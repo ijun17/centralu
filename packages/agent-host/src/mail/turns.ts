@@ -6,13 +6,14 @@ import { HOUR_MS } from './rules.js'
 export type TurnGuardOptions = {
   now?: () => number
   /**
-   * Whether the session's turn is still going from the host before: kept by the keeper, or cut by an update and continued (#1618). Its open row
-   * stays open and is read back, its end is recorded here, and what it sends keeps the row's cause (§8.2 step 6). Without it every open row is closed `lost`
+   * Whether the session's turn is still going from the host before: kept by the keeper, or cut by an update and continued. Its
+   * open row stays open and is read back, its end is recorded here, and what it sends keeps the row's cause (§8.2 step 6).
+   * Without it every open row is closed `lost`
    */
   keepOpen?: (sessionId: string) => boolean
   /**
-   * The session whose request the turn is, read from the store's rows of that turn (`MessageService.requestsIn`, docs/plans/turn-owned-by-no-one.md
-   * §4.2), or null. Nothing of it is kept here: a restart or a swap reads it from the same rows
+   * The session whose request the turn is, read from the store's rows of that turn (`MessageService.requestsIn`,
+   * docs/plans/turn-owned-by-no-one.md §4.2), or null. Nothing is kept here: a restart or a swap reads the same rows
    */
   askerIn?: (sessionId: string, turn: TurnRead) => string | null
 }
@@ -22,10 +23,10 @@ const STARTED_BY: readonly TurnStartedBy[] = ['mail', 'person', 'caller', 'cli',
 const turnStartedBy = (stored: string): TurnStartedBy => STARTED_BY.find((s) => s === stored) ?? 'caller'
 
 /**
- * A turn that started, as the mailbox hears of it (docs/plans/mailbox.md §8.2): whose it is, whether the CLI ran it on its own, and
- * the caller it is the work of, when there is one.
- * `again`: the turn was decided at its start, and the tool's naming of its inputs decided it otherwise (#1639). `unowned`: a message from a sender that is no
- * session started it (a hub's Assistant, Centralu's own notice; #2290): no caller's and no task's, not even the person's
+ * A turn that started, as the mailbox hears of it (docs/plans/mailbox.md §8.2): whose it is, whether the CLI ran it on its own,
+ * and the caller it is the work of, when there is one. `again`: the turn was decided at its start and the tool's naming of its
+ * inputs decided it otherwise. `unowned`: a message from a sender that is no session started it (a hub's Assistant, Centralu's
+ * own notice): no caller's and no task's, not even the person's
  */
 export type TurnStart = { by: 'person' | 'work'; cli: boolean; source: TurnSource; ownerId?: string; unowned?: true; again?: true }
 
@@ -59,12 +60,12 @@ type Open = LastTurn & {
 }
 
 /**
- * Each session's turns as mail sees them (docs/plans/mailbox.md §7.5, §8.2): the work message and starter of the running one, and the counts the
- * delivery's warning to the person reads (#2014): a pair's mail-started turns with no word from the person (`pairTurns`), and the host's
- * (`hostTurns`). Both are counted from the store, so a restart does not reset them. Nothing here holds or defers mail.
- *
- * **A turn continued after a restart or an update is not mail-started** (§8.2 step 6): nothing begins it here, its row is read back (`closeStale`
- * with `keepOpen`), so `current` gives the original turn's starter and work message, and it adds no row either count could count.
+ * Each session's turns as mail sees them (docs/plans/mailbox.md §7.5, §8.2): the work message and starter of the running one,
+ * and the counts the delivery's warning to the person reads: a pair's mail-started turns with no word from the person
+ * (`pairTurns`), and the host's (`hostTurns`). Both are counted from the store, so a restart does not reset them. Nothing here
+ * holds or defers mail. **A turn continued after a restart or an update is not mail-started** (§8.2 step 6): nothing begins it
+ * here, its row is read back (`closeStale` with `keepOpen`), so `current` gives the original turn's starter and work message
+ * and it adds no row either count could count.
  */
 /** What started a turn the mailbox did not: the person's own turn, or the CLI's, has no cause (D9); a caller's turn of known work was started by it */
 const causeOf = (by: Exclude<TurnStartedBy, 'mail'>, messageId: string | null): string | null => (by === 'caller' ? messageId : null)
@@ -83,8 +84,9 @@ export class MailTurns {
   }
 
   /**
-   * Turns the previous host left open: the ones of sessions still in that turn (kept by the keeper, or continued after an update cut them) go
-   * on and are read back with their work message and starter; the rest can never end and are closed `lost`. Returns those closed
+   * Turns the previous host left open: those of sessions still in that turn (kept by the keeper, or continued after an update
+   * cut them) go on and are read back with their work message and starter; the rest can never end and are closed `lost`.
+   * Returns those closed
    */
   closeStale(): { sessionId: string; turnSeq: number }[] {
     const lost: { sessionId: string; turnSeq: number }[] = []
@@ -110,9 +112,9 @@ export class MailTurns {
   }
 
   /**
-   * A turn the mailbox did not start begins: the person typed, a caller's message came, or the CLI ran on after its background work. `messageId`
-   * is the work it belongs to, if known (its starter too, the task that started it). When a turn mail started is going, this is that turn (the
-   * wake is its first input), and nothing is added. No count of mail-started turns counts it
+   * A turn the mailbox did not start begins: the person typed, a caller's message came, or the CLI ran on after its background
+   * work. `messageId` is the work it belongs to, if known (its starter too, the task that started it). When a turn mail started
+   * is going, this is that turn (the wake is its first input) and nothing is added; no count of mail-started turns counts it
    */
   beginOther(sessionId: string, by: Exclude<TurnStartedBy, 'mail'>, messageId: string | null, owner?: string): void {
     if (this.open.get(sessionId)?.by === 'mail') return
@@ -125,8 +127,8 @@ export class MailTurns {
   }
 
   /**
-   * The turn going, which `beginOther` recorded, was decided again when the tool named the input it opened from (#1639): the same turn, its
-   * starter, work message and owner corrected in place. A turn the mailbox's delivery started is the mailbox's
+   * The turn going, which `beginOther` recorded, was decided again when the tool named the input it opened from: the same turn,
+   * its starter, work message and owner corrected in place. A turn the mailbox's delivery started is the mailbox's
    */
   restate(sessionId: string, by: Exclude<TurnStartedBy, 'mail'>, messageId: string | null, owner?: string): void {
     const turn = this.open.get(sessionId)
@@ -141,9 +143,9 @@ export class MailTurns {
   }
 
   /**
-   * The tool opened the running turn for mail a turn before did not take (`MailDelivery.turnInputs`, docs/plans/mailbox.md §10.6.3): mail started it,
-   * as a wake does, so it is the mailbox's from here, with that mail's work message (a task, when it carries one) and starter. Recorded first as the
-   * CLI's own, since the tool named no input of the session's own rows
+   * The tool opened the running turn for mail a turn before did not take (`MailDelivery.turnInputs`, docs/plans/mailbox.md
+   * §10.6.3): mail started it, as a wake does, so it is the mailbox's from here, with that mail's work message and starter.
+   * Recorded first as the CLI's own, since the tool named no input of the session's own rows
    */
   openedFor(sessionId: string, turn: { workMessage: string | null; starter: string | null }): void {
     const open = this.open.get(sessionId)
@@ -156,8 +158,8 @@ export class MailTurns {
   }
 
   /**
-   * The task of a turn a caller's message started is written only after the task went in and the turn began: the running turn of that kind is
-   * that task's from here, and the task is its starter (§9.1)
+   * The task of a turn a caller's message started is written only after the task went in and the turn began: the running turn
+   * of that kind is that task's from here, and the task is its starter (§9.1)
    */
   attach(sessionId: string, messageId: string, owner: string): void {
     const turn = this.open.get(sessionId)
@@ -177,8 +179,9 @@ export class MailTurns {
   }
 
   /**
-   * The session's turn that is going, or else the one that ended last: the end of a turn is reported once it ends, and the report belongs to that
-   * turn's work (§9.2), covers what it did since it began (§9.3), and settles the requests it carried (§7.6) whichever of the two it is made in
+   * The session's turn that is going, or else the one that ended last: the end of a turn is reported once it ends, and the
+   * report belongs to that turn's work (§9.2), covers what it did since it began (§9.3), and settles the requests it carried
+   * (§7.6) whichever of the two it is made in
    */
   latest(sessionId: string): Readonly<LastTurn> | undefined {
     return this.open.get(sessionId) ?? this.lastEnded.get(sessionId)
@@ -215,8 +218,9 @@ export class MailTurns {
   }
 
   /**
-   * The turns the mail between sessions `a` and `b` (addresses) started in the last hour with no word from the person: counted since the latest of an
-   * hour ago and the person's last word to either, a turn of theirs or a message (the pair's warning, §7.5)
+   * The turns the mail between sessions `a` and `b` (addresses) started in the last hour with no word from the person: counted
+   * since the latest of an hour ago and the person's last word to either, a turn of theirs or a message (the pair's warning,
+   * §7.5)
    */
   pairTurns(a: string, b: string): number {
     return this.records.pairTurnsSince(a, b, Math.max(this.now() - HOUR_MS, this.lastPersonWord(a), this.lastPersonWord(b)))

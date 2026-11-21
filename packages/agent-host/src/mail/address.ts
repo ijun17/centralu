@@ -1,20 +1,11 @@
 /**
- * A party's name in mail (docs/plans/mailbox.md §4, §5.1).
- *
- *   session:<hostId>/<sessionId>          a session; the host id is the id of the host the session lives on
- *   app:<hostId>/<projectId>/<appId>      an app of a project
- *   person                                the person
- *   centralu                              Centralu itself: a sender only
- *
- * **Absolute from the first step.** The design (§2) writes `session:<id>` and `app:<projectId>/<appId>`, and §11.4 says
- * that across machines an address carries the host's id and that "v1 writes these shapes from its first step, so the
- * local build never needs its ids rewritten". The two disagree for a local build; this follows §11.4, so a message
- * stored today is still right when mail crosses a link (slice 4). The window's hub-relative `<machine>.<id>` is
- * translated at the edge, not stored.
+ * A party's name in mail (docs/plans/mailbox.md §4, §5.1): `session:<hostId>/<sessionId>`, `app:<hostId>/<projectId>/<appId>`,
+ * `person`, `centralu` (a sender only). Absolute from the first step, so a message stored now is still right when mail crosses
+ * a link; the window's hub-relative `<machine>.<id>` is translated at the edge, not stored.
  */
 
 /**
- * One piece of an address: no separator (`/` or `:`), no space, never empty, at most 64 characters (an app's id is its author's,
+ * One piece of an address: no separator (`/` or `:`), no space, never empty, at most 64 characters (an app's id is its author's
  * and goes into the wake frame as it is)
  */
 const SEGMENT = '[A-Za-z0-9][A-Za-z0-9._~-]{0,63}'
@@ -31,10 +22,10 @@ export type Party =
   | { kind: 'centralu' }
 
 /**
- * The person of a hub, as a machine it links names them (#1987): the person works in the hub's window, so a machine's session that
- * writes to the person while a hub links it writes to the hub's person, under this address. No session's id is `person` (a host makes its
- * sessions' ids, never that word, and a linked machine's have a dot), so the address names no session. A reply from there is the person's own word,
- * and only a hub that links this host writes from it (`MailReach.mayWrite`), so a stored sender of this form is always one
+ * The person of a hub, as a machine it links names them: a machine's session that writes to the person while a hub links it
+ * writes to the hub's person, under this address. No session's id is `person` (a host makes its ids, never that word; a linked
+ * machine's have a dot). A reply from there is the person's own word, and only a hub that links this host writes from it
+ * (`MailReach.mayWrite`), so a stored sender of this form is always one
  */
 export const PERSON_ID = 'person'
 
@@ -53,8 +44,8 @@ export function senderKind(address: string): Party['kind'] | undefined {
 const SESSION_ID_RE = new RegExp(`^${SEGMENT}$`)
 
 /**
- * Whether `id` can name a session in an address (#2290). A message's sender id that cannot names no session: a hub's Assistant's (`isHubSender`)
- * and Centralu's own notices are recorded under ids that start with `_`, which no host makes
+ * Whether `id` can name a session in an address. A message's sender id that cannot names no session: a hub's Assistant's
+ * (`isHubSender`) and Centralu's own notices are recorded under ids that start with `_`, which no host makes
  */
 export function isSessionId(id: unknown): id is string {
   return typeof id === 'string' && SESSION_ID_RE.test(id)
@@ -80,9 +71,9 @@ export function parseAddress(address: string): Party | null {
 }
 
 /**
- * An address a machine holds, as the hub `hub` names it (docs/plans/linked-mail.md §6): the hub's person is its `person`, and a session of the
- * machine (`machine.host` its id in mail, `machine.id` its id at that hub) is `session:<hub>/<machine id>.<id>`. What is on the hub's side already,
- * or on any other host, stays as it is
+ * An address a machine holds, as the hub `hub` names it (docs/plans/linked-mail.md §6): the hub's person is its `person`, and a
+ * session of the machine (`machine.host` its id in mail, `machine.id` its id at that hub) is `session:<hub>/<machine id>.<id>`.
+ * What is on the hub's side already, or on any other host, stays as it is
  */
 export function inHubTerms(address: string, hub: string, machine?: { host: string; id: string }): string {
   if (address === sessionAddress(hub, PERSON_ID)) return PERSON

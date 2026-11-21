@@ -2,15 +2,11 @@ import type { HostActivity } from '@cc/protocol'
 import type { Drain } from '../drain.js'
 
 /**
- * `host.stop {ifIdle}` (#1224): the hand-over into the person's Windows sign-in stops a host only while nothing runs on
- * it, and the check and the stop are one step. Asked over two calls (the activity, then the stop), a turn the hub
- * started in between was ended with the host.
- *
- * Busy is the host's one idle rule (`hostBusy`: a turn, an approval or a question waiting, background work, an open
- * terminal, a running command) or any call in flight besides the asking one: a call can be about to start a turn
- * (`sessions.send` between its arrival and its first state change). Idle, the drain begins in the same tick, before
- * anything else can run: from then on every new call is refused as retryable (`DrainCut`), so no turn, terminal or
- * command starts on a host that is going.
+ * `host.stop {ifIdle}`: the hand-over into the person's Windows sign-in stops a host only while nothing runs on it, and the
+ * check and the stop are one step (over two calls, a turn the hub started in between was ended with the host). Busy is the
+ * host's one idle rule (`hostBusy`) or any call in flight besides the asking one: a call can be about to start a turn
+ * (`sessions.send` between its arrival and its first state change). Idle, the drain begins in the same tick, before anything
+ * else can run: every new call is then refused as retryable (`DrainCut`), so nothing starts on a host that is going.
  */
 export type StopGate = {
   /** What runs, when anything does: the activity and the calls in flight besides the asking one. Null when idle */

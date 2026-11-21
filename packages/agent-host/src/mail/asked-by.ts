@@ -9,10 +9,11 @@ export type AskerParty = {
 }
 
 /**
- * Who asked for the Assistant's turn (docs/plans/mailbox.md §7.6, #1447; docs/plans/turn-owned-by-no-one.md §4.2). The turn is a session's
- * request when a request of that session was delivered into it: read from the store's rows of the turn, settled or not, so archiving the session,
- * answering the request mid-turn, a restart or a host swap does not change whose request the turn is. What the host knows of it is the record's,
- * never anything the session wrote: its name, its project's name and whether that project is trusted.
+ * Who asked for the Assistant's turn (docs/plans/mailbox.md §7.6; docs/plans/turn-owned-by-no-one.md §4.2). The turn is a
+ * session's request when a request of that session was delivered into it: read from the store's rows of the turn, settled or
+ * not, so archiving the session, answering the request mid-turn, a restart or a host swap does not change whose request the
+ * turn is. What the host knows of it is the record's, never anything the session wrote: its name, its project's name and
+ * whether that project is trusted
  */
 export type Asker = AskerParty & {
   /** The asker's oldest request in the turn: the mail tool's `thread`/`id` that answers it in that turn needs no card */
@@ -22,8 +23,9 @@ export type Asker = AskerParty & {
   /** The person's message the request cites, which Centralu checked when it was sent (docs/plans/cited-requests.md), or null: the turn is not on their word */
   cites: { seq: number; at: number } | null
   /**
-   * Other sessions with a request in the same turn. The drain gives the Assistant one asker's requests a turn and never lets a request join a
-   * running turn, so there are none; if there ever were, the gate fails closed: every step but a read asks, and the card names every asker
+   * Other sessions with a request in the same turn. The drain gives the Assistant one asker's requests a turn and never lets a
+   * request join a running turn, so there are none; if there ever were, the gate fails closed: every step but a read asks, and
+   * the card names every asker
    */
   also?: readonly AskerParty[]
 }

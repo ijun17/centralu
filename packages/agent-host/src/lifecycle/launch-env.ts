@@ -1,13 +1,9 @@
 import { tryParseJson } from '../json-value.js'
 
 /**
- * What the host's launcher hands it in the environment (lessons ST16), read once and taken out.
- *
- * The keeper, the window and `centralu serve` pass these as variables, never as arguments: `ps`
- * shows every argument to every user of the machine, and the token is the key to every RPC
- * (85c5b37b, #390). Everything this host spawns (agents, terminals, commands, app processes)
- * inherits `process.env`, and none of them has any use for these: a shell in a project should not
- * hold the token. So they are read here, before anything is spawned, and deleted.
+ * What the host's launcher hands it in the environment (lessons ST16), read once and taken out. They come as variables, never
+ * arguments (`ps` shows every argument to every user, and the token is the key to every RPC), and are deleted before anything
+ * is spawned: a shell in a project should not hold the token
  */
 
 export type LaunchEnv = {
@@ -16,42 +12,39 @@ export type LaunchEnv = {
   /** Where the keeper says this host's files came from, for `hello_ok` (keeper-link.ts) */
   keeperSource: string | undefined
   /**
-   * The keeper's front door (#280 step 3): the stable address every client reaches this host
-   * through, whichever host is current. The Codex bridge is given this rather than the host's own
-   * port, because a running codex keeps the bridge it started and a swap must not cut it off.
+   * The keeper's front door: the stable address every client reaches this host through. The Codex bridge gets it rather than
+   * the host's own port, because a running codex keeps the bridge it started and a swap must not cut it off
    */
   frontDoor: string | undefined
   /**
-   * Started by `centralu serve` (docs/agent-host/remote/serve.md), the one host `host.stop` may end: it has
-   * no keeper or window to stop it, and on Windows a launcher can only be killed, which skips the
-   * shutdown.
+   * Started by `centralu serve` (docs/agent-host/remote/serve.md), the one host `host.stop` may end: it has no keeper or window
+   * to stop it, and on Windows a launcher can only be killed, which skips the shutdown
    */
   startedByServe: boolean
   /**
-   * Who started this host, for `host.lock` and the conflict message a second host on the folder prints (#1223):
-   * `CC_STARTED_BY=app` from the desktop window; the keeper and `centralu serve` are told apart by their own
-   * variables. Null when nothing says (a host from source, a script)
+   * Who started this host, for `host.lock` and the conflict message of a second host on the folder: `CC_STARTED_BY=app` from
+   * the window; the keeper and `serve` are told apart by their own variables. Null when nothing says
    */
   startedBy: 'app' | 'keeper' | 'serve' | null
   /**
-   * Where a `centralu serve` was asked for from (`CC_SERVE_FROM`, #1223): the hub's name when a hub's link passed it
-   * (`serve --detach --from <hub>`), and the ssh client's address when it ran in an ssh session. Null when neither
+   * Where a `centralu serve` was asked for from (`CC_SERVE_FROM`): the hub's name when a hub's link passed it, and the ssh
+   * client's address in an ssh session. Null when neither
    */
   serveFrom: ServeFrom | null
   /**
-   * The token handed over in the environment, by a keeper or `centralu serve` older than #538 (and by scripts that
-   * start a host themselves). Under a keeper the keeper's, the same for every host it runs
+   * The token handed over in the environment, by an older keeper or `serve` (and by scripts that start a host themselves);
+   * under a keeper, the keeper's, the same for every host it runs
    */
   token: string | undefined
   /**
-   * The launcher writes the token as the first line on stdin instead (#538, `readHandedToken`): never in the
-   * environment, which every process of this user can read for as long as the host runs
+   * The launcher writes the token as the first line on stdin instead (`readHandedToken`): never in the environment, which every
+   * process of this user can read while the host runs
    */
   tokenOnStdin: boolean
   /**
-   * Where `centralu serve` keeps the full credentials' verifiers (#1405, `serve-credentials.ts`): set when the launcher
-   * hands this host its key on stdin instead of a token. The host then takes as full only a hello whose credential's
-   * verifier is in that file, read at each hello
+   * Where `centralu serve` keeps the full credentials' verifiers (`serve-credentials.ts`): set when the launcher hands this
+   * host its key on stdin instead of a token; only a hello whose credential's verifier is in that file is full, read at each
+   * hello
    */
   serveState: string | undefined
 }
@@ -60,9 +53,8 @@ export type LaunchEnv = {
 export type ServeFrom = { hub?: string; ssh?: string }
 
 /**
- * The variables `takeLaunchEnv` reads or removes. Nothing the host spawns may see any of them: `CC_HOST_URL` and
- * `CC_HOST_CREDENTIAL` are what a host gives its own agents (#1405), and a host started inside one (`pnpm app:dev` run
- * by an agent) must not hand its agents the parent's
+ * The variables `takeLaunchEnv` reads or removes. Nothing the host spawns may see them: `CC_HOST_URL` and `CC_HOST_CREDENTIAL`
+ * are what a host gives its own agents, and a host started inside one must not hand its agents the parent's
  */
 export const LAUNCH_VARIABLES = [
   'CC_KEEPER',

@@ -2,17 +2,13 @@ import type { Readable } from 'node:stream'
 import { asObj, tryParseJson } from '../json-value.js'
 
 /**
- * The host token handed over on stdin (#538): the first line a keeper or `centralu serve` writes to the host's
- * stdin, `{"token":"…"}`, when it set `CC_HOST_TOKEN_ON_STDIN=1`.
- *
- * Why stdin: what a process is started with (its environment, its arguments) stays readable to every process of
- * its user for as long as it runs (`ps eww`, measured in #502), and deleting a variable hides it only from the
- * process's children. A pipe's bytes are read once by the one process that holds its end. Both launchers already
- * keep the host's stdin as a pipe: the keeper for its control lines, `centralu serve` for `--watch-parent`.
- *
- * Read before anything else uses stdin: what follows the line (the keeper's control lines) is put back and the
- * stream is left paused, so nothing is lost before the next reader is there. That reader resumes it (the control
- * channel does, and so does the parent watch) and reads on as if this had never been there.
+ * The host token handed over on stdin: the first line a keeper or `centralu serve` writes, `{"token":"…"}`, when it set
+ * `CC_HOST_TOKEN_ON_STDIN=1`. Why stdin: what a process is started with (environment, arguments) stays readable to every
+ * process of its user while it runs (`ps eww`), and deleting a variable hides it only from the process's children; a pipe's
+ * bytes are read once by the one process holding its end, and both launchers already hold the host's stdin as a pipe (the
+ * keeper for control lines, `serve` for `--watch-parent`). Read before anything else uses stdin: what follows the line (the
+ * keeper's control lines) is put back and the stream left paused, so nothing is lost before the next reader (the control
+ * channel, the parent watch) resumes it.
  */
 
 /** How long the host waits for the line before it gives up: the launcher writes it right after the spawn */

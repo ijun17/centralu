@@ -109,10 +109,10 @@ export function isSendNote(m: Pick<MailRow, 'kind' | 'origin'>): boolean {
 }
 
 /**
- * The Assistant's `send_to_session` words, a task or a note (#2258 review): the Assistant acts for the person, so they flow down inline and read as
- * the person's request. Before #2258 such a send at rest was plain input, as if the person typed it. Every other session's mail stays its sender's
- * text, not an instruction. A task a handoff gave again (`MessageService.handOver`, fact `handedOver`) has the heir as its sender and someone
- * else's words, so it never reads as the person's, even when the heir is the Assistant
+ * The Assistant's `send_to_session` words, a task or a note: the Assistant acts for the person, so they flow down inline and
+ * read as the person's request, where every other session's mail stays its sender's text, not an instruction. A task a handoff
+ * gave again (`MessageService.handOver`, fact `handedOver`) has the heir as its sender and someone else's words, so it never
+ * reads as the person's, even when the heir is the Assistant
  */
 export function forPersonOf(m: Pick<MailRow, 'kind' | 'origin' | 'facts'>, fromAssistant: boolean): 'task' | 'note' | undefined {
   if (!fromAssistant || m.origin !== 'send_to_session' || m.facts.handedOver === true) return undefined
@@ -217,9 +217,9 @@ export const WARNING_TEXT = {
   rate_limited: (sender: string, limit: number) => `Centralu refused mail from ${sender}: more than ${limit} messages in a minute. ${sender} was told to wait; nothing else was stopped.`,
   ask_rate: (sender: string) => `Centralu refused a request from ${sender} to the Assistant: its project's sessions asked ${ASKS_PER_HOUR} times in the last hour. ${sender} was told to wait or write to you.`,
   /**
-   * An update changed the store past what an older build reads without the copy kept before it (#2304): the disk was
-   * `short` of the room a copy is made with, or (null) the copy could not be written, which the log explains. Said
-   * plainly, since nothing brings back what the change removed
+   * An update changed the store past what an older build reads without the copy kept before it: the disk was `short` of the
+   * room a copy is made with, or (null) the copy could not be written, which the log explains. Said plainly, since nothing
+   * brings back what the change removed
    */
   // Free space just short of what the copy needs can round to the same figure: it then reads "just under"
   noStoreCopy: (short: { free: string; needed: string } | null) =>

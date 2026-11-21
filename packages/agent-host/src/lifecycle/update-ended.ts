@@ -3,11 +3,11 @@ import { isObj } from '../json-value.js'
 import type { OsFiles } from '../os/port.js'
 
 /**
- * The terminals and Run commands an update's stop ends (#1902 part B, docs/agent-host/lifecycle/continue-after-update.md), kept in the update-resume list
- * beside the turns (`update-resume.ts`) so the next host brings them back. Recorded by the stopping host in its first step, before
- * the shells are killed (`stopPlan`); they are no session's, so there is no conversation mark: the list is the host's own and is
- * taken whole, once, by the first host that starts after it (`UpdateResumeLists.takeEnded`). Only what opening them again needs is
- * kept: nothing a shell printed, nothing a person typed.
+ * The terminals and Run commands an update's stop ends (docs/agent-host/lifecycle/continue-after-update.md), kept in the
+ * update-resume list beside the turns so the next host brings them back. Recorded by the stopping host in its first step,
+ * before the shells are killed (`stopPlan`); they are no session's, so there is no conversation mark: the list is taken whole,
+ * once, by the first host that starts after it (`UpdateResumeLists.takeEnded`). Only what opening them again needs is kept:
+ * nothing a shell printed or a person typed.
  */
 export type EndedTerminal = {
   /** The folder of the project the terminal is in: terminals are kept by folder */
@@ -23,9 +23,9 @@ export type EndedRun = { cwd: string; command: string }
 export type Ended = { terminals: EndedTerminal[]; runs: EndedRun[] }
 
 /**
- * How long after the stop a list is still used. A start that follows an update is seconds to minutes after its stop; a list that
- * is older was left by a stop whose host never came (a rollback to a host from before this does not read it), and what it
- * names is not what anyone expects at a start days later
+ * How long after the stop a list is still used. A start after an update is seconds to minutes after its stop; an older list was
+ * left by a stop whose host never came (a rollback to an older host does not read it), and what it names is not what anyone
+ * expects days later
  */
 export const ENDED_MAX_AGE_MS = 10 * 60_000
 
@@ -57,9 +57,9 @@ export function readEnded(o: unknown): Ended {
 export const RUN_RESTARTED_LINE = 'Started again after the update.'
 
 /**
- * Brings back what an update's stop listed (#1902): each terminal as a fresh shell in its folder, each Run command that was running
+ * Brings back what an update's stop listed: each terminal as a fresh shell in its folder, each Run command that was running
  * started again. Nothing is typed into a shell and nothing that ran in a terminal runs again. One whose folder is no longer a
- * project's, or is gone from the disk, is skipped and said in the log; one that fails to open does not stop the rest.
+ * project's or is gone is skipped and said in the log; one that fails to open does not stop the rest
  */
 export function restartEnded(
   e: Ended,

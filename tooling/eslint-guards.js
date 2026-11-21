@@ -620,7 +620,7 @@ const COMMENTS_SWEPT = [
   'packages/{protocol,core,common,platform,ui}/**/*.{ts,tsx,mts,cts,js,mjs,cjs}',
   'apps/web/**/*.{ts,tsx,mts,cts,js,mjs,cjs}',
   `${HOST_SRC}/*.ts`,
-  `${HOST_SRC}/{keeper,os,transport,views}/**/*.ts`,
+  `${HOST_SRC}/{keeper,lifecycle,mail,os,transport,views}/**/*.ts`,
 ]
 
 /**
