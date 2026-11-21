@@ -7,7 +7,7 @@ import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { fakeRegistry, linuxRemote, sha256, sha512, tarGz, type FakePackage, type FakeRegistry } from './fake-registry.test-helpers.js'
+import { fakeRegistry, linuxRemote, pinnedRuntime, sha256, sha512, tarGz, type FakePackage, type FakeRegistry } from './fake-registry.test-helpers.js'
 import { installCommand, installRemote, installScript, nodeCommand, preflight, preflightCommand, remoteRuntime, type PreflightFacts, type RemoteRuntime } from './install.js'
 import { VERSION_WORD } from './registry.js'
 import { powershell } from '../os.js'
@@ -464,7 +464,7 @@ describe.skipIf(process.platform === 'win32')('installRemote over a fake ssh int
     // 9.9.1 to 9.9.3 as published before the host-only packages; 9.9.4 and 9.9.5 with one, as a
     // release publishes it now: beside the platform package, which npm installs keep using
     reg = await fakeRegistry([...pkgs('9.9.1'), ...pkgs('9.9.2'), ...pkgs('9.9.3'), ...pkgs('9.9.4'), hostOnly('9.9.4'), ...pkgs('9.9.5'), hostOnly('9.9.5')])
-    reg.addNodeArchive(machine.archive.version, machine.archive.file, machine.archive.bytes)
+    reg.addNodeArchive(machine.archive)
     runtime = machine.runtime
   })
   afterAll(async () => {
@@ -473,7 +473,7 @@ describe.skipIf(process.platform === 'win32')('installRemote over a fake ssh int
   })
   afterEach(() => rmSync(join(home, '.centralu'), { recursive: true, force: true }))
 
-  const env = (over: Record<string, string> = {}) => machine.env(home, over)
+  const env = (over: Record<string, string> = {}) => machine.env(over)
   const install = (version: string, o: { runtime?: RemoteRuntime; env?: Record<string, string> } = {}) => {
     const t = new SshTunnel({ target: 'box', ssh: machine.ssh, env: env(o.env) })
     return installRemote({ exec: (c) => t.exec(c), spec: { shell: 'posix' }, target: 'box', version, runtime: o.runtime ?? runtime, script: installScript(), registry: { registry: reg.url }, nodeDist: `${reg.url}/dist` })
@@ -556,7 +556,7 @@ describe.skipIf(process.platform === 'win32')('installRemote over a fake ssh int
   }, 90_000 * SLOW)
 
   it('refuses a Node archive whose SHA-256 is not the pinned one, and leaves nothing', async () => {
-    const wrong = { node: { version: NODE_V, archives: { 'linux-x64': { file: machine.archive.file, sha256: 'f'.repeat(64) } } } }
+    const wrong = pinnedRuntime('linux-x64', NODE_V, machine.archive.file, 'f'.repeat(64))
     await expect(install('9.9.1', { runtime: wrong })).rejects.toThrow(/does not match the SHA-256 this Centralu release pinned/)
     expect(existsSync(remote('node'))).toBe(false)
     expect(existsSync(remote('current'))).toBe(false)

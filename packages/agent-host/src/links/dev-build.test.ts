@@ -9,7 +9,7 @@ import { removeTree } from '../temp-dir.test-helpers.js'
 import { PROTOCOL_VERSION } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
 import { isDevVersion } from './dev-build.js'
-import { fakeRegistry, fakeServe, linuxRemote, type FakePackage, type FakeRegistry } from './fake-registry.test-helpers.js'
+import { fakeRegistry, fakeServe, linuxRemote, type FakePackage, type FakeRegistry, type NodeArchive } from './fake-registry.test-helpers.js'
 import { installRemote, installScript, type RemoteRuntime } from './install.js'
 import { findMachine, remoteDev, resolveCommit } from './remote-dev.js'
 import { storeRegistry } from './stored.js'
@@ -242,7 +242,7 @@ describe('the command’s lookups (#1036)', () => {
  */
 function wholeCommand(o: {
   shell: RemoteSpec['shell']
-  prepare: (root: string, home: string) => Promise<{ ssh: string; env: (over?: Record<string, string>) => Record<string, string>; runtime: RemoteRuntime; archive: { version: string; file: string; bytes: Buffer }; packages: (version: string) => FakePackage[] }>
+  prepare: (root: string, home: string) => Promise<{ ssh: string; env: (over?: Record<string, string>) => Record<string, string>; runtime: RemoteRuntime; archive: NodeArchive; packages: (version: string) => FakePackage[] }>
 }) {
   let root: string
   let home: string
@@ -256,7 +256,7 @@ function wholeCommand(o: {
     mkdirSync(home, { recursive: true })
     ctx = await o.prepare(root, home)
     reg = await fakeRegistry(ctx.packages(BASE))
-    reg.addNodeArchive(ctx.archive.version, ctx.archive.file, ctx.archive.bytes)
+    reg.addNodeArchive(ctx.archive)
     mkdirSync(join(root, 'hub'), { recursive: true })
     const store = new Store(join(root, 'hub', 'store.db'))
     storeRegistry(store).add({ id: 'box', name: 'Box', sshTarget: 'box', remote: spec, addedAt: 1, acceptedVersions: null })
@@ -441,13 +441,13 @@ describe.skipIf(process.platform === 'win32')('pnpm remote-dev against a Linux m
   const NODE_V = '24.21.0'
   wholeCommand({
     shell: 'posix',
-    prepare: async (root, home) => {
+    prepare: async (root) => {
       const machine = linuxRemote(root, NODE_V)
       // git is found where this machine has it; the fake tools come first
       const gitDir = dirname(execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim())
       return {
         ...machine,
-        env: (over = {}) => machine.env(home, over, [gitDir]),
+        env: (over = {}) => machine.env(over, [gitDir]),
         packages: (v): FakePackage[] => [
           { name: 'centralu', version: v, files: { 'package.json': JSON.stringify({ name: 'centralu', version: v }), 'bin/centralu.mjs': fakeServe(v, { installInfo: INSTALL_INFO, realServe: REAL }), 'bin/serve.mjs': SERVE_SHIM, 'bin/serve-switch.mjs': SWITCH_MARK } },
           { name: '@centralu/host-linux-x64', version: v, files: { 'package.json': '{}', 'host/main.mjs': 'export {}\n' } },

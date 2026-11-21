@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { fakeExe, fakeNodeExe } from '../fake-exe.test-helpers.js'
-import { pinnedRuntime, type FakePackage } from './fake-registry.test-helpers.js'
+import { pinnedRuntime, sha256, type FakePackage } from './fake-registry.test-helpers.js'
 import type { RemoteRuntime } from './install.js'
 import { PS_PREAMBLE, type RemoteCommand, type RemoteRun } from './tunnel.js'
 
@@ -55,7 +55,7 @@ export async function windowsNodeZip(): Promise<Buffer> {
 }
 
 export function windowsRuntime(zip: Buffer): RemoteRuntime {
-  return pinnedRuntime('win32-x64', WIN_NODE_V, WIN_NODE_FILE, zip)
+  return pinnedRuntime('win32-x64', WIN_NODE_V, WIN_NODE_FILE, sha256(zip))
 }
 
 /** A fake version's `serve-switch.mjs`: there to be found; its `--switch` is the real launcher's (`fakeServe`) */

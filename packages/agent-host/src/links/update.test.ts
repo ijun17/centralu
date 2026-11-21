@@ -66,7 +66,7 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
     mkdirSync(home, { recursive: true })
     machine = linuxRemote(root, NODE_V)
     reg = await fakeRegistry([...pkgs('9.9.1'), ...pkgs('9.9.2'), ...pkgs('9.9.3')])
-    reg.addNodeArchive(machine.archive.version, machine.archive.file, machine.archive.bytes)
+    reg.addNodeArchive(machine.archive)
     runtime = machine.runtime
   })
   afterAll(async () => {
@@ -82,7 +82,7 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
 
   /** A HostControl as LinkedMachine gives one, with this machine as the remote; what it saw is kept */
   const control = (env: Record<string, string> = {}, o: { exec?: HostControl['exec']; followMs?: number } = {}) => {
-    const t = new SshTunnel({ target: 'box', ssh: machine.ssh, env: machine.env(home, env) })
+    const t = new SshTunnel({ target: 'box', ssh: machine.ssh, env: machine.env(env) })
     const seen: string[] = []
     const c: HostControl = {
       exec: o.exec ?? ((cmd) => t.exec(cmd)),

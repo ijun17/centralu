@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { fakeServe, tarGz } from './fake-registry.test-helpers.js'
+import { fakeServe, pinnedRuntime, tarGz } from './fake-registry.test-helpers.js'
 import { connectionCommand } from './tunnel.js'
 import { WIN_NODE_FILE, WIN_NODE_V, windowsPackages, windowsRemoteEnv, pwsh7ModulePath } from './windows-remote.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
@@ -61,7 +61,7 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
     }, 120_000 * SLOW)
 
     it('refuses a Node archive whose SHA-256 is not the pinned one, and leaves nothing', async () => {
-      const wrong = { node: { version: WIN_NODE_V, archives: { 'win32-x64': { file: WIN_NODE_FILE, sha256: 'f'.repeat(64) } } } }
+      const wrong = pinnedRuntime('win32-x64', WIN_NODE_V, WIN_NODE_FILE, 'f'.repeat(64))
       await expect(install('9.9.4', { runtime: wrong })).rejects.toThrow(/does not match the SHA-256 this Centralu release pinned/)
       expect(existsSync(remote('node'))).toBe(false)
       expect(existsSync(remote('current'))).toBe(false)

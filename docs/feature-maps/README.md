@@ -28,7 +28,8 @@ one table with these rows, in this order:
 A cell is a list of paths from the repository's root, each with the names that matter in it:
 `packages/agent-host/src/mail/stop-notices.ts` (`StopNotices.sessionsStopped`). The owner of the feature comes first.
 A row names where a thing is, never what the rule is: the rule stays in the code's comment and the rule document, so
-the map cannot disagree with them. A data-folder file is written `<data>/name`.
+the map cannot disagree with them. A cell is a path and its names, never a quoted string, a step number or a sentence
+on what the code does. A data-folder file is written `<data>/name`.
 
 ## Keeping a map current
 

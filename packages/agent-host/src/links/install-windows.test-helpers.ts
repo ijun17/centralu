@@ -55,7 +55,7 @@ export function windowsRemote() {
       // The lookup test runs this one: a version whose centralu.mjs only says it ran
       ...windowsPackages('9.8.0', { mjs: RUN_IT('9.8.0'), serve: SERVE_SHIM }, false),
     ])
-    reg.addNodeArchive(WIN_NODE_V, WIN_NODE_FILE, zip)
+    reg.addNodeArchive({ version: WIN_NODE_V, file: WIN_NODE_FILE, bytes: zip })
     runtime = windowsRuntime(zip)
   }, 120_000 * SLOW)
   afterAll(async () => {

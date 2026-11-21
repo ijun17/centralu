@@ -68,7 +68,7 @@ export const sha256 = (b: Buffer) => createHash('sha256').update(b).digest('hex'
 /**
  * This POSIX machine playing a Linux x64 machine a hub links to, for the install, update and dev-build tests. In `root`:
  * `bin/uname` says Linux x86_64 and `bin/getconf` says glibc `$FAKE_GLIBC` (2.39 when unset), for `bin` to come first
- * on the remote's PATH; `ssh` hands its last argument to `/bin/sh` in `$HOME`, as sshd does, so the hub's real commands
+ * on the remote's PATH; `ssh` hands its last argument to `/bin/sh` in `$HOME` (`<root>/home`), as sshd does, so the hub's real commands
  * run. `archive` is the pinned Node for `FakeRegistry.addNodeArchive`: its `bin/node` runs this Node, beside a licence
  * and `archiveFiles`; `runtime` pins it.
  */
@@ -79,8 +79,8 @@ export function linuxRemote(
 ): {
   ssh: string
   /** The remote's environment: `HOME`, and a PATH with the fake tools first, then `before`, then the system's folders */
-  env: (home: string, over?: Record<string, string>, before?: string[]) => Record<string, string>
-  archive: { version: string; file: string; bytes: Buffer }
+  env: (over?: Record<string, string>, before?: string[]) => Record<string, string>
+  archive: NodeArchive
   runtime: RemoteRuntime
 } {
   const bin = join(root, 'bin')
@@ -97,15 +97,18 @@ export function linuxRemote(
   const bytes = tarGz(`node-v${nodeVersion}-linux-x64`, { 'bin/node': { text: `#!/bin/sh\nexec "${process.execPath}" "$@"\n`, mode: 0o755 }, LICENSE: 'MIT', ...archiveFiles })
   return {
     ssh,
-    env: (home, over = {}, before = []) => ({ HOME: home, PATH: [bin, ...before, '/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(':'), ...over }),
+    env: (over = {}, before = []) => ({ HOME: join(root, 'home'), PATH: [bin, ...before, '/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(':'), ...over }),
     archive: { version: nodeVersion, file, bytes },
-    runtime: pinnedRuntime('linux-x64', nodeVersion, file, bytes),
+    runtime: pinnedRuntime('linux-x64', nodeVersion, file, sha256(bytes)),
   }
 }
 
-/** The Node a remote install is pinned to: one platform's archive, by its file name and the sha256 of `bytes` */
-export function pinnedRuntime(platform: string, version: string, file: string, bytes: Buffer): RemoteRuntime {
-  return { node: { version, archives: { [platform]: { file, sha256: sha256(bytes) } } } }
+/** A Node release archive as nodejs.org/dist serves it (`FakeRegistry.addNodeArchive`) */
+export type NodeArchive = { version: string; file: string; bytes: Buffer }
+
+/** The Node a remote install is pinned to: one platform's archive, by its file name and its sha256 */
+export function pinnedRuntime(platform: string, version: string, file: string, sha: string): RemoteRuntime {
+  return { node: { version, archives: { [platform]: { file, sha256: sha } } } }
 }
 
 export type FakeRegistry = {
@@ -117,7 +120,7 @@ export type FakeRegistry = {
   /** Signs `name@version`'s metadata with a key the registry does not publish */
   forgeSignature(id: string): void
   /** Adds a Node archive at `/dist/v<version>/<file>` */
-  addNodeArchive(version: string, file: string, bytes: Buffer): void
+  addNodeArchive(archive: NodeArchive): void
   close(): Promise<void>
 }
 
@@ -167,7 +170,7 @@ export async function fakeRegistry(packages: FakePackage[]): Promise<FakeRegistr
     hits,
     swapTarball: (id, bytes) => void served.set(id, bytes),
     forgeSignature: (id) => void forged.add(id),
-    addNodeArchive: (version, file, bytes) => void files.set(`/dist/v${version}/${file}`, bytes),
+    addNodeArchive: ({ version, file, bytes }) => void files.set(`/dist/v${version}/${file}`, bytes),
     close: () => new Promise((r) => server.close(() => r())),
   }
 }
