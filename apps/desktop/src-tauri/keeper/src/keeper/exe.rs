@@ -6,10 +6,9 @@
 //! webview, so it can be started from verified content outside the bundle (thin-shell plan §5).
 //!
 //! **`centralu --keeper` refuses** (#461), at once and before anything graphical exists
-//! (`run_from_window`). Until 0.1.0-beta.16 it `exec`ed the `centralu-keeper` beside it, for keepers
-//! of 0.1.0-beta.11 and earlier, which hand themselves over by starting the new build's *window*
-//! executable as `centralu --keeper --take-over-fd 3 ...`, and for windows from before #440, which
-//! started their keeper that way. Such a keeper now never hears its successor say `hello` or
+//! (`run_from_window`). A keeper of 0.1.0-beta.11 or earlier hands itself over by starting the new
+//! build's *window* executable as `centralu --keeper --take-over-fd 3 ...`, and a window from before
+//! #440 starts its keeper that way. Such a keeper never hears its successor say `hello` or
 //! `ready` (the handoff's commit point), so it rolls back and serves on; the window then offers
 //! "Restart completely", which starts a keeper of its own build. Opening a window instead would put
 //! a second window on screen from a background keeper, so the refusal is an exit, not a fallthrough.
@@ -19,7 +18,7 @@
 //! an earlier `cargo build` left there: older code than the window's, with nothing to tell the two
 //! apart (the two binaries of one `cargo build` are linked in no fixed order, so their times say
 //! nothing either). A macOS debug window that opts into the keeper (`CC_USE_KEEPER=1`) therefore starts
-//! its own executable with `--keeper` and this variable. That is the only `--keeper` left.
+//! its own executable with `--keeper` and this variable. That is the only `--keeper` that runs a keeper.
 
 use std::path::{Path, PathBuf};
 
@@ -31,7 +30,7 @@ pub const KEEPER_EXE: &str = "centralu-keeper";
 pub const IN_PROCESS_ENV: &str = crate::start_plan::KEEPER_IN_PROCESS_ENV;
 
 /// Exit code of `centralu --keeper` refusing to be a keeper (#461). `EX_USAGE`: the command line
-/// names a way of starting the keeper this build no longer has.
+/// names a way of starting the keeper this build does not have.
 pub const EXIT_NOT_A_KEEPER: i32 = 64;
 
 /**
@@ -56,9 +55,9 @@ pub struct Start {
 }
 
 impl Start {
-    /// `--keeper` only for a keeper in the window's executable, the one place it still means
-    /// something. `centralu-keeper` ignores it (`server::parse_args`): shell v1, whose bytes are
-    /// pinned, still passes it, as every start did until #461.
+    /// `--keeper` only for a keeper in the window's executable, the one place it means something.
+    /// `centralu-keeper` ignores it (`server::parse_args`): shell v1, whose bytes are pinned,
+    /// passes it.
     pub fn args(&self) -> Vec<String> {
         let mut args = Vec::new();
         if self.in_process {
@@ -166,13 +165,13 @@ mod tests {
         assert_eq!(o.bundle_path.as_deref(), Some("/Applications/Centralu.app"));
         assert_eq!(o.app_version.as_deref(), Some("0.1.0"));
 
-        // A debug window's keeper in its own executable: the one start that still needs `--keeper`
+        // A debug window's keeper in its own executable: the one start that needs `--keeper`
         let dev = Start { host_source: None, bundle_path: None, dev: true, in_process: true, ..start };
         assert_eq!(dev.args(), ["--keeper", "--data-dir", "/d ata", "--app-version", "0.1.0"]);
         assert_eq!(dev.env(), [("CC_DEV".to_string(), "1".to_string()), (IN_PROCESS_ENV.to_string(), "1".to_string())]);
     }
 
-    /// Shell v1's pinned bytes still pass `--keeper` first; the keeper reads the rest as before.
+    /// Shell v1's pinned bytes pass `--keeper` first; the keeper reads the remaining arguments the same either way.
     #[test]
     fn a_keeper_still_reads_a_command_line_that_starts_with_keeper() {
         let argv: Vec<String> =

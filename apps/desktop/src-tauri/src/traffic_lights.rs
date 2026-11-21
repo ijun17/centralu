@@ -33,12 +33,12 @@ pub fn install(app: &tauri::AppHandle) {
 
     // Why this has to reposition a few more times right after the event:
     // macOS 26 **delivers the resize event first and settles the window frame afterward.** So
-    // the position captured at event time is immediately pushed out of place — this is the
-    // "resizing occasionally looks wrong" that was flagged during dogfooding.
+    // the position captured at event time is immediately pushed out of place, and resizing
+    // occasionally looks wrong.
     //
-    // This used to spawn 3 fresh threads per event, but during a drag, events arrive dozens of
-    // times per second, so threads piled up into the hundreds. Now a **single long-lived
-    // thread** receives signals over a channel and recalibrates. Signals that pile up while it
+    // During a drag, events arrive dozens of times per second, so fresh threads per event would
+    // pile up into the hundreds. A **single long-lived thread** receives signals over a channel
+    // and recalibrates. Signals that pile up while it
     // is calibrating are collapsed into one — it is the same job either way ("reposition based
     // on the current frame"), so doing it once is enough.
     let (tx, rx) = std::sync::mpsc::channel::<()>();

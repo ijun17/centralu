@@ -4,11 +4,9 @@
 //! copies it into `<data>/content/<version>/` and starts `centralu-keeper` from that copy. Such a
 //! keeper and everything it starts are judged by macOS as the shell, so they must only ever run code
 //! the project signed: its hosts run from that copy as they are (`version_dir_of`, `source::Copies`).
-//! Until #1895 step 4 PR 7 a Linux window also copied what its AppImage carried there, unsigned, and
-//! started its keeper from that copy; Linux is direct now.
+//! A Linux window starts its host directly (#1895 step 4 PR 7).
 //!
-//! What is left here since a keeper no longer moves to another build (#1895 step 4, PR 4; it verified
-//! and copied the next build's content for its handoff, thin-shell plan §10 step 5): where a keeper runs
+//! What this holds (a keeper runs one build for its life, #1895 step 4, PR 4): where a keeper runs
 //! from (`Origin`), the cleanup of `<data>/content/`, and the verifier's checks under the shell's rules,
 //! which the window runs again after the shell refused its content to say which file or check failed
 //! (`diagnose`).

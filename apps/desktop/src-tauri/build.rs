@@ -5,10 +5,10 @@
  * permission check at all.** The check only fires under three conditions: the command is a
  * plugin command, the app has declared a manifest, or the request came from a remote origin
  * (tauri 2.11.5 webview/mod.rs `on_message`,
- * `plugin_command.is_some() || has_app_acl_manifest || !is_local`). So until now, a page on a
- * local origin (the dev server address, `tauri://localhost`, or a registered custom scheme)
- * could call any registered command from any window and any frame. The only thing standing
- * in the way was the invoke key, which changes on every run, and Tauri writes the real key to
+ * `plugin_command.is_some() || has_app_acl_manifest || !is_local`). So without a manifest, a page
+ * on a local origin (the dev server address, `tauri://localhost`, or a registered custom scheme)
+ * can call any registered command from any window and any frame. The only thing standing in
+ * the way is the invoke key, which changes on every run, and Tauri writes the real key to
  * stderr whenever the key is wrong.
  *
  * Every command listed in `commands` gets an `allow-<command>` and `deny-<command>`

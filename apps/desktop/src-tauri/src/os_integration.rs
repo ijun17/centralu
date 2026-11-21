@@ -226,9 +226,9 @@ pub(crate) struct ShortcutKeys {
 /// The labels for shortcut hints, since the UI is not allowed to ask which OS it is on.
 ///
 /// The bindings themselves need no help — every handler already takes `metaKey ||
-/// ctrlKey`, so the shortcuts have always worked here and on Linux alike. It was only the
-/// hints that were wrong, and they were wrong everywhere at once because `⌘` was written
-/// out at each of them. A key that is not on the keyboard is a worse hint than none.
+/// ctrlKey`, so the shortcuts work here and on Linux alike. Only the hints need the OS: a `⌘`
+/// written out at each of them is wrong off macOS, and a key that is not on the keyboard is a
+/// worse hint than none.
 #[tauri::command]
 pub(crate) fn shortcut_keys() -> ShortcutKeys {
     #[cfg(target_os = "macos")]
@@ -285,9 +285,8 @@ pub(crate) fn alert(app: AppHandle, kind: String, sound: bool) {
 /// which needs storage that can cross threads (`Retained<NSSound>` is not Send). Rather than
 /// pay that weight for one short sound, this hands the job to `afplay` — alerts fire rarely.
 ///
-/// The argument is the alert *kind*, not a sound name. It used to be a macOS sound name
-/// picked by the caller, which meant the caller had to know what macOS calls its sounds
-/// — and there was no honest way for another OS to answer that question.
+/// The argument is the alert *kind*, not a sound name. A sound name would make the caller
+/// know what macOS calls its sounds — and another OS has no honest way to answer that.
 #[cfg(target_os = "macos")]
 fn play_sound(kind: &str) {
     // Distinguishing the sounds is a feature, not a taste — it tells someone in the next room

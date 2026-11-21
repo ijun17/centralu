@@ -53,7 +53,7 @@ fn a_built_host_needs_the_app_version_and_the_keeper_reports_it() {
     assert_eq!(KeeperInfo::of_this_process(&dir, own_build(&by_hand)).version, crate::keeper::DEV_VERSION);
 }
 
-/// #1501 review: `run` itself refuses a built host without `--app-version`, before it touches the data
+/// #1501: `run` itself refuses a built host without `--app-version`, before it touches the data
 /// folder. The folder here sits under a file, so a keeper that went on would fail creating it, with 1.
 #[test]
 fn a_keeper_told_a_built_host_without_the_app_version_does_not_start() {
@@ -133,11 +133,10 @@ fn push_until_closed(k: &Arc<Keeper>) {
 }
 
 /**
- * #840 item 5: a window the keeper can no longer push its status to (it stopped reading) was
- * taken off the push list and nothing else: its connection stayed open, so it still counted as
- * attached (background mode off never stopped the keeper for it) and the window, if it came
- * back, waited for status that never came. The keeper now closes that connection, which is the
- * detach, and the window attaches again.
+ * #840 item 5: the keeper closes the connection of a window it cannot push its status to (it
+ * stopped reading), which is the detach, and the window attaches again. Left open, the
+ * connection would still count as attached (background mode off would never stop the keeper for
+ * it) and the window, if it came back, would wait for status that never comes.
  */
 #[test]
 fn a_window_whose_status_push_fails_is_closed_and_detached() {
@@ -162,10 +161,10 @@ fn a_window_whose_status_push_fails_is_closed_and_detached() {
 }
 
 /**
- * #840 item 5, the review's catch: with background mode off (the default), the window the
- * keeper closed was its last, and its detach stopped the keeper at once, host, agents and
- * terminals with it. A window that was only stalled then came back to a new keeper with
- * nothing. It is waited for now, as an announced relaunch is, and the next attach spends that.
+ * #840 item 5: with background mode off (the default), the window the keeper closed may
+ * be its last, and its detach must not stop the keeper at once, host, agents and terminals with
+ * it: a window that was only stalled would come back to a new keeper with nothing. It is waited
+ * for (`REATTACH_GRACE`), and the next attach spends that.
  *
  * Run in a process of its own: without the grace the keeper's stop ends the process.
  */
@@ -202,9 +201,9 @@ fn a_closed_window_is_waited_for_with_background_mode_off() {
 }
 
 /**
- * #840 item 5: a window that stops reading holds up no push. Pushes were blocking writes under the
- * state lock, so once its socket was full every change (and every request and the host's status,
- * which wait for that lock) waited out the write timeout. Another window still gets its status
+ * #840 item 5: a window that stops reading holds up no push. A blocking write under the state
+ * lock would make every change (and every request and the host's status, which wait for that
+ * lock) wait out the write timeout once its socket is full. Another window still gets its status
  * meanwhile.
  */
 #[test]
@@ -298,7 +297,7 @@ fn ask(sock: &Path, req: &Value, want: usize) -> Vec<String> {
     use std::io::BufRead;
     let mut s = UnixStream::connect(sock).unwrap();
     // Before the request: the keeper may answer and close at once, and macOS refuses `SO_RCVTIMEO` (EINVAL) on a socket
-    // its peer has closed, so a timeout set after the write fails on a fast machine (the GitHub runner did)
+    // its peer has closed, so a timeout set after the write fails on a fast machine
     s.set_read_timeout(Some(Duration::from_millis(200))).unwrap();
     let mut r = BufReader::new(s.try_clone().unwrap());
     s.write_all(&json_line(req)).unwrap();
@@ -568,7 +567,7 @@ fn a_window_whose_executable_an_update_replaced_can_still_stop_for_the_update() 
         assert_eq!(crate::os::peer_pid(&s).unwrap(), child.id());
         (k.judge_window_for_update(&s), k.may_tell_system_ending(&s))
     };
-    // The window may also still tell the host the system is ending (#2119 review), which the path rule alone refused
+    // The window may also still tell the host the system is ending (#2119), which the path rule alone refuses
     assert_eq!(judged(&mut window_proc), (Ok(()), true), "the attached window after its executable was replaced");
     let (stranger_judged, stranger_ending) = judged(&mut stranger);
     assert!(stranger_judged.as_ref().is_err_and(|e| e.contains("no Centralu window attached")), "{stranger_judged:?}");
@@ -798,7 +797,7 @@ fn a_host_that_ignores_the_stop_for_an_update_is_terminated_once_the_wait_is_up(
 }
 
 /**
- * Review of #1895 step 3: a stop for an update from a process that is not a window (an agent's Bash, any tool of this user)
+ * #1895 step 3: a stop for an update from a process that is not a window (an agent's Bash, any tool of this user)
  * would end the keeper and have every cut turn continued with "Centralu was updated". Over the real socket, from this test
  * binary (not a window): refused, and nothing stops.
  */

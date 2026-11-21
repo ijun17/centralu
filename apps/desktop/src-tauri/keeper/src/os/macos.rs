@@ -37,7 +37,7 @@ extern "C" fn on_term(_sig: libc::c_int, info: *mut libc::siginfo_t, _ctx: *mut 
 
 /// Runs `told` when launchd stops this process (SIGTERM from pid 1, `is_system_stop`), and then ends the process as the signal
 /// would have: the keeper and its host are stopped by the system together, and the host cannot tell that SIGTERM from the keeper's
-/// own (#1970). A SIGTERM from any other process ends it at once, as before. Called once, with the keeper still single-threaded
+/// own (#1970). A SIGTERM from any other process ends it at once, as without a handler. Called once, with the keeper still single-threaded
 pub fn on_system_stop(told: impl Fn() + Send + 'static) {
     let mut fds = [0 as libc::c_int; 2];
     // SAFETY: fds holds the two descriptors pipe writes
@@ -105,7 +105,7 @@ pub fn is_zombie(pid: u32) -> bool {
     // SAFETY: proc_bsdinfo is plain data, for which all zeroes is a valid value.
     let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
     let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
-    // A non-zero `arg` asks for zombies too: with 0 the call fails on one, and a zombie read as
+    // A non-zero `arg` asks for zombies too: with 0 the call fails on one, and a zombie reads as
     // "not a zombie" (measured on macOS 27).
     // SAFETY: the buffer is valid for `size` bytes for the duration of the call.
     let n = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 1, &mut info as *mut _ as *mut libc::c_void, size) };

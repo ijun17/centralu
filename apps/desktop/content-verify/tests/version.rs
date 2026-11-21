@@ -125,7 +125,7 @@ fn a_corrupt_floor_is_an_error_not_a_reset() {
 /// #840 item 14: writers recording at once (the shell and a keeper, two threads of a keeper) leave
 /// the highest version they recorded, and every write succeeds. Without a lock one could read the
 /// floor, another raise it, and the first write a lower version back over it; with one temporary
-/// name per process, threads wrote the same file and renames failed.
+/// name per process, threads would write the same file and renames would fail.
 #[test]
 fn writers_at_once_leave_the_highest_floor() {
     let t = Temp::new("floor-race");

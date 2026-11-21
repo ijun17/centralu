@@ -1,10 +1,10 @@
 //! The window's side of the macOS shell (docs/plans/thin-shell.md §6, §6.1, §10.2): install or upgrade
 //! `<data>/shell/Centralu.app` from the shell the window carries (`install`), open it through
 //! LaunchServices to start the keeper, and read how that went (`start`). When it does not start a
-//! keeper the window starts one directly, as before, and says why (`Report`).
+//! keeper the window starts one directly, and says why (`Report`).
 //!
 //! Used by a macOS release build only (`start_plan::StartMode::ThroughShell`, docs/agent-host/lifecycle/start.md).
-//! Debug builds, Linux and Windows start the keeper (or the host) as they always did.
+//! Debug builds, Linux and Windows never open it.
 //!
 //! **A shell the window carries unpinned** (a local `pnpm app` build or a release rehearsal, whose
 //! shell was built on the spot rather than taken from `shell.lock`) is neither installed nor opened:

@@ -25,8 +25,8 @@ pub fn parse_args(args: &[String]) -> Options {
             "--bundle-path" => o.bundle_path = it.next().cloned(),
             "--app-version" => o.app_version = it.next().cloned(),
             "--take-over-fd" => o.take_over_fd = it.next().and_then(|s| s.parse().ok()),
-            // Ignored, like anything unknown. `--keeper` among them: every start passed it until
-            // #461, and shell v1, whose bytes are pinned, still does.
+            // Ignored, like anything unknown. `--keeper` among them: shell v1, whose bytes are
+            // pinned, passes it.
             _ => {}
         }
     }

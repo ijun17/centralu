@@ -3,11 +3,11 @@
 //!
 //! The listeners are polled, and a poll on a listener with a connection waiting stays readable
 //! until that connection is accepted. When `accept` fails for want of a descriptor (`EMFILE`, a
-//! keeper started from Finder has a soft limit of 256), the connection stays in the queue, so every
-//! loop came straight back to the same failure: one core spinning and the log growing by thousands
-//! of lines a second, until a descriptor came free. Now a failure leaves the listener alone for a
-//! moment, and the log says it once (and then once every `LOG_EVERY`, with the count) instead of
-//! every time.
+//! keeper started from Finder has a soft limit of 256), the connection stays in the queue, so a
+//! loop that went straight back would meet the same failure: one core spinning and the log growing
+//! by thousands of lines a second, until a descriptor comes free. So a failure leaves the listener
+//! alone for a moment, and the log says it once (and then once every `LOG_EVERY`, with the count)
+//! instead of every time.
 //!
 //! A thread per connection is started with `spawn`, not `thread::spawn`: the latter panics when the
 //! OS refuses a thread, and the release build has `panic = "abort"`, which ends the keeper and with
@@ -157,7 +157,7 @@ pub(crate) mod few_descriptors {
 
     /// A socket opened now, before the process runs out of descriptors, and connected after. Connecting takes no new
     /// descriptor, so the waiting connection a test queues is its own however many threads are opening files (a descriptor
-    /// freed with `drop(held.pop())` goes to whichever thread opens first, and a client that lost it failed with EMFILE).
+    /// freed with `drop(held.pop())` goes to whichever thread opens first, and a client that lost it fails with EMFILE).
     pub(crate) struct Spare(OwnedFd);
 
     impl Spare {
@@ -242,7 +242,7 @@ mod tests {
         assert!(raised.1 > 256 && raised.1 <= crate::os::DESCRIPTOR_LIMIT, "{raised:?}");
         assert_eq!(few_descriptors::soft_limit(), raised.1);
         assert_eq!(crate::os::raise_descriptor_limit(), None, "already as high as it goes");
-        // What the keeper starts gets the limit it had before back (#840 item 3, review).
+        // What the keeper starts gets the limit it had before back (#840 item 3).
         let mut c = std::process::Command::new("/bin/sh");
         c.args(["-c", "ulimit -n"]);
         crate::os::original_descriptor_limit(&mut c);

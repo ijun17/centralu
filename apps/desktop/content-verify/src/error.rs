@@ -65,8 +65,8 @@ pub enum Error {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IoStep {
     /// Opening, examining or reading a file or folder the verifier was given to read. Opening the
-    /// copy to read it back counts here too, as it always has: the shell's and the keeper's refusals
-    /// must read an error the same way, and a shell already installed reads it this way.
+    /// copy to read it back counts here too: the shell's and the keeper's refusals must read an error
+    /// the same way, and a shell already installed reads it this way.
     Read,
     /// Anything else: creating, writing, syncing, listing or reading back the copy, renaming it into
     /// place, locking or writing the floor.
