@@ -152,6 +152,5 @@ describe("what pre-pr reads in its tools' answers", () => {
         detail: [expect.stringMatching(/^AssertionError: /)],
       },
     ])
-
   })
 })
