@@ -15,11 +15,8 @@ import { droppedGridList, droppedGridPanel, gridTakes } from '../grid/drop.js'
  * open the screen first and then drag it in separately, that would be doing the work twice, so
  * dropping it here handles both steps at once.
  *
- * **The Experimental badge is gone** (2026-08-27, by the user's call). It went up when the
- * grid shipped looking finished while the spec still listed it under non-goals (issue #25) —
- * the mark existed to warn about the hour you might lose inside an unproven view. Weeks of
- * dogfooding later the grid is simply how sessions get watched side by side, and a warning
- * that no longer warns anyone is clutter on the one lane that is always on screen.
+ * **No Experimental badge** (owner, 2026-08-27): the grid is how sessions get watched side by
+ * side, and a warning that warns nobody is clutter on the one lane that is always on screen.
  * The Assistant's badge stays — that surface still is what its mark says it is.
  */
 export function GridButton() {
@@ -40,8 +37,7 @@ export function GridButton() {
         } ${over ? 'shadow-[inset_0_0_0_2px_var(--color-focus)]' : ''}`}
         /*
           A **selection**, not a toggle.
-          Making it an on/off switch reads as "a layer briefly covering the previous screen" — it
-          actually was misread that way. It follows the same rule as the other rows in the
+          Making it an on/off switch reads as "a layer briefly covering the previous screen". It follows the same rule as the other rows in the
           sidebar: pressing it shows this, and leaving it means choosing something else.
         */
         onClick={() => setView('grid')}

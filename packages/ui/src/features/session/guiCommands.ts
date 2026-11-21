@@ -1,7 +1,7 @@
 import { useStore } from '../../store/store.js'
 
 /**
- * GUI slash commands (requested by a user on 2026-09-07).
+ * GUI slash commands.
  *
  * `/usage` is a client-side built-in command in the CLI, so there is no response for it in the
  * SDK protocol — sending it to a session leaves the agent nothing it can do. So for the names

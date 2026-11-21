@@ -78,7 +78,7 @@ describe('applyOffer', () => {
    */
   /*
    * #665 review: the shell's `ready` means only "another build than this window". Measured: host latest 0.3.0, window
-   * 0.2.0, bundle on disk 0.0.5 answered ready with version 0.0.5, and the button offered a relaunch into the past.
+   * 0.2.0, bundle on disk 0.0.5 answers ready with version 0.0.5, which must not become a relaunch into the past.
    */
   it('offers Apply now only into the installed version, read from the bundle, and only forward', () => {
     const host = { ...installed, latest: '0.3.0' }
@@ -263,9 +263,9 @@ describe('applyWords', () => {
   })
 
   /**
-   * Review of #1895 step 3: an absent `restartsHost` was read as "the keeper holds them", so Windows and Linux (whose check
-   * is empty), a browser, a window before its first check and one not attached to a keeper all promised that agents keep
-   * going and that the update applies by itself once idle, neither of which happens there
+   * Review of #1895 step 3: an absent `restartsHost` does not mean "the keeper holds them". On Windows and Linux (whose
+   * check is empty), in a browser, in a window before its first check and in one not attached to a keeper, agents do not
+   * keep going and the update does not apply by itself once idle, so the words promise neither
    */
   it('promises nothing it cannot tell: no keep-going and no applying by itself without a signal', () => {
     const unknown = [undefined, null, { ready: false }, { ready: false, reason: 'not attached to the background keeper' }, { ...ready }]

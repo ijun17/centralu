@@ -42,10 +42,10 @@ export function CodeViewer({ projectId, sessionId = null }: { projectId: string;
   /**
    * Why the failure gets a place on screen and not only a toast.
    *
-   * A file can now be opened by clicking a path an agent typed, and that path is a guess —
+   * A file can be opened by clicking a path an agent typed, and that path is a guess —
    * nothing checked it against the disk before it became a link (see `parseFileRef`). So a
    * file that is not there is an ordinary outcome here, not an exotic one. The toast alone
-   * could not carry it: it is a 2.5s pill and this overlay covers the lane it appears in,
+   * cannot carry it: it is a 2.5s pill and this overlay covers the lane it appears in,
    * so the one thing left on screen would be "Loading…", forever, about a file that will
    * never load.
    */
@@ -147,8 +147,8 @@ export function CodeViewer({ projectId, sessionId = null }: { projectId: string;
     return hit
   }, [lines, query])
   /*
-   * Moves between search results (#183). While only the highlighting and a count existed, since
-   * the list is virtualized, a match off screen had to be found by scrolling by hand. Enter goes
+   * Moves between search results (#183). The list is virtualized, so with only the highlighting
+   * and a count, a match off screen would have to be found by scrolling by hand. Enter goes
    * to the next one, ⇧Enter to the previous — wrapping around at either end. Which match it is
    * on resets to the start whenever the search term or the file changes.
    */

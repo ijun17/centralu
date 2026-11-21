@@ -83,10 +83,9 @@ export function StateDot({ state }: { state: SessionState }) {
  * The signature element — the identity of a keyboard-first tool.
  *
  * `mod` and `alt` take a meaning, not a glyph (issue #32). The key that is `⌘` on this Mac is
- * `Ctrl` on another keyboard, and the handler had already been accepting both for a long time —
- * only the screen was telling the person to press a key that did not exist. Writing the symbol
- * at the call site, as in `<Kbd>⌘</Kbd>`, is what spread that lie across ten files at once, so
- * the keyboard's name is now taken in from this one place only.
+ * `Ctrl` on another keyboard, and the handler accepts both. A symbol written at the call site,
+ * as in `<Kbd>⌘</Kbd>`, tells the person to press a key their keyboard does not have, so the
+ * keyboard's name is taken in from this one place only.
  */
 export function Kbd({
   children,
@@ -156,11 +155,9 @@ export function Tooltip({
   /** Pressed since the pointer came in: the tip stays away until it leaves */
   const pressed = useRef(false)
   /*
-   * fixed, not absolute (dogfooding: the usage donut's tooltip was clipped at the bottom by the
-   * modal's scroll box). An absolute inside the trigger is guaranteed to be clipped by an
-   * overflow somewhere among its ancestors — a sidebar button's tooltip (overflow-y-auto) was
-   * standing on the exact same mine. Floating it relative to the viewport leaves no box to be
-   * clipped by. Placed by the same rule as every popover (anchored.ts): `placement` is the side tried first and it
+   * fixed, not absolute: an absolute inside the trigger is clipped by an overflow somewhere
+   * among its ancestors (the usage donut's by the modal's scroll box, a sidebar button's by
+   * its overflow-y-auto). Floating it relative to the viewport leaves no box to be clipped by. Placed by the same rule as every popover (anchored.ts): `placement` is the side tried first and it
    * flips when the window has no room there — a default direction, not a guarantee.
    */
   const pos = useAnchoredPlacement(anchorRef, tipRef, open, {
@@ -198,8 +195,8 @@ export function Tooltip({
         setOpen(false)
       }}
       /*
-       * A press puts the tip away until the pointer leaves (owner, 2026-10-18): a button that opens a list left its tip
-       * standing over the list it opened. The focus the press gives the button does not bring it back; keyboard focus
+       * A press puts the tip away until the pointer leaves (owner, 2026-10-18): a button that opens a list would leave
+       * its tip standing over the list it opened. The focus the press gives the button does not bring it back; keyboard focus
        * still does.
        */
       onMouseDownCapture={() => {
@@ -213,9 +210,10 @@ export function Tooltip({
     >
       {children}
       {/*
-        Drawn into the body, not inside the anchor (owner, 2026-10-20): a tooltip inherited whatever its row wore, so an
-        away machine's dimmed project (opacity 60%) showed its tooltip see-through. Opacity on an ancestor cannot be
-        undone by a child; outside it, the tip is always whole. Fixed positioning already ignored the anchor's box.
+        Drawn into the body, not inside the anchor (owner, 2026-10-20): a tooltip inside it inherits whatever its row
+        wears, so an away machine's dimmed project (opacity 60%) would show its tooltip see-through. Opacity on an
+        ancestor cannot be undone by a child; outside it, the tip is always whole. Fixed positioning already ignores
+        the anchor's box.
       */}
       {open &&
         createPortal(

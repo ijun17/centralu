@@ -5,10 +5,7 @@ import { letterOf } from '../../app/keys.js'
 /**
  * Copy and ⌘A for a pane whose rows are virtualized: the code viewer and the diff (#428).
  *
- * Both panes had their own copy of this and the copies drifted: the diff let the browser copy whatever a selection that
- * ended outside the pane covered (chrome included), the viewer copied the pane's part only (#424); the diff forgot the
- * remembered anchor on a new file, the viewer did not; ⌘A in the diff painted the sticky file band too, in the viewer
- * only the rows. They now share one rule, the viewer's:
+ * Both panes share this one rule, so what they copy, remember and paint cannot drift apart (#424):
  *
  * - **What is copied is rebuilt from `lines`**, not read off the DOM, which holds only the rows near the viewport
  *   (`selectedText`). A selection that ends outside the pane copies the pane's part (the edge it left by, `edgeCaret`);
@@ -19,11 +16,11 @@ import { letterOf } from '../../app/keys.js'
  * - **⌘A claims the whole of `wholeText`** and paints the rows that exist, nothing else: the highlight keeps a live
  *   selection alive (without one the browser fires no `copy`), and repainting on scroll keeps it under the eye. The
  *   claim ends when the person selects something else (#842 item 9): any press of the mouse, a selection that moves out
- *   of the rows, or Shift with a key that extends a selection. It used to end on a mouse press only, so after ⌘A here,
- *   text selected by keyboard anywhere else (the composer, a field) copied as the whole file. It does **not** end when
+ *   of the rows, or Shift with a key that extends a selection; ended on a mouse press only, text selected by keyboard
+ *   anywhere else (the composer, a field) after ⌘A here would copy as the whole file. It does **not** end when
  *   the range collapses because its rows were recycled by scrolling (#36): that range is painted again instead.
  * - **The pane takes focus once per `resetKey`** once it has rows (`ready`), so ⌘A has somewhere to land: it is not a
- *   text field, and with focus left on the sidebar button that opened it ⌘A went to the document and ⌘C then copied
+ *   text field, and with focus left on the sidebar button that opened it ⌘A goes to the document and ⌘C then copies
  *   only the mounted rows (#118). Once per key, so it never steals focus back from a search box mid-typing.
  *
  * Spread the returned props on the scroll area (`scrollRef`), which needs `tabIndex={0}`.
@@ -74,8 +71,8 @@ export function useVirtualCopy({
   /*
    * Remember where the selection began, while the row it began on still exists.
    *
-   * The reported garbage came from here: once the anchor's row is recycled the browser puts the anchor somewhere
-   * else, out of the rows and up into the app chrome, and ⌘C copied "Files / esc back to chat / Open in IDE". Reading
+   * Once the anchor's row is recycled the browser puts the anchor somewhere else, out of the rows and up into the
+   * app chrome, and ⌘C would copy "Files / esc back to chat / Open in IDE". Reading
    * it while it is still a row is what lets the copy handler serve lines 3…N instead.
    *
    * A collapsed selection is a *new* one beginning, in the rows or outside them, so it overwrites the memory even with

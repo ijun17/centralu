@@ -17,8 +17,8 @@ import { SettingsCard, SettingsEmpty, SettingsPage, SettingsRow } from './Settin
 /**
  * Settings → Archive (#204): the way out of a deleted session, built in the same change as the way in.
  *
- * The retired archive (FR-20) is why this screen exists at all: it hid sessions with a keystroke and had no exit, so
- * a record that sat intact in the store was, to the person, gone. Here every session in the session archive can be read,
+ * A session hidden with no way back is, to the person, gone, even while its record sits intact in the store (FR-20).
+ * Here every session in the session archive can be read,
  * restored, or deleted for good, and the screen says what each one still takes on this machine and what else goes
  * with it — a store that keeps everything anyone ever pasted into a chat should not keep it out of sight.
  *

@@ -50,7 +50,7 @@ function anchorOf(within: HTMLElement | null): { left: number; bottom: number } 
  * Command palette (E-2) — finds projects, sessions, apps, actions and **conversation content** from
  * one search box. Since "where did we talk about that" is the real question in this app, search
  * results are mixed into the same list. Opened by ⌘K / Ctrl+K, or by the search field at the top of the sidebar
- * (#529, #727, back in the sidebar 2026-11-05), which is how a person who was never told the key finds it.
+ * (#529), which is how a person who was never told the key finds it.
  */
 export function CommandPalette() {
   const open = useStore((s) => s.paletteOpen)
@@ -82,7 +82,7 @@ export function CommandPalette() {
   const [query, setQuery] = useState('')
   const [cursor, setCursor] = useState(0)
   /*
-   * The shortcut table, shown in place of the list (owner, 2026-10-20: it left Settings for here). Esc goes back to the
+   * The shortcut table, shown in place of the list (owner, 2026-10-20). Esc goes back to the
    * list, as a second level of anything does; Esc there closes.
    */
   const [keys, setKeys] = useState(false)
@@ -108,9 +108,7 @@ export function CommandPalette() {
    * This effect runs **after** the render where `open` became true. But the input box is already
    * on screen in that same render — anything typed in between gets wiped out by this effect.
    * Someone who starts typing the instant they press ⌘K loses their first character, and this
-   * happens more often the slower the machine is (the wider that gap gets). It showed up
-   * intermittently when the full e2e suite ran in parallel: the palette stayed open with the
-   * filter cleared, leaving all 5 items still listed.
+   * happens more often the slower the machine is (the wider that gap gets).
    *
    * Clearing on close means it is already empty the next time it opens, and the write that
    * overwrites input after the render disappears entirely. What the person sees behaves
@@ -132,16 +130,16 @@ export function CommandPalette() {
 
     const newIn = newSessionIn ? projects[newSessionIn] : undefined
     const actions: Item[] = [
-      // Starting a session (#529): the dialog the project's + opens, for the project the person is in
+      // Starting a session (#529), for the project the person is in
       ...(newIn
         ? [{ kind: 'action' as const, id: 'new-session', label: 'New session', sub: `in ${newIn.name}`, run: () => openNewSession(newIn.id) }]
         : []),
       { kind: 'action', id: 'settings', label: 'Open settings', // The window's own categories, in its own order — the palette should not describe a
-      // room by a floor plan it no longer has (issue #7)
+      // room by a floor plan it does not have (issue #7)
       sub: 'Notifications · appearance · permissions', run: () => toggleSettings(true) },
       { kind: 'action', id: 'shortcuts', label: 'Keyboard shortcuts', sub: 'The keys on this keyboard', run: () => setKeys(true), keepOpen: true },
       { kind: 'action', id: 'open-git', label: 'Open Git', sub: 'Changes · history · branches', run: () => openGit() },
-      // Import (#1141): its sidebar door went with "Your apps"; an imported app lands as a project of its own
+      // Import (#1141), here and in the New app dialog: an imported app lands as a project of its own
       { kind: 'action', id: 'import-app', label: 'Import an app', sub: 'From a folder, a .zip or a link', run: () => useStore.getState().openImport() },
       { kind: 'action', id: 'toggle-panel', label: 'Evidence panel', sub: `${sc('mod', 'B')} · changes · files`, run: () => togglePanel() },
       /*
@@ -230,7 +228,7 @@ export function CommandPalette() {
       /*
        * A session picked here is one the person is going to type to (#528): its composer takes the
        * keyboard once the palette is gone. The palette's own field leaves with it and drops focus on
-       * the page, where no key reaches the composer (a Tab did in WebKit on macOS only).
+       * the page, where no key reaches the composer (only a Tab does, in WebKit on macOS only).
        */
       const go = (id: string) => {
         focusSession(id)
@@ -242,7 +240,7 @@ export function CommandPalette() {
         openSearchHit(item.sessionId, item.seq)
       } else if (item.kind === 'project') {
         const first = Object.values(sessions).find((s) => s.projectId === item.id)
-        // A project with no session still has to be selectable (#183) — it used to just close the palette and leave the screen unchanged
+        // A project with no session still has to be selectable (#183): its project screen opens, so choosing it changes the screen
         if (first) go(first.id)
         else focusProject(item.id)
       } else if (item.kind === 'app') {
@@ -263,8 +261,8 @@ export function CommandPalette() {
       /*
        * While a word is being composed (Korean, Japanese, Chinese), these keys are the input
        * method's: Enter finishes the syllable, the arrows walk its candidates, Esc cancels it
-       * (#181). Taking that Enter ran the highlighted command the moment the person finished
-       * typing "설정", and closed the palette under the input method.
+       * (#181). Taking that Enter would run the highlighted command the moment the person
+       * finishes typing "설정", and close the palette under the input method.
        */
       if (composingKey(e)) return
       if (keys) {
@@ -321,8 +319,8 @@ export function CommandPalette() {
 
   /*
    * A popover hanging from the sidebar's search field (#727), not a dialog in the middle of the
-   * window. The catcher covers the whole window, so a press anywhere but the panel closes it, as it
-   * did; only the dimming starts below the field's row, so the field the person pressed (and the top
+   * window. The catcher covers the whole window, so a press anywhere but the panel closes it; only
+   * the dimming starts below the field's row, so the field the person pressed (and the top
    * bar above it) stays in view over the panel that came from it. The panel's left edge is the
    * field's and it opens 4px under it, from where the field is measured (anchorOf). The catcher
    * sits outside the top bar's drag region in the tree, so a press on it never moves the window.

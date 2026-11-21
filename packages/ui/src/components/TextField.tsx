@@ -3,10 +3,7 @@ import { forwardRef, useId, type InputHTMLAttributes, type ReactNode } from 'rea
 /**
  * A framed text input, and the label, hint and problem the forms put around it.
  *
- * 29 inputs wrote their frame by hand (`w-full rounded-md border border-line bg-surface-floor px-2 py-1.5 text-xs
- * text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none`, and four files kept a private copy
- * of it as `inputClass`, `field` or `fieldClass`). They differed only where the screen needed it, and those are the
- * props:
+ * One frame for every input, so it cannot drift between screens; what a screen needs to differ is a prop:
  *
  * - `size`: `md` for a dialog's fields, `sm` for a field inside a settings card or a row beside a button, `xs` for a
  *   field inside a line of text (the code viewer's find, a hex value).

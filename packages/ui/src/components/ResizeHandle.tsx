@@ -6,17 +6,17 @@ import { useCallback, useEffect, useRef, useState } from 'react'
  * Width is calculated relative to the actual edge of the element the handle is attached to.
  * Using the window's own edge (window.innerWidth) as the reference means the reference point
  * drifts the instant the layout is pushed past the window, producing a feedback loop where
- * dragging makes it grow even larger (dogfooding: "it grew larger than what was dragged and the
- * screen started scrolling sideways"). Using the element's own rect lets the calculation
+ * dragging makes it grow larger than what was dragged and the screen scrolls sideways. Using the
+ * element's own rect lets the calculation
  * self-correct even once it has been pushed out of place.
  *
  * Double-clicking resets it to the default — there must be a way back after an accidental drag.
  *
  * #842 item 11:
- *  - **Only the primary button drags.** A right-click, or a Ctrl+click (the context menu on macOS), started a drag whose
- *    mouseup the context menu swallowed, so the edge followed the pointer until the next click.
+ *  - **Only the primary button drags.** A right-click, or a Ctrl+click (the context menu on macOS), would start a drag
+ *    whose mouseup the context menu swallows, so the edge would follow the pointer until the next click.
  *  - **A drag ends if the handle goes away mid-drag** (the panel closed under it by ⌘B): the owner is told, or the
- *    panel's width animation stayed off for good. It also ends when the window loses focus, where no mouseup comes.
+ *    panel's width animation stays off for good. It also ends when the window loses focus, where no mouseup comes.
  *  - **The keyboard resizes it**: it is a focusable separator, and the arrows move the edge (Shift for a bigger step),
  *    Home and End go to the limits.
  */

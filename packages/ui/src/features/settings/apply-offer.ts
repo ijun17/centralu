@@ -11,7 +11,7 @@ import type { RelaunchCheck, RelaunchPort } from '@cc/platform/ports'
 export type ApplyOffer =
   /** "Apply now": relaunching starts the new build, and the keeper holds everything through it */
   | { kind: 'apply' }
-  /** The old wording: this platform cannot relaunch into it, and `reason` says why when known */
+  /** "Restart": this platform cannot relaunch into it, and `reason` says why when known */
   | { kind: 'restart'; reason?: string }
   /**
    * This window already runs the installed version: the relaunch happened, and what is left is
@@ -22,7 +22,7 @@ export type ApplyOffer =
 
 /**
  * @param windowVersion the version this window was built from (`APP_VERSION`); the host's
- *   `current` is the host's, which stays the old one until the switch
+ *   `current` is the host's, which stays the running one until the switch
  * @param relaunch the platform's answer to "would a relaunch start another build", undefined where
  *   the platform cannot relaunch at all, null while it has not answered yet
  */

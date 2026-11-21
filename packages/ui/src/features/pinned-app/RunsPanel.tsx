@@ -21,10 +21,9 @@ import { Badge } from '../../components/Badge.jsx'
  * session continues, or it ends (the counter on `external_app_runs_changed`), and when the person
  * presses the button. The host emits that signal for every row in the record — a rejected call, a
  * read-only tool call, and the chain it starts too (an agent an app asked for can run for several
- * minutes). While this relied on the "changed" signal the view listens for (`external_app_state_changed`),
- * a chain started by a read-only tool call stayed invisible until Refresh was pressed: that signal
- * does not fire for a read-only tool call (#190), and re-reading every few seconds only ran while a
- * row the panel already held was still running.
+ * minutes). The "changed" signal the view listens for (`external_app_state_changed`) is not enough: it
+ * does not fire for a read-only tool call (#190), so the chain such a call starts would stay invisible
+ * until Refresh is pressed.
  * A failure (the app answered with a failure, the host rejected it) is shown by a bright line on the
  * left of the row and one line stating the reason. Brightness belongs to whatever is blocked, exactly
  * the palette rule.

@@ -141,10 +141,10 @@ export function useAutocomplete({
    * The command list is asked for twice at most, and the second ask is the honest one.
    *
    * A sleeping session can only answer from the disk cache, and a cache answers with what
-   * was true last time — it served a plugin's commands for days after the plugin was
+   * was true last time — it can serve a plugin's commands for days after the plugin is
    * uninstalled. So the cached answer renders immediately (an empty menu while a process
-   * boots is worse), and the moment the session comes alive — which composer focus now
-   * starts (warmSession) — the list is fetched once more from the tool itself.
+   * boots is worse), and the moment the session comes alive — which composer focus
+   * starts (`wake`) — the list is fetched once more from the tool itself.
    */
   const live = useStore((s) => !!s.sessions[sessionId]?.live)
   const wantCommands = trigger?.kind === 'command'
@@ -156,9 +156,9 @@ export function useAutocomplete({
   const [askedFor, setAskedFor] = useState<string | null>(null)
   if (wantCommands && askedFor !== sessionId) setAskedFor(sessionId)
   /*
-   * The asks after an answer that gave no list, counted. It used to forget the ask instead (`askedFor` back to null), but
-   * React may run that and the next `/` in one render, which asked again at once: the ask never looked changed, and the
-   * failed answer stayed (#2151, WebKit). A count only goes up
+   * The asks after an answer that gave no list, counted. Forgetting the ask instead (`askedFor` back to null) fails: React
+   * may run that and the next `/` in one render, which asks again at once, so the ask never looks changed and the failed
+   * answer stays (#2151, WebKit). A count only goes up
    */
   const [asks, setAsks] = useState(0)
   const [askAgain, setAskAgain] = useState(false)
@@ -183,9 +183,9 @@ export function useAutocomplete({
   const fileQuery = trigger?.kind === 'file' && atSource === 'files' ? trigger.query : null
   const fileKey = fileQuery !== null ? searchKey(projectId, fileQuery) : null
   /*
-   * Each answer carries the search it answers (#842 item 13): after a keystroke the list still held the previous
-   * query's results until the new answer came, and Enter or Tab in that moment inserted one of them (after a switch of
-   * session, even a path from the previous project). A failed search is an answer too, with its reason: it is not "no
+   * Each answer carries the search it answers (#842 item 13): after a keystroke the list still holds the previous
+   * query's results until the new answer comes, and Enter or Tab in that moment must not insert one of them (after a
+   * switch of session, a path from the previous project). A failed search is an answer too, with its reason: it is not "no
    * files" (#1143 U14), and a later query is not known to find nothing either.
    */
   // The search on screen, for the read below: a new keystroke is a refresh of the same subject (the project), not a new one
@@ -216,10 +216,9 @@ export function useAutocomplete({
     if (!trigger) return []
     if (trigger.kind === 'command') {
       /*
-       * Never truncated. This used to keep only the top 20, but since the empty-query sort
-       * ranks short names first, a plugin's longer-named skills (all twenty-one of
-       * openai-templates:*) were **entirely** cut off — on screen that just looked like they
-       * did not exist, and it was reported exactly that way. The list already scrolls
+       * Never truncated. The empty-query sort ranks short names first, so a top-20 cut drops a
+       * plugin's longer-named skills **entirely** (all twenty-one of openai-templates:*), and on
+       * screen they look as though they do not exist. The list already scrolls
        * (max-h-56), so nothing is lost by being long, and the measured maximum of 102 entries
        * is not a size that needs virtual scrolling.
        */

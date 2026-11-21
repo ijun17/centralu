@@ -6,9 +6,8 @@ import { SIDEBAR_VARS } from '../layout.js'
 
 /**
  * The shared shell for sidebar row menus — placement (zoom compensation, flipping, edge handling)
- * and the closing rules live here. Pulled out of the project menu: once session rows needed the
- * same menu, writing this calculation twice would foreseeably end up with only one copy fixed later
- * (the zoom compensation already went through that once).
+ * and the closing rules live here, once for the project and the session menus: two copies of this
+ * calculation end up with only one of them fixed.
  */
 /** The button that opened a row menu, from the box that holds it: what the keyboard returns to */
 export function menuTrigger(anchorEl: HTMLElement | null): HTMLElement | null {
@@ -34,10 +33,9 @@ export function RowMenu({
   /*
    * **Appears right below the button that opened it.**
    *
-   * It used to be `absolute right-2 top-6`. This row has no positioned ancestor of its own, so
-   * that coordinate resolved against the sidebar as a whole, and no matter which project was
-   * pressed, the menu always landed at one fixed spot near the top right of the sidebar — pressing
-   * the tenth project produced its answer at the very top (a dogfooding finding). A menu has to sit
+   * Not `absolute` inside the row: the row has no positioned ancestor of its own, so such a
+   * coordinate resolves against the sidebar as a whole, and whichever project is pressed, the menu
+   * lands at one fixed spot near the top right of the sidebar. A menu has to sit
    * **next to whatever called it** for it to read as a menu about that thing.
    *
    * Why `fixed`: the sidebar has `overflow-y-auto`, so placing it in normal flow would clip the
@@ -65,10 +63,9 @@ export function RowMenu({
   useDismiss({ onClose, refs: [ref, { current: anchorEl }], returnFocusTo: trigger })
 
   /*
-   * **Tab goes from the button into the menu, and Shift+Tab comes back** (#1531 review). The menu used to stand in the
-   * DOM right after its button, so Tab from the button reached its first row. Drawn into the body it is the last thing in
-   * the page, and Tab went on to the next control of the sidebar with the menu left open, out of the keyboard's reach. The
-   * order the document no longer gives is given here.
+   * **Tab goes from the button into the menu, and Shift+Tab comes back** (#1531 review). Drawn into the body, the
+   * menu is the last thing in the page, so Tab from the button would go on to the next control of the sidebar with the
+   * menu left open, out of the keyboard's reach. The order the document does not give is given here.
    */
   const firstItem = (): HTMLElement | null => ref.current?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)') ?? null
   useEffect(() => {
@@ -92,7 +89,7 @@ export function RowMenu({
   /*
    * **Drawn into the body, not inside the row that opened it** (#1531). `position: fixed` frees a box from clipping, not
    * from its ancestors' paint: an `opacity` on any ancestor applies to every descendant, fixed ones included, so the
-   * menu of a project on a machine that is away (its block is `opacity-60`) came up half transparent, the rows under it
+   * menu of a project on a machine that is away (its block is `opacity-60`) would come up half transparent, the rows under it
    * showing through. Opacity on an ancestor cannot be undone by a child; outside it the menu is whole — the same reason
    * the tooltip is portaled. It also covers any other menu inside a faded or transformed ancestor.
    */
@@ -104,7 +101,7 @@ export function RowMenu({
       onKeyDown={back}
       className={`fixed z-30 ${className} overflow-y-auto rounded-lg border border-line bg-surface-raised p-1 shadow-(--shadow-popover)`}
       style={{
-        // The sidebar's own line colour (SIDEBAR_VARS), which a menu drawn into the body no longer inherits
+        // The sidebar's own line colour (SIDEBAR_VARS), which a menu drawn into the body does not inherit
         ...SIDEBAR_VARS,
         top: place?.top ?? 0,
         left: place?.left ?? 0,

@@ -3,17 +3,16 @@
  *
  * The view subscribes to live output first and reads the stored log second, so nothing falls
  * between the two; live chunks that arrive before the stored log are held until it lands. The hold
- * must end on **every** answer, not only a good one. While it ended only on success, a read that
- * failed (a timeout, the connection dropping mid-reconnect) or answered for another run left every
- * later chunk of a running dev server held in memory for as long as the panel stayed open, and the
- * pane stayed blank.
+ * must end on **every** answer, not only a good one: a read that fails (a timeout, the connection
+ * dropping mid-reconnect) or answers for another run would otherwise leave every later chunk of a
+ * running dev server held in memory for as long as the panel stays open, and the pane blank.
  *
  * A failed read is said on screen: a dim line stands where the stored log would be, so output that
  * starts mid-run is not mistaken for the whole log.
  *
  * The exit line is part of the output and takes the same hold: a run that ends before the stored log answers (a
- * typo'd script, a slow linked machine) used to have its live exit line drawn first, above the log it ends, and then
- * again once the log said the run had ended (#1143 U18). It is drawn once, after everything it ends.
+ * typo'd script, a slow linked machine) would otherwise have its live exit line drawn first, above the log it ends, and
+ * then again once the log says the run has ended (#1143 U18). It is drawn once, after everything it ends.
  */
 export type LogReplay = {
   /** A live chunk of this run's output */

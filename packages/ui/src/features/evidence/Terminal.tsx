@@ -51,7 +51,7 @@ export function TerminalPane({ projectId }: { projectId: string }) {
   /*
    * Output that arrives between a terminal's snapshot (its `history` in the answer to list or create) and the moment its
    * view mounts and subscribes (#842 item 5). The view mounts a render after the answer, and a dev server printing in
-   * between lost those lines for good: they were not in the snapshot and nobody was listening yet. The pane listens all
+   * between would lose those lines for good: they are not in the snapshot and nobody is listening yet. The pane listens all
    * along, keeps what comes for a terminal from its answer until its view takes it (`takeEarly`), and the view writes
    * the snapshot, then this, then listens, with nothing in between.
    *
@@ -104,8 +104,8 @@ export function TerminalPane({ projectId }: { projectId: string }) {
   /*
    * A reconnect that had to resync, a host swap, or a resync of the project's machine (an update restarted its host, #1902) reads
    * the terminals again and mounts them fresh (#842 item 4). The
-   * views on screen were attached to a connection that is gone: output from the gap was missing, a shell that died
-   * meanwhile never got its exit (so no Restart), and a shell the new host did not keep took keys that went nowhere.
+   * views on screen are attached to a connection that is gone: output from the gap is missing, a shell that died
+   * meanwhile never gets its exit (so no Restart), and a shell the new host did not keep takes keys that go nowhere.
    * A fresh list carries each shell's scrollback and whether it is alive, and drops the ones that are gone.
    */
   const hostResyncs = useStore((s) => resyncsOf(s, projectId))
@@ -140,9 +140,9 @@ export function TerminalPane({ projectId }: { projectId: string }) {
   return (
     <section className="flex min-h-0 flex-1 flex-col" data-testid="evidence-terminal">
       {/*
-        No separate header bar is used (user request, 2026-09-07). The label 'Terminal' was already
-        saying exactly what the tab right above it said, and two bars pushed the content's starting
-        point down by that much in a narrow panel. The button goes to the right end of the tab strip
+        No separate header bar is used (user request, 2026-09-07). A 'Terminal' label would say
+        exactly what the tab right above it says, and two bars push the content's starting point
+        down by that much in a narrow panel. The button goes to the right end of the tab strip
         instead — it is a portal, so the state stays right here.
       */}
       <TabActions>
@@ -197,7 +197,7 @@ export function TerminalPane({ projectId }: { projectId: string }) {
 }
 
 /**
- * One running command — a panel standing next to the shell terminals (#60's final shape).
+ * One running command — a panel standing next to the shell terminals (#60).
  *
  * The × means **stop**, not close: this panel only exists while there is a run, so the two mean the
  * same thing. Even Stop's outcome comes back as an exit event, turns off the ledger flag, and the
@@ -280,7 +280,7 @@ function TerminalView({
    * in the dependency array would re-run the effect and recreate xterm entirely, and the newly
    * created terminal would start at its default size (80×24) and then immediately get resized to
    * its actual size, making the shell redraw its prompt — it would look like a line growing every
-   * time something is closed (a finding raised twice during dogfooding).
+   * time something is closed.
    */
   const historyRef = useRef(info.history)
   historyRef.current = info.history
@@ -328,8 +328,8 @@ function TerminalView({
   }, [platform, info.terminalId, key, takeEarly, mounted])
 
   /*
-   * One restart at a time (#842 item 10): a second click while the first was on its way restarted the shell twice, and
-   * an answer that came back after the view was gone wrote into a disposed terminal.
+   * One restart at a time (#842 item 10): a second click while the first is on its way would restart the shell twice,
+   * and an answer that comes back after the view is gone would write into a disposed terminal.
    */
   const restarting = useRef(false)
   const restart = async () => {

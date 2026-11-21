@@ -1,5 +1,5 @@
 /**
- * Matching a path an agent wrote to a real file inside the project (the story behind #39).
+ * Matching a path an agent wrote to a real file inside the project (#39).
  *
  * A link always opens **relative to the project root**. But the path an agent writes is often
  * relative to wherever it happened to be looking — especially true in a monorepo or a solution.
@@ -8,8 +8,8 @@
  *     What the agent wrote: `Media/ImageSearch.cs`
  *     Where it really is:   `Widgets.Cli/Media/ImageSearch.cs`
  *
- * Since that file does not exist at the root, the viewer could only say "could not open it." To
- * a person's eye, a perfectly fine-looking path looks like a dead link.
+ * That file does not exist at the root, so opening at the root alone can only say "could not open
+ * it." To a person's eye, a perfectly fine-looking path looks like a dead link.
  *
  * So it does **suffix matching**: it looks through the project's file list for a path that ends
  * with `…/<the written path>`. Only matched at segment boundaries — `Media/ImageSearch.cs`

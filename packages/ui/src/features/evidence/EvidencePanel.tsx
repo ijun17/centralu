@@ -23,11 +23,10 @@ import { PanelGroups } from './PanelTabs.jsx'
  * Looking at something closely (code, a diff, a commit) does not happen here — a diff cannot be
  * read at 340px. Clicking it expands into a wide overlay over the conversation.
  *
- * **This lane stays visible while that overlay is open** (issue #15). It used to be covered
- * by it, on the reasoning above — but "a diff needs more than 340px" is a reason not to draw
- * the diff *in here*, not a reason to hide the list that sent you to it. This is where the
- * next file comes from, so covering it turned reading three changed files into three rounds
- * of escape-and-find-it-again.
+ * **This lane stays visible while that overlay is open** (issue #15). "A diff needs more than
+ * 340px" is a reason not to draw the diff *in here*, not a reason to hide the list that sent you
+ * to it. This is where the next file comes from, so covering it turns reading three changed files
+ * into three rounds of escape-and-find-it-again.
  */
 export function EvidencePanel() {
   const open = useStore((s) => s.panelOpen)
@@ -49,7 +48,7 @@ export function EvidencePanel() {
    * retarget muscle memory every time a tab is dragged.
    */
   /*
-   * The command-run ledger is loaded for this project up front (a carryover from #60). Loading it
+   * The command-run ledger is loaded for this project up front (#60). Loading it
    * only once the terminal tab is opened would leave the badge dark right after a UI reload — a dev
    * server that is already running is a fact even before the tab is opened.
    */
@@ -79,9 +78,9 @@ export function EvidencePanel() {
   /*
    * **The width slides** on open and close.
    *
-   * The collapsed strip and the panel used to be swapped wholesale, and the screen changed abruptly.
-   * The eye then could not follow "what went where," and it was momentarily unclear whether
-   * something had collapsed or vanished. With the width flowing continuously, it reads on its own
+   * Swapping the collapsed strip and the panel wholesale changes the screen abruptly: the eye
+   * cannot follow "what went where," and it is momentarily unclear whether something collapsed or
+   * vanished. With the width flowing continuously, it reads on its own
    * as the same thing having collapsed.
    *
    * The transition is turned off while dragging the resize handle — interpolating every frame
@@ -130,9 +129,9 @@ function PanelHeader({ projectName, branch }: { projectName: string; branch: str
 
   /*
    * The header's height **has to match the conversation side's header** (SessionHeader's HEADER) —
-   * the two stand side by side, and even a 1px mismatch reads as a doubled boundary. Back when this
-   * was written as padding, this one came out to 41px and the other to 40px (their contents were
-   * 24px and 23px respectively). So it is written as `h-10`, not padding: the two rows stay one row
+   * the two stand side by side, and even a 1px mismatch reads as a doubled boundary. Written as
+   * padding, this one comes out to 41px and the other to 40px (their contents are 24px and 23px
+   * respectively). So it is written as `h-10`, not padding: the two rows stay one row
    * even when their contents change.
    */
   return (
@@ -173,7 +172,7 @@ function PanelHeader({ projectName, branch }: { projectName: string; branch: str
 /**
  * The strip left behind when the panel is collapsed: the expand button where the collapse button was, the same
  * component and the same mark turned the other way. No count, no label and no running dot (owner, 2026-10-19): the
- * sidebar's changes capsule already says what changed, and a label named the panel by its internal name
+ * sidebar's changes capsule already says what changed, and a label names the panel by its internal name
  */
 function CollapsedRail() {
   const togglePanel = useStore((s) => s.togglePanel)

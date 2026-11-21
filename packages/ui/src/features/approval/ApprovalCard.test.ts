@@ -5,9 +5,9 @@ import { agentStartScope, approvalCardCovered, approvalKeyAction, keyScope, offe
 /**
  * `code` having a default value matters.
  *
- * This helper used to construct only `key`, so it checked ⌥a with `{ key: 'a', altKey: true }` —
+ * A helper that builds only `key` checks ⌥a with `{ key: 'a', altKey: true }` —
  * **an event a Mac keyboard never actually produces.** On an ABC layout, ⌥A comes through as
- * `å`, so underneath a passing test, the real shortcut was dead. When testing with a constructed
+ * `å`, so such a test passes while the real shortcut is dead. When testing with a constructed
  * event, the first thing to check is whether that shape is what a real keyboard actually sends.
  */
 const key = (
@@ -71,7 +71,7 @@ describe('approvalKeyAction — when the global y/n/a keys become an approval (U
     expect(approvalKeyAction(key('a', { altKey: true }), { typing: false, covered: true })).toBeNull()
   })
 
-  /** #158: holding y down let the next card, which appeared right after the first response, get approved before anyone read it */
+  /** #158: holding y down must not approve the next card, which appears right after the first response, before anyone reads it */
   it('a key held down and repeating is not an approval', () => {
     expect(approvalKeyAction({ ...key('y'), repeat: true }, FREE)).toBeNull()
     expect(approvalKeyAction({ ...key('a', { altKey: true, code: 'KeyA' }), repeat: true }, FREE)).toBeNull()
@@ -178,7 +178,7 @@ describe('approvalCardCovered — which card accepts a key press', () => {
   /*
    * #158: "Delete this session?", a new session, image zoom, and the command palette all open
    * via local state and do not show up in the store's five values. Pressing y to confirm in one
-   * of those windows approved a command hidden behind it. These windows are counted through
+   * of those windows must not approve a command hidden behind it. These windows are counted through
    * `openLayers` by `Modal` (the command palette counts itself directly).
    */
   it('even a single window opened via local state blocks the focused card', () => {
@@ -230,7 +230,7 @@ describe('agentStartScope — how far "always" on a start-agent card reaches', (
     expect(agentStartScope({ project: { id: 'p1' } }, false)).toBe('session')
   })
 
-  // The Assistant's child works in no project (#853): ⌥a used to send `project` for it, and the toast said so
+  // The Assistant's child works in no project (#853): ⌥a must not send `project` for it
   it('stays the session for a child that works in no project', () => {
     expect(agentStartScope({ project: { id: '' } }, true)).toBe('session')
   })

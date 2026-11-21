@@ -34,7 +34,7 @@ describe('the inbox list (#2213)', () => {
     expect(settleCursor([], onMail, true)).toBe(CURSOR_START)
   })
 
-  // The stale row number the review found: a row arrives above the cursor, then the cursor's own row is done
+  // A stale row number: a row arrives above the cursor, then the cursor's own row is done
   it('the cursor follows its row as rows arrive above it, and a row that is done hands it to the row now at its place', () => {
     const at = (rows: ReturnType<typeof arrangeInbox>['waiting'], cursor: { key: string | null; row: number }) => settleCursor(rows.map(rowKeyOf), cursor, true)
     const list = (...ids: [string, number][]) => arrangeInbox(ids.map(([id, t]) => session(id, t)), null).waiting

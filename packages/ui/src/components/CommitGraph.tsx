@@ -22,9 +22,9 @@ const DOT_Y = ROW_H / 2
  * The left pad is the panel's text padding (px-3, 12px), not a lane measure.
  *
  * The commit row carries no padding of its own — this SVG is its first child, so this
- * number is the distance between the panel wall and lane 0. It was 7, and the HEAD ring
- * (r 5 + 1 stroke) reaches 5.5 from center, which left the ring 1.5px off the wall —
- * visibly touching it. 12 lines the dots up with every other left edge in the panel.
+ * number is the distance between the panel wall and lane 0. The HEAD ring (r 5 + 1 stroke)
+ * reaches 5.5 from center, so at 7 the ring sits 1.5px off the wall — visibly touching it.
+ * 12 lines the dots up with every other left edge in the panel.
  * The right side stays narrow: it faces the row's own gap, not the wall.
  */
 const PAD_L = 12

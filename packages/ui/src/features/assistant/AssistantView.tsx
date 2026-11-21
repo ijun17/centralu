@@ -167,8 +167,8 @@ function Suggestions({ ask }: { ask: (text: string) => void }) {
   const waking = useStore((s) => s.assistantWaking)
   const [picking, setPicking] = useState(false)
   /*
-   * Without the host, this invitation is a promise that cannot be kept (dogfooding, 2026-09-07:
-   * "the connection was disconnected, but the Assistant screen looked connected anyway").
+   * Without the host, this invitation is a promise that cannot be kept, and the screen must not
+   * look connected while it is not.
    *
    * Clicking while disconnected does not just quietly do nothing — it is **worse**: an RPC call
    * queues up expecting a reconnect, so it only fails after waiting 30 seconds. For those 30
@@ -210,8 +210,7 @@ function Suggestions({ ask }: { ask: (text: string) => void }) {
       )}
       {/*
         The path for someone who does not want to talk — no conversation is forced on them
-        (#63's escape hatch). Exactly what FirstRun used to do: picker → project → all the way
-        through to the new-session window.
+        (#63's escape hatch): picker → project → all the way through to the new-session window.
       */}
       <button
         className="mt-3 text-sm text-ink-faint underline-offset-2 hover:text-ink hover:underline disabled:opacity-50"
@@ -257,14 +256,14 @@ function AssistantEmpty() {
     setText('')
     /*
      * /usage opens its screen here as it does in a session's composer, rather than becoming the Assistant's first
-     * message (#1143 U17). A command that acts on a session (/model) has none yet, so it goes as text, as before.
+     * message (#1143 U17). A command that acts on a session (/model) has none yet, so it goes as text.
      */
     const gui = guiCommandFor(t, false)
     if (gui) return gui.run({ sessionId: null })
     /*
      * If it never got born, the first question is put back (#180). A send failure after birth
      * is restored by send into the real session's draft, but a failure before birth never
-     * reaches send, so the text had nowhere to live at all. Anything typed in the meantime is
+     * reaches send, so the text would have nowhere to live at all. Anything typed in the meantime is
      * not overwritten — it is kept after the restored text.
      */
     void askAssistant(t).then((ok) => {

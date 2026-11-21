@@ -11,13 +11,13 @@ import { More, SettingsGroup, SettingsRow } from './SettingsLayout.jsx'
  *
  * This screen says three sentences: this is what is currently running, that is what is out
  * there, and whether to upgrade is for the person to decide. **It upgrades on its own only with
- * "Automatic updates" on** (one switch for checking and applying since the owner's 2026-10-20
- * decision; #352) — swapping out the running app is not reversible, so even then it waits until
+ * "Automatic updates" on** (one switch for checking and applying: owner, 2026-10-20; #352)
+ * — swapping out the running app is not reversible, so even then it waits until
  * nothing is running and nobody is typing.
  *
  * The check is done by the host. The launcher has the same code too, but what actually runs is
- * a copy already installed on the person's machine, and that copy's comparison logic was wrong
- * (#42) — checking here runs the code shipped with the app itself, bypassing the stale launcher
+ * a copy already installed on the person's machine, whose comparison logic can be stale and
+ * wrong (#42) — checking here runs the code shipped with the app itself, bypassing the launcher
  * entirely.
  */
 export function UpdatesSection() {
@@ -34,7 +34,7 @@ export function UpdatesSection() {
   const words = applyWords(relaunch)
   /*
    * One switch for the host's two (owner, 2026-10-20): automatic checking (`auto`) and applying when idle (`autoApply`).
-   * It reads as on only when both are, so a host still holding the old default (checking on, applying off) shows it
+   * It reads as on only when both are, so a host holding checking on and applying off shows it
    * off, and turning it on sets both. Saved one after the other; the switch holds until both answers are back.
    */
   const automatic = update ? update.auto && update.autoApply === true : false

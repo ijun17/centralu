@@ -41,10 +41,10 @@ type Mode = 'full' | 'slot' | 'hidden'
  * it, and scrolling the area from script does not bring it back (#309). Measured with the system
  * WebKit of macOS 27, legacy (always shown) scrollbars, a frame nested the way a view's is: both
  * ways lost them; `opacity: 0`, and moving the frame out of the window and back, kept them. The
- * grid, the project screen and the app view all hide views here, so going to a session and back
- * left a board app on the grid with empty gutters, and so did dragging a panel while #294 hid every
- * view for the length of a drag. Overlay scrollbars (a trackpad's default) take no gutter, and
- * Playwright's WebKit forces them, which is why this never showed in e2e.
+ * grid, the project screen and the app view all hide views here, so hidden either way, going to a
+ * session and back would leave a board app on the grid with empty gutters. Overlay scrollbars (a
+ * trackpad's default) take no gutter, and Playwright's WebKit forces them, which is why e2e does
+ * not show this.
  *
  * `-200vw`: the lane starts at the sidebar's edge and is narrower than the window, so the whole box
  * lies left of the window's edge. A negative offset adds nothing anyone can scroll to.
@@ -117,7 +117,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
   /*
    * A view put out of sight lets go of the keyboard (#115). `inert` is meant to see to that, but
    * WebKit leaves focus inside a frame that turns inert while it holds focus (measured with
-   * Playwright's WebKit: the hidden frame went on taking every key). When the view is hidden by
+   * Playwright's WebKit: the hidden frame goes on taking every key). When the view is hidden by
    * something other than a click in the page — a notification, the global shortcut, the store
    * moving to a session — the person types into a view they cannot see, and the app's own
    * shortcuts never hear a key. Taking focus off the frame hands the keys back to the page.
@@ -164,7 +164,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
    * panel — the grid's or the project screen's — draws no pane (`visible` is false there: a panel is too narrow for a
    * 380px conversation beside the app), so the link goes to the app view with the pane open, through `openApp`, the
    * door the panel's Open uses. On the project screen that is this same view; on the grid it is the app's own view,
-   * apart from the grid's (#288). Setting only this view's flag in a slot did nothing a person could see.
+   * apart from the grid's (#288). Setting only this view's flag in a slot would do nothing a person can see.
    */
   const openApp = useStore((s) => s.openApp)
   /*
@@ -611,7 +611,7 @@ function RestartButton({ onClick, className = '' }: { onClick: () => void; class
  * The placeholder while an app is starting up (B-6). Decision, 2026-09-14: doing the skeleton well
  * is all the async case needs.
  *
- * An app starts up on first need, so opening a previously idle app is exactly the moment its process
+ * An app starts up on first need, so opening an idle app is exactly the moment its process
  * starts (performance budget: the skeleton appears instantly, the first screen within 2 seconds). An
  * empty area or a bare one-line "Loading" is indistinguishable from something stalled. The shape of
  * where the view will stand is shown first, and what it is waiting for is stated in one line

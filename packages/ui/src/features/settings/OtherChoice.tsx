@@ -9,7 +9,7 @@ import { ChevronIcon } from '../../components/icons.jsx'
  *
  * Drawn rather than left to the OS (owner, 2026-10-19): the native control's arrow and fill differ per engine and
  * read as a form dropped into the window. The select underneath is the same element (its props, its test id, its
- * list), so picking from it works as it always did; only its face and the chevron are ours.
+ * list), so picking from it works as a native select does; only its face and the chevron are ours.
  */
 const SELECT_TONE = {
   compact: 'bg-surface-floor',

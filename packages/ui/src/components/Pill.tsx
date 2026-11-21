@@ -2,7 +2,7 @@ import type { HTMLAttributes, MouseEventHandler, ReactNode } from 'react'
 
 /**
  * The capsule: a short status in a rounded-full frame. It is a `<button>` when it does something (`onClick`), a
- * `<span>` when it only reports. Two sizes, both from the screens of #1160 (owner, 2026-10-18):
+ * `<span>` when it only reports. Three sizes, `bar` and `label` from the screens of #1160 (owner, 2026-10-18):
  *
  * - `bar`: 28px tall on a translucent hover fill, the top bar's shape (the update line beside the inbox count).
  * - `label`: a card's kind written in a capsule at its top left ("Awaiting approval", "Agent is asking"), no fill.

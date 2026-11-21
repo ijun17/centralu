@@ -1,11 +1,10 @@
 /**
  * Whether the conversation view keeps following the bottom.
  *
- * There is a reason this is pulled out of the DOM. While this judgment was tangled up with
- * rAF and ResizeObserver inside `ChatStream`, **a race was fixed but no regression test could
- * be written for it** — reproducing it depended on timing, so adding a wait made it break
- * against the pre-fix code too. Once the judgment alone is pulled out, that race reduces to
- * three plain values.
+ * It is kept out of the DOM so its races can be tested. Tangled up with rAF and
+ * ResizeObserver inside `ChatStream`, **a race fixed there gets no regression test** —
+ * reproducing it depends on timing, and a wait makes it break with the fix as well as
+ * without. As a judgment alone, such a race reduces to three plain values.
  */
 
 /** Being this close counts as "at the bottom". It will never line up exactly to the pixel */
@@ -37,8 +36,8 @@ export type FollowDecision = 'follow' | 'release' | 'ignore'
  *
  * Scroll events are asynchronous. If the virtual scroller re-measures a row right after the
  * person scrolls up and the total height changes, "follow" can run before the scroll event is
- * processed. At that moment the flag is still true, so it dragged the person back down to the
- * bottom.
+ * processed. At that moment the flag is still true, so it would drag the person back down to
+ * the bottom.
  *
  * Looking at position too removes that race: scrollTop stays put when content grows, but drops
  * when the person scrolls up.
@@ -46,8 +45,8 @@ export type FollowDecision = 'follow' | 'release' | 'ignore'
  * **But a drop is only the person's when the person did something** (`touched`, see
  * `personIsScrolling`). Layout drops scrollTop on its own: the browser clamps it when the
  * content shrinks under a view at the end, and a row measuring smaller than its guess does
- * exactly that. In WebKit a large answer landing in one burst dropped it 54px with no input on
- * the list at all; reading that as the person let go of the bottom, and the list stopped 914px
+ * exactly that. In WebKit a large answer landing in one burst drops it 54px with no input on
+ * the list at all; reading that as the person lets go of the bottom, and the list stops 914px
  * short of the answer's end. This branch only exists to catch the person's own scroll before
  * its event arrives — without their input there is nothing for it to catch, so it follows.
  * The scroll event itself is still judged by `stickAfterScroll`, input or not.
@@ -88,9 +87,9 @@ export const isScrollUpKey = (e: { key: string; shiftKey: boolean }): boolean =>
  * Whether the list still follows the bottom, judged from a scroll event.
  *
  * **A scroll event reports a move that already happened, against the content as it is now.**
- * The event fires a frame after the move, and content can land in between: following wrote
- * scrollTop to the end, a burst of answer grew the list by 900px, and only then did the event
- * arrive — reading "not at the bottom" there let go of a view that had never moved (seen in
+ * The event fires a frame after the move, and content can land in between: following writes
+ * scrollTop to the end, a burst of answer grows the list by 900px, and only then does the event
+ * arrive — reading "not at the bottom" there would let go of a view that never moved (seen in
  * WebKit, the same burst as in `decideFollow`). So while following, the question is not "is it
  * at the bottom now" but "did the view move up from where it was at the bottom".
  *
@@ -138,9 +137,9 @@ export type ScrollWriter = { scrollTop: number; scrollTo(options: ScrollToOption
  *
  * And while the view sticks to the end (`sticking`), no compensation is written at all: a row
  * above changing size leaves the view at the end. A shorter list clamps it to the new end, and
- * the follow effect follows a longer one. Written, the compensation moved the view up and the
- * next scroll event read that as the person scrolling up, so it stopped following. WebKit
- * measures rows a few frames after a jump to the end, and the view came to rest 300px above it
+ * the follow effect follows a longer one. Written, the compensation moves the view up and the
+ * next scroll event reads that as the person scrolling up, so it stops following. WebKit
+ * measures rows a few frames after a jump to the end, and the view comes to rest 300px above it
  * (#424).
  */
 export function writeScroll(
@@ -178,7 +177,7 @@ export type Measured = { index: number; start: number; end: number }
  * they arrive.
  *
  * Why binary search: this is called on every scroll event. As the conversation grows longer, a
- * linear scan makes scrolling heavy, and that has already burned battery life once before.
+ * linear scan makes scrolling heavy and costs battery life.
  *
  * When no row touches the top (an empty conversation, nothing measured yet), this returns null
  * — meaning there is no place to remember.
@@ -215,7 +214,7 @@ export function anchorAt(
  * spot it was last placed. In a virtual list rows mount and unmount on every scroll, so one
  * shared key leaves a copy behind each time — measured in WebKit: one collision, scrolled through
  * once, left the same passage five times in the DOM, and selecting and copying the region gave it
- * back five times, as the person reported. The store is meant never to produce a shared key
+ * back five times. The store is meant never to produce a shared key
  * (`rekeyAgainst`), but a slip there must not turn into copies on screen, so the list does not
  * trust it: the first row keeps its key and a later row with the same one gets a string key of its
  * own, which no number equals.
@@ -237,8 +236,8 @@ export function rowKeys(items: readonly { seq: number }[]): (number | string)[] 
  * The virtual list keeps a height per row key it has ever measured, and nothing in it removes
  * one: a key that leaves the list (an off-screen session cut back to its window, the rows of the
  * session the focus view showed before) stays in its cache for as long as the pane is mounted. The
- * focus view's pane is one instance for every session it shows, so over days it held a height for
- * every row it had ever shown. Only keys still in the list are kept, so the cache is never larger
+ * focus view's pane is one instance for every session it shows, so over days it would hold a height
+ * for every row it has ever shown. Only keys still in the list are kept, so the cache is never larger
  * than the list itself. A row that comes back is measured again, as on its first showing.
  *
  * Runs on every change of the list, so it does nothing until the cache holds more keys than the
@@ -261,7 +260,7 @@ export type LaidOutRow = { index: number; top: number; height: number }
  * Returning to a row aims at `start` (where the scroller puts that row) every frame, and the view
  * is shown once the aim stops moving. Two equal aims in a row are not enough: a row's new height
  * reaches the scroller a frame or more after layout (measuring waits for its own frame), and in
- * WebKit the view was shown two rows past the spot and then jumped back to it. The DOM already
+ * WebKit the view shows two rows past the spot and then jumps back to it. The DOM already
  * knows: the row aimed at is mounted at `start`, and every mounted row above it ends where the
  * next one begins. A row whose height has changed and not yet been measured breaks that chain.
  * Rows held outside the range (an inline frame kept mounted) are not next to their neighbours and

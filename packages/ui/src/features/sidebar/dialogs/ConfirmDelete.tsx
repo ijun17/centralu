@@ -37,14 +37,13 @@ export function ConfirmDelete({
   const platform = usePlatform()
   const toolLabel = useToolMeta(tool).label
   /*
-   * Since #204 the session goes to the session archive, and both choices below are about what goes with it **when it is deleted
+   * The session goes to the session archive (#204), and both choices below are about what goes with it **when it is deleted
    * for good** from Settings → Archive. The dialog says so in its first lines: a session that leaves the sidebar with
    * no word about where it went and how it comes back is the retired hide-a-session feature (FR-20).
    *
-   * Whether to also delete the original on the tool's side too (dogfooding: "really delete it").
-   * **Defaults to deleting it** — it used to default to keeping it, but a person pressing delete
-   * actually means to clean up, so a half-delete that "deleted it, but the file is still there"
-   * turned out to be the wrong feel (a second dogfooding finding). Turning it off swaps the notice
+   * Whether to also delete the original on the tool's side too.
+   * **Defaults to deleting it**: a person pressing delete actually means to clean up, so a
+   * half-delete that "deleted it, but the file is still there" feels wrong. Turning it off swaps the notice
    * in the same spot to "it stays on the tool's side" (the same grammar as project deletion: the
    * two sentences are never shown together for the person to pick between).
    */

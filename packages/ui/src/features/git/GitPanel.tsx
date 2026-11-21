@@ -21,10 +21,9 @@ const DIFF_TRUNCATED_MESSAGE = '…diff is too large; showing part of it. Open i
  * Builds the basis for an approval decision inside the app itself — so nobody has to leave for
  * the IDE just to see this.
  *
- * Everything named `initial*` here used to mean exactly that: read once at mount, because
- * the panel was born from the click that carried it. It is not, any more — the change list
- * on the right stays visible while this is open (#15), so clicks keep arriving at a panel
- * that is already mounted, and a value read once is a value ignored from then on. `pick`
+ * Nothing named `initial*` here is read only once at mount: the change list on the right
+ * stays visible while this is open (#15), so clicks keep arriving at a panel that is
+ * already mounted, and a value read once is a value ignored from then on. `pick`
  * says which click these fields belong to, so each one lands.
  */
 export function GitPanel({
@@ -63,12 +62,11 @@ export function GitPanel({
 }
 
 /**
- * B-2 change diff — **the list, staging and commit belong to the sidebar on the right** (left
- * column removed 2026-09-07).
+ * B-2 change diff — **the list, staging and commit belong to the sidebar on the right**.
  *
- * A file list used to sit here too, but the sidebar's Changes already holds the same list and
- * it stays visible even during an overlay (#15) — two copies of the same list left it unclear
- * which one to click (user's observation). This screen draws the one thing that needs room, the
+ * No file list here: the sidebar's Changes already holds the same list and it stays visible
+ * even during an overlay (#15) — two copies of the same list leave it unclear which one to
+ * click (user's observation). This screen draws the one thing that needs room, the
  * diff, and nothing else. Whether a file is staged is still needed without the list, so it is
  * looked up by finding that file in status.
  */
@@ -122,7 +120,7 @@ function Changes({
         )
         if (hit) setSelected(hit)
       })
-      // Said, as a failed diff is (#850 item 8): silent, the click looked like it did nothing. Clicking again retries
+      // Said, as a failed diff is (#850 item 8): silent, the click looks like it did nothing. Clicking again retries
       .catch((e: unknown) => alive && setToast(`Could not load diff: ${errorMessage(e)}`))
     return () => {
       alive = false
@@ -261,8 +259,8 @@ function DiffView({
   /**
    * Each line split the way it is drawn: the marker moves into its own span, `body` is what
    * is left. Splitting it once here is what lets the copy handler below put the line back
-   * together — and it stops `--- a/foo` from losing a dash, which the old blanket
-   * `replace(/^[+-]/, '')` did to every file header, since the classifier calls those
+   * together — and it stops `--- a/foo` from losing a dash, which a blanket
+   * `replace(/^[+-]/, '')` would do to every file header, since the classifier calls those
    * context lines.
    */
   const truncated = Boolean(data?.truncated)
@@ -319,7 +317,7 @@ function DiffView({
         {place.label && (
           /*
            * Without `left-0`, this only sticks vertically: scrolling 1,500px to the right
-           * would carry the band along by -1,500px too (found again, #122) — the moment
+           * would carry the band along by -1,500px too (#122) — the moment
            * someone scrolls right to see the end of a long line, the very band that was
            * telling them which file disappears. Sticky has to be set on both axes.
            *
@@ -343,11 +341,11 @@ function DiffView({
             const i = v.index
             /*
              * A file-boundary band (user's choice, 2026-09-07 — a commit diff is several files
-             * as one block of text, and there was no way to see where the next file started).
+             * as one block of text, and without it there is no way to see where the next file starts).
              * In a virtualized scroll, the actual sticky display is handled by
              * `diff-current-file-band` above; this row shows the raw `diff --git` position
              * itself. data-line stays as is, so copying still produces the raw text (display ≠
-             * copy, from #36).
+             * copy, #36).
              */
             if (kind === 'file') {
               const label = diffFileLabel(body)
@@ -418,8 +416,7 @@ function DiffView({
 }
 
 /**
- * B-3 commit detail — **the list belongs to the sidebar's History** (left column removed
- * 2026-09-07). Clicking a commit in the sidebar opens its diff here, laid out full width.
+ * B-3 commit detail — **the list belongs to the sidebar's History**. Clicking a commit in the sidebar opens its diff here, laid out full width.
  * Picking the next commit happens in the sidebar too — two copies of the same list would be
  * confusing (the same judgment as with Changes).
  */
@@ -455,8 +452,8 @@ function History({
         failure={detail.error === null ? undefined : { what: 'the commit', error: detail.error, onRetry: () => void detail.reload() }}
         emptyHint="Pick a commit from the History list on the right"
         /*
-         * An `async () => {}` used to sit here, so clicking the button on the commit screen did
-         * nothing — a dead button is worse than no button at all (#122).
+         * The button on the commit screen opens a file, never an empty `async () => {}` — a dead
+         * button is worse than no button at all (#122).
          *
          * A commit diff spans several files, so "which file" has to be told by the diff itself:
          * it is whichever file the band is pointing at. What gets opened is **that file in the
@@ -499,7 +496,7 @@ function Branches({ projectId }: { projectId: string }) {
   // store too (issue #49) — the dry run beside it changes nothing and stays a plain read.
   const gitCheckout = useStore((s) => s.gitCheckout)
   /*
-   * A failed read is not an empty list (#850 item 8): it used to draw no branch at all, as if the repository had none.
+   * A failed read is not an empty list (#850 item 8): no branch at all would read as a repository with none.
    * A refresh after a checkout that fails keeps the list beside the error
    */
   const loaded = useLoad<GitBranch[]>(() => platform.git.branches(projectId), [platform, projectId])

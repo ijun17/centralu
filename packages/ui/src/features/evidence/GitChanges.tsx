@@ -23,8 +23,8 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
   /*
    * Writes through the store, reads straight from the platform (issue #49).
    *
-   * This panel sits **beside** the sidebar count it was leaving stale — commit here and the
-   * number a few pixels to the left kept the old value. `refresh` below stays local because
+   * This panel sits **beside** the sidebar count: a commit here that only this panel saw would
+   * leave the number a few pixels to the left at the old value. `refresh` below stays local because
    * it fetches the file list, which the store does not hold; the store owns the summary.
    */
   const gitStage = useStore((s) => s.gitStage)
@@ -37,8 +37,8 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
 
   /*
    * A response arriving late while switching projects must not draw another project's list (`useLoad`). Re-reads
-   * whenever an agent touches a file (evidence only means something if it is current). A failed read says so: it
-   * used to be drawn as "No changes" (#850 item 8).
+   * whenever an agent touches a file (evidence only means something if it is current). A failed read says so, not
+   * "No changes" (#850 item 8).
    */
   const status = useLoad(() => platform.git.status(projectId), [platform, projectId], [touched])
   const files = status.data
@@ -79,7 +79,7 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
 
   return (
     <section className="flex min-h-0 flex-1 flex-col border-b border-line" data-testid="evidence-git">
-      {/* The label 'Changes' was dropped since the tab already says it — only the count and buttons go to the right of the strip */}
+      {/* No 'Changes' label, as the tab already says it: only the count and buttons go to the right of the strip */}
       {files && files.length > 0 && (
         <TabActions>
           <ChangeCount count={changedFileCount(files)} />
@@ -157,8 +157,8 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
          * Committing has to work in a narrow space too — the flow of checking a change and then
          * wrapping it up right there must not be broken. This block stays even when the list is
          * empty (#160). In the most common sequence of committing and pushing as separate steps,
-         * the moment everything got committed and the state became "No changes," Push disappeared
-         * along with it — there was no way left in the app to push the commit just made.
+         * the moment everything is committed the state becomes "No changes," and Push leaving with
+         * the list would leave no way in the app to push the commit just made.
          */
         <div className="mt-auto border-t border-line px-3 py-2">
           <TextInput
@@ -365,7 +365,7 @@ function statusMark(status: GitFileStatus['status']): string {
 /**
  * The signal that knows when to re-read the list — two signals combined.
  *
- * The count of files an agent touched reports the first edit **during** a turn. That alone was not
+ * The count of files an agent touched reports the first edit **during** a turn. That alone is not
  * enough (#160): a `git commit` run through Bash, a command typed into the terminal, or re-editing a
  * file already touched does not change this count. So this also watches `gitEpoch`, which is bumped
  * by the same signals that make the sidebar's summary re-read (turn end, window regaining focus, an

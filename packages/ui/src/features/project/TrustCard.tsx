@@ -17,7 +17,7 @@ import { useStore } from '../../store/store.js'
  * menu) and wherever a "Trust this project…" button stands (an untrusted app's screen, its Settings row, the New app
  * dialog, `TrustProjectButton`).
  */
-/** The test ids of one card's parts: the sidebar's keep the names they had before the list came (`trust-ask-yes-<name>`) */
+/** The test ids of one card's parts: the sidebar's follow their own scheme (`trust-ask-yes-<name>`) */
 export type TrustCardIds = { card: string; yes: string; no: string; title: string; apps: string; app: (key: string) => string }
 
 export const trustCardIds = (testId: string): TrustCardIds => ({

@@ -1,6 +1,6 @@
 /**
- * What an event of one session draws again in the sidebar: that session's row, and nothing in another project. Every
- * event of every session used to draw every row of every project, a streamed reply's every piece included, and that was
+ * What an event of one session draws again in the sidebar: that session's row, and nothing in another project. Drawing
+ * every row of every project for every event of every session, a streamed reply's every piece included, was measured as
  * most of what the window allocated while sessions worked out of view (perf:memory --steps background).
  *
  * Real React, the real store and the real list (`ProjectSessionList`), so a function it made anew on each draw and

@@ -54,14 +54,14 @@ const splitList = (s: string): string[] =>
  * even necessary?"). It goes straight to a screen with its own input field the moment it is
  * created, so there is no reason to type ahead of that in a dialog — the rule for what becomes the
  * session name (FR-18) applies identically to the input field's first message (the manager rewrites
- * the first sentence sent as 'New session'). The subheading and helper text were removed for the
- * same reason: this dialog's body is nothing but the conversation list.
+ * the first sentence sent as 'New session'). There is no subheading or helper text, for the same
+ * reason: this dialog's body is nothing but the conversation list.
  *
  * The frame matches the other dialogs (Settings, Inbox) — **fixed header / scrolling body / fixed
  * footer.** The tool row and the start button must stay in place no matter how long the dialog
- * grows, and only the middle (the conversation list, worktree settings) is allowed to grow. The
- * whole dialog used to grow instead, and turning on the worktree option and expanding the
- * suggestions pushed the start button off screen.
+ * grows, and only the middle (the conversation list, worktree settings) is allowed to grow. If the
+ * whole dialog grew, turning on the worktree option and expanding the suggestions would push the
+ * start button off screen.
  */
 export function NewSessionDialog({ projectId, onClose }: { projectId: string; onClose: () => void }) {
   const platform = usePlatform()
@@ -127,7 +127,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
    * to choose which branch to fork from").
    *
    * The default is the project's trunk (as set by the manager), or the current branch if there is
-   * none — in other words, **something that used to happen silently, now written out in words.**
+   * none — in other words, **what would otherwise happen silently, written out in words.**
    * The list only assists, so being unable to read it does not block creation (the same rule as the
    * manager dialog).
    */
@@ -175,13 +175,13 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
    * Follows the row picked by the arrow keys when it is outside the collapsed list's view —
    * **only when the selection changes.**
    *
-   * This used to be called from the row's own `ref` callback. An inline ref's function identity is
-   * different on every render, so React detaches and reattaches it, which meant scrollIntoView ran
-   * **on every render.** This dialog subscribes to the store (the project, the session list), so
-   * even with just one session running, it re-renders on every event, and each time the list got
-   * yanked back to the selected row — this is what "the scroll position snaps back to the top after
-   * a moment" was, once the dialog grew from turning the worktree option on (dogfooding, 2026-09-07;
-   * measured: one event took the outer value from 324 to 13, the inner one from 1140 to 0).
+   * Not from the row's own `ref` callback: an inline ref's function identity is different on every
+   * render, so React detaches and reattaches it, and scrollIntoView would run **on every render.**
+   * This dialog subscribes to the store (the project, the session list), so even with just one
+   * session running, it re-renders on every event, and each time the list would be yanked back to
+   * the selected row — the scroll position snaps back to the top after a moment once the worktree
+   * option grows the dialog (measured: one event took the outer value from 324 to 13, the inner one
+   * from 1140 to 0).
    *
    * `block: 'nearest'` means nothing happens for a row already visible — that is why the screen does
    * not jump while picking with the mouse.
@@ -220,12 +220,12 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
            * while just passing over it with the arrow keys.
            */
           /*
-           * **An arrow key inside an input field belongs to that field** (#181). While this handler,
-           * attached to the whole form, was not checking the target, a ↓ pressed in the Branch
-           * field to move the cursor silently picked a past conversation instead (the button changed
-           * from Start to Load), and the Enter pressed right after resumed that conversation instead
-           * of starting a new one. The From field's suggestion list (datalist) also failed to open
-           * on ↓.
+           * **An arrow key inside an input field belongs to that field** (#181). This handler is
+           * attached to the whole form, so without a check of the target, a ↓ pressed in the Branch
+           * field to move the cursor would silently pick a past conversation (the button changing
+           * from Start to Load), and the Enter pressed right after would resume that conversation
+           * instead of starting a new one. The From field's suggestion list (datalist) would not
+           * open on ↓ either.
            */
           if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && past.status === 'ok' && !isTextEntry(e.target)) {
             e.preventDefault()
@@ -278,8 +278,8 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
       >
         {/*
           The header stays fixed and only the body scrolls (the same frame as Settings and Inbox) —
-          this is exactly where turning on the worktree option used to add fields and suggestion
-          chips and grow the dialog off screen. The start button is pinned at the bottom, so it stays
+          this is exactly where turning on the worktree option adds fields and suggestion chips,
+          which would otherwise grow the dialog off screen. The start button is pinned at the bottom, so it stays
           within reach no matter how far the scroll has gone.
         */}
         <header className="shrink-0 border-b border-line px-4 py-2.5">
@@ -365,7 +365,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                   selected={resume?.externalId === s.externalId}
                   onSelect={() => {
                     // Does not create another one if it is already open — jumps to that session instead.
-                    // Marking it visually without blocking the click used to let the same conversation end up twice in the list (measured).
+                    // Marking it visually without blocking the click lets the same conversation end up twice in the list (measured).
                     if (s.importedAs) {
                       focusSession(s.importedAs)
                       askComposerFocus(s.importedAs)
@@ -382,8 +382,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                     Codex  — **the first user message** (even a conversation carried on for days
                              shows as its very first topic)
                   So "how recently it was last continued" is stated plainly next to the title —
-                  otherwise a recent conversation looks old and cannot be found (a dogfooding
-                  finding).
+                  otherwise a recent conversation looks old and cannot be found.
                 */
                   meta={<>
                     last <RelativeAge when={s.updatedAt} />
@@ -460,7 +459,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                   className="w-full"
                 />
               </Field>
-              {/* **Where** the new branch forks from — a fact that used to live nowhere on screen */}
+              {/* **Where** the new branch forks from, written on screen */}
               <Field label="From" hint="the new branch forks from here">
                 <TextInput
                   type="text"
@@ -623,9 +622,9 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
         </div>
 
         {/*
-          The shortcut hint was removed (dogfooding, 2026-09-02) — ↑↓, ↵ and esc are things the hand
-          already knows in any dialog with a list, and the value is too small for a spot that gets
-          read every time. The behavior is unchanged: only the hint text is gone.
+          No shortcut hint (2026-09-02) — ↑↓, ↵ and esc are things the hand already knows in any
+          dialog with a list, and the value is too small for a spot that gets read every time. The
+          keys work; only the hint text is not shown.
         */}
         <footer className="flex shrink-0 justify-end gap-2 border-t border-line px-4 py-2.5">
           <button
@@ -638,7 +637,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           <Button
             type="submit"
             variant="primary"
-            /* Since the input field is gone, Enter means start — this needs to hold the default focus */
+            /* With no input field, Enter means start — this needs to hold the default focus */
             autoFocus
             // A worktree is refused in a project that is not trusted, and the setup typed here would be saved before that: trust it first (#1512)
             disabled={busy || blocked || (worktree && !!project && !project.trusted)}
@@ -655,11 +654,10 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
 /**
  * A label plus a field.
  *
- * A long instruction that used to live in the placeholder was moved up into the label — a
- * placeholder **disappears the moment typing starts**, so it is gone exactly when the person needs
- * to ask again "what was I supposed to put here." On top of that, in a 480px dialog, "Setup command,
- * runs once in the new worktree (e.g. pnpm install)" got truncated and could not even be read in
- * full.
+ * A long instruction goes in the label, not the placeholder — a placeholder **disappears the
+ * moment typing starts**, so it is gone exactly when the person needs to ask again "what was I
+ * supposed to put here." On top of that, in a 480px dialog, "Setup command, runs once in the new
+ * worktree (e.g. pnpm install)" is truncated in a placeholder and cannot even be read in full.
  *
  * Why a div instead of a label: a suggestion chip (a button) sits inside it, and a click inside a
  * label passes through to the field — the input field grabbing focus every time a chip is pressed

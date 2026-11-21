@@ -9,8 +9,7 @@ import { useStore } from '../store/store.js'
  * The `data-tauri-drag-region` attribute alone is not enough: that attribute has to sit on the
  * exact element the mousedown lands on, so grabbing text or an icon inside the header simply does
  * nothing. Spreading the attribute onto every child does not fix it either, since a new child
- * opens a new hole — that is where "it works sometimes and not other times" comes from (caught
- * twice in dogfooding).
+ * opens a new hole, and the drag works sometimes and not other times.
  *
  * So mousedown is caught across the whole region, and unless the spot pressed is something
  * interactive (a button, an input), the drag is started manually. Every visible empty spot
@@ -18,10 +17,10 @@ import { useStore } from '../store/store.js'
  *
  * **A popover that hangs inside the region marks itself `data-no-drag`**, its outside-click
  * backdrop included (#365). The backdrop covers the whole screen from inside the region, so
- * without the mark every press anywhere started a window drag. On Windows that is not just a
+ * without the mark every press anywhere starts a window drag. On Windows that is not just a
  * moved window: tao starts the drag with ReleaseCapture and WM_NCLBUTTONDOWN/HTCAPTION, the
  * system's modal move loop takes the mouse until the button is released, and the page never
- * sees the mouseup — so a backdrop waiting for `click` never closed its dropdown. Backdrops
+ * sees the mouseup — so a backdrop waiting for `click` never closes its dropdown. Backdrops
  * close on mousedown for the same reason: nothing after the press has to reach the page.
  */
 export function DragRegion({
@@ -61,8 +60,8 @@ export function DragRegion({
         /*
          * Moving the window leaves focus where it was (#115). A press on a plain `div` is, to the
          * page, a click on nothing: it takes focus off the composer and leaves it on `<body>`. A
-         * native title bar never does that, so after dragging the window by its bar the person
-         * typed on into a composer that no longer had the keyboard, and nothing showed it.
+         * native title bar never does that: after dragging the window by its bar the person would
+         * type on into a composer that has lost the keyboard, and nothing shows it.
          * Cancelling the press's default keeps focus (and starts no text selection); the drag
          * itself is the platform's and does not need it.
          */
@@ -70,9 +69,9 @@ export function DragRegion({
         if (e.detail >= 2) return
         e.preventDefault()
         /*
-         * One drag per press (owner, 2026-10-18: on Windows the drag sometimes did not start, most often right beside
-         * the bar's controls). A press on an element that itself carries data-tauri-drag-region (the bar, the right-hand
-         * group) also reaches the shell's own drag script on `document`, so the window was told to start dragging twice
+         * One drag per press (owner, 2026-10-18: on Windows a drag may not start, most often right beside the bar's
+         * controls). A press on an element that itself carries data-tauri-drag-region (the bar, the right-hand group)
+         * also reaches the shell's own drag script on `document`, which would tell the window to start dragging twice
          * for one press, and on Windows the second call can land after the first drag has begun or ended. This one
          * starts it; the shell's script is told to skip this press by the attribute it reads (`false` means "not a drag
          * region"), put back on the next task.
@@ -83,9 +82,8 @@ export function DragRegion({
           setTimeout(() => el.setAttribute('data-tauri-drag-region', was), 0)
         }
         void platform.system.startWindowDrag().catch((err: unknown) => {
-          // Does not swallow the error. This exact thing caused the window to stop moving and
-          // went unnoticed three times before — if the Tauri permission
-          // (core:window:allow-start-dragging) is missing, it gets rejected right here.
+          // Does not swallow the error: if the Tauri permission (core:window:allow-start-dragging)
+          // is missing, it is rejected right here, and the window silently stops moving.
           if (warned.current) return
           warned.current = true
           setToast(`Could not move window: ${errorMessage(err)}`)

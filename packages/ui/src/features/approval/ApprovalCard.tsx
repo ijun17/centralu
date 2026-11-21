@@ -660,8 +660,8 @@ export function keyScope(
 /**
  * How far "always" on a start_agent card reaches. The project when the person asked for it (⌥a, or ⌥ and a click) and the
  * child has one; the Assistant's child works in no project (#853), so there is none to remember it for and it stays
- * this session's. The button and the key both ask here: the key sent `project` for the Assistant's card, and the
- * toast said sessions in a project may start agents when the host had remembered it for this session only.
+ * this session's. The button and the key both ask here, so neither sends `project` for the Assistant's card and the
+ * toast never says sessions in a project may start agents when the host remembers it for this session only.
  */
 export function agentStartScope(detail: { project: { id: string } }, wantsProject: boolean): 'session' | 'project' {
   return wantsProject && detail.project.id !== '' ? 'project' : 'session'
@@ -672,7 +672,7 @@ export function agentStartScope(detail: { project: { id: string } }, wantsProjec
  * tests attach here).
  *
  * A ⌘, ⌃ or ⇧ combination is a different shortcut: ⌘A (select all) and ⌘⇧A (next waiting, which
- * this app advertises in the top bar) used to flow straight through and trigger "always allow" —
+ * this app advertises in the top bar) must not flow through and trigger "always allow" —
  * approval is the single most dangerous button to have mis-fire in this app. Only ⌥ is let
  * through (⌥a is the established convention for project scope). Neither typing into a text field
  * nor a card hidden behind a modal or overlay is accepted.
@@ -688,9 +688,8 @@ export function approvalKeyAction(
   },
 ): ApprovalKeyAction | null {
   /*
-   * A key held down and repeating is not an approval (#158). Holding y down meant that the
-   * moment the next card appeared after the first response, it too got approved before anyone
-   * had read it.
+   * A key held down and repeating is not an approval (#158). Holding y down would approve the
+   * next card too, the moment it appears after the first response, before anyone has read it.
    */
   if (e.repeat || ctx.covered) return null
   // A key an input method is using belongs to the composition, whatever modifiers it carries (app/keys.ts)

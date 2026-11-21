@@ -59,19 +59,19 @@ function tabbedRecently(): boolean {
  *
  * **There is exactly one reason this is a separate component: the draft lives in the global
  * store.** An unsent draft belongs to the session, so it has to live in the store (see the
- * `draft` comment below), which means the store changes on every keystroke. While this code
- * lived inside SessionPane, that one keystroke re-rendered **the header, the chat stream, and
- * every message bubble on screen** (measured: 1.0 renders per character for the pane, 1.0 for
- * the stream, 2.0 for each row — doubled while a response was streaming). Typing has no reason
- * to cost something proportional to the size of the conversation.
+ * `draft` comment below), which means the store changes on every keystroke. Read inside
+ * SessionPane, that one keystroke re-renders **the header, the chat stream, and every message
+ * bubble on screen** (measured: 1.0 renders per character for the pane, 1.0 for the stream, 2.0
+ * for each row — doubled while a response streams). Typing has no reason to cost something
+ * proportional to the size of the conversation.
  *
- * So the place that reads the draft has been narrowed down to just this one. Everything above
- * it now passes down only `sessionId`.
+ * So this is the only place that reads the draft. Everything above it passes down only
+ * `sessionId`.
  *
  * Not subscribing to the conversation (`chat`) either, for the same reason — the only place
  * that needs it is recalling with the arrow keys, and that reads it with `getState()` at the
  * moment of the keypress. Subscribing to it would re-render the composer on every streaming
- * delta, undoing exactly the cost that was just moved out of it.
+ * delta, undoing exactly the cost kept out of it.
  */
 export const Composer = memo(function Composer({
   sessionId,
@@ -90,7 +90,7 @@ export const Composer = memo(function Composer({
    * When it sits directly below the conversation, that line is **the boundary between the
    * conversation and the composer.** But inside a collapsed card, the card's rounded border is
    * already the boundary, and a straight line drawn right below it looks like the corner ending
-   * twice (reported by a user on 2026-09-10).
+   * twice.
    */
   framed?: boolean
 }) {
@@ -100,9 +100,9 @@ export const Composer = memo(function Composer({
    * This subscribes to a narrowed-down string rather than the full array — subscribing to the
    * questions array directly would deliver a new reference every time, undoing exactly the
    * re-render this component was built to avoid. The judgment is the same one the store's send
-   * uses (`composerTarget`): back when attachments were not looked at, attaching a file under
-   * the "write an answer" prompt sent the text as a new turn instead, and the question was
-   * dropped.
+   * uses (`composerTarget`), attachments included: without them, attaching a file under the
+   * "write an answer" prompt would send the text as a new turn instead, and the question would
+   * be dropped.
    */
   const target = useStore((s) =>
     composerTarget(s.sessions[sessionId]?.pendingQuestions ?? EMPTY_QUESTIONS, (s.drafts[sessionId]?.attachments.length ?? 0) > 0),
@@ -129,11 +129,11 @@ export const Composer = memo(function Composer({
   /*
    * An unsent draft belongs to **the session**, not to this component.
    *
-   * Holding it with useState left the text stuck to that spot on screen. Since the focus view
-   * reuses the same component when the session changes, whatever was being typed for session A
-   * stayed sitting in session B's composer, and sending it went to the wrong session. In the
-   * grid it was the opposite problem: switching screens unmounts the component, so the text
-   * disappeared along with it — two symptoms of the same underlying cause.
+   * Held with useState, the text would stick to that spot on screen. Since the focus view
+   * reuses the same component when the session changes, whatever is being typed for session A
+   * would stay in session B's composer, and sending it would go to the wrong session. In the
+   * grid it is the opposite problem: switching screens unmounts the component, so the text
+   * would disappear along with it — two symptoms of the same underlying cause.
    */
   const draft = useStore((s) => s.drafts[sessionId] ?? EMPTY_DRAFT)
   const setDraft = useStore((s) => s.setDraft)
@@ -220,8 +220,8 @@ export const Composer = memo(function Composer({
   /*
    * Takes the keyboard when asked to (#528): the session was just picked in the palette or created,
    * and what the person does next is type to it. Without this the palette's field and the dialog's
-   * button left the keyboard on the page, and the first key went nowhere until a click in the box;
-   * a Tab reached it only in WebKit on macOS. Asked through the store, since the palette and the
+   * button leave the keyboard on the page, and the first key goes nowhere until a click in the box;
+   * a Tab reaches it only in WebKit on macOS. Asked through the store, since the palette and the
    * dialog never hold this element, and taken here once nothing covers the session: the dialog asks
    * while it is still closing. The rules (an approval card's keys, a field being typed in) are
    * `composerFocusAnswer`'s.
@@ -248,19 +248,18 @@ export const Composer = memo(function Composer({
   const attachFile = useStore((s) => s.attachFile)
   /*
    * Attachments still uploading (#180). A chip only enters the draft once the host has finished
-   * storing it — sending before that only sent the text, and a chip that finished late got
-   * attached to the draft afterward and rode along on the *next* message instead. While
+   * storing it — sending before that would send only the text, and a chip that finishes late
+   * would be attached to the draft afterward and ride along on the *next* message instead. While
    * something is uploading, nothing sends, and the list shows what it is waiting on.
    */
   const uploading = useStore((s) => s.uploading[sessionId] ?? 0)
   /*
    * The composer's height comes **from the value.**
    *
-   * This used to touch `style.height` directly in onChange, which only kept the height correct
-   * when the value changed through typing. After sending, `setText('')` cleared the value but
-   * left the height standing, so an empty composer sat there tall — tall with nothing written
-   * in it, and back to normal the moment anything was typed (found in dogfooding). Inserting a
-   * long path through autocomplete had the opposite problem: it did not grow at all.
+   * Setting `style.height` in onChange keeps the height correct only when the value changes
+   * through typing: after sending, `setText('')` clears the value but leaves the height
+   * standing, so an empty composer sits there tall, and inserting a long path through
+   * autocomplete does not grow it at all.
    *
    * The number of paths that change the value will only keep growing (paste, restoring a draft,
    * switching sessions...). Instead of re-fitting the height on every one of those paths, this
@@ -290,7 +289,7 @@ export const Composer = memo(function Composer({
    *
    * The focus view reuses this same component when the session changes. Without clearing it,
    * text recalled from A's history would still be sitting in B's composer, and that is exactly
-   * the situation an unsent draft was moved to the session to prevent — sending it as-is would
+   * the situation keeping the unsent draft on the session prevents — sending it as-is would
    * go to the wrong session.
    *
    * Cleared before render (layout). As an effect, someone else's text would flash for one frame.
@@ -373,7 +372,7 @@ export const Composer = memo(function Composer({
      * Newlines are checked first (a value comparison, free). Only what passes that gets
      * measured with the mirror — a long line that has wrapped has no newline, yet looks like
      * several lines, and an arrow key pressed in the middle of it belongs to the caret, not to
-     * history (reported by a user on 2026-09-07).
+     * history.
      */
     const onEdge =
       dir === -1
@@ -441,7 +440,7 @@ export const Composer = memo(function Composer({
     /*
      * Only a file from outside the app is attached (#286). A session or panel dragged inside the
      * app can carry the images it shows as files in WebKit; dropped here, that is the grid's drop,
-     * and attaching the screenshot it happened to show is the bug. Checked here, in the one place
+     * and attaching the screenshot it happens to show would be wrong. Checked here, in the one place
      * both the pane and the composer hand their drop to, so neither can miss it.
      */
     const types = [...dt.types]
@@ -509,16 +508,6 @@ export const Composer = memo(function Composer({
   // must be recreated every render too
   useImperativeHandle(dropRef, () => ({ accept: acceptDrop, acceptAppLink }))
 
-  /*
-   * The pane rendering a conversation is what fetches it.
-   *
-   * This used to be loaded only by focusSession. In the focus view, selecting and viewing were
-   * the same action, so this never showed — but the grid is a screen that **views without
-   * selecting**. Putting a session that had never once been opened from the sidebar into a grid
-   * cell rendered an empty pane (found in dogfooding). It is right for the component rendering
-   * a single session to be the one that fetches its conversation.
-   */
-
   // Avoid rendering even at the moment the session disappears (deleted, archived) — this is
   // decided after every hook has run
   if (!alive) return null
@@ -577,14 +566,9 @@ export const Composer = memo(function Composer({
       )}
       <div
         /*
-         * The input field is filled in **again** (reported by a user on 2026-09-11).
-         *
-         * It was cleared on 09-10 because "a resting input field is brighter than the
-         * conversation". That diagnosis overlapped with a separate issue, where one row of
-         * panel peeked out above the pane's floor as the card collapsed and looked like a hole
-         * — now that the collapsed height has been lowered enough to hide the input field
-         * itself, that side effect is gone. What remains is only the original purpose: the
-         * surface for typing has to be **a different surface** from the one for reading.
+         * The input field is filled: the surface for typing has to be **a different surface**
+         * from the one for reading. The collapsed card is low enough to hide the field itself,
+         * so no row of it peeks out above the pane's floor to look like a hole.
          *
          * The rule that brightness marks something currently happening is still kept by the
          * border — line-strong on focus, ink-muted when a file is dragged over it.
@@ -628,12 +612,12 @@ export const Composer = memo(function Composer({
           rows={1}
           value={text}
           /*
-              Focusing here wakes the session, and since #568 this is the one place that does
-              ahead of a send: selecting a session in the sidebar only shows it, and the grid's
+              Focusing here wakes the session, and this is the one place that does ahead of a
+              send (#568): selecting a session in the sidebar only shows it, and the grid's
               panels stay asleep until used. Waking here moves the resume (about 0.7 s on Claude)
               into the typing instead of after the send button, and lets the slash list answer
-              from the live process rather than the disk cache (which kept serving an
-              uninstalled plugin's commands). wake() dedups and stays quiet, so a second call on
+              from the live process rather than the disk cache (which can serve an uninstalled
+              plugin's commands). wake() dedups and stays quiet, so a second call on
               an already-live session costs nothing.
             */
           onPointerDown={() => {
@@ -730,9 +714,8 @@ export const Composer = memo(function Composer({
           }}
           /*
            * With a question open, **whatever is typed here goes as the answer to that
-           * question** (#125). That fact needs to be known before pressing send — this used to
-           * silently drop the question, and the person did not even know what they had just
-           * gotten rid of.
+           * question** (#125). That fact needs to be known before pressing send, or the question
+           * is dropped without the person knowing what they just got rid of.
            */
           placeholder={
             target === 'answer'
@@ -755,11 +738,9 @@ export const Composer = memo(function Composer({
           data-composer-session={sessionId}
         />
         {/*
-            The attach button uses **the same component** as send. It used to be a separate one
-            built from a label, with different inner padding (6px vs 4px) and icon size (16 vs
-            15), so the two buttons standing side by side looked mismatched in size and height
-            (found in dogfooding). The file picker is opened by clicking a hidden input — it
-            does the same job without a label.
+            The attach button uses **the same component** as send, so the two buttons standing
+            side by side match in size and height (inner padding, icon size). The file picker is
+            opened by clicking a hidden input — it does the same job without a label.
           */}
         <input
           ref={fileRef}
@@ -771,8 +752,8 @@ export const Composer = memo(function Composer({
             /*
              * The chosen files are copied out before the field is cleared (#180). If the value
              * were left as-is, the browser would not fire `change` again for picking the same
-             * file a second time, so removing the chip (or sending it) meant the same file could
-             * never be attached again. `files` is a live list, so clearing the value clears it
+             * file a second time, so removing the chip (or sending it) would mean the same file
+             * could never be attached again. `files` is a live list, so clearing the value clears it
              * too — this copies it into an array first, then clears.
              */
             const files = Array.from(e.currentTarget.files ?? [])
@@ -809,15 +790,14 @@ export const Composer = memo(function Composer({
       </div>
       {/*
           Model, effort and permissions are decided **right before sending**, so they sit below
-          the composer. In the header they were at the opposite end of the screen, so what was
-          being sent and under which settings never showed together at a glance. Here, the hand
+          the composer. In the header they would be at the opposite end of the screen, so what is
+          being sent and under which settings would never show together at a glance. Here, the hand
           and the eye stay in the same spot.
         */}
       {/*
-          The shortcut hint was removed. Sending with Enter and breaking the line with
-          Shift+Enter is the default for a chat composer — learned once and done — but a hint
-          takes up space every single time. Once read, it is noise from then on (dogfooding:
-          "because these are obvious").
+          No shortcut hint. Sending with Enter and breaking the line with Shift+Enter is the
+          default for a chat composer — learned once and done — but a hint takes up space every
+          single time. Once read, it is noise from then on.
         */}
       <ComposerFooter sessionId={sessionId} onMenuOpenChange={onMenuOpenChange} />
     </form>

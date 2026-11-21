@@ -12,22 +12,22 @@ import { useStore } from '../../store/store.js'
  * Can be changed even after a conversation has started — that turns out to be more useful than
  * deciding it all up front.
  *
- * **The four selectors are not lined up side by side.** They used to be a row of `<select>`
- * elements, but all four are things nobody looks at most of the time, so they permanently took
- * up a whole row below the composer, and in a narrow pane like the grid the four pushed against
- * each other and cut off the text. Now the current values read as a single button, and the menu
- * only opens to change them (the same approach as Claude Code).
+ * **The four selectors are not lined up side by side.** As a row of `<select>` elements, four
+ * things nobody looks at most of the time would permanently take up a whole row below the
+ * composer, and in a narrow pane like the grid the four push against each other and cut off the
+ * text. The current values read as a single button, and the menu only opens to change them (the
+ * same approach as Claude Code).
  *
  * **The model list is never hardcoded here.** It shows exactly what the tool's official API
  * reports (Claude's `supportedModels()`, Codex's `model/list`).
- * This used to be hardcoded, which is why there was no way to pick Fable when it launched — this
- * avoids repeating the situation where the tool has moved on and only this app is stuck.
+ * A hardcoded list leaves no way to pick a model the tool has just launched (Fable, for one): the
+ * tool has moved on and only this app is stuck.
  */
 
 /*
- * Hints have to be short. 'Asks only for risky actions' (27 characters) used up all the label
- * space in the w-56 menu, so **the word "Normal" itself disappeared** (found in dogfooding) —
- * once the description erases the name, that row cannot be picked.
+ * Hints have to be short. 'Asks only for risky actions' (27 characters) uses up all the label
+ * space in the w-56 menu, so **the word "Normal" itself disappears** — once the description
+ * erases the name, that row cannot be picked.
  */
 const PRESETS: { value: PermissionPreset; label: string; hint: string }[] = [
   { value: 'safe', label: 'Safe', hint: 'Asks for everything' },
@@ -53,21 +53,19 @@ export function useModels(
    *
    * The Claude SDK only exposes the model list through a Query. So **it cannot be read without
    * a running session**. If the app is opened and a sleeping session is selected, there is no
-   * query at that moment, so the list comes back empty, and since an empty result was never
-   * re-fetched, the selector was permanently left with only "Default" (found in dogfooding).
-   * This re-fetches the moment the session wakes up.
+   * query at that moment, so the list comes back empty, and an empty result never re-fetched
+   * would leave the selector with only "Default" for good. This re-fetches the moment the
+   * session wakes up.
    */
   /*
-   * **Clears the list first** (dogfooding on 2026-09-09: "this is a Claude session, but Codex
-   * models are showing").
+   * **Clears the list first.**
    *
    * The list is the tool's own vocabulary — 'sonnet' and 'gpt-5.6-sol' are words in each
    * other's dictionary that do not exist, so showing another tool's list even briefly offers
-   * something the screen cannot actually pick. This used to leave **the previous tool's list
-   * sitting there** until a new response came back: switching from viewing a Codex session to
-   * opening a Claude session's menu could still show Codex models for a moment, and because
-   * Claude only returns its list once a session is alive (while it is waking up), that window
-   * could stretch for whole seconds.
+   * something the screen cannot actually pick. Leaving **the previous tool's list sitting
+   * there** until a new response comes back would show Codex models for a moment when switching
+   * from a Codex session to a Claude session's menu, and because Claude only returns its list
+   * once a session is alive (while it is waking up), that window can stretch for whole seconds.
    */
   // (`useLoad`: the tool and the machine are the subject, so a change clears the list; waking is a refresh of the same
   // tool's list, which may stay until the new one arrives)
@@ -136,11 +134,10 @@ function MenuRow({
         {selected ? '✓' : ''}
       </span>
       {/*
-        The label wins. The hint used to be shrink-0, so as space ran out **the label shrank
-        all the way to zero** — the description stayed and the name vanished (the Normal
-        disappearance incident). Lowering the label's shrink weight lets it hold out the
-        longest, but when the label itself is long, like a model name, it still gets truncated
-        (min-w-0 truncate is unchanged).
+        The label wins. With a hint that cannot shrink, as space runs out **the label shrinks
+        all the way to zero** — the description stays and the name vanishes. Lowering the
+        label's shrink weight lets it hold out the longest, but when the label itself is long,
+        like a model name, it still gets truncated (min-w-0 truncate).
       */}
       <span className="min-w-0 shrink-[0.2] truncate text-sm">{label}</span>
       {hint && <span className="ml-auto min-w-0 truncate text-2xs text-ink-faint">{hint}</span>}
@@ -262,9 +259,8 @@ export function SessionSettings({
   }, [menuRequest, sessionId])
 
   /*
-   * **Picking an option does not close the menu** (requested by a user on 2026-09-06). It
-   * started out as "close on pick, except for model", but the asymmetry of effort closing the
-   * menu while model kept it open actually broke expectations more. This menu is a place for
+   * **Picking an option does not close the menu.** "Close on pick, except for model" breaks
+   * expectations more: effort closing the menu while model keeps it open is an asymmetry. This menu is a place for
    * touching several knobs in a row — there are three ways to close it (outside click, Esc,
    * the toggle button), and the first click on the composer already counts as an outside click,
    * so it never becomes a wall in the way.
@@ -433,12 +429,10 @@ export function SessionSettings({
           )}
 
           {/*
-            **There is no role group here** (removed on 2026-09-01). There used to be a row
-            that promoted a session to "project assistant", but once the seat that directs
-            sessions within a project also became the worktree manager (#69), even the person
-            who built it confused the two, and the promotion was never actually used. The
-            director's seat comes from the relationship (having children makes it a manager) —
-            it is not something to pick.
+            **There is no role group here.** A row that promotes a session to "project
+            assistant" is easily confused with the worktree manager (#69), the seat that directs
+            sessions within a project. The director's seat comes from the relationship (having
+            children makes it a manager) — it is not something to pick.
           */}
 
           <MenuSection label="Permissions">
@@ -460,13 +454,13 @@ export function SessionSettings({
           </MenuSection>
 
           {/*
-            **There is no switching agents here** (decided in dogfooding).
+            **There is no switching agents here.**
 
-            The conversation does not carry over, so changing the tool from this menu was never
-            "switching" — it was "starting a new conversation", and creating a new session
-            already does that, more honestly. It amounted to a second door doing the same thing
-            under a different name, and every time, a confirmation dialog had to explain what
-            would be kept and what would be lost. A half feature gets removed.
+            The conversation does not carry over, so changing the tool from this menu is not
+            "switching" — it is "starting a new conversation", and creating a new session
+            already does that, more honestly. It would be a second door doing the same thing
+            under a different name, with a confirmation dialog every time to explain what would
+            be kept and what would be lost.
 
             The one remaining exception is the Assistant, and that lives in app settings
             (Cmd+,) under Assistant — because it is the only session that exists exactly once

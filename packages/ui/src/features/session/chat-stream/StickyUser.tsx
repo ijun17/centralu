@@ -137,9 +137,8 @@ export function useStickyUser({
   /*
    * If the next user message comes in under the pinned banner, one of the two has to disappear.
    *
-   * This originally only pinned "the most recent user message that has fully passed", and kept
-   * drawing the banner even once the next user message met it. That clipped the next turn's
-   * actual text under the card, unreadable at the exact moment someone was trying to read the
+   * Drawing the banner even once the next user message meets it clips the next turn's actual
+   * text under the card, unreadable at the exact moment someone is trying to read the
    * question. Using only the virtual list's measurements would miss the card's actual wrapped
    * height and open/closed state, so this directly compares the rendered rectangle of the next
    * user row on screen against the banner's rectangle.
@@ -246,17 +245,15 @@ export function StickyUser({ sticky }: { sticky: StickyUserState }) {
     /*
       A negative offset, not `top-0`.
       This scroll container has `py-4` around it, and sticky **cannot leave its own
-      containing block (the parent's content box)** — so `top-0` sat 16px below the padding
+      containing block (the parent's content box)** — so `top-0` sits 16px below the padding
       rather than at the ceiling (measured: a 16px gap). A negative offset gives that 16px
       back, reaching the actual ceiling. The padding itself is kept: it is the room the
       conversation gets to breathe in once scrolled all the way up.
 
-      Why **10**, not 16: 6px is deliberate slack. Sticking it flush to the ceiling was
-      tried twice — a 1px overlap, then a 3px overlap plus opacity. Trunk WebKit measured a
-      0 gap, but the real WKWebView (an older system engine) always left a hairline gap in
-      the end (found in dogfooding three times before the conclusion: an engine's
-      compositing rounding cannot be beaten). If it cannot be flush, **it is deliberately
-      set apart instead** — a 6px gap absorbs that hairline (±1px) into the design instead
+      Why **10**, not 16: 6px is deliberate slack. Flush to the ceiling (a 1px overlap, or a
+      3px overlap plus opacity) trunk WebKit measures a 0 gap, but the real WKWebView (an
+      older system engine) still leaves a hairline gap: an engine's compositing rounding
+      cannot be beaten. So **it is deliberately set apart instead** — a 6px gap absorbs that hairline (±1px) into the design instead
       of reading as an error, and the banner reads as a floating card rather than a strip
       hanging off the edge (which is also why the button below gets the same rounded
       corners on all four sides and a complete border, like a message bubble).
@@ -282,22 +279,17 @@ export function StickyUser({ sticky }: { sticky: StickyUserState }) {
         extension of the user message that scrolled off the top, and differing in even one
         of those reads as something else entirely.
 
-        That is exactly what happened when the width was left full: a 75%-wide bubble
-        anchored to the right suddenly became a strip stretching edge to edge, and it read
-        not as something the person said but as **a toolbar floating below the header**
-        (dogfooding: "it is not flush against the top"). Measured, it was already flush —
-        0px from the scroll container's ceiling, at zoom levels 0.9, 1.0, 1.1, 1.15 and 1.2,
-        all 0px. What made it look detached was shape, not position. So this is given the
-        same right alignment and `max-w-[75%]` as a message bubble, with its width following
-        the text length (w-fit).
+        At full width, a 75%-wide bubble anchored to the right becomes a strip stretching
+        edge to edge, and it reads not as something the person said but as **a toolbar
+        floating below the header**, looking detached even when flush (measured 0px from the
+        scroll container's ceiling at zoom levels 0.9, 1.0, 1.1, 1.15 and 1.2). What makes it
+        look detached is shape, not position. So this is given the same right alignment and
+        `max-w-[75%]` as a message bubble, with its width following the text length (w-fit).
 
         Being a **card** floating 6px off the ceiling is why it gets the same rounded
-        corners on all four sides and a complete border as a message bubble (how the flush
-        attempt was abandoned is in the -top comment above). It rises a few pixels from
-        below and settles as it appears (cc-hang) — that motion is what says "this is
-        floating here". (There was a translucent-plus-blur version — meant to show
-        "covering", not "hiding" — but the conversation showing through it kept reading as
-        "a gap against the header", so it was dropped.)
+        corners on all four sides and a complete border as a message bubble (why it is not
+        flush is in the -top comment above). It rises a few pixels from below and settles as
+        it appears (cc-hang) — that motion is what says "this is floating here".
 
         Clicking expands it — for reading a question too long for one line again, without
         scrolling back up. A very long question has its height clipped and scrolls inside
@@ -311,15 +303,12 @@ export function StickyUser({ sticky }: { sticky: StickyUserState }) {
         data-obscured={stickyObscured ? 'true' : undefined}
       >
         {/*
-          **Opaque** (the conclusion after the third round of dogfooding feedback on this).
-          Translucent-plus-blur was meant to say "covering, not hiding", but even with a
-          measured geometric gap of zero (header bottom equals scroll ceiling, measured in
-          WebKit), the conversation showing through it kept reading as "a gap against the
-          header" — WKWebView's backdrop-filter on a sticky element inside a scroll
-          container is unreliable, and the content behind it sometimes showed through with
-          no blur at all. Three repeated misreadings outweigh the nuance this was meant to
-          convey. The color replaces the composited color that surface-hover/55 used to produce
-          over surface-floor with a surface-raised token instead — the visible brightness is unchanged.
+          **Opaque**, in the bubble's own fill. Translucent-plus-blur would say "covering, not
+          hiding", but even with a measured geometric gap of zero (header bottom equals scroll
+          ceiling, measured in WebKit), the conversation showing through it reads as "a gap
+          against the header" — WKWebView's backdrop-filter on a sticky element inside a
+          scroll container is unreliable, and the content behind it sometimes shows through
+          with no blur at all.
         */}
         <button
           type="button"
@@ -342,10 +331,9 @@ export function StickyUser({ sticky }: { sticky: StickyUserState }) {
             onClick={() => setStickyOpen(false)}
             data-testid="sticky-user-expanded"
             /*
-              The same shape as the collapsed strip, but **less transparent here.** The
-              collapsed row's transparency is meant to show "covering, not hiding", but the
-              reason to expand it is to read it — the conversation showing through a long
-              question would immediately defeat that purpose.
+              The same shape and opaque fill as the collapsed strip: the reason to expand it
+              is to read it, and the conversation showing through a long question would
+              immediately defeat that purpose.
             */
             {...mineBubbleAttrs(stickyRelayed)}
             className={`absolute inset-x-0 top-0 z-10 max-h-60 cursor-pointer overflow-y-auto whitespace-pre-wrap break-words rounded-bubble border px-3 py-2 text-left text-md shadow-(--shadow-sticky) ${mineBubbleLook(stickyRelayed)}`}

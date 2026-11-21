@@ -229,7 +229,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
                       Commit exactly what the preview shows — the drop must not change the screen (#53).
                       With no preview yet it lands on the half it is let go over, as on the grid (GridView):
                       React renders a dragover's update in a later task, so a quick release can come before
-                      the preview of its last dragover is on the screen, and that drop used to be lost (#509).
+                      the preview of its last dragover is on the screen, and that drop would be lost (#509).
                     */
                     const r = e.currentTarget.getBoundingClientRect()
                     const before = dropsLeft(r, e.clientX)

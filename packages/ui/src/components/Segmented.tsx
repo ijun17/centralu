@@ -3,10 +3,9 @@ import { useRef, type KeyboardEvent, type ReactNode } from 'react'
 /**
  * Pick one of several, shown all at once: the tool a session starts with, the theme mode, the line height.
  *
- * Six screens had copied the same toggle (a row of framed buttons, the picked one lifted with `border-ink-muted
- * bg-surface-hover/40`), and they no longer agreed: some were a radio group to a screen reader, one said
- * `aria-pressed`, one said nothing; their hover brightened the border on one screen and the fill on another. One
- * component, one behaviour:
+ * One component, so every screen's toggle is the same to a screen reader and under the pointer (copies drift: a radio
+ * group on one screen, `aria-pressed` or nothing on another, a hover that brightens the border here and the fill
+ * there):
  *
  * - a `radiogroup` of `radio`s, named by `label`;
  * - the keyboard of a radio group (WAI-ARIA): Tab enters on the picked option and leaves the group, the arrows move

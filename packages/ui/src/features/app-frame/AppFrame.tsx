@@ -350,7 +350,7 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
         if (typeof url !== 'string' || !OPENABLE.test(url)) return { isError: true }
         if (!(await askToOpen(url))) return { isError: true }
         // The same outward-opening path as terminal links (the platform port). Navigating inside the app would blow away the session.
-        // If it fails to open, the app also gets a failure answer — it used to be that success ({}) went back on desktop even when nothing opened (#159)
+        // If it fails to open, the app gets a failure answer, never success ({}) for a link that did not open (#159)
         try {
           await platform.system.openUrl(url)
         } catch {

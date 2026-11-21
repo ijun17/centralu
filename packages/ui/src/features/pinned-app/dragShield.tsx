@@ -6,9 +6,9 @@ import { createPortal } from 'react-dom'
  * A transparent cover over each app view laid over a panel, for as long as anything is dragged (#296).
  *
  * In WebKit a drag goes into a frame whatever the frame's pointer-events say: measured in Playwright's WebKit, a row or
- * a panel dragged over an app's view went quiet on the page the moment it crossed the frame's edge, and its drop never
- * arrived. #294 answered that by hiding every view for the length of any drag, which emptied the screen — views
- * nowhere near the hand included. The cover answers it instead: it is an element of this page lying above the frame, so
+ * a panel dragged over an app's view goes quiet on the page the moment it crosses the frame's edge, and its drop never
+ * arrives. Hiding every view for the length of any drag empties the screen — views nowhere near the hand included.
+ * The cover answers it instead: it is an element of this page lying above the frame, so
  * `dragenter`, `dragover` and `drop` land on the page, and the view stays where it was, showing what it showed.
  *
  * The view is not inside its panel (slots.ts: an iframe that moves loses its document), so a cover inside the view

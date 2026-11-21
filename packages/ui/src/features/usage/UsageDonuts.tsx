@@ -86,12 +86,11 @@ function connectedIds(machines: Record<string, MachineInfo>): string[] {
  * Usage in the top bar — **one weekly donut per tool** (user request, 2026-09-09), **per machine** (#82, owner
  * decision on docs/plans/remote-hub.md §6).
  *
- * It used to be a single text button labeled 'Usage', which opened a modal in the middle of the
- * screen on click. Two things about that fell short: (1) with no number on the dashboard, the
- * limit was something the person had to **ask** in order to know; (2) the place the answer
- * opened in was far from where they clicked.
+ * Not a text button that opens a modal in the middle of the screen: (1) with no number on the
+ * dashboard, the limit is something the person has to **ask** in order to know; (2) the place
+ * the answer opens in is far from where they clicked.
  *
- * Now the donut lives on the dashboard permanently — how full it is shows as brightness, and the
+ * So the donut lives on the dashboard permanently — how full it is shows as brightness, and the
  * center holds **that tool's single-letter mark** (the same letter as the sidebar session chip,
  * so which limit belongs to which tool reads without a legend). The detail drops down **directly
  * below** that donut.
@@ -222,8 +221,8 @@ export function UsageDonuts() {
           }
         })
         /*
-         * A question that failed is not an answer (#850 item 8; owner, 2026-10-18: a linked machine read "No agent" for minutes
-         * after its host restarted for an update, though Claude Code was there). The last answer stays, or nothing is
+         * A question that failed is not an answer (#850 item 8; owner, 2026-10-18): taken as one, a linked machine whose host
+         * just restarted for an update reads "No agent" for minutes though Claude Code is there. The last answer stays, or nothing is
          * drawn yet, and the machine is asked again soon rather than at the next 5-minute tick.
          */
         .catch(() => {
@@ -348,7 +347,7 @@ export function UsageDonuts() {
       </Tooltip>
     ) : null
 
-  // With no linked machine, a computer with no usable tool says only that, as it always did
+  // With no linked machine, a computer with no usable tool says only that
   if (noAgent && machineIds.length === 0) return noAgent
 
   return (
@@ -377,7 +376,7 @@ export function UsageDonuts() {
             Pressing outside closes it — covers the screen without dimming it (same rule as the inbox).
             On the press, not the click, and marked data-no-drag: this sits inside the top bar's
             window drag region, and on Windows a window drag swallows the mouseup, so a click never
-            came and the dropdown stayed open (#365, DragRegion.tsx).
+            comes and the dropdown would stay open (#365, DragRegion.tsx).
           */}
           {!leaving && (
             <div
@@ -601,7 +600,7 @@ function Donut({
          */
         /*
          * A linked machine's donuts sit in a capsule drawn by its outline only (owner, 2026-10-18): a filled capsule
-         * left the hover's fill nothing to stand out from. The hover is a full step, so it shows on either ground.
+         * would leave the hover's fill nothing to stand out from. The hover is a full step, so it shows on either ground.
          * The donut has no padding of its own, here or in a capsule (one gap of 2px between neighbours, owner 2026-11-02),
          * and the capsule keeps 2px on every side, so its hover circle stands the same distance from the outline above,
          * below and beside it (owner).
@@ -686,7 +685,7 @@ function Donut({
 
 /**
  * Where a donut would stand when a machine has no usable agent (owner, 2026-10-18): an empty dashed ring of the donut's
- * size, not the words "No agent", which took the capsule's width and were cut at its edge. The tooltip around it says
+ * size, not the words "No agent", which take the capsule's width and are cut at its edge. The tooltip around it says
  * what it means.
  */
 function NoAgentMark() {

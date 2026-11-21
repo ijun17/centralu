@@ -11,7 +11,7 @@ import { formatElapsed, useElapsedNow } from '../elapsed.js'
  *
  * It is common for the first character to take tens of seconds to arrive, and if the screen is
  * completely quiet the whole time, **there is no way to tell whether it is working or has
- * stopped** (found in dogfooding).
+ * stopped**.
  *
  * So two things are shown together:
  *   - A moving dot: "it is alive". In the end, movement is the only thing that sets it apart
@@ -22,17 +22,15 @@ import { formatElapsed, useElapsedNow } from '../elapsed.js'
  * The stop button lives here too. It is also at the top, but the eyes of someone waiting are at
  * the bottom of the conversation.
  *
- * **The count is derived; only the tick lives here** (issue #23). This used to read
- * `Date.now()` on mount and treat that as the start of the turn, which held right up until
- * the component was remounted — switching to the grid and back, or moving between sessions,
- * put a three-minute turn back at zero. The lie was small and in the worst direction: the
- * longer a wait, the more the number understated it.
+ * **The count is derived; only the tick lives here** (issue #23). A start read from
+ * `Date.now()` on mount would reset whenever the component remounts — switching to the grid
+ * and back, or moving between sessions, would put a three-minute turn back at zero, and the
+ * longer a wait, the more the number would understate it.
  *
- * Keeping the component alive would not have been the fix. What was stored was the wrong
- * thing — an elapsed count, which is derived, and derived values should not be the thing
- * that survives. The start instant lives on the store now (`workingSince`), and this
- * subtracts it from the current time. The clock below no longer carries any state; it
- * exists only to make the time be re-read when the shown count would change (elapsed.ts).
+ * An elapsed count is derived, and derived values should not be the thing that survives. The
+ * start instant lives on the store (`workingSince`), and this subtracts it from the current
+ * time. The clock below carries no state; it exists only to make the time be re-read when the
+ * shown count would change (elapsed.ts).
  */
 export function ActivityRow({ sessionId, activity }: { sessionId: string; activity: SessionSummary['activity'] }) {
   const interrupt = useStore((s) => s.interrupt)
@@ -44,8 +42,8 @@ export function ActivityRow({ sessionId, activity }: { sessionId: string; activi
   // only lives while working) is the right home for it
   const plan = useStore((s) => s.sessions[sessionId]?.plan ?? null)
   /*
-   * What Stop does to the background work (#290), said before it is pressed. On 2026-10-04 an interrupt to rephrase
-   * a message stopped two background subagents without a word; the tools differ (Claude stops a subagent and keeps a
+   * What Stop does to the background work (#290), said before it is pressed: an interrupt can stop background
+   * subagents without a word, and the tools differ (Claude stops a subagent and keeps a
    * shell, Codex keeps a child agent), so the line comes from what each task says about itself.
    */
   const notice = useStore((s) => interruptNotice(s.sessions[sessionId]?.backgroundTasks ?? []))

@@ -34,11 +34,10 @@ import { Fold } from '../../components/Fold.jsx'
  * a lie that it is more urgent than the grid button — "experimental" is not urgent, it is
  * **something the person should press knowingly.**
  *
- * The border used to be dashed. The reasoning was "when the sidebar narrows, the text gets
- * clipped away and only the shape is left," but **measuring it showed that was not true.** The
- * 'Experimental' badge is `shrink-0`, so it stands at its full 63px even at the narrowest width
- * (180px, with the button at 163px) — what gets clipped instead is the name. Since there was
- * nothing the dashed border was protecting, there was no reason for it to stay either.
+ * The border is solid. A dashed one would only help if a narrow sidebar clipped the text away and
+ * left only the shape, and **measuring shows it does not.** The 'Experimental' badge is
+ * `shrink-0`, so it stands at its full 63px even at the narrowest width (180px, with the button
+ * at 163px) — what gets clipped instead is the name.
  */
 export function AssistantButton() {
   const view = useStore((s) => s.view)
@@ -74,7 +73,7 @@ export function AssistantButton() {
   useEffect(() => expander.hold(holding), [expander, holding])
   useEffect(() => () => expander.reset(), [expander])
 
-  // pt-1.5, the grid's own gap: the search field stands above it (#529, back there 2026-11-05) and takes the lane's top margin
+  // pt-1.5, the grid's own gap: the search field stands above it (#529) and takes the lane's top margin
   return (
     <div
       className="px-2 pt-1.5"
@@ -99,8 +98,7 @@ export function AssistantButton() {
           The Assistant is a session too. Before the first conversation, no session exists yet,
           so it is not made draggable — that keeps the #63 rule that opening a screen alone never
           creates a process. Once a conversation exists, it can be dragged into the grid like any
-          other session row. The side that receives an ID into GridView was already shared code;
-          this was the only entry point still missing from it.
+          other session row.
         */
         draggable={!!id}
         onPointerEnter={(e) => e.pointerType === 'mouse' && expander.enterRow(true)}
@@ -132,7 +130,7 @@ export function AssistantButton() {
  * hang here, where the person watches and steps into them like any session.
  *
  * `earlier`: ones whose assistant is gone (replaced on a tool switch, #994 review). Nothing else starts a session with
- * no project and no app, so a missing starter was an Assistant; without this group they had no row at all.
+ * no project and no app, so a missing starter was an Assistant; without this group they would have no row at all.
  */
 export function assistantChildren(
   sessions: Record<string, SessionSummary>,
@@ -223,11 +221,11 @@ function AssistantChildren({
 }
 
 /**
- * One child's row: opens it, drags onto the grid, and carries a ⋯ menu to stop or delete it (#994 review): the delete
- * dialog lived only in a project's list, so a child of the Assistant could not be removed from the screen.
+ * One child's row: opens it, drags onto the grid, and carries a ⋯ menu to stop or delete it (#994 review): no project's
+ * list holds a child of the Assistant, so without this menu it could not be removed from the screen.
  */
 // No fold gutter on these rows (owner, 2026-10-20): an Assistant's child folds nothing, so the chevron's empty
-// column only pushed its mark away from the guide line
+// column would only push its mark away from the guide line
 function AssistantChildRow({ s, onHold, setConfirming }: { s: SessionSummary; onHold: (rowId: string, held: boolean) => void; setConfirming: (on: boolean) => void }) {
   const selected = useSelectedSessionId()
   const focusSession = useStore((st) => st.focusSession)

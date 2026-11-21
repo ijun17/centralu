@@ -89,7 +89,7 @@ export function UserAttachment({ att }: { att: ChatAttachment }) {
  * The composer's attachments, before sending (#284).
  *
  * An image shows as a small thumbnail rather than an `IMG` chip: a pasted screenshot's name is
- * generated, so the chip said nothing about which image it was, and the person found out only
+ * generated, so a chip says nothing about which image it is, and the person would find out only
  * after sending. A file keeps its chip, and so does an image that cannot be drawn (AttachmentThumb).
  *
  * **Every item sits in a row of one fixed height** (`h-12`, the thumbnail's height). Items of

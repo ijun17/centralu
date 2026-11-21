@@ -7,7 +7,7 @@ import { connectAction, isTrying } from '../../settings/MachinesSection.jsx'
 
 /**
  * Reconnect, first in the menu of a project whose machine is not connected (#1533). The person finds the project, not the
- * machine: its menu is where they look for a way to bring it back, and the badge's menu and Settings → Machines were two
+ * machine: its menu is where they look for a way to bring it back, and the badge's menu and Settings → Machines are two
  * clicks away. It is the same action as theirs (`reconnectMachine`, so `machines.reconnect`: one attempt now, skipping the
  * backoff), and the host joins a press and an agent's call at the same moment into one attempt.
  *

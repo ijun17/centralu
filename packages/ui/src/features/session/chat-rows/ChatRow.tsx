@@ -30,7 +30,7 @@ import { Button } from '../../../components/Button.jsx'
  *
  * **The reason for memo is streaming.** While a response streams, each delta only changes the
  * last row (the store's message_delta leaves every other item's identity untouched), and
- * without memo, every visible bubble on screen was re-rendered **entirely** on each chunk — with
+ * without memo, every visible bubble on screen re-renders **entirely** on each chunk — with
  * a long answer filling the screen, that means re-parsing markdown many times over (measured:
  * 2.7 renders per character). Markdown itself is already memoized, but that alone cannot stop
  * the shell above it from running fresh every time.
@@ -93,22 +93,20 @@ export const ChatRow = memo(function ChatRow({
         {/*
           A string with no whitespace, like a long URL or path, does not wrap under the default
           rule. That makes the bubble spill sideways and puts a horizontal scrollbar on the
-          whole conversation (found in dogfooding). whitespace-pre-wrap keeps line breaks the
+          whole conversation. whitespace-pre-wrap keeps line breaks the
           person typed, and break-words breaks even a long chunk that otherwise could not wrap.
         */}
         {/*
           Contrast against the background (surface-floor) is what makes "something I said" visible.
-          surface-raised plus line was only two steps apart (#1d1d1d and #292929 then; Dark's wider
-          steps, #725, made them #282320 and #3a3531, ΔL* 8.4 apart; #2c2c2e and #3a3a3c, 6.4, since #2335), and was effectively invisible
-          in a dark room (found in dogfooding). This lifts it to surface-hover (#48484a on a #1d1d1d
-          floor, ΔL* 19.9), the same as the hover background, and gives the border one step more
-          brightness.
+          surface-raised plus line is too close (in Dark #2c2c2e and #3a3a3c, ΔL* 6.4 apart) and is
+          effectively invisible in a dark room. So the bubble is on surface-hover (#48484a on a #1d1d1d
+          floor, ΔL* 19.9), the same as the hover background, with a border one step brighter
+          (bubbleLook.ts).
         */}
         {/*
           Attachments stand as real objects above the body text — an image as a thumbnail
-          (click to zoom), a file as a named chip. This used to render "📎 name" mixed into the
-          text, which was a list, not a picture, and it even caused the side effect (#75) of the
-          sent text differing from the rendered text.
+          (click to zoom), a file as a named chip. "📎 name" mixed into the text would be a list,
+          not a picture, and would make the sent text differ from the rendered text (#75).
         */}
         {item.attachments && item.attachments.length > 0 && (
           <div className="flex max-w-[75%] flex-wrap justify-end gap-1.5 pb-0.5">
@@ -119,9 +117,8 @@ export const ChatRow = memo(function ChatRow({
         )}
         {/*
           A message that came from another session, an app or a script (relayed) is drawn as the agent's
-          answer bubble is: surface-raised and the line edge, solid (bubbleLook.ts). It was the person's
-          bubble with a dashed edge, but a dashed edge means failed or unknown everywhere else in the app
-          (#1629). The source line above it stays. No hue: the fill alone tells it from my own.
+          answer bubble is: surface-raised and the line edge, solid (bubbleLook.ts). Not dashed: a dashed
+          edge means failed or unknown everywhere else in the app (#1629). The source line above it stays. No hue: the fill alone tells it from my own.
         */}
         {/* No empty bubble is rendered for a message that only sent an image */}
         {(item.text || !item.attachments?.length) && (
@@ -149,7 +146,7 @@ export const ChatRow = memo(function ChatRow({
      * dimmed one step to ink-muted — following the ink rule exactly, where brightness signals
      * importance. Codex's summary arrives as **bold heading** markdown, so this is still
      * rendered through Markdown, just left quiet with no background color. The tone is Markdown's
-     * own: its root sets the ink of the body, so a colour put on this wrapper never reached it.
+     * own: its root sets the ink of the body, so a colour put on this wrapper does not reach it.
      */
     return (
       <div className="min-w-0" data-testid="msg-reasoning">
@@ -172,17 +169,14 @@ export const ChatRow = memo(function ChatRow({
     /*
      * The label **shrinks and wraps.**
      *
-     * This row was built for **short divider labels** like "conversation compacted here", so
-     * `shrink-0` was the right value at the time. But once a failed turn started being shown on
-     * screen (#107), error sentences ended up in the same spot — a single line like "Your
-     * access token could not be refreshed because your refresh token was revoked…" pushed the
-     * row wide and **put a horizontal scrollbar on the whole conversation** (found in
-     * dogfooding). A sentence the person needs to read being pushed off screen defeats the
-     * point of showing it at all.
+     * Besides short divider labels like "conversation compacted here", this row carries a failed
+     * turn's error sentence (#107). A label that cannot shrink lets a single line like "Your
+     * access token could not be refreshed because your refresh token was revoked…" push the
+     * row wide and **put a horizontal scrollbar on the whole conversation**, and a sentence the
+     * person needs to read pushed off screen defeats the point of showing it at all.
      *
      * The lines on either side are `flex-1`, so they only ever draw whatever space the label
-     * leaves over — center alignment holds even when the label wraps to several lines, and a
-     * short label still looks exactly as it did before.
+     * leaves over — center alignment holds even when the label wraps to several lines.
      */
     // A tool's notice the host made readable (#342): who, what kind, whose to act on, the tool's words on demand
     if (item.notice) return <NoticeMark notice={item.notice} />
@@ -235,7 +229,7 @@ export const ChatRow = memo(function ChatRow({
 })
 
 /**
- * An image inside the conversation (#40, extended to zoom in #62).
+ * An image inside the conversation (#40), zoomable (#62).
  *
  * In the body it is clipped at max-h-80, so text in a screenshot cannot be read — clicking it
  * opens a larger view in a modal. Why the Modal component is reused as-is: being a portal, it
@@ -285,21 +279,20 @@ function ImageNote({ path, name: viewed, note }: { path?: string; name?: string;
 }
 
 /**
- * The number of lines shown as a preview while collapsed — just enough to recognize what
- * command produced what
+ * The number of lines of a running tool's output tail shown in its open card — just enough to
+ * see where it is
  */
 const PREVIEW_LINES = 3
 
 /**
- * The preview's **height cap** (reported by a user on 2026-09-12).
+ * The tail's **height cap**.
  *
  * `PREVIEW_LINES` counts lines split by `\n`. But there is no guarantee one logical line renders
  * as one visual line: something like a resource-upload response, one blob of JSON with no
- * newlines, is logically one line, so the preview truncation cuts nothing at all, and on screen
- * it wraps into dozens of lines, with the card covering the entire conversation. That is what
- * "collapsed, but everything is showing" meant.
+ * newlines, is logically one line, so the line count cuts nothing at all, and on screen
+ * it wraps into dozens of lines, with the card covering the entire conversation.
  *
- * So one more cap is added — a height counted in **visible lines**. `lh` is one line-height unit
+ * So there is one more cap — a height counted in **visible lines**. `lh` is one line-height unit
  * of that element, so `3lh` is always exactly three lines regardless of font size or leading
  * changes (writing it in px would mean hand-rounding a value like
  * leading-body × 11px = 17.875px, and that rounding would show one pixel of a fourth line's
@@ -321,19 +314,15 @@ function unmarkedAskProject(item: Extract<ChatItem, { kind: 'tool' }>): NonNulla
  *
  * **No scrolling inside it.** A small scroll area inside the conversation intercepts the wheel,
  * so trying to scroll the conversation instead scrolls inside the card while the conversation
- * stays put (called out as "annoying" in dogfooding). Scrolling belongs to exactly one thing,
- * the conversation itself — collapsed shows a preview, expanded shows everything. Length is
+ * stays put. Scrolling belongs to exactly one thing,
+ * the conversation itself — collapsed shows the title row, expanded shows everything. Length is
  * decided by the person.
  *
- * **Collapsed by default.**
- *
- * This used to collapse only read-only tools and expand changes (Bash, Edit, MCP). The thinking
- * was that changes need to be seen, but in practice, using a tool even a few times buried the
- * conversation in output, making the actual answer unreadable (found in dogfooding). What was
+ * **Collapsed by default**, changes (Bash, Edit, MCP) too: expanded cards bury the
+ * conversation in output after a few tool uses, making the actual answer unreadable. What was
  * done is already said by the title row — whether that is a command or a path.
  *
- * Two things are never lost even while collapsed: a failure stays visible as 'Failed' in the
- * title row, and a few lines of output preview are shown as-is.
+ * A failure is never lost while collapsed: it stays visible as 'failed' in the title row.
  */
 export function ToolCard({
   item,
@@ -368,7 +357,7 @@ export function ToolCard({
   const lines = item.result ? item.result.replace(/\s+$/, '').split('\n') : []
   /*
    * The tail of output while the tool is still running (#58, Codex's outputDelta). Only shown
-   * until `result` arrives — unlike the preview, this shows **the end**: for a command still
+   * until `result` arrives, and it shows **the end**: for a command still
    * running, what matters is now, not the start.
    * (The sum of chunks is not the whole thing — the first chunk has been observed missing in
    * practice. The full output is what `result` delivers.)
@@ -477,8 +466,8 @@ export function ToolCard({
       )}
 
       {/*
-        What the tool was given, whole, once the card is open (owner, 2026-10-18: a long command was cut to one line in
-        the title and could not be read anywhere). Only when it says more than the title row could.
+        What the tool was given, whole, once the card is open (owner, 2026-10-18: the title cuts a long command to one
+        line, so it could not be read anywhere else). Only when it says more than the title row could.
       */}
       {showInput && (
         <div className="border-t border-line px-3 py-2" data-testid="tool-card-input">
@@ -511,7 +500,7 @@ export function ToolCard({
       )}
 
       {/*
-        The output only once the card is open (owner, 2026-10-18: the preview lines were rarely read and made every
+        The output only once the card is open (owner, 2026-10-18: preview lines are rarely read and make every
         call a block). Closed, a card is its one title row; the tail of a running command shows when it is opened.
       */}
       {!call && open && lines.length > 0 && (
@@ -546,8 +535,8 @@ export function ToolCard({
 /**
  * What the subagent a launch card started did (#222), collapsed under the card.
  *
- * The conversation never shows these steps: a subagent's calls landing among the parent's was
- * the confusion #98 removed. They are read from the host only when the person opens this, and
+ * The conversation never shows these steps: a subagent's calls landing among the parent's
+ * confuse whose they are (#98). They are read from the host only when the person opens this, and
  * drawn with the conversation's own rows (`messagesToChat`, `ChatRow`) — its text, its reasoning,
  * its tool cards — so a step reads the same here as the parent's does above. An agent the
  * subagent launched is a launch card too, with its own steps inside.
@@ -615,7 +604,7 @@ export function SubagentSteps({
           )}
           {/*
             Steps archived without the session (#418) are said to be there, with the way back: read as "none
-            were recorded", a card the person emptied looked like one that never kept anything
+            were recorded", a card the person emptied would look like one that never kept anything
           */}
           {steps && !steps.loading && !steps.error && !!steps.trashed && (
             <p className="text-xs text-ink-faint" data-testid="subagent-steps-trashed">
@@ -645,7 +634,7 @@ export function SubagentSteps({
 }
 
 /**
- * Where a card's archived steps went (#418), in the number they are: "The step was moved… restores it" for one,
+ * Where a card's archived steps went (#418), in the number they are: "The step was archived… restores it" for one,
  * "…restores them" for more, and "N earlier steps" when a running subagent wrote more under the card since
  */
 export function trashedLine(trashed: number, more: boolean): string {

@@ -3,7 +3,7 @@
  *
  * The answer to a search arrives after the person typed more. The rows on screen are the previous query's hits until
  * it does, and Enter on one of those opens something that does not match what is in the box: type "fo", see its hits,
- * type "foz" and press Enter before the answer, and a "fo" hit opened when nothing else matched "foz". The composer's
+ * type "foz" and press Enter before the answer, and a "fo" hit opens when nothing matches "foz". The composer's
  * `@` list has the same rule (`autocompleteState.ts`): stale rows may stay on screen, but a key never picks one.
  */
 export type FoundHits<T> = { query: string; list: T[] }

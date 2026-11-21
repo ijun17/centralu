@@ -102,9 +102,9 @@ describe('is this a drag the panel should accept', () => {
 })
 
 /**
- * #286: in the packaged app, a grid panel dragged onto another session panel attached a screenshot
- * from its conversation. WebKit adds the images inside a dragged element to the drag as files, so
- * the drag carried `Files` next to the session type, and the panel took it for a file from the OS.
+ * #286: in the packaged app, a grid panel dragged onto another session panel must not attach a
+ * screenshot from its conversation. WebKit adds the images inside a dragged element to the drag as
+ * files, so the drag carries `Files` next to the session type, and could be taken for a file from the OS.
  */
 describe('a drag that started inside the app is never a file from the OS', () => {
   const dt = (types: string[]) => ({ types }) as unknown as DataTransfer

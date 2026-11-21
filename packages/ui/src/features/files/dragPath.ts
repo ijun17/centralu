@@ -1,7 +1,7 @@
 /**
  * Dragging a path from the file tree and dropping it into the composer.
  *
- * A dedicated MIME type is used. The composer's drop handling was originally built for **files
+ * A dedicated MIME type is used. The composer's drop handling also takes **files
  * dragged in from the OS** (attachments), and without telling the two apart, something dragged from
  * the tree would also try to become an attachment, find `dataTransfer.files` empty, and
  * **nothing would happen** — the kind of silent no-op this project forbids.
@@ -52,9 +52,9 @@ export function hasDragFiles(dt: DataTransfer): boolean {
  *
  * A drag that starts inside Centralu is never a file dropped in from the OS, whatever else the
  * engine adds to it. WebKit adds the images inside a dragged element to the drag as files: in the
- * packaged app, dragging a grid panel whose conversation showed a screenshot carried `Files` next
- * to the session type, and the session panel it was dropped on attached the screenshot instead of
- * the grid placing the session.
+ * packaged app, dragging a grid panel whose conversation shows a screenshot carries `Files` next
+ * to the session type, and without the mark the session panel it is dropped on would attach the
+ * screenshot instead of the grid placing the session.
  *
  * Why a mark put on at `dragstart` rather than a list of our own types: a list only covers the
  * draggables that remember to set one of them. The mark is put on by one listener on the window,
@@ -117,7 +117,7 @@ export function appendPath(text: string, path: string): string {
 /**
  * Is this a drag the session panel should accept (#116)?
  *
- * Making the whole panel a drop target meant it **now shares the same surface as reordering** — a
+ * The whole panel is a drop target, so it **shares the same surface as reordering** — a
  * grid panel is also a place where panels swap positions with each other, and the sidebar's sessions
  * and projects are also dragged with their own MIME types. So what to accept is written as **an
  * explicit list.** Writing it as "accept anything that is not that other thing" would mean, every

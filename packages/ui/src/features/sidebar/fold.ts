@@ -10,7 +10,7 @@ import { isListedWaiting, isUnread, listedState, needsAnswer, type ReadTracked }
  * **as counts**.
  *
  * There are five states counted, in the order the counters are read in (approval → error →
- * waiting for input, then working, then `background`: a turn that ended while its own background work runs, #2146). Error was not part of the original request, but it cannot be
+ * waiting for input, then working, then `background`: a turn that ended while its own background work runs, #2146). Error cannot be
  * dropped: it is a state that the inbox and ⌘⇧A count as a waiting session (core `isWaiting`), and if a
  * session stalled inside a folded project disappears with no indication at all, folding has just done
  * exactly that. Idle and rate-limited are not counted — they are rows that neither call the person nor
@@ -32,8 +32,8 @@ export function foldSummary(
     const s = { ...raw, state: listedState(raw) }
     /*
      * An idle session is not counted at all, read or unread (owner, 2026-10-20): the chips speak only of what runs and
-     * what needs the person (an approval, a question, an error). An unread answer looked as urgent as an approval, and
-     * whether an idle session counted depended on having opened it, which the line could not show. The inbox lists the
+     * what needs the person (an approval, a question, an error). Counted, an unread answer would look as urgent as an
+     * approval, and whether an idle session counted would depend on having opened it, which the line cannot show. The inbox lists the
      * unread ones.
      */
     const stopped = !!s.interruption && isListedWaiting(s)
@@ -77,7 +77,7 @@ export function groupAttention(
   return found
 }
 
-/** How long the pointer rests on a folded project's name row before it expands (owner, 2026-10-26: 200 ms in #1578, 100 ms in #1605). The Assistant's button shares it (#1591) */
+/** How long the pointer rests on a folded project's name row before it expands (owner, 2026-10-26, #1605). The Assistant's button shares it (#1591) */
 export const HOVER_EXPAND_MS = 100
 
 /**

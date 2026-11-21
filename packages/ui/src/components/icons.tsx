@@ -252,9 +252,9 @@ export function CloseIcon({ size = 13 }: { size?: number }) {
  * opening and closing, and rotation cannot do that. The rotation itself also says "this just
  * opened".
  *
- * This replaced a filled triangle (▸▾) that was used before — a triangle is drawn by the font, so
- * we cannot control its size or alignment, and its weight is heavier than text, so it caught the
- * eye before the name did in a list.
+ * Not a filled triangle (▸▾): a triangle is drawn by the font, so we cannot control its size or
+ * alignment, and its weight is heavier than text, so it catches the eye before the name does in a
+ * list.
  */
 export function ChevronIcon({ open, size = 12 }: { open: boolean; size?: number }) {
   return (
@@ -337,25 +337,18 @@ export function PencilIcon({ size = 13 }: { size?: number }) {
 }
 
 /**
- * Run — a filled triangle.
+ * Run — a filled play triangle.
  *
- * Filled, where the chevron next door deliberately is not. That note is about *font*
- * triangles: their weight and alignment belong to whichever font drew them, which is why
- * they lost to a drawn chevron. Drawn here, the solid mark is the right one — "run" is a
- * button you press, and an outline reads as a shape being described rather than pressed.
- */
-/**
- * Run — a play triangle.
+ * Filled, where the chevron next door deliberately is not. The chevron's note is about *font*
+ * triangles, whose weight and alignment belong to whichever font drew them. Drawn here, the
+ * solid mark is the right one — "run" is a button you press, and an outline reads as a shape
+ * being described rather than pressed.
  *
- * The old triangle occupied only 7 x 9.2 inside a 16-unit canvas, and that was drawn at 13px.
- * The restart icon standing right beside it draws an 11-diameter circle at 14px, so on the same
- * row the ink width differed by nearly a factor of two. That is why it looked small even though
- * the size numbers, 13 and 14, were close — it is the ink, not the canvas, that determines
- * perceived size.
- *
- * So the canvas is filled more (8.8 x 10.8) and drawn at 15px. The corners are rounded: every
- * other icon in this file uses `strokeLinecap="round"`, and a single knife-sharp triangle looked
- * like it belonged to a different set.
+ * It is the ink, not the canvas, that determines perceived size. The restart icon beside it
+ * draws an 11-diameter circle at 14px; a triangle of 7 x 9.2 in the 16-unit canvas at 13px
+ * looks half as wide on the same row. So the triangle fills 8.8 x 10.8 and is drawn at 15px.
+ * The corners are rounded: every other icon in this file uses `strokeLinecap="round"`, and a
+ * single knife-sharp triangle looks like it belongs to a different set.
  */
 export function PlayIcon({ size = 15 }: { size?: number }) {
   return (
@@ -423,7 +416,7 @@ export function BranchIcon({ size = 13 }: { size?: number }) {
 
 /**
  * Uncommitted changes — a page with a plus over a minus, the diff's two signs (owner, 2026-10-18: the sidebar's bare
- * count read as "what is this number"). The page says files, the signs say changed.
+ * count reads as "what is this number"). The page says files, the signs say changed.
  */
 export function ChangesIcon({ size = 12 }: { size?: number }) {
   return (
@@ -537,7 +530,7 @@ function CapIcon({ children }: { children: ReactNode }) {
 
 /**
  * "From", after the source line over a relayed message ("Manager", "Board app", #1948): down, then right into the message
- * below. It replaced the font's ⤷, which sat above the text (#2332)
+ * below. Drawn, not the font's ⤷, which sits above the text (#2332)
  */
 const FROM_ARROW = 'M1.75.75v4a2.25 2.25 0 0 0 2.25 2.25h5M6.75 4.75 9 7 6.75 9.25'
 
@@ -571,8 +564,8 @@ export function MarkIcon({ kind }: { kind: MarkKind }) {
 }
 
 /**
- * A plan step's state (#58): done, the one in progress, still to come. Told apart by shape, not hue. The text's cap height and
- * on its baseline (`CAP_BOX`), where the font glyphs (✓ ▸ ○) were each a different, smaller size (#2332)
+ * A plan step's state (#58): done, the one in progress, still to come. Told apart by shape, not hue. The text's cap height,
+ * on its baseline (`CAP_BOX`): the font glyphs (✓ ▸ ○) are each a different, smaller size (#2332)
  */
 export function PlanStepIcon({ status }: { status: 'pending' | 'inProgress' | 'completed' }) {
   return (

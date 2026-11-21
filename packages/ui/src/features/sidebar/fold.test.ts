@@ -34,7 +34,7 @@ describe('foldSummary (#205)', () => {
     expect(foldSummary([read, unread])).toEqual([])
   })
 
-  // The inbox lists an open question as an approval whatever state the session is in (`listedState`); the folded line did not
+  // The inbox lists an open question as an approval whatever state the session is in (`listedState`); the folded line must too
   it('counts an open question as an approval, as the inbox lists it, working or read', () => {
     const asking = { pendingQuestions: [{}], lastSeq: 3, lastReadSeq: 3 }
     expect(foldSummary([{ state: 'working', ...asking }])).toEqual([{ state: 'waiting_approval', count: 1 }])

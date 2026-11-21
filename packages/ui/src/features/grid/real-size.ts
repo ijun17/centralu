@@ -5,8 +5,8 @@ import { useEffect, useState, type RefObject } from 'react'
  * count their columns in (core's `columnsFor`). A panel's minimum width is fixed in real pixels, like
  * the sidebar's and the evidence panel's: the text zoom (App.tsx, on the root) is there to enlarge the
  * letters, not to narrow the panel. A resize observer's box is in zoomed CSS pixels, so it is multiplied
- * by the zoom it was laid out under (dogfooding: a grid that was one row at zoom level 3 became two rows
- * at level 4 while it was not).
+ * by the zoom it was laid out under (otherwise a grid of one row at zoom level 3 becomes two rows at level
+ * 4 in the same real room).
  *
  * The zoom is the one the measured layout had, read beside the box, and the product is kept — not the
  * box kept and multiplied by the store's zoom at render. The store's zoom changes the moment the scale is

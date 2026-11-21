@@ -250,7 +250,7 @@ function StopConfirm({ m, action, onCancel, onConfirm }: { m: MachineInfo; actio
   const machineActivity = useStore((s) => s.machineActivity)
   /*
    * Undefined while the machine is being asked. A failed question reads as an unknown answer (null), which the
-   * sentence words as such: it used to leave the confirmation asking, with its button disabled, for good.
+   * sentence words as such; left undefined, the confirmation would stay asking, with its button disabled, for good.
    */
   const asked = useLoad(() => machineActivity(m.id), [machineActivity, m.id])
   const activity: HostActivity | null | undefined = asked.error !== null ? null : asked.data

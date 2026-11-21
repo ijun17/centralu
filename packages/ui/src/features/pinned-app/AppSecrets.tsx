@@ -47,8 +47,8 @@ export function AppSecrets({ app }: { app: ExternalCatalogApp }) {
 }
 
 /**
- * The saved secrets could not be read (#944): said once above the fields. On screen nothing said it before, and a
- * section showing every value missing read as values never entered. Moved aside, the values are in that copy; the line
+ * The saved secrets could not be read (#944): said once above the fields. Without it, a
+ * section showing every value missing reads as values never entered. Moved aside, the values are in that copy; the line
  * goes once a value is saved again. Still in place, the file has to be fixed or removed first. Why, when the host knows
  * (`reason`, words that never quote the file)
  */

@@ -4,7 +4,7 @@ import { arrivedNotices } from './InboxPill.jsx'
 
 /**
  * What the inbox capsule takes for news (InboxPill's peek): a notice that arrived since the last look. It keeps the
- * keys of the notices there now only; it used to keep every key ever, for the window's life.
+ * keys of the notices there now only, not every key ever for the window's life.
  */
 
 const notice = (sessionId: string, at: number, kind: Notice['kind'] = 'done'): Notice => ({ sessionId, kind, name: sessionId, at })

@@ -92,7 +92,7 @@ const TONE_CLASS: Record<MarkdownTone, string> = {
 
 /*
  * GitHub's Markdown, except that only a double tilde strikes text through (owner, 2026-10-18). GFM's default also
- * strikes `~text~`, and Korean writes a range with one tilde: "1~3일, 5~7일" struck "3일, 5" through. `~~text~~` still
+ * strikes `~text~`, and Korean writes a range with one tilde: "1~3일, 5~7일" would strike "3일, 5" through. `~~text~~` still
  * strikes, as it does on GitHub. One array for every block, so react-markdown does not see new plugins each render.
  */
 const REMARK_PLUGINS: Options['remarkPlugins'] = [[remarkGfm, { singleTilde: false }]]
@@ -133,10 +133,10 @@ export const MarkdownBlock = memo(function MarkdownBlock({
           return <ReplyImage key={path} path={path} alt={label} sessionId={sessionId} />
         },
         /*
-         * Links branch three ways (extended in #39):
+         * Links branch three ways (#39):
          *  - If href is a file in this project, it is the same file link as a backticked
          *    path — the agent also writes things like `[manager.ts](packages/.../manager.ts)`,
-         *    and that used to be a dead link.
+         *    which would otherwise be a dead link.
          *  - http(s) and mailto open in a new window (navigating inside the app would lose
          *    the session).
          *  - Any other href is **never put into the DOM.** The rule that a string produced

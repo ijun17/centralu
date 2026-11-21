@@ -7,8 +7,8 @@ import { installedUpdate, applyOffer, useRelaunchCheck } from './apply-update.js
 /**
  * "A new version is available" — a quiet line on the dashboard (issue #43).
  *
- * **It only appears when it has something to say.** That is why the shortcut chips were
- * removed from the top bar (issue #33): something that stays on all the time takes attention
+ * **It only appears when it has something to say.** The same reason keeps shortcut chips out
+ * of the top bar (issue #33): something that stays on all the time takes attention
  * every time it is seen, and after the first time it has nothing left to tell. This line is the
  * opposite — most of the time it is not there at all, and it only shows up while something new
  * has landed in the registry, then disappears again. That is what earns it a place on the
@@ -19,7 +19,7 @@ import { installedUpdate, applyOffer, useRelaunchCheck } from './apply-update.js
  * And once it finishes, **it does not restart on its own** unless the person turned on "Apply
  * updates automatically when idle". Where the desktop app can relaunch into the installed build
  * without cutting anything (#352: the keeper holds every agent through it), the line offers
- * "Apply now"; elsewhere it says to restart, as before.
+ * "Apply now"; elsewhere it says to restart.
  *
  * @param waiting what an automatic apply waits for (`useAutoApplyUpdate`), null when none is pending
  */

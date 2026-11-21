@@ -7,7 +7,7 @@ import { Button } from '../../../components/Button.jsx'
 import { Segmented } from '../../../components/Segmented.jsx'
 
 /**
- * The handoff confirmation dialog (a dogfooding request).
+ * The handoff confirmation dialog.
  *
  * States the whole sequence in sentences — because this one button bundles three steps together:
  * "ask for a note → new session → (by default) archive." Archiving can be undone (Settings → Archive
@@ -16,7 +16,7 @@ import { Segmented } from '../../../components/Segmented.jsx'
  * is not required: if the last step fails, nothing is lost, there are just two sessions left over,
  * and if it succeeds, the only thing lost is exactly what the person just read and approved.
  *
- * The receiving agent can be chosen (a dogfooding request) — the note is plain text, so it does
+ * The receiving agent can be chosen — the note is plain text, so it does
  * not lock in a tool. It defaults to the current tool. Archiving is also a checkbox, on by default
  * (#1477): turning it off turns this from switching tools into branching.
  */
@@ -48,12 +48,11 @@ export function ConfirmHandoff({
    * session being replaced is the one least likely to summarize correctly, and a note it writes can
    * carry its drift or injected text. Asking the agent stays one click away.
    *
-   * Archiving defaults to **on**, for both note sources (#1477, owner direction). It was off since #694
-   * (#78's pairing: keep the original until the successor is known to work), but a kept original is not
-   * idle: its process keeps running, and when one of its background tasks ends it wakes for a turn that rewrites
+   * Archiving defaults to **on**, for both note sources (#1477, owner direction). Keeping the original
+   * until the successor is known to work (#78) costs more than it seems: a kept original is not idle: its process keeps running, and when one of its background tasks ends it wakes for a turn that rewrites
    * its whole context (after an hour idle the cache has expired), its apps stay attached to it
    * (#1638), and two sessions claim one piece of work. Archiving is not deleting: the original stays in the
-   * archive and can be restored, so the safety the old default gave is still there. The box stays, so
+   * archive and can be restored, so that safety is still there. The box stays, so
    * branching (keeping both) is one click, and when it is off and the original has background work running
    * the dialog says what that costs.
    *

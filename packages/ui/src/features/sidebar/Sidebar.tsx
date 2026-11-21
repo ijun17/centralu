@@ -57,9 +57,9 @@ export function Sidebar() {
 
   return (
     /*
-      **Only the project list scrolls** (#988). The whole sidebar used to be the scroller, and the resize handle, an
-      absolutely placed child of it, scrolled up with the rows: past the first screen there was no edge left to drag.
-      Now the aside never scrolls; the top doors and the bottom area stand still, and the handle is the scroller's
+      **Only the project list scrolls** (#988). With the whole sidebar as the scroller, the resize handle, an
+      absolutely placed child of it, would scroll up with the rows: past the first screen there would be no edge left to
+      drag. So the aside never scrolls; the top doors and the bottom area stand still, and the handle is the scroller's
       sibling, spanning the aside's full height, so a scroll never moves it and the list's scrollbar never covers it.
     */
     <aside
@@ -84,12 +84,12 @@ export function Sidebar() {
         <GridButton />
       </div>
       {/*
-        The list keeps room for about two rows however short the window (#988 follow-up): in a 150px window the fixed
-        top and bottom left it none, and a project's row could not be reached at all. The bottom area gives way first.
+        The list keeps room for about two rows however short the window (#988 follow-up): otherwise, in a 150px window the
+        fixed top and bottom leave it none, and a project's row cannot be reached at all. The bottom area gives way first.
       */}
       {/*
         The two ways a project comes to be stand over the list as icons (owner, 2026-10-19), beside its name, instead
-        of a row of framed buttons under it: an existing folder, or a new app. "New folder as a project" was dropped
+        of a row of framed buttons under it: an existing folder, or a new app. No "New folder as a project"
         (owner, 2026-10-21): a new folder is made in the file manager or by an agent, then added.
         The list starts where its own controls are, and the bottom keeps only the
         user-folder apps still listed. The row stands still; only the list under it scrolls. A wider gap above it sets it
@@ -101,8 +101,7 @@ export function Sidebar() {
         <span ref={addAnchor} className="flex">
           <IconButton
             /*
-             * **There should be exactly one way to pick a folder in this app**: this button is the picker itself (the
-             * typed-path dialog is long gone). Once a machine is linked it first asks where (#734): this computer, the
+             * **There should be exactly one way to pick a folder in this app**: this button is the picker itself. Once a machine is linked it first asks where (#734): this computer, the
              * picker, or a linked machine, whose folder is typed (the picker cannot see that machine's disk).
              */
             label="Add a folder as a project"
@@ -125,15 +124,15 @@ export function Sidebar() {
       </div>
       {/*
         The list scrolls with its bar drawn over it, as the conversation does (OverlayScrollbar, `cc-scroll-overlay`;
-        owner, 2026-11-05): a native bar took a column of its own, so every row moved left by its width the moment the
-        list grew past the window and back when it shrank. The thumb stands 4px in from the edge, clear of the resize
+        owner, 2026-11-05): a native bar takes a column of its own, so every row would move left by its width the moment
+        the list grows past the window and back when it shrinks. The thumb stands 4px in from the edge, clear of the resize
         handle (ResizeHandle, w-1) that spans the same edge.
       */}
       <div className="relative flex min-h-[4.5rem] flex-1 flex-col">
         <div ref={listRef} className="cc-scroll-overlay min-h-0 flex-1 overflow-y-auto" data-testid="sidebar-projects">
           {/*
             Until the host's first lists arrive the list is not known to be empty (owner, 2026-10-18: "No projects yet"
-            flashed on a slow start). The shape of two projects stands there instead, and the real list fades in.
+            would flash on a slow start). The shape of two projects stands there instead, and the real list fades in.
           */}
           {ids.length === 0 && !listed ? (
             <SidebarSkeleton />
@@ -159,8 +158,8 @@ export function Sidebar() {
       {/*
         The bottom area stands still under the list (#988). Capped, so a long leftover list cannot push the list off the
         screen: past the cap it scrolls on its own, and in a window too short for both it shrinks before the list does.
-        Since #1141 it holds the three ways a project comes to be, and only above them the user-folder apps still listed
-        (none on this computer once its host has moved them into projects).
+        It holds only the user-folder apps still listed (#1141; none on this computer once its host has moved them into
+        projects), and nothing when there are none.
       */}
       <div
         className="max-h-[45%] min-h-0 shrink overflow-y-auto border-t border-line empty:hidden"

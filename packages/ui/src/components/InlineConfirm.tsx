@@ -3,10 +3,9 @@ import { Button } from './Button.jsx'
 /**
  * An action that asks first, in the place where it was pressed (#428): a sentence, then Cancel and the action.
  *
- * Four screens had their own: the session archive's "Delete for good", an app's "Remove", a machine's "Remove?" and the stop
- * confirmation before an update. They put the buttons in two orders (the action first on two of them), and two let the
- * action be pressed again while it ran. One component: Cancel first, then the action, which is disabled while `busy`
- * (a second press would start the same change twice).
+ * Used by the session archive's "Delete for good", an app's "Remove", a machine's "Remove?" and the stop confirmation
+ * before an update. One component, so the order and the lock are the same everywhere: Cancel first, then the action,
+ * which is disabled while `busy` (a second press would start the same change twice).
  *
  * - `tone="danger"`: for what cannot be taken back; the box and the action wear the danger colour.
  * - `inline`: no box, the question and its two buttons run on in a row (a machine's line in Settings → Machines),

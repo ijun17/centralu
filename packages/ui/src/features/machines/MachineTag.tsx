@@ -30,10 +30,10 @@ export function MachineTag({ machine, testId, className = '' }: { machine: strin
 }
 
 /**
- * A linked machine's project or user-folder app in the sidebar's one list (#734), where a machine header used to say
- * which machine its rows were on. MachineTag's chip, so it reads as the same mark wherever a machine is named; the
- * border is the link: solid while connected, dashed while not (connecting, away, unreachable, …). It keeps what the
- * header offered, and more: pressing it opens a menu with the link's state, its last error and Connect (MachineMenu),
+ * A linked machine's project or user-folder app in the sidebar's one list (#734), which has no machine header to say
+ * which machine its rows are on. MachineTag's chip, so it reads as the same mark wherever a machine is named; the
+ * border is the link: solid while connected, dashed while not (connecting, away, unreachable, …). Pressing it opens a
+ * menu with the link's state, its last error and Connect (MachineMenu),
  * and its tooltip carries the last error too.
  *
  * Capped at 96px and cut with an ellipsis past it, so a long machine name cannot take the line from the project's own
@@ -41,7 +41,7 @@ export function MachineTag({ machine, testId, className = '' }: { machine: strin
  * badge's place inside a row that is itself a button (an app row), where the badge stands over it as a button of its
  * own beside the row's.
  */
-// In the project name's own ink (owner, 2026-10-20): beside a project's changes badge, the faint chip read as one more
+// In the project name's own ink (owner, 2026-10-20): beside a project's changes badge, a faint chip reads as one more
 // count. Its look is the chip's, a fill one step above the sidebar and an edge one step above the fill (owner, 2026-11-02;
 // no white border). Written whole rather than layered on CHIP: two text or border colours on one element are settled by the order
 // of the generated CSS, not of the class attribute

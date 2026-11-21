@@ -1,11 +1,10 @@
 /**
- * Is the caret on the **visually** first or last line (the story behind #38)?
+ * Is the caret on the **visually** first or last line (#38)?
  *
- * history.ts used to count lines only by newlines. When a single logical line grows long enough
- * to wrap into two or three visual lines, pressing the up arrow on the wrapped second line has
- * no newline to find, so it was treated as the "first line" and history came up instead of the
- * caret — it looked as though what the person was typing had vanished (reported by a user on
- * 2026-09-07).
+ * Counting lines only by newlines is not enough. When a single logical line wraps into two or
+ * three visual lines, the up arrow on the wrapped second line finds no newline, so it would count
+ * as the "first line" and bring up history instead of moving the caret — what the person was
+ * typing would look as though it had vanished.
  *
  * Counting wrapped lines eventually needs the on-screen coordinates of the character, and a
  * textarea has no API to ask for that. So this builds a **mirror `<div>` with the same width and
@@ -18,8 +17,8 @@
  *     Once a node is created it stays in the document and is reused.
  *
  * When it cannot be measured (an environment with no layout, or zero width), it **returns
- * true** — history must not disappear just because it could not be measured. In that case it
- * quietly falls back to the old behavior (counting newlines only).
+ * true** — history must not disappear just because it could not be measured. In that case only
+ * the caller's newline count decides.
  */
 
 /**
