@@ -96,7 +96,8 @@ beforeEach(() => {
   claude = new Adapter('claude')
   codex = new Adapter('codex')
   const adapters = new Map<ToolName, AgentAdapter>([['claude', claude], ['codex', codex]])
-  mgr = new SessionManager(store, adapters, (_e: NormalizedEvent) => {}, undefined, join(root, 'worktrees'), {
+  mgr = new SessionManager(store, adapters, (_e: NormalizedEvent) => {}, undefined, {
+    worktreeRoot: join(root, 'worktrees'),
     handoffTimings: timings,
   })
   mgr.prLookup = async () => null

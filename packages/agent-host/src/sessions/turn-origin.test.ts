@@ -189,7 +189,7 @@ describe('what is kept of the turns a hub follows', () => {
     const before = w.mgr.linkedHost.hostReader()
     // A control: while the turn is running, what a hub reads is the turn before it
     expect(await before.lastAnswer(id, undefined, true)).toMatchObject({ text: 'first answer' })
-    const restarted = new SessionManager(w.store, w.adapters, () => {}, undefined, `${w.caller.path}-worktrees`)
+    const restarted = new SessionManager(w.store, w.adapters, () => {}, undefined, { worktreeRoot: `${w.caller.path}-worktrees` })
     try {
       expect(JSON.parse(spans(id)!).latest.ended).toBe(true)
       expect(await restarted.linkedHost.hostReader().lastAnswer(id, undefined, true)).toMatchObject({ text: 'half of the second' })

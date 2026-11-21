@@ -69,6 +69,11 @@ export const STOPPING_WAIT_MS = 10_000
  */
 export const branchWasThereKey = (sessionId: string) => `worktree_branch_was_there:${sessionId}`
 
+/** Sessions by name, quoted, for a refusal that names who is still in a worktree */
+function sessionNames(sessions: readonly { name: string }[]): string {
+  return sessions.map((s) => `"${s.name}"`).join(', ')
+}
+
 /** A branch a new worktree starts on that was there already (#1662): where it starts, and whether a local branch of that name exists */
 type TakenBranch = ForkBase & { sha: string; existing: boolean }
 
@@ -302,11 +307,15 @@ export class WorktreeSessions {
     const holder = (await gitWorktreeList(cwd)).find((w) => w.branch === branch)
     if (!holder) return
     const where = `${branch} is checked out at ${holder.path}`
-    const id = canonicalKey(dirname(holder.path)) === canonicalKey(join(this.host.worktreeRoot, projectId)) ? basename(holder.path) : null
-    const live = id ? this.host.meta.get(id) : undefined
-    if (live) throw rpcError(`${where}, the worktree of the session "${live.name}". Delete that session first, or start on another branch.`)
-    const archived = id && isSessionId(id) ? this.host.store.trash.trashedSession(id) : null
-    if (!archived) throw rpcError(`${where}, which is not the worktree of an archived session, so it was left alone. Remove it there, or start on another branch.`)
+    const id = basename(holder.path)
+    const live = this.host.meta.get(id)
+    if (live) throw rpcError(`${where}, a folder named for the session "${live.name}", which is not archived. Delete that session first, or start on another branch.`)
+    const archived = isSessionId(id) ? this.host.store.trash.trashedSession(id) : null
+    // Whose worktree it is, by the path and project the session recorded: where the folder sits under today's root does not decide it
+    const recorded = archived?.record.projectId === projectId ? archived.session.worktree?.path : undefined
+    if (!archived || !recorded || canonicalKey(recorded) !== canonicalKey(holder.path)) {
+      throw rpcError(`${where}, which is not the worktree of an archived session, so it was left alone. Remove it there, or start on another branch.`)
+    }
     const kept = (why: string) => rpcError(`${where}, the worktree of the archived session "${archived.session.name}", which ${why}. Nothing was removed: restore that session to keep its work, or start on another branch.`)
     /*
      * Held across the checks and the removal: the archive refuses a restore or a purge of a session whose worktree is
@@ -329,6 +338,9 @@ export class WorktreeSessions {
       }
       // Restored between the read above and the mark: it is a session's worktree again, and is not taken
       if (this.host.meta.has(sid) || !this.host.store.trash.trashedSession(sid)) throw kept('was restored from the archive just now')
+      // A session working in it (a helper started there) loses its folder: refused, as deleting the worktree's session is
+      const occupants = this.host.sessionsInside(archived.session)
+      if (occupants.length) throw kept(`has ${sessionNames(occupants)} working in it`)
       await gitWorktreeRemove(cwd, holder.path, { worktreeRoot: this.host.worktreeRoot })
     } finally {
       this.worktreeCleanup.delete(sid)
@@ -605,7 +617,7 @@ export class WorktreeSessions {
     const occupied = (): { ok: false; error: string } | null => {
       const occupants = this.host.sessionsInside(target)
       if (!occupants.length) return null
-      return { ok: false, error: `${occupants.map((s) => `"${s.name}"`).join(', ')} ${occupants.length === 1 ? 'is' : 'are'} still in the worktree of "${target.name}" — delete ${occupants.length === 1 ? 'it' : 'them'} first` }
+      return { ok: false, error: `${sessionNames(occupants)} ${occupants.length === 1 ? 'is' : 'are'} still in the worktree of "${target.name}" — delete ${occupants.length === 1 ? 'it' : 'them'} first` }
     }
     const taken = occupied()
     if (taken) return taken

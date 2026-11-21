@@ -388,7 +388,7 @@ describe('asking another project', () => {
     const raw = w.store as unknown as { db: { pragma(s: string): unknown }; migrate(): void; migrationsRun: number }
     raw.db.pragma('user_version = 54')
     raw.migrate()
-    w.mgr = new SessionManager(w.store, w.adapters, (e) => w.events.push(e), undefined, join(w.target.path, 'test-worktrees'))
+    w.mgr = new SessionManager(w.store, w.adapters, (e) => w.events.push(e), undefined, { worktreeRoot: join(w.target.path, 'test-worktrees') })
     // A start_agent child of its own project keeps its asker
     expect(w.mgr.listSessions().find((s) => s.id === child.id)?.askedBy).toBe(sibling.id)
     const restored = w.mgr.listSessions().find((s) => s.id === targetSession)!

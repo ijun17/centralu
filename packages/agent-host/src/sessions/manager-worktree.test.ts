@@ -84,7 +84,7 @@ describe('worktree sessions', () => {
     cpSync(template, repo, { recursive: true })
 
     const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
-    wtMgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, wtRoot)
+    wtMgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, { worktreeRoot: wtRoot })
     // Default to "unknown" — calling the real gh would make the test depend on whether gh is installed on
     // this machine (#76 stage 3).
     wtMgr.prLookup = async () => null
@@ -137,7 +137,7 @@ describe('worktree sessions', () => {
 
     // Simulates a host restart — calling resume on an already-live session does nothing.
     const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
-    const restarted = new SessionManager(store, adapters, () => {}, undefined, wtRoot)
+    const restarted = new SessionManager(store, adapters, () => {}, undefined, { worktreeRoot: wtRoot })
     // Not the real gh, like every other manager here (#368; why: 'remembers the worktree even after the host restarts')
     restarted.prLookup = async () => null
     const restartedRpc = createRpcHandler(restarted, adapters)
@@ -160,7 +160,7 @@ describe('worktree sessions', () => {
   it("the wake-up catch-up also reads from the worktree's history", async () => {
     const a = new CwdFiledAdapter()
     const adapters = new Map<ToolName, AgentAdapter>([['claude', a]])
-    const first = new SessionManager(store, adapters, () => {}, undefined, wtRoot)
+    const first = new SessionManager(store, adapters, () => {}, undefined, { worktreeRoot: wtRoot })
     first.prLookup = async () => null
     const s = (await createRpcHandler(first, adapters)('agents.createSession', {
       projectId: project.id, cwd: repo, tool: 'claude', worktree: true,
@@ -168,7 +168,7 @@ describe('worktree sessions', () => {
     await first.tenure.disposeAll()
 
     a.toolHistory = [{ role: 'user', text: 'something said in the worktree terminal' }]
-    const restarted = new SessionManager(store, adapters, () => {}, undefined, wtRoot)
+    const restarted = new SessionManager(store, adapters, () => {}, undefined, { worktreeRoot: wtRoot })
     restarted.prLookup = async () => null
     await restarted.processes.resumeSession(s.id)
 
@@ -181,7 +181,7 @@ describe('worktree sessions', () => {
     const s = await create(true)
     const path = s.worktree!.path
 
-    const restarted = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), () => {}, undefined, wtRoot)
+    const restarted = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), () => {}, undefined, { worktreeRoot: wtRoot })
     /*
      * Not the real gh (#368). A manager that comes up with a worktree session checks for its merge at once and does
      * not wait for it (#69), and that check ends in `gh pr view` in the repository. On windows-2022 that gh took 10 s,
@@ -475,6 +475,54 @@ describe('worktree sessions', () => {
       expect(existsSync(old.worktree!.path)).toBe(false)
     })
 
+    it("takes over an archived session's worktree made under another root, by the path the session recorded", async () => {
+      const old = await archived('pr/moved-root')
+      await wtMgr.tenure.disposeAll()
+      const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
+      const next = new SessionManager(store, adapters, (e) => events.push(e), undefined, { worktreeRoot: join(root, 'data', 'worktrees') })
+      next.prLookup = async () => null
+      try {
+        const s = (await createRpcHandler(next, adapters)('agents.createSession', { projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'pr/moved-root' })) as SessionInfo
+        expect(s.worktree!.path.startsWith(join(root, 'data', 'worktrees'))).toBe(true)
+        expect(existsSync(old.worktree!.path)).toBe(false)
+      } finally {
+        await next.tenure.disposeAll()
+      }
+    })
+
+    it("keeps an archived session's worktree that another session still works in", async () => {
+      const s = await start('pr/occupied')
+      commit(s.worktree!.path, 'occupied.txt')
+      git(s.worktree!.path, 'push', '-q', 'origin', 'pr/occupied')
+      const helper = await wtMgr.createSession({ projectId: project.id, cwd: s.worktree!.path, tool: 'claude', permissionPreset: 'normal', askedBy: s.id })
+      wtMgr.rename(helper.id, 'helper')
+      await wtRpc('agents.deleteSession', { sessionId: s.id })
+
+      await expect(start('pr/occupied')).rejects.toThrow(/"helper" working in it/)
+      expect(existsSync(s.worktree!.path)).toBe(true)
+    })
+
+    it("never takes a worktree named as an archived session that is not the one it recorded", async () => {
+      const old = await archived('pr/recorded')
+      const namesake = join(root, 'elsewhere', old.id)
+      git(repo, 'worktree', 'add', '-q', '-b', 'pr/namesake', namesake)
+
+      await expect(start('pr/namesake')).rejects.toThrow(/not the worktree of an archived session/)
+      expect(existsSync(namesake)).toBe(true)
+    })
+
+    it("never takes another project's archived worktree, though both are of one repository", async () => {
+      const old = await archived('pr/other-project')
+      mkdirSync(join(repo, 'sub'))
+      const sub = (await wtRpc('projects.add', { path: join(repo, 'sub') })) as { id: string }
+      await wtRpc('projects.setTrusted', { projectId: sub.id, trusted: true })
+
+      await expect(
+        wtRpc('agents.createSession', { projectId: sub.id, cwd: join(repo, 'sub'), tool: 'claude', worktree: true, worktreeBranch: 'pr/other-project' }),
+      ).rejects.toThrow(/not the worktree of an archived session/)
+      expect(existsSync(old.worktree!.path)).toBe(true)
+    })
+
     it("keeps an archived session's worktree with uncommitted changes, and says whose it is", async () => {
       const old = await archived('pr/dirty')
       writeFileSync(join(old.worktree!.path, 'a.txt'), 'not committed\n')
@@ -531,7 +579,7 @@ describe('worktree sessions', () => {
     it("never takes a worktree a session not archived works in", async () => {
       const live = await start('pr/live')
 
-      await expect(start('pr/live')).rejects.toThrow(new RegExp(`the worktree of the session "${live.name}"`))
+      await expect(start('pr/live')).rejects.toThrow(new RegExp(`a folder named for the session "${live.name}", which is not archived`))
       expect(existsSync(join(live.worktree!.path, 'a.txt'))).toBe(true)
     })
   })
@@ -1125,7 +1173,7 @@ describe('worktree sessions', () => {
       const helper = await wtMgr.createSession({ projectId: project.id, cwd: s.worktree!.path, tool: 'claude', permissionPreset: 'normal', askedBy: s.id })
       wtMgr.rename(helper.id, 'helper')
       await wtMgr.tenure.disposeAll()
-      const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e), undefined, wtRoot)
+      const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e), undefined, { worktreeRoot: wtRoot })
       try {
         expect(next.listSessions().find((x) => x.id === helper.id)!.live).toBe(false)
         const r = await next.runCentraluTool(managerId, 'agent_session', { sessionId: s.id, action: 'delete' })
@@ -1214,7 +1262,7 @@ describe('worktree sessions', () => {
         await gate
         return repair(...args)
       })
-      const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e), undefined, wtRoot)
+      const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e), undefined, { worktreeRoot: wtRoot })
       spy.mockRestore()
       try {
         const restoring = next.trash.restoreSession(s.id)
@@ -1239,7 +1287,7 @@ describe('worktree sessions', () => {
       renameSync(worktreeRecoveryDir(gone.s.id), `${worktreeRecoveryDir(gone.s.id)}.purging-2`)
       await store.trash.purgeSession(gone.s.id)
       await wtMgr.tenure.disposeAll()
-      const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e), undefined, wtRoot)
+      const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e), undefined, { worktreeRoot: wtRoot })
       try {
         await vi.waitFor(() => expect(existsSync(`${worktreeRecoveryDir(gone.s.id)}.purging-2`)).toBe(false))
         await vi.waitFor(() => expect(existsSync(saved(kept.s).dir)).toBe(true))
@@ -1272,7 +1320,7 @@ describe('worktree sessions', () => {
       expect(store.trash.isTrashed(s.id)).toBe(true)
       expect(existsSync(worktreeRecoveryDir(s.id))).toBe(false)
       await wtMgr.tenure.disposeAll()
-      const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e), undefined, wtRoot)
+      const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e), undefined, { worktreeRoot: wtRoot })
       try {
         await vi.waitFor(() => expect(existsSync(saved(s).dir)).toBe(true))
         const back = await next.trash.restoreSession(s.id)
@@ -1649,7 +1697,7 @@ describe('worktree sessions', () => {
     const unknownProject = join(wtRoot, randomUUID(), randomUUID())
     mkdirSync(unknownProject, { recursive: true })
 
-    const restarted = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), () => {}, undefined, wtRoot)
+    const restarted = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), () => {}, undefined, { worktreeRoot: wtRoot })
     restarted.prLookup = async () => null
     await restarted.worktreeSweep
 

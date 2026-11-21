@@ -87,7 +87,7 @@ beforeEach(async () => {
   const adapters = new Map<ToolName, AgentAdapter>([['codex', codex]])
   rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot, reservedIds: ['control'], builderBusy: (ref) => mgr.appSessions.builderBusy(ref) })
   rt.refresh()
-  mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
+  mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), { worktreeRoot: join(root, 'worktrees') })
   // Where an app made without a project goes (#1141): this test's ~/Centralu
   mgr.projectCreation.useProjectsHome(() => join(root, 'Centralu'))
   mgr.prLookup = async () => null

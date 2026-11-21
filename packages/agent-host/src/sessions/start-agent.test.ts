@@ -831,7 +831,7 @@ describe('starting another agent in the same project', () => {
       // The host goes with the hand-over in the air; the next one starts on the same store
       vi.useRealTimers()
       await w.mgr.tenure.disposeAll()
-      const next = new SessionManager(w.store, w.adapters, () => {}, undefined, join(dirname(w.caller.path), 'worktrees'))
+      const next = new SessionManager(w.store, w.adapters, () => {}, undefined, { worktreeRoot: join(dirname(w.caller.path), 'worktrees') })
       try {
         vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
         const mail = wireHostMail(next, w.store)

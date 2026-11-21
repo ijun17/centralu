@@ -62,7 +62,7 @@ async function lastHost(crashedAt: number, o: { queued?: boolean } = {}) {
 /** The start after, an hour on: `systemEnd` is what the last host's record said, or `null` when it said nothing of the system */
 function nextStart(systemEnd: SystemEnd | null) {
   vi.setSystemTime(T0 + HOUR)
-  const mgr = new SessionManager(w.store, w.adapters, () => {}, undefined, undefined, systemEnd ? { systemEnd } : {})
+  const mgr = new SessionManager(w.store, w.adapters, () => {}, undefined, systemEnd ? { systemEnd } : {})
   mgr.prLookup = async () => null
   later.push(mgr)
   return mgr

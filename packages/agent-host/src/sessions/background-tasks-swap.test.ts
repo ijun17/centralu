@@ -85,7 +85,7 @@ beforeEach(() => {
 function host() {
   const claude = new Adapter()
   const adapters = new Map<ToolName, AgentAdapter>([['claude', claude]])
-  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, tmpdir())
+  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, { worktreeRoot: tmpdir() })
   const session = (id: string) => mgr.listSessions().find((s) => s.id === id)!
   return { mgr, claude, session, rpc: createRpcHandler(mgr, adapters) }
 }

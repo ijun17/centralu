@@ -142,7 +142,7 @@ export async function crossWorld(): Promise<CrossWorld> {
     ['codex', new CrossAdapter('codex')],
   ])
   // Worktrees (start_agent's, #561) go under the temp root, never the data folder's; no gh is asked about pull requests
-  const mgr = new SessionManager(store, adapters as unknown as Map<ToolName, AgentAdapter>, (e) => events.push(e), undefined, join(root, 'worktrees'))
+  const mgr = new SessionManager(store, adapters as unknown as Map<ToolName, AgentAdapter>, (e) => events.push(e), undefined, { worktreeRoot: join(root, 'worktrees') })
   mgr.prLookup = async () => null
   const caller = await mgr.projectCreation.addProject(callerPath)
   const target = await mgr.projectCreation.addProject(targetPath)

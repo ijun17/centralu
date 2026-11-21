@@ -134,7 +134,7 @@ beforeEach(async () => {
 
 /** A host over the store as it is now — again, for a session only an older build could have made */
 function openManager(): void {
-  mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
+  mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), { worktreeRoot: join(root, 'worktrees') })
   mgr.prLookup = async () => null
   mgr.apps.useExternalApps(rt)
   rpc = createRpcHandler(mgr, adapters, { externalApps: rt })

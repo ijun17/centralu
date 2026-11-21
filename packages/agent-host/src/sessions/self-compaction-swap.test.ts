@@ -39,7 +39,7 @@ function host() {
   claude.compactCommand = (focus) => (focus ? `/compact ${focus}` : '/compact')
   ;(claude.capabilities as { backgroundTasks: boolean }).backgroundTasks = true
   const adapters = new Map<ToolName, AgentAdapter>([['claude', claude]])
-  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, tempRoot('compact-then-home-'))
+  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, { worktreeRoot: tempRoot('compact-then-home-') })
   hosts.push(mgr)
   return { mgr, claude, rpc: createRpcHandler(mgr, adapters) }
 }

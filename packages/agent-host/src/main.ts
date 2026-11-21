@@ -375,7 +375,6 @@ const mgr = new SessionManager(
     sleeperRef.current?.observe(e)
   },
   (sessionId) => bridgeAddress(launch.frontDoor, port, token, sessionId),
-  undefined,
   {
     ...(updateResume ? { updateResume } : {}),
     // The last host recorded that the system was ending (#1397)

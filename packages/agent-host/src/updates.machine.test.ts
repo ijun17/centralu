@@ -8,7 +8,7 @@ const reached = vi.hoisted(() => ({ calls: [] as string[], copy: '', version: ''
 vi.mock('./os.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./os.js')>()),
   installedCopyPath: () => reached.copy,
-  installedCopyVersionSource: () => ({ kind: 'command' as const, file: 'copy-version', args: [] as string[] }),
+  installedCopyVersionSource: () => ({ kind: 'plutil' as const, args: ['copy-version'] }),
 }))
 vi.mock('./os/exec.js', () => ({
   execText: async (file: string, args: string[]) => {
@@ -19,7 +19,7 @@ vi.mock('./os/exec.js', () => ({
   },
   execTextSync: (file: string, args: string[]) => {
     // The one program of this test that answers: the installed copy's version
-    if (file === 'copy-version') return { stdout: reached.version, stderr: '' }
+    if (args[0] === 'copy-version') return { stdout: reached.version, stderr: '' }
     reached.calls.push(`${file} ${args.join(' ')}`)
     throw new Error('this test reaches no process')
   },

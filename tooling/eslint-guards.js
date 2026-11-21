@@ -165,6 +165,9 @@ const gitStart = guard('git-start', { git: 'git is started here by name: go thro
 /** What may be asked `--version` or `--help` by `child_process` directly: each answers from its own binary, with no network, sign-in or first-run work to wait on */
 const PROBE_FREE = /^(?:git|node|gpgv)(?:\.exe)?$/
 
+/** What host code may run through `runSync` / `execTextSync` (#2370): each starts no program of its own, so a limit that ends the pid ends all of it */
+const STARTS_NOTHING = /^(?:ps|reg|plutil)(?:\.exe)?$/
+
 /**
  * A program that is given a time limit ends with the whole tree it started (`os.processes.run`, `OsProcesses.stop`), never by
  * `execFile`'s `timeout:`: that signals the pid only, and what a `.cmd` shim's `cmd.exe` started goes on running. A call to a
@@ -177,12 +180,36 @@ const PROBE_FREE = /^(?:git|node|gpgv)(?:\.exe)?$/
  * no limit nothing ends it; `execText` (os/exec.ts) bounds it and ends its tree. `PROBE_FREE` and `process.execPath` are let
  * through. Arguments held in a variable, a command line built by interpolation and a starter imported under another name are
  * not seen.
+ *
+ * In host code, `runSync` and `execTextSync` run only a program named in `STARTS_NOTHING`, written as a literal (a path's last
+ * part counts) or as `systemTool([…, name])` (`sync`; off with `{ sync: false }`): a synchronous run cannot end a tree without
+ * blocking the host for a process-table read, so it is kept to programs that leave none. `execTextSync` in os/exec.ts,
+ * which hands its own parameter on, is not read; its callers are. Not seen: a runner imported under another name or kept
+ * in a variable (`const run = os.processes.runSync`).
  */
 const timedStart = guard('timed-start', {
   timed: "'timeout' (or options spread from elsewhere, which may carry one) on a started program ends its pid only, and what it started runs on: use os.processes.run with timeoutMs (os/exec.js execText for a short question)",
   probe: 'a program asked its version or help through child_process or runSync can wait forever (a sign-in, the network, a first run) and nothing ends it: use execText (os/exec.js), which bounds it and ends its tree',
+  sync: "runSync and execTextSync end the pid only, so they run only a program that starts nothing (STARTS_NOTHING in tooling/eslint-guards.js, by name): use os.processes.run or execText (os/exec.js), which end the tree",
 }, (context, add) => {
   const timed = (context.options[0] ?? {}).timed !== false
+  const sync = (context.options[0] ?? {}).sync !== false
+  // The layer's synchronous runners: their limit ends the pid only (os/exec.ts `execTextSync`)
+  const pidOnly = new Set(['runSync', 'execTextSync'])
+  const startsNothing = (node) => {
+    const command = unwrap(node)
+    const named = command?.type === 'CallExpression' && nameOf(command.callee) === 'systemTool' && unwrap(command.arguments[0])?.type === 'ArrayExpression'
+      ? plain(unwrap(unwrap(command.arguments[0]).elements.at(-1)))
+      : plain(command)
+    return STARTS_NOTHING.test((named ?? '').split(/[\\/]/).at(-1) ?? '')
+  }
+  /** `command` is a parameter of `execTextSync` in os/exec.ts, which hands it on to `runSync` */
+  const handedOn = (node, command) => {
+    if (command?.type !== 'Identifier' || !/[\\/]os[\\/]exec\.ts$/.test(context.filename)) return false
+    let fn = node.parent
+    while (fn && !/Function/.test(fn.type)) fn = fn.parent
+    return !!fn && pidOnly.has(fn.id?.name) && fn.params.some((p) => p.type === 'Identifier' && p.name === command.name)
+  }
   const made = new Set() // `const exec = promisify(execFile)`
   const probeFree = (node) => {
     const command = unwrap(node)
@@ -193,8 +220,6 @@ const timedStart = guard('timed-start', {
   // Only as the first argument, where they are the question (`npm -v`, `go version`); later, `version` is a field (`npm view x version`)
   const PROBE_FIRST = /^(?:-v|version)$/
   const probing = (word, at) => PROBE_FLAG.test(word) || (at === 0 && PROBE_FIRST.test(word))
-  // The layer's synchronous runners: their limit ends the pid only (os/exec.ts `execTextSync`)
-  const pidOnly = new Set(['runSync', 'execTextSync'])
   return {
     VariableDeclarator(node) {
       const init = node.init && unwrap(node.init)
@@ -209,6 +234,7 @@ const timedStart = guard('timed-start', {
         node.arguments.some((a) => a.type === 'ArrayExpression' && a.elements.some((e, at) => e && probing(plain(unwrap(e)) ?? '', at))) ||
         line.trim().split(/\s+/).slice(1).some((word, at) => probing(word, at))
       if (asked && !probeFree(node.arguments[0])) add(node, 'probe')
+      else if (sync && pidOnly.has(callee) && !startsNothing(node.arguments[0]) && !handedOn(node, unwrap(node.arguments[0]))) add(node, 'sync')
       if (!timed || !starter) return
       for (const a of node.arguments) {
         if (a.type === 'ObjectExpression' && a.properties.some((p) => (p.type === 'SpreadElement' && callee !== 'spawn') || (p.type === 'Property' && keyOf(p) === 'timeout'))) add(node, 'timed')
@@ -531,7 +557,7 @@ export const guardConfigs = [
   // The scripts, tests and their helpers ask tools too (the drift checks, the measurements): a probe is read in them all (#2346)
   {
     files: ['scripts/**/*.{ts,mts,js,mjs}', 'packages/*/scripts/**/*.{ts,mts,js,mjs}', '**/*.test.ts', '**/*.test-helpers.ts', 'tooling/**/*.{ts,mts,js,mjs}', 'e2e/**/*.ts'],
-    rules: { 'guard/timed-start': ['error', { timed: false }] },
+    rules: { 'guard/timed-start': ['error', { timed: false, sync: false }] },
   },
   // The path rules are written in os/rules.ts alone
   { files: [`${HOST_SRC}/**/*.{ts,mts}`], ignores: [...TESTS, `${HOST_SRC}/os/rules.ts`], rules: { 'guard/one-path-rule': 'error' } },

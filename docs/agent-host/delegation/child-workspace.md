@@ -16,7 +16,8 @@ A branch asked for that is already there (#1662, a pull request's handed to a ne
 is not forked: the worktree starts on it as the remote has it, fetched (trusted projects only), tracking it when only the remote
 has it. A local branch behind the remote is moved to its head when every commit of its own was on the remote at some point
 (the remote-tracking ref's reflog, so a rebased pull request counts) or is on the trunk; otherwise the start is refused with
-the count. An archived session's worktree that has the branch checked out is removed when it has no uncommitted change and
+the count. An archived session's worktree (known by the path the session recorded, wherever the worktree root was when
+it was made) that has the branch checked out is removed when it has no uncommitted change and
 every commit of its own is on a remote or the trunk; any other worktree that has it (a session not archived, the project's
 folder, one of the person's) is never touched, and the refusal names it. A start that fails keeps such a branch, and so does the session's cleanup later: `worktree_branch_was_there:<session>`, an
 app setting (no store step; a build before it reads nothing new), marks it, and goes when the session is deleted for good.
@@ -64,8 +65,9 @@ retry; the archive's answer and the purge say so.
 
 **Where worktrees are, and what a start sweeps** (#2344). The worktree root is `worktrees` in the data folder
 (`worktreesFolder`, the one definition), beside `worktree-recovery` (`worktreeRecoveryFolder`), so a host or test given
-`CC_DATA_DIR` never makes one in the real `~/.centralu`. A `--db` named elsewhere moves the store and its logs, not the
-worktrees: a worktree and its recovery snapshots stay in one folder. As the host starts, it removes each session folder in the root
+`CC_DATA_DIR` never makes one in the real `~/.centralu`. A `--db` named elsewhere moves the store and what the host keeps beside
+it (host.lock and host-ownership.sqlite, host.log and host-errors.log, the stop and quit marks, the update-resume list,
+the system-end record, held tool output, the copies kept before a breaking step), not the worktrees: a worktree and its recovery snapshots stay in one folder. As the host starts, it removes each session folder in the root
 (`<project id>/<session id>`) that a removal left part way: owned by no session (no live or archived session has its
 name as its id, or has it or a folder inside it as its worktree or working folder), not listed by git, and with no
 `.git`. It goes through `gitWorktreeRemove` with `leftoverOnly`, which refuses a folder git lists on its own read of

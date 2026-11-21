@@ -199,7 +199,7 @@ describe('a program the host runs in a project folder', () => {
   it('a found path is remembered; a miss is asked again', () => {
     let asked = 0
     const find = () => (++asked > 1 ? 'C:\\Git\\cmd\\git.exe' : null)
-    expect(programPath('git', 'win32', find)).toBe(notOnPath('git'))
+    expect(programPath('git', 'win32', find)).toBe(notOnPath('git', process.env, 'win32'))
     expect(programPath('git', 'win32', find)).toBe('C:\\Git\\cmd\\git.exe')
     expect(programPath('git', 'win32', find)).toBe('C:\\Git\\cmd\\git.exe')
     expect(asked).toBe(2)
@@ -219,14 +219,16 @@ describe('a program the host runs in a project folder', () => {
       expect(path).toBe(win32.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'centralu-not-on-path', `${name}.exe`))
       expect(win32.isAbsolute(path)).toBe(true)
     }
-    expect(notOnPath('git', { SystemRoot: '' })).toBe('C:\\Windows\\System32\\centralu-not-on-path\\git.exe')
+    expect(notOnPath('git', { SystemRoot: '' }, 'win32')).toBe('C:\\Windows\\System32\\centralu-not-on-path\\git.exe')
   })
 
-  it('an agent CLI the same way: the path found, else the bare name off Windows and never on it', () => {
+  it('an agent CLI the same way: the path found, else a path that is not there, never the bare name (#2366)', () => {
     expect(toolCommand('codex', 'win32', () => 'C:\\npm\\codex.cmd')).toBe('C:\\npm\\codex.cmd')
-    expect(toolCommand('codex', 'win32', () => null)).toBe(notOnPath('codex'))
-    expect(toolCommand('claude', 'win32', () => null)).toBe(notOnPath('claude'))
-    expect(toolCommand('codex', 'darwin', () => null)).toBe('codex')
+    expect(toolCommand('codex', 'win32', () => null)).toBe(notOnPath('codex', process.env, 'win32'))
+    expect(toolCommand('claude', 'win32', () => null)).toBe(notOnPath('claude', process.env, 'win32'))
+    // Under WSL the start's own PATH search would find the Windows install on a drive, which the lookup passed over
+    expect(toolCommand('claude', 'linux', () => null)).toBe('/centralu-not-on-path/claude')
+    expect(toolCommand('codex', 'darwin', () => null)).toBe('/centralu-not-on-path/codex')
   })
 
   /*
