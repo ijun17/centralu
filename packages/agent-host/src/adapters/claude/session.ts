@@ -22,6 +22,7 @@ import type { ClaudeMessage } from './json.js'
 import { requestTurnHooks } from './request-hook.js'
 import { claudeAutoCompactWindow, claudeCompactAt, claudeQueryOptions, compactPointOff, type ClaudeInput, type QueryHandle } from './sdk-query.js'
 import { ClaudeRaceRetry, type RaceMsg } from './refresh-race.js'
+import { TURN_START_MS, TurnStartWait } from './turn-start.js'
 import { tracksInputs } from './tracked-input.js'
 import { initSurfaceLines } from './surface.js'
 import { ClaudeScheduleLook } from './schedule-look.js'
@@ -76,9 +77,19 @@ export class ClaudeSession implements SessionHandle {
    * though no turn ran (measured on 2.1.296), and that is no finished turn: it is not shown as one
    */
   private quietInputs = new Map<string, ClaudeInput>()
-  private trackedInputKnown = false
-  /** Installed only after the initial CLI metadata confirms the protocol we have verified. */
-  sendTracked?: (text: string, observer?: InputObserver, opts?: { origin?: InputOrigin; id?: string }) => Promise<void>
+  /** Whether the CLI's first init confirmed the protocol tracked inputs need (`tracksInputs`); undefined until that init */
+  private tracks: boolean | undefined
+  /**
+   * From the first input: the CLI says whether it can track only in a turn's init, so what goes before (a wake of a resumed session) waits
+   * for that, and a CLI that cannot track takes it when written (`onInit`). Gone once the CLI said it cannot
+   */
+  sendTracked?: (text: string, observer?: InputObserver, opts?: { origin?: InputOrigin; id?: string }) => Promise<void> = (text, observer, opts) => {
+    const receipt = this.ledger.track(observer, opts?.id)
+    this.sendInput(text, receipt.id, receipt, opts?.origin)
+    return receipt.done
+  }
+  /** The wait for the CLI to start a turn for input given it at rest (`TurnStartWait`) */
+  private readonly turnStart = new TurnStartWait(() => this.notStarted())
   /** The CLI version this process last reported (#297) */
   private reportedVersion: string | null = null
   /** The init message's command list was compared with the adapter's limitations (#270): once per process */
@@ -175,6 +186,7 @@ export class ClaudeSession implements SessionHandle {
       resend: (sent) => {
         this.queue.push(...sent)
         this.ledger.turnStarted(CLAUDE_TURN)
+        this.turnStart.expect()
         this.notify?.()
         this.notify = null
       },
@@ -277,7 +289,7 @@ export class ClaudeSession implements SessionHandle {
           type: 'user' as const,
           parent_tool_use_id: null,
           session_id: this.externalId ?? '',
-          uuid: next.uuid,
+          uuid: next.sentAs ?? next.uuid,
           message: { role: 'user' as const, content: [{ type: 'text' as const, text: next.text }] },
           // The person's own typing says so; everything else is left unattributed, as before (see `InputOrigin`)
           ...(next.origin ? { origin: next.origin } : {}),
@@ -356,8 +368,10 @@ export class ClaudeSession implements SessionHandle {
   }
 
   /** One message of the stream, in the order the CLI sent it */
-  private onMessage(q: QueryHandle, msg: ClaudeMessage): void {
+  private onMessage(q: QueryHandle, said: ClaudeMessage): void {
+    const msg = this.raceRetry.ownIds(said)
     const m = msg as StreamMsg
+    if (m.type === 'assistant' || m.type === 'stream_event' || m.type === 'result' || (m.type === 'system' && m.subtype === 'init')) this.turnStart.heard()
     if ((!this.ledger.turnRunning || !this.turnNamed) && !m.parent_tool_use_id && (m.type === 'assistant' || m.type === 'stream_event')) {
       const opening = !this.ledger.turnRunning
       if (opening) {
@@ -372,7 +386,7 @@ export class ClaudeSession implements SessionHandle {
          * nothing to go by: null. A turn a send at rest began was said working at once, before the CLI named its input, so it is said
          * again now (as Codex does). With a card up it is not (the card's state stays): the turn's end names the inputs it took
          */
-        this.startInputs = m.user_message_uuid ? [m.user_message_uuid] : this.sendTracked ? [] : null
+        this.startInputs = m.user_message_uuid ? [m.user_message_uuid] : this.tracks ? [] : null
         if (opening || this.startInputs !== null) this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
         this.startInputs = null
       }
@@ -396,7 +410,7 @@ export class ClaudeSession implements SessionHandle {
     }
     const retrying = m.type === 'result' && this.raceRetry.afterResult(msg as RaceMsg)
     // What this result folded in, for the host to read while it handles the events that end the turn (#1377)
-    const took = !retrying && this.sendTracked ? (Array.isArray(m.user_message_uuids) ? m.user_message_uuids.filter((id): id is string => typeof id === 'string') : []) : null
+    const took = !retrying && this.tracks ? (Array.isArray(m.user_message_uuids) ? m.user_message_uuids.filter((id): id is string => typeof id === 'string') : []) : null
     if (m.type === 'result' && !retrying) {
       const result = msg as { user_message_uuid?: string; user_message_uuids?: string[] }
       const named = result.user_message_uuids ?? (result.user_message_uuid ? [result.user_message_uuid] : [])
@@ -420,6 +434,8 @@ export class ClaudeSession implements SessionHandle {
     // A result ends the open turn: a Stop still waiting is confirmed by it, unless it failed or hit a limit (nothing to confirm)
     if (m.type === 'result') this.ledger.endSaid(events, completedInputs, took)
     else this.ledger.said(events)
+    // An input still waits after the turn ended (one queued behind it): its own turn should begin now
+    if (m.type === 'result' && !retrying && this.queuedInputs() > 0) this.turnStart.expect()
     this.schedules.arm()
     // Once a turn ends, asks what is currently in the context window (FR-14).
     if (m.type === 'result' && !retrying) {
@@ -462,14 +478,12 @@ export class ClaudeSession implements SessionHandle {
   /** The CLI's init message: its conversation id, what it can track, its version and its commands */
   private onInit(m: StreamMsg): void {
     if (m.session_id) this.externalId = m.session_id
-    if (!this.trackedInputKnown) {
-      this.trackedInputKnown = true
-      if (tracksInputs(m)) {
-        this.sendTracked = (text, observer, opts) => {
-          const receipt = this.ledger.track(observer, opts?.id)
-          this.sendInput(text, receipt.id, receipt, opts?.origin)
-          return receipt.done
-        }
+    if (this.tracks === undefined) {
+      this.tracks = tracksInputs(m)
+      // A CLI that names no inputs took what it was given before it said so when it was written, as it takes every input after
+      if (!this.tracks) {
+        this.sendTracked = undefined
+        this.ledger.completeTracked()
       }
     }
     // The CLI's own version, for moving the session to a newer install (#297). Once per process: init repeats per query
@@ -625,6 +639,7 @@ export class ClaudeSession implements SessionHandle {
     if (starting) this.turnNamed = false
     this.queue.push({ text, uuid, parentNote, ...(origin ? { origin } : {}) })
     this.ledger.turnStarted(CLAUDE_TURN)
+    if (starting) this.turnStart.expect()
     this.notify?.()
     this.notify = null
     // A note queued while a tool awaits approval must leave that card and state intact.
@@ -728,7 +743,7 @@ export class ClaudeSession implements SessionHandle {
    * or Codex Stop says what it drops. A CLI without it is asked plainly: what it holds runs after the Stop, as before
    */
   private get cancelsQueued(): boolean {
-    return this.sendTracked !== undefined
+    return this.tracks === true
   }
 
   /** What a Stop releases besides the turn, after the tracked inputs failed */
@@ -765,7 +780,7 @@ export class ClaudeSession implements SessionHandle {
     // identifies exactly which did not run; do not silently discard their already-visible rows.
     const cancelled = (response as { cancelled?: unknown } | undefined)?.cancelled
     if (Array.isArray(cancelled)) {
-      const ids = cancelled.filter((id): id is string => typeof id === 'string')
+      const ids = cancelled.filter((id): id is string => typeof id === 'string').map((id) => this.raceRetry.ownId(id))
       let count = 0
       for (const id of ids) if (this.personInputs.delete(id)) count++
       this.reportUndelivered(count)
@@ -789,11 +804,26 @@ export class ClaudeSession implements SessionHandle {
     // (SDKControlInterruptResponse). A mixed batch could contain person input, so leave the SDK
     // queue intact when that race is possible; only local notes have been removed above.
     if (!query?.cancelAsyncMessage || this.personInputs.size || this.queue.length || this.raceRetry.held.length || this.sendGate) return
-    for (const id of ids) void query.cancelAsyncMessage(id).catch((error: Error) => {
+    for (const id of ids) void query.cancelAsyncMessage(this.raceRetry.sentId(id)).catch((error: Error) => {
       this.emit({ type: 'error', sessionId: this.sessionId, error: {
         code: 'internal', message: `Could not cancel the parent note: ${error.message}`, retryable: false,
       } })
     })
+  }
+
+  /**
+   * The CLI started no turn for what it was given at rest (`TurnStartWait`): every input no turn took is given back, a tracked one by its
+   * failure (the mailbox sends a wake again), the person's by saying it did not run, and the turn the session reads as running ends
+   */
+  private notStarted(): void {
+    if (this.closed || this.queuedInputs() === 0) return
+    const untracked = this.queuedInputs() - this.ledger.untaken
+    const within = `in ${TURN_START_MS / 1000} s`
+    this.queue = this.queue.filter((input) => input.quiet)
+    this.personInputs.clear()
+    this.ledger.failTracked(new Error(`Claude Code started no turn for it ${within}`))
+    const ended = untracked > 0 ? undeliveredError(this.sessionId, untracked, `got no turn from Claude Code ${within}`) : { type: 'error' as const, sessionId: this.sessionId, error: { code: 'internal' as const, message: `Claude Code started no turn for its input ${within}, so it did not run`, retryable: true } }
+    this.ledger.endSaid([ended], undefined, null)
   }
 
   private reportUndelivered(count: number): void {
@@ -819,6 +849,7 @@ export class ClaudeSession implements SessionHandle {
    * same way; only swapping the process was missing it.
    */
   async dispose(): Promise<void> {
+    this.turnStart.heard()
     this.ledger.failTracked(new Error('The session closed before the parent note finished'))
     this.ledger.close()
     this.stopMidTurnRead()

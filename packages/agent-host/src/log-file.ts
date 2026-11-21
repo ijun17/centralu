@@ -19,9 +19,6 @@ import { realOs } from './os/real.js'
  * terminal or from Finder.
  */
 
-/** A log line with the time in front (#1784): the one stamp every `[links]` line takes, so they can be placed against the other logs */
-export const stamped = (line: string): string => `${new Date().toISOString()} ${line}`
-
 /** Once one file exceeds this, one generation is rolled off */
 export const MAX_LOG_BYTES = 8 * 1024 * 1024
 
@@ -133,6 +130,20 @@ export class RollingFile {
 }
 
 /**
+ * Each line the file takes, with the time it was written in front (#1784, #2377), so lines are placed against each other and against
+ * the store. A write can end mid-line: what the next one goes on with is not stamped again, and a blank line stays blank
+ */
+export function lineStamps(now: () => Date = () => new Date()): (text: string) => string {
+  let atLineStart = true
+  return (text) => {
+    const at = now().toISOString()
+    const out = text.split('\n').map((part, i) => ((i > 0 || atLineStart) && part.trim() !== '' ? `${at} ${part}` : part)).join('\n')
+    atLineStart = text.endsWith('\n')
+    return out
+  }
+}
+
+/**
  * Also flows stderr into a file (**mirrors it, without intercepting it**).
  *
  * It still goes out on the original stderr too — if it disappeared from view when launched from a
@@ -152,10 +163,11 @@ export function teeStderrToFile(path: string, maxBytes: number = MAX_LOG_BYTES):
   if (!file.isOpen) return () => {}
 
   const original = process.stderr.write.bind(process.stderr)
+  const stamp = lineStamps()
 
   process.stderr.write = ((chunk: unknown, enc?: unknown, cb?: unknown) => {
     try {
-      file.write(typeof chunk === 'string' ? chunk : Buffer.from(chunk as Uint8Array).toString('utf8'))
+      file.write(stamp(typeof chunk === 'string' ? chunk : Buffer.from(chunk as Uint8Array).toString('utf8')))
     } catch {
       /* If it fails to write to the file, the original path below is still alive */
     }

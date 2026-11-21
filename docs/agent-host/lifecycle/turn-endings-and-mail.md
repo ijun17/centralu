@@ -48,8 +48,13 @@ stopping, more than 30 minutes wakes a sleeping session only for mail that needs
 when the person only opens the session, and goes with the next mail that wakes it (#1951). The sweep also runs the mailbox's retention
 and moves on the work of a session that left without telling the mailbox. Sleeping sessions are resumed two at a time.
 
-A wake is delivered when the tool says it took the input (`takeInput`, `sessions/mail-accept.ts`); a tool silent for 90 s counts as
-having taken it, because sending it again could run the work twice. If that tool then **fails** the input (a session closed with it
+A wake is delivered when the tool says it took the input (`takeInput`, `sessions/mail-accept.ts`). Claude Code says so in a turn's `init`
+whether it can name its inputs, and sends that only when it starts a turn, so the first wake of a resumed process is tracked until then
+(an older CLI took it when written). A Claude Code at rest that starts no turn for the wake in 30 s fails it, and the mailbox sends it
+again (`TURN_START_MS`, `adapters/claude/turn-start.ts`): the CLI starts one in about a second (measured on 2.1.296), and drops an input
+whose id it has already read without a word (#2377), which is why a turn that lost the sign-in race goes again under a new id. A tool silent
+for 90 s counts as having taken it: a wake given while a turn runs waits behind it until a turn takes it, and sending it again could run the
+work twice. If that tool then **fails** the input (a session closed with it
 queued, a rejected `turn/start`), the delivery makes the mail unread and undelivered again and holds it `failed` for the person (Inbox:
 Retry): a failure told that late does not prove the tool never ran it, so nothing sends it again by itself. A failure after the tool
 took it is not acted on. The tool keeps the wake in its own record as a user turn; the host writes no user row for it, so the catch-up and the import

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { MAX_LOG_BYTES, RollingFile, hostLogPath, rotateIfLarge, startupBanner, teeStderrToFile } from './log-file.js'
+import { MAX_LOG_BYTES, RollingFile, hostLogPath, lineStamps, rotateIfLarge, startupBanner, teeStderrToFile } from './log-file.js'
 
 const dirs: string[] = []
 const tmp = () => {
@@ -26,6 +26,23 @@ describe('the host log file', () => {
       stop()
     }
     expect(readFileSync(path, 'utf8')).toContain('[agent-host] hello')
+  })
+
+  it('puts the time in front of each line in the file (#1784, #2377)', () => {
+    const path = hostLogPath(tmp())
+    const stop = teeStderrToFile(path)
+    try {
+      process.stderr.write('[mail] one\n[sleep] two\n')
+    } finally {
+      stop()
+    }
+    expect(readFileSync(path, 'utf8')).toMatch(/^\d{4}-\d\d-\d\dT[\d:.]+Z \[mail\] one\n\d{4}-\d\d-\d\dT[\d:.]+Z \[sleep\] two\n$/)
+  })
+
+  it('stamps a line once though it comes in parts, and leaves a blank line blank', () => {
+    const stamp = lineStamps(() => new Date(0))
+    const at = new Date(0).toISOString()
+    expect([stamp('[a] st'), stamp('arts\n\n[b] '), stamp('ends\n')].join('')).toBe(`${at} [a] starts\n\n${at} [b] ends\n`)
   })
 
   /*

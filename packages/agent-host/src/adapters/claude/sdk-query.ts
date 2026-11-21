@@ -15,8 +15,8 @@ import type { UsageQuery } from './usage.js'
 
 /** The SDK query a Claude session runs on: the surface of it we use, what its input carries, and its options. */
 
-/** One message for the CLI to read, as the session's input stream holds it */
-export type ClaudeInput = { text: string; uuid: ReturnType<typeof randomUUID>; parentNote: boolean; origin?: InputOrigin; quiet?: boolean }
+/** One message for the CLI to read, as the session's input stream holds it. `sentAs`: the id the CLI is given it under when not its own (a resend, `ClaudeRaceRetry`) */
+export type ClaudeInput = { text: string; uuid: ReturnType<typeof randomUUID>; parentNote: boolean; origin?: InputOrigin; quiet?: boolean; sentAs?: ReturnType<typeof randomUUID> }
 
 /**
  * Only the part of the SDK Query that we use.
