@@ -4,12 +4,6 @@ import type { AppState, StoreGet, StoreSet } from './state.js'
 import { syncBadge } from './events/notices.js'
 import { replayPendingEvents } from './sessionList.js'
 
-/**
- * The Assistant: opening its screen without starting it, starting it with the first question
- * (#63), the intro's choice of tool, and the MCP-server and skill proposals it leaves for the person.
- */
-
-/** The store's actions for the Assistant and its proposals */
 type AssistantActions = Pick<
   AppState,
   | 'openAssistant'
@@ -23,16 +17,13 @@ type AssistantActions = Pick<
 >
 
 /**
- * What changes when the Assistant's screen comes up, for every way onto it (#1647): the sidebar button and a saved
- * workspace through `openAssistant`, a mail, a notice, the palette and the waiting list through `focusSession`. The screen
- * shows the session `assistantId` names, so a way in that knows the session passes it; one that does not (the button
- * asks the host) learns it a moment later. Landing here also counts as having passed the intro (the same reason as `setView`, #63).
+ * Every way onto the Assistant's screen goes through this (#1647); one that knows the session passes it, and the button
+ * learns it from the host a moment later. Landing here passes the intro, as in `setView` (#63).
  */
 export function assistantScreen(id?: string): Pick<AppState, 'view' | 'introSeen' | 'overlay'> & Partial<Pick<AppState, 'assistantId'>> {
   return { view: 'assistant', introSeen: true, overlay: null, ...(id ? { assistantId: id } : {}) }
 }
 
-/** Records the tool the Assistant will be born with; a failure is toasted */
 async function recordChoice(set: StoreSet, get: StoreGet, tool: ToolName): Promise<boolean> {
   try {
     await get().platform?.agents.configureAssistant(tool)
@@ -48,21 +39,11 @@ export const assistantActions = (set: StoreSet, get: StoreGet): AssistantActions
   async openAssistant() {
     const platform = get().platform
     if (!platform) return
-    /*
-     * The screen changes first. Even if the lookup is slow, if nothing happens in the meantime, the
-     * person who clicked assumes the button is dead — the same reason a message is marked "working"
-     * the instant it is sent.
-     */
+    // The screen changes first: a click that shows nothing during a slow lookup reads as a dead button
     set(assistantScreen())
     get().saveWorkspace()
     try {
-      /*
-       * **Only asks — never creates** (#63, deferred startup). Opening the screen and creating the
-       * process are separate: if there is none, an empty conversation (with suggested-question
-       * cards) stands, and creation happens only in `askAssistant`, at the moment the first
-       * question is asked. Creating it here would bring up a tool process for a person who
-       * never even asked for it.
-       */
+      // Only asks, never creates (#63): the process starts at the first question (`askAssistant`)
       const info = await platform.agents.assistantPeek()
       if (!info) return
       set((s) => ({
@@ -72,11 +53,10 @@ export const assistantActions = (set: StoreSet, get: StoreGet): AssistantActions
           [info.id]: s.sessions[info.id] ?? initialSession({ ...info, projectId: null }),
         },
       }))
-      // This is also a point where a session is first registered — replays any events held in the pen
       replayPendingEvents(get)
       if (!get().chat[info.id]) void get().loadHistory(info.id)
     } catch (e) {
-      // If it could not be opened, the view reverts — the worst outcome is leaving an empty screen up with no explanation
+      // Reverted and said, not an empty screen with no word
       set({ view: 'focus', toast: `Could not open the Assistant: ${errorMessage(e)}` })
     }
   },
@@ -86,7 +66,6 @@ export const assistantActions = (set: StoreSet, get: StoreGet): AssistantActions
     if (!platform) return false
     let id = get().assistantId
     if (!id) {
-      // The first question is the birth itself (#63) — the process comes up only the instant a card is pressed
       set({ assistantWaking: true })
       try {
         const info = await platform.agents.assistant()
@@ -106,17 +85,13 @@ export const assistantActions = (set: StoreSet, get: StoreGet): AssistantActions
         set({ assistantWaking: false })
       }
     }
-    // A failure from this point on has `send` put the text back into the composer (now the draft of a real session)
+    // From here a failure has `send` put the text back into the composer
     await get().send(id, text)
     return true
   },
 
   async completeIntro(tool) {
-    /*
-     * The screen is passed through first — a failed setting save must not trap the person on the intro
-     * screen (it runs on the default, claude). Clicking the card only records the setting; no process
-     * comes up.
-     */
+    // Passed first: a failed save must not trap the person on the intro (the default, claude, runs)
     set({ introSeen: true })
     get().saveWorkspace()
     await recordChoice(set, get, tool)
@@ -128,7 +103,7 @@ export const assistantActions = (set: StoreSet, get: StoreGet): AssistantActions
     if (!platform) return false
     let id = get().assistantId
     if (!id) {
-      // This run may not have opened it: the host knows whether a session exists, and a recorded choice is not read once one does
+      // The host knows whether a session exists, and a recorded choice is not read once one does
       try {
         id = (await platform.agents.assistantPeek())?.id ?? null
       } catch (e) {
@@ -147,7 +122,7 @@ export const assistantActions = (set: StoreSet, get: StoreGet): AssistantActions
       set((s) => ({ mcpProposals: stampProposals(s.mcpProposals, r.proposals, Date.now()) }))
       syncBadge(get)
     } catch {
-      /* The app is fine even if the suggestion list fails to load — the next event calls it again */
+      /* The next event reads it again */
     }
   },
 
@@ -175,7 +150,7 @@ export const assistantActions = (set: StoreSet, get: StoreGet): AssistantActions
       set((s) => ({ skillProposals: stampProposals(s.skillProposals, r.proposals, Date.now()) }))
       syncBadge(get)
     } catch {
-      /* The app is fine even if this fails to load — the next event calls it again */
+      /* The next event reads it again */
     }
   },
 

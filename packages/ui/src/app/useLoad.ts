@@ -1,45 +1,30 @@
 import { errorMessage } from '@cc/protocol/client'
 import { useCallback, useEffect, useRef, useState, type DependencyList } from 'react'
 
-/** What a screen knows about something it reads when it shows (`useLoad`) */
 export type Loaded<T> = {
-  /**
-   * The last answer; undefined before the first one arrives, while a new subject is read, and after a new subject
-   * failed. A failed refresh keeps it, beside `error`
-   */
+  /** Undefined while a new subject is read or after it failed; a failed refresh keeps it beside `error` */
   data: T | undefined
-  /** Why the last read failed; null when it did not. Set together with `data` when a refresh failed */
   error: string | null
-  /** A read is in flight */
   loading: boolean
 }
 
 export type Load<T> = Loaded<T> & {
-  /** Reads again now, keeping what is shown until the answer arrives; settles once that read is over, never rejects */
+  /** Keeps what is shown until the answer; never rejects */
   reload: () => Promise<void>
 }
 
 const IDLE: Loaded<never> = { data: undefined, error: null, loading: false }
 
-/** A failure's reason as a line a screen can print */
 export function loadErrorText(e: unknown): string {
   const text = errorMessage(e)
   return text.trim() || 'Unknown error'
 }
 
-/**
- * The rules of `useLoad` without React, so they are tested on their own: which answer counts, and what a failure or
- * a new subject leaves on screen. `show` receives each change as an update of what is shown.
- */
+/** The rules of `useLoad` without React, so they are tested on their own */
 export function createLoader<T>(show: (update: (shown: Loaded<T>) => Loaded<T>) => void) {
-  /** The number of the read whose answer counts; any other answer is late */
   let current = 0
   return {
-    /**
-     * Asks `ask`. `keep` leaves what is shown on screen until the answer (the same subject read again); without it
-     * what was shown goes at once (a new subject). An `ask` that returns null has nothing to ask: the load is idle.
-     * Never rejects.
-     */
+    /** `keep`: the same subject, shown until the answer. A null `ask` leaves the load idle. Never rejects */
     async read(ask: () => Promise<T> | null, keep: boolean): Promise<void> {
       const id = ++current
       let pending: Promise<T> | null
@@ -58,11 +43,10 @@ export function createLoader<T>(show: (update: (shown: Loaded<T>) => Loaded<T>) 
         const data = await pending
         if (id === current) show(() => ({ data, error: null, loading: false }))
       } catch (e) {
-        // A refresh that failed leaves the last answer beside its error (#850 review); a new subject has none to keep
+        // A failed refresh keeps the last answer beside its error; a new subject has none to keep
         if (id === current) show((s) => ({ data: keep ? s.data : undefined, error: loadErrorText(e), loading: false }))
       }
     },
-    /** Makes every answer still on its way late (the subject changed, the screen went away) */
     drop(): void {
       current++
     },
@@ -105,7 +89,6 @@ export function useLoad<T>(
   const latest = useRef(read)
   latest.current = read
 
-  /** Starts a read now, or after the pause; the returned function takes back one that has not started */
   const start = (keep: boolean) => {
     if (delayMs <= 0) {
       void loader.read(latest.current, keep)
@@ -117,7 +100,6 @@ export function useLoad<T>(
 
   useEffect(() => {
     const cancel = start(keepLast)
-    // The subject changed or the screen went away: an answer still on its way is late
     return () => {
       cancel()
       loader.drop()

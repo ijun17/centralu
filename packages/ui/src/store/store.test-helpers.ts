@@ -1,7 +1,4 @@
-/**
- * What the store tests share: the reset each test starts from, session and app records, and
- * readers that turn the conversation back into text. (A test-only file. Product code never imports it.)
- */
+// What the store tests share. Product code never imports it.
 import { expect, vi } from 'vitest'
 import type { ExternalAppInfo, NormalizedEvent, SessionInfo } from '@cc/protocol'
 import { sessionLiveDefaults } from '@cc/protocol'

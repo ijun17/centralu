@@ -6,26 +6,14 @@ import { machineNameOf } from './names.js'
 import { forgetSessions, mergeListedSince, replayPendingEvents, trackWorkingSince, watchLiveEvents } from './sessionList.js'
 
 /**
- * Linked machines (#82): their list, adding, linking and removing one, what is installed there, and a
- * machine's own recovery when it comes back.
- */
-
-/**
- * A machine row from the answer to `machines.add/reconnect/acceptVersions`, kept only when no `machine_status` got there
- * first (#82). The link moves on its own before the answer leaves the hub: `add` answers `connecting` while the version
- * check has already broadcast `versions_differ` (measured in e2e, the event arrived first). Writing the answer over the
- * event would leave the row saying connecting until the next change, which for a held link never comes.
+ * An answer's row is kept only when no `machine_status` came first (#82): `add` answers `connecting` after the version
+ * check broadcast `versions_differ` (measured in e2e), and a held link sends nothing more.
  */
 function withAnswered(machines: Record<string, MachineInfo>, m: MachineInfo): Record<string, MachineInfo> {
   return machines[m.id] ? machines : { ...machines, [m.id]: m }
 }
 
-/**
- * The machines whose resync is not complete (#1611): its list read failed, or the hub answered a list from its mirror
- * while the link was up. Held per platform (a new one starts clean) and read when a `machine_status` says the machine is
- * connected, so what a resync could not read is asked again at the next word the hub has about that machine instead of
- * waiting for the next connect.
- */
+// Machines whose resync is not whole (docs/state-management.md §7, #1611), per platform: a new one starts clean
 const unrecovered = new WeakMap<object, Set<string>>()
 const unrecoveredOf = (platform: object): Set<string> => {
   let set = unrecovered.get(platform)
@@ -33,26 +21,19 @@ const unrecoveredOf = (platform: object): Set<string> => {
   return set
 }
 
-/**
- * Whether a machine's resync has left something unread, to be read again at its next `machine_status` that finds it
- * connected (see `unrecovered`). A transition into connected is not asked: the hub sends `machine_resync` right after it.
- */
 export function resyncOwed(platform: object | null, machineId: string): boolean {
   return platform !== null && (unrecovered.get(platform)?.has(machineId) ?? false)
 }
 
 /**
- * How many times what the host holds for this project has to be read again by the views that keep it (a terminal's tabs, a
- * run's panel): the connection to the host resynced (#842), or the project's machine did (`machine_resync`, #1902). A machine that
- * was updated starts its terminals and runs over, with ids that begin again at 1 and a run id that is new, so a view that
- * kept the old ones would draw another shell under an old tab, or stay on a run that is gone.
+ * Bumped by a host resync (#842) or the project's machine's (#1902): an updated host restarts terminals and runs with
+ * new ids, so a view keeping the old ones draws a shell under an old tab or stays on a gone run.
  */
 export function resyncsOf(s: Pick<AppState, 'hostResyncs' | 'machineResyncs' | 'projects'>, projectId: string): number {
   const machine = s.projects[projectId]?.machine
   return s.hostResyncs + (machine ? (s.machineResyncs[machine] ?? 0) : 0)
 }
 
-/** Reads the run ledger again for every project this window has it for: all of them, or those of one machine */
 export function reloadCommandRuns(get: StoreGet, machineId?: string): void {
   const s = get()
   for (const projectId of Object.keys(s.commandRuns)) {
@@ -60,11 +41,7 @@ export function reloadCommandRuns(get: StoreGet, machineId?: string): void {
   }
 }
 
-/**
- * The machines that are connected and whose rows still carry the hub's mirror mark (#1611): the list that wrote it was
- * read while the link was down or failing, and no resync has replaced it. They are read again where a list is taken
- * whole (attach, a reconnect to the hub), since that list can land after the machine's own resync.
- */
+// docs/state-management.md §7 (#1611): a whole list can land after the machine's own resync
 export function machinesHoldingMirror(s: Pick<AppState, 'machines' | 'sessions' | 'projects'>): string[] {
   const ids = new Set<string>()
   for (const row of [...Object.values(s.sessions), ...Object.values(s.projects)]) {
@@ -73,7 +50,6 @@ export function machinesHoldingMirror(s: Pick<AppState, 'machines' | 'sessions' 
   return [...ids]
 }
 
-/** The store's actions for linked machines */
 type MachineActions = Pick<
   AppState,
   | 'refreshMachines'
@@ -267,25 +243,14 @@ export const machineActions = (set: StoreSet, get: StoreGet): MachineActions => 
       platform.agents.listSessions().catch(() => null),
       platform.projects.list().catch(() => null),
     ]).finally(watch.stop)
-    /*
-     * Whole only when both lists were read and the hub asked the machine for each. A row still marked while the machine
-     * is connected means the hub's call to it failed while the link stayed up. Either way the machine is owed a read at
-     * its next `machine_status` (#1611); the rows the failed read left are not dimmed meanwhile (`isAway` follows the
-     * machine's row alone).
-     */
+    // docs/state-management.md §7: when a resync is whole, and when a machine is owed a read (#1611)
     const mirrored = (x: { machine?: string | null; unreachable?: boolean }) => ofMachine(x) && x.unreachable === true
     const whole = !!fresh && !!projects && !fresh.some(mirrored) && !projects.some(mirrored)
     if (whole) unrecoveredOf(platform).delete(machineId)
     else unrecoveredOf(platform).add(machineId)
     if (!fresh) return
     set((st) => {
-      /*
-       * Only this machine's rows move. Every other row keeps its object, so nothing about this computer's sessions or
-       * another machine's re-renders or loses what the reducer derived. A row of this machine the fresh list no
-       * longer has (deleted there, or the machine was unlinked) leaves; a new one joins at the end. What changed
-       * while the list was out is kept over its older rows, as in the reconnect recovery (`mergeListedSince`).
-       * What a session that left kept is cleared as `session_deleted` clears it (#163).
-       */
+      // docs/state-management.md §7, step 1: only this machine's rows move (#163)
       const { sessions, gone } = mergeListedSince(asked, st.sessions, fresh.filter(ofMachine), watch.touched, ofMachine)
       let nextProjects = st.projects
       if (projects) {
@@ -298,11 +263,7 @@ export const machineActions = (set: StoreSet, get: StoreGet): MachineActions => 
         for (const [id, p] of theirs) if (!nextProjects[id]) nextProjects[id] = p
       }
       const forgotten = forgetSessions(st, gone)
-      /*
-       * A wake that failed while the link was dropping (#1840) leaves a note about the link: with the link back it is
-       * cleared, and the conversation is read again below. Nothing wakes it; the composer taking the keyboard or a message
-       * does, as for any asleep session. A session locked elsewhere keeps its note: the link did not cause it.
-       */
+      // A wake's failure note from a dropping link clears with the link back (#1840); a lock elsewhere's note stays
       const base = forgotten.wakeError ?? st.wakeError
       const wakeError = Object.fromEntries(Object.entries(base).filter(([id]) => !ofMachine(sessions[id] ?? {}) || st.wakeLocked[id]))
       return {
@@ -320,10 +281,7 @@ export const machineActions = (set: StoreSet, get: StoreGet): MachineActions => 
     // Its agent CLIs may have moved while it was away
     if (get().machineAgentVersions[machineId]) void get().checkMachineAgentVersions(machineId)
 
-    /*
-     * The events of the gap are not replayed through the hub (protocol.md, `machine_resync`): every conversation of
-     * this machine that is open is read again, the same way a host resync reads every one held (#173).
-     */
+    // docs/state-management.md §7, step 2: the hub does not replay a remote's gap (#173)
     const holding = new Set(Object.keys(get().chat))
     const focused = get().focusedSessionId
     if (focused) holding.add(focused)

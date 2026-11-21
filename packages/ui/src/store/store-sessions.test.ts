@@ -1,9 +1,6 @@
 /**
- * Store regression tests: sessions: their facts, waking, deleting and the session archive.
- *
- * Ports go through `MockPlatform` (no ad-hoc mocking, or the contract falls apart). The
- * `pendingEvents` holding pen is module state, so it cannot be cleared between tests — each test
- * uses a different session id instead. Shared fixtures are in store.test-helpers.ts.
+ * Store tests: sessions' facts, waking, deleting and the session archive. Ports go through `MockPlatform`.
+ * The `pendingEvents` pen is module state that tests cannot clear, so each test uses its own session id.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent, SessionInfo } from '@cc/protocol'
@@ -16,10 +13,8 @@ import { delta, resetStore, sessionInfo } from './store.test-helpers.js'
 beforeEach(resetStore)
 
 /*
- * The while-alive facts (approval, questions, activity, limit, usage) have the host's memory as their
- * source of truth. If the value carried in the list on reconnect or restart is not inherited, a
- * session can sit at state=waiting_approval with no card payload, and the approval never appears on
- * screen (measured after a restart).
+ * The while-alive facts (approval, questions, activity, limit, usage) live in the host's memory. Not taken from the list
+ * on reconnect or restart, a session sits at waiting_approval with no card, and the approval never shows (measured).
  */
 describe('inheriting while-alive facts', () => {
   const approval = {
@@ -55,13 +50,8 @@ describe('inheriting while-alive facts', () => {
 })
 
 /*
- * Settings survive a restart on screen, not only in the database (issue #37).
- *
- * The database holds the chosen values and the host reads them back. A cold-start path that
- * takes only `effort` off the list and lets initialSession's defaults fill the rest would make the
- * button under the composer say "Default · Normal", and every restart would look like a loss.
- * A stored value must come from the session, never from what the startup path bothered to
- * name, so this checks all of them at once.
+ * A cold start that takes only `effort` off the list and lets initialSession's defaults fill the rest shows
+ * "Default · Normal" under the composer, so this checks every stored setting at once.
  */
 describe('inheriting stored session settings (issue #37)', () => {
   const stored = {
@@ -93,10 +83,7 @@ describe('inheriting stored session settings (issue #37)', () => {
   })
 })
 
-/*
- * A rename must never fail while only the screen reports success (issue #5). A failure must always
- * surface where a person can see it (a toast).
- */
+// A failed rename never shows as done on screen; it says so in a toast.
 describe('renaming a session (issue #5)', () => {
   it('a success changes the name and locks auto-naming', async () => {
     const mock = new MockPlatform()
@@ -168,11 +155,8 @@ describe('wake — silently waking along the focus path', () => {
   })
 })
 
-/**
- * Sleeping sessions are woken by use, not by being seen (#568). The host puts idle sessions to sleep after 15 minutes;
- * waking every grid panel at startup, or every session the person clicks through, would start processes nobody types
- * to.
- */
+// Woken by use, not by being seen: waking every grid panel at startup, or every session clicked through, would start
+// processes nobody types to (the host sleeps idle sessions after 15 minutes).
 describe('waking a sleeping session (#568)', () => {
   it('the grid\'s sleeping panels stay asleep when the app comes up', async () => {
     const mock = new MockPlatform()
@@ -247,7 +231,7 @@ describe('the command run ledger (#60, moved into the terminal panel)', () => {
     mock.emitTerminalExit('shell-1', 0)
     expect(useStore.getState().commandRuns[p.id]!['pnpm dev']!.running).toBe(true)
 
-    // A **known** runId arriving through the same channel records the outcome — proof that the ignore above is not empty
+    // A known runId on the same channel records the outcome, so the ignore above is not vacuous
     mock.emitTerminalExit(useStore.getState().commandRuns[p.id]!['pnpm dev']!.runId, 0)
     expect(useStore.getState().commandRuns[p.id]!['pnpm dev']!.running).toBe(false)
   })
@@ -264,7 +248,6 @@ describe('the command run ledger (#60, moved into the terminal panel)', () => {
     expect(useStore.getState().commandRuns[p0.id]!['pnpm dev']!.running).toBe(true)
   })
 
-  // #841 item 11: stopCommand does not swallow a failure; it says it, as runCommand does
   it('a stop that fails says so, as a run that fails does', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
@@ -289,11 +272,8 @@ describe('the command run ledger (#60, moved into the terminal panel)', () => {
   })
 })
 
-/**
- * A session deleted while awaited (#163). A post-await `set` spreading `{ ...s.sessions[id]!, … }`
- * would revive a nearly empty row if `session_deleted` arrived in that window — code that iterates every
- * session would break on that row.
- */
+// A post-await `set` spreading `{ ...s.sessions[id]!, … }` after `session_deleted` revives a nearly empty row, and code
+// that iterates every session breaks on it.
 describe('a session deleted while awaited is never revived (#163)', () => {
   function stalled<T>() {
     let resolve!: (v: T) => void
@@ -352,7 +332,7 @@ describe('a session deleted while awaited is never revived (#163)', () => {
     ])
   })
 
-  // #378 review: the host deletes an app's agent session once its run is over, and the draft must not go with it
+  // #378 review: the host deletes an app's agent session once its run is over
   it('a draft with words in it survives its session\'s deletion, to be copied', () => {
     const id = 'del-draft-378'
     useStore.setState({
@@ -384,9 +364,8 @@ describe('a session deleted while awaited is never revived (#163)', () => {
 })
 
 /*
- * An app's agent session the person opens stays theirs (#378 review). The host hears "opened" through markRead, which
- * sends nothing with nothing unread, and the app's request is read as it arrives: a fresh app-agent session opened that
- * way would tell the host nothing, and a short run would delete it under the person's eyes.
+ * An opened app-agent session stays the person's (#378 review). markRead sends nothing with nothing unread, and the
+ * app's request is read as it arrives, so the host would not hear "opened" and a short run would delete it on screen.
  */
 describe('an app-agent session on screen', () => {
   it('tells the host it is open even with nothing unread, without moving the read position', async () => {
@@ -403,11 +382,8 @@ describe('an app-agent session on screen', () => {
   })
 })
 
-/*
- * A lock found after a slow background resume had already handed the session back (#168, item 5).
- * Taken as adapter_crashed, the session would stay "live" on screen and the fork offer, drawn only
- * from the wake result, would never appear.
- */
+// A lock found after a slow background resume handed the session back (#168 item 5): taken as adapter_crashed, the
+// session stays "live" on screen and the fork offer, drawn only from the wake result, never appears.
 describe('a late lock error offers the fork (#168)', () => {
   it('the session turns dormant with the reason and the fork offer, and the marker does not speak of a turn', () => {
     const id = 'late-lock-168'
@@ -445,9 +421,8 @@ describe('a late lock error offers the fork (#168)', () => {
 })
 
 /*
- * A newer host's session (#384). `sessions.list` reads it tolerantly (`parseTolerant`): a value this build does not
- * know costs that value only. `session_created`, the only word about a session the host made on its own, does too:
- * parsed strictly, one new word would leave the session out of the sidebar until a reconnect lists it.
+ * `sessions.list` and `session_created` read tolerantly (`parseTolerant`, #384): an unknown value costs that value only.
+ * Parsed strictly, one new word would leave a session the host made out of the sidebar until a reconnect lists it.
  */
 describe('a session a newer host created', () => {
   it('is added from session_created even with a value this build does not know, as the session list would', async () => {
@@ -466,10 +441,7 @@ describe('a session a newer host created', () => {
   })
 })
 
-/*
- * A handoff moves the original's children to the session that took over (#693, #1475); the host says so with
- * `session_owner`, and the sidebar hangs the child under its new owner without waiting for a reconnect.
- */
+// A handoff moves the original's children to its successor (#1475); `session_owner` rehangs them without a reconnect.
 describe('a child that changed owner (#693)', () => {
   it('takes the owner the host names', async () => {
     const mock = new MockPlatform()
@@ -487,10 +459,7 @@ describe('a child that changed owner (#693)', () => {
   })
 })
 
-/*
- * A session the host moved into a project (#1141: a user-folder app's builder, once its folder became a project) is
- * said again with session_created; a window that holds it moves it, and keeps the rest of its row as it had it.
- */
+// A user-folder app's builder moves with its folder when it becomes a project; the host says it again with session_created.
 describe('a session moved into a project (#1141)', () => {
   it('session_created for a session this window holds takes its new project and nothing else', async () => {
     const mock = new MockPlatform()
@@ -505,9 +474,8 @@ describe('a session moved into a project (#1141)', () => {
 })
 
 /*
- * The session archive (#204) from the screen's side. Deleting says where the session went; restoring puts it back in the
- * sidebar, and a project its restore registered again arrives with it — the screen has not heard of that project,
- * and a session row under a project the sidebar does not have is drawn nowhere.
+ * Deleting says where the session went; a restore puts it back with any project it registered again, since a row under
+ * a project the sidebar does not have is drawn nowhere.
  */
 describe('the session archive (#204)', () => {
   it('deleting says where the session went, and restoring brings it and its registered project back', async () => {
@@ -570,8 +538,8 @@ describe('Undo on the archive toast (#1512)', () => {
     return { mock, p, s }
   }
 
-  // #1589: the dialog's first Archive asks the host (read, then move) with the conversation-file box as the person left it; its lines are
-  // shown, and only the next Archive moves anyway
+  // #1589: the first Archive asks the host (read, then move) with the conversation-file box as left; its lines are shown,
+  // and only the next Archive moves anyway
   const bin = (mock: MockPlatform) => (mock as unknown as { trashBin: Map<string, { removeExternal: boolean }> }).trashBin
 
   it('archives at the first Archive when the host finds nothing it holds would be lost, with the file box as the person left it (ticked or not)', async () => {
@@ -624,7 +592,7 @@ describe('Undo on the archive toast (#1512)', () => {
     expect(useStore.getState().sessions[s.id]).toBeDefined()
   })
 
-  // #1595: with the worktree deleted too the host's check cannot move the session, so its losses are read first
+  // #1595: with the worktree deleted too the host's check cannot move the session
   it('with the worktree deleted too, reads the losses, gives them back and moves nothing', async () => {
     const { mock, s } = await oneSession('/tmp/archive-w1')
     const lines = ['A session it started owes it a report; it will not be told, and the report is dropped.']
@@ -715,9 +683,8 @@ describe('newSessionProjectOf (#529)', () => {
 })
 
 /*
- * The preset a new session starts with (owner decision 2026-11-05; #1525): `auto` in a trusted project, here or
- * on a linked machine, `normal` in an untrusted one, and the person's own choice always wins. The window sends the preset
- * itself, so a client that names none (a script, the limited credential) still gets `normal` from the host.
+ * Owner decision 2026-11-05 (#1525): `auto` in a trusted project, here or linked, `normal` in an untrusted one, the
+ * person's choice first. The window sends it, so a client that names none still gets `normal` from the host.
  */
 describe('the preset a new session starts with (#1525)', () => {
   async function started(trusted: boolean, opts?: { permissionPreset?: 'safe' | 'normal' | 'edits' | 'auto' }, machine?: string) {
@@ -750,10 +717,7 @@ describe('the preset a new session starts with (#1525)', () => {
   })
 })
 
-/*
- * #1647: a pick that reaches the Assistant without the sidebar's button (a mail's Open, a notice, the waiting list) has to
- * bring up the same screen: the one that shows the conversation of the session `assistantId` names.
- */
+// #1647: a mail's Open, a notice or the waiting list bring up the sidebar button's screen, `assistantId`'s conversation.
 describe('focusing the Assistant', () => {
   it('names it as the Assistant the screen shows, in the change that moves to its screen', async () => {
     const mock = new MockPlatform()
@@ -772,10 +736,7 @@ describe('focusing the Assistant', () => {
   })
 })
 
-/*
- * #1653: the Assistant's session is deleted. The screen goes back to its start state instead of drawing a pane for a
- * session the store no longer holds, and the next first question starts a new one.
- */
+// #1653: the screen goes back to its start state rather than draw a pane for a gone session; the next question starts one.
 describe('the Assistant session being deleted', () => {
   it('forgets which session is the Assistant, so its screen shows the start state again', async () => {
     const mock = new MockPlatform()
@@ -791,10 +752,8 @@ describe('the Assistant session being deleted', () => {
   })
 })
 
-/*
- * #2171: a row built from the host's `SessionInfo` is built in one place, so `createSession`'s own answer neither leaves
- * out fields nor replaces a row that `session_created` (broadcast before the response) has registered.
- */
+// #2171: one builder of a row from `SessionInfo`, so `createSession`'s answer neither drops fields nor replaces the row
+// `session_created` (broadcast before the response) registered.
 describe('registering a session from the host\'s answer (#2171)', () => {
   async function createdFrom(answer: (id: string) => SessionInfo, before?: (answer: SessionInfo) => void) {
     const mock = new MockPlatform()

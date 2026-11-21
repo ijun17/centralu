@@ -3,16 +3,11 @@ import { formatClock, formatDay } from '@cc/core'
 export { formatClock, formatDay }
 
 /**
- * How the app writes a size, a count and a length of time (#428). (A moment, `formatClock` and `formatDay`, is written
- * in core, which needs it too.)
- *
- * One rule for every screen, so none writes a byte size as "5120.0 MB", "1024.0 KB", "0KB" or "630MB", or a token count
- * as "1000k" or "2500.0k": the number is scaled to the largest
- * unit it reaches, written with one decimal below 100 and none from there ("1.5 KB", "630 MB", "8.5 GB"), and a value
- * that rounds up to the next unit is written in it ("1 MB", not "1024 KB").
+ * One way every screen writes a size, a count and a length of time (#428); a moment is written in core, which needs it
+ * too. One decimal below 100, none from there, and a value that rounds up to the next unit is written in it ("1 MB").
  */
 
-/** `n` scaled by `base` until its rounded value is below `base`, with the unit it ended on; the first unit is whole */
+/** The first unit is whole */
 function scaled(n: number, base: number, units: readonly string[]): string {
   const round = (v: number) => (v < 100 ? Math.round(v * 10) / 10 : Math.round(v))
   let value = Math.max(0, Number.isFinite(n) ? n : 0)
@@ -38,15 +33,8 @@ export const formatChangedCount = (n: number, more?: boolean): string =>
   more ? `${formatCount(n)}+` : String(n)
 
 /**
- * A length of time, in one style: the two largest units that matter, no space before a unit ("1.5s", "3m 20s", "2h 5m",
- * "3d 4h"). One style everywhere: never "42 s" beside "42s", "75h 3m" past a day, "125.0 s", or a 4-hour wait spelled
- * "4 hours".
- *
- * - Precise (default): milliseconds under a second ("250ms"), tenths under ten seconds ("1.5s"), whole seconds to a
- *   minute, minutes and seconds to ten minutes ("9m 50s": a precision that stops being useful there), then minutes.
- * - `coarse`: for a wait that is only ever read to the minute: whole seconds to a minute, then minutes only.
- *
- * Under a day the hours and minutes are both written ("1h 0m"), so a count that grows a unit does not change width.
+ * The two largest units that matter, no space ("1.5s", "3m 20s", "2h 5m", "3d 4h"). Seconds stop at ten minutes, where
+ * they stop being useful; `coarse` is for a wait read only to the minute. "1h 0m" keeps the width as a unit is added.
  */
 export function formatDuration(ms: number, { coarse = false }: { coarse?: boolean } = {}): string {
   const total = Math.max(0, Number.isFinite(ms) ? ms : 0)
@@ -61,11 +49,7 @@ export function formatDuration(ms: number, { coarse = false }: { coarse?: boolea
   return `${Math.floor(m / 1440)}d ${Math.floor(m / 60) % 24}h`
 }
 
-/**
- * The time under a message's bubble (owner, 2026-10-18), as a chat app writes it: the clock time only ("3:42 PM"),
- * since a divider in the conversation says the day (`formatDayLong`). In English whatever the system's language: the
- * app's words are English.
- */
+/** Under a message's bubble: the clock time only, as a divider says the day; English whatever the system's language */
 export function formatSaidAt(at: number): string {
   return new Date(at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
 }
@@ -80,16 +64,12 @@ export function formatDayLong(at: number): string {
   })
 }
 
-/** The local calendar day a moment falls on, for comparing two moments */
 export function dayKey(at: number): string {
   const d = new Date(at)
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
 }
 
-/**
- * When something was read, short, in local time and English like the clock under a message: "3:42 PM" for today, "Oct 25,
- * 3:42 PM" for an earlier day this year, "Dec 30, 2025, 3:42 PM" for an earlier year. `now` is the moment it is read against.
- */
+/** "3:42 PM" today, "Oct 25, 3:42 PM" earlier this year, "Dec 30, 2025, 3:42 PM" before */
 export function formatReadAt(at: number, now: number): string {
   const time = formatSaidAt(at)
   if (dayKey(at) === dayKey(now)) return time

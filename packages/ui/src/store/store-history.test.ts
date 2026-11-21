@@ -1,9 +1,6 @@
 /**
- * Store regression tests: history and its cursor.
- *
- * Ports go through `MockPlatform` (no ad-hoc mocking, or the contract falls apart). The
- * `pendingEvents` holding pen is module state, so it cannot be cleared between tests — each test
- * uses a different session id instead. Shared fixtures are in store.test-helpers.ts.
+ * Store tests: history and its cursor. Ports go through `MockPlatform`.
+ * The `pendingEvents` pen is module state that tests cannot clear, so each test uses its own session id.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
@@ -14,13 +11,8 @@ import { delta, line, readAll, resetStore, sessionInfo } from './store.test-help
 
 beforeEach(resetStore)
 
-/**
- * Reading back further.
- *
- * The conversation the screen holds and the history cursor **must move together.** If they fall out
- * of sync, "earlier conversation" either prepends a range that does not connect to the screen, or the
- * way to load it disappears entirely.
- */
+// The held conversation and the history cursor move together: out of sync, "earlier conversation" prepends a range
+// that does not connect, or the way to load it disappears.
 describe('history cursor', () => {
   const many = (id: string, n: number) =>
     Array.from({ length: n }, (_, i) => ({
@@ -48,11 +40,8 @@ describe('history cursor', () => {
     expect(info.more).toBe(true)
   })
 
-  /*
-   * `oldestSeq === chat[0].seq` is not enough: when that `seq` is the render key, `loadOlder` starts
-   * reading from the wrong place (#79) even though the cursor is at "the same spot" as the screen. So
-   * the actual outcome is checked instead.
-   */
+  // `oldestSeq === chat[0].seq` holds even when that `seq` is the render key and `loadOlder` reads from the wrong
+  // place (#79), so the outcome is checked.
   it('a conversation built only from events still has every stored row exactly once when read back to the end', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('h3', sessionInfo('h3'))
@@ -85,16 +74,10 @@ describe('history cursor', () => {
   })
 })
 
-/**
- * The history cursor is set only by the stored number (#79).
- *
- * A live row's `seq` is the render key shared across every session; the `seq` on a row read from
- * history is the number the host assigned within that session. In a session where an event arrives
- * before the screen, if the cursor took the render key instead: a key lower than the stored number
- * leaves a gap in the middle (A), and a key higher appends the newest page a second time (A2). An
- * event arriving mid-read must not discard the page just fetched (B). Measured (2026-09-25): with the
- * render key as the cursor, opening the session for an app's requested agent for the first time showed
- * the prompt and the Read/Write cards twice.
+/*
+ * A live row's `seq` is a render key shared by every session; a history row's is the host's number in its session. A
+ * cursor taken from the key leaves a gap when lower (A) and appends the newest page again when higher (A2); an event
+ * mid-read must not drop the fetched page (B). Measured: an app agent's session showed its prompt and cards twice.
  */
 describe('the cursor for a session where an event arrives before history (#79)', () => {
   const rows = (id: string, n: number, from = 1) =>
@@ -214,10 +197,9 @@ describe('the cursor for a session where an event arrives before history (#79)',
     )
     mock.messages.set('r79', stored as never)
 
-    // The host replays its buffer to a freshly attached UI — held before the session is registered,
-    // then replayed during attach. An old message (21), messages inside the page, and the last reply
-    // whose earlier part was pushed out of the buffer (only '150' remains)
-    // History never draws approval rows — an approval older than the page has nowhere to find its place, so it is left out
+    // The host replays its buffer to a fresh UI, held until the session is registered: an old message (21), messages in
+    // the page, and a last reply whose start left the buffer (only '150' remains). History draws no approval rows, so
+    // an approval older than the page has no place and is left out
     const replay = [
       { type: 'user_message', sessionId: 'r79', seq: 21, text: 'L21' },
       approval,
@@ -496,13 +478,9 @@ describe('the cursor for a session where an event arrives before history (#79)',
   )
 })
 
-/**
- * When a non-conversation event arrives before history is read.
- *
- * A state or usage event the host sends while resuming a session must not create `chat[id] = []`
- * before the person ever clicks that session: focusing would read that empty array as "already read,"
- * so history would never be called, with no error. An 11,550-line session then reopens completely
- * empty (seen 2026-09-25).
+/*
+ * A state or usage event sent while the host resumes a session must not create `chat[id] = []`: focusing reads an empty
+ * array as already read, and history is never asked (measured: an 11,550-line session reopened empty).
  */
 describe('an event arriving before history', () => {
   const many = (id: string, n: number) =>
@@ -553,12 +531,8 @@ describe('an event arriving before history', () => {
     expect(useStore.getState().chat['c']).toHaveLength(30)
   })
 
-  /*
-   * The main rule: a non-conversation event never creates a slot. `chat[id]` being absent is
-   * used throughout the store as "not read yet" (focus, session creation). The two safeguards below
-   * catch this at load time, so this promise would silently break without a test pinning it down on
-   * its own.
-   */
+  // An absent `chat[id]` means "not read yet" throughout the store (focus, session creation). The safeguards below
+  // catch an empty slot at load time, so only this pins the event rule.
   it.each(quiet)('%s never creates an empty slot for an unread session', async (_name, ev) => {
     const mock = new MockPlatform()
     mock.sessions.set('g', sessionInfo('g'))
@@ -571,12 +545,8 @@ describe('an event arriving before history', () => {
     expect(useStore.getState().sessions['g']).toBeDefined()
   })
 
-  /*
-   * The two below pin down the rule itself, **independent of any event**: an empty slot is treated the
-   * same as never having read it. An event is not the only way an empty array gets created (a filter
-   * that undoes an optimistically drawn row can also empty it). The tests above never see these two
-   * safeguards, since the event-side rule already blocks it.
-   */
+  // An empty slot reads as never read, whatever made it (a filter undoing an optimistically drawn row can empty it
+  // too). The tests above never reach these safeguards.
   it('clicking a session with an empty slot and no cursor still calls history — no matter where the empty slot came from', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('a', sessionInfo('a'))
@@ -631,11 +601,9 @@ describe('an event arriving before history', () => {
   })
 })
 
-/**
- * Restoring the slot of an in-conversation app view (M4 B-1). History carries no body, only "some
- * app's view stood (or was rejected) under this card" — a reopened UI stands a placeholder on that
- * card. Whether it can be reopened is unknown until the host is asked (`kept: false`). A history row
- * for an app view never becomes a conversation row (`ChatItem`).
+/*
+ * History says only that an app's view stood (or was rejected) under a card, so a reopened UI stands a placeholder
+ * there, `kept: false` until the host is asked (M4 B-1). Such a row never becomes a `ChatItem`.
  */
 describe('inlineViewsFromHistory — a past card\'s app view slot', () => {
   const row = (seq: number, payload: Record<string, unknown>) =>

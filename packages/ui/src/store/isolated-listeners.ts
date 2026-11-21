@@ -1,14 +1,6 @@
 import type { StateCreator } from 'zustand'
 
-/**
- * **A store listener that throws does not stop the others, or the code that set the state** (#2070).
- *
- * zustand calls its listeners in one loop inside `setState`, so a throwing one (a view's selector, or React refusing an
- * update loop, as in #2059) would skip every listener after it and throw out of `set` into its caller. A host event's
- * handler (`conversationEvent`) would then stop halfway: its later steps, the state-change notice among them, would not
- * run for that event, and the views after the failing one would stay behind the store. Each listener runs on its own; the
- * error is logged and thrown again on its own once the others have run, so it still surfaces as an uncaught error.
- */
+// docs/state-management.md §2: each store listener runs on its own (#2070).
 export const isolatedListeners =
   <T>(init: StateCreator<T>): StateCreator<T> =>
   (set, get, api) => {
@@ -19,8 +11,7 @@ export const isolatedListeners =
           listener(state, previous)
         } catch (err) {
           console.error('A store listener threw', err)
-          // Thrown again on its own, after the others ran: an uncaught error is what e2e catches as a page error, and a
-          // listener that throws (React refusing an update loop, #2059) is a bug to see, not to swallow
+          // Uncaught, so e2e sees it as a page error: a throwing listener is a bug to see (#2059)
           queueMicrotask(() => {
             throw err
           })

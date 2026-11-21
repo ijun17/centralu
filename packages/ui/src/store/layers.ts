@@ -1,9 +1,5 @@
-/**
- * The layers that can stand over the screen, as the store records them (#850 item 11). A modal or another window
- * opened through local state counts itself in `openLayers` (`Modal`, #158); the others are the store's own flags.
- */
 export type CoveringLayers = {
-  /** The count of windows opened via local state (delete confirmation, new session, image zoom, command palette…) */
+  /** Windows opened through local state count themselves here (`Modal`, #158) */
   openLayers: number
   paletteOpen: boolean
   settingsOpen: boolean
@@ -12,16 +8,11 @@ export type CoveringLayers = {
   overlay: unknown
 }
 
-/** A layer that asks whether something covers it, and so does not count itself */
 export type OwnLayer = 'inbox' | 'overlay'
 
 /**
- * Whether another layer stands over this one: a modal, the palette, settings, usage, the inbox or an overlay.
- *
- * Every keyboard listener on the window that acts on something on screen asks this first, so a key meant for the
- * layer on top is not also answered underneath. One definition, so the listeners cannot drift apart: a copy that
- * leaves out `openLayers` lets y or n answer the capability question over an app view while a modal stands over it
- * (#850 item 11). `own` names the layer asking, which does not cover itself.
+ * Every window keyboard listener that acts on the screen asks this first, so a key meant for the layer on top is not
+ * answered underneath. One definition: a copy without `openLayers` lets y/n answer under a modal (#850 item 11).
  */
 export function isCovered(st: CoveringLayers, own?: OwnLayer): boolean {
   return (
@@ -35,23 +26,18 @@ export function isCovered(st: CoveringLayers, own?: OwnLayer): boolean {
 }
 
 /**
- * Whether a dialog stands over the whole window: a modal (anything counted in `openLayers`), settings or usage (#842
- * item 1). The window's global shortcuts are not answered while one is up: ⌘K over a dialog would open the palette
- * under it and take the keyboard, so what the person typed would go to the hidden palette and its Enter run a command
- * nobody could see; ⌘1-9 and ⌘[ would move the screen behind it. The palette is not one of these: ⌘K closes it.
+ * Global shortcuts wait while a dialog is up (#842 item 1): ⌘K would open a hidden palette that takes the keyboard,
+ * and ⌘1-9 or ⌘[ would move the screen behind it. The palette is not one: ⌘K closes it.
  */
 export function dialogOpen(st: Pick<CoveringLayers, 'openLayers' | 'settingsOpen' | 'usageOpen'>): boolean {
   return st.openLayers > 0 || st.settingsOpen || st.usageOpen
 }
 
-/** The windows that cover the whole screen and are not counted in `openLayers` */
 export type WindowLayers = Pick<CoveringLayers, 'paletteOpen' | 'settingsOpen' | 'usageOpen' | 'inboxOpen'>
 
 /**
- * Whether a window that covers the screen opened between two states: the palette, the inbox, settings or usage. A
- * popover that was open under it goes (`useDismiss`): it keeps nothing the person can still reach, and its Escape,
- * claimed on the window before the window under it hears the key, would close the hidden popover instead of the window
- * on top.
+ * A popover under a window that just opened closes (`useDismiss`): its Escape, claimed on the window first, would
+ * close the hidden popover instead of the window on top.
  */
 export function coveringLayerOpened(prev: WindowLayers, next: WindowLayers): boolean {
   return (

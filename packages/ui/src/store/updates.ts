@@ -4,19 +4,13 @@ import { agentApplyVerdict } from '../features/settings/apply-offer.js'
 import { typedWithin, TYPING_QUIET_MS } from '../features/settings/typing.js'
 
 /**
- * What the host installs and runs: Centralu's own update (checked, applied, and applied at an agent's
- * request, #665) and the agent CLIs' versions (#297).
- */
-
-/**
- * The tickets the host gave this window for an agent's "Apply now" (#665), by request: the go names one of these. Kept
- * as the answer's promise, since the host may send the go before the answer's reply has reached this window. A ticket
- * no go came for is forgotten after a while: the host asks again after its card, so the first is never used.
+ * Tickets for an agent's "Apply now" (#665), by request, kept as the answer's promise: the go can arrive before the
+ * reply. One no go came for is forgotten after a while.
  */
 const applyTickets = new Map<string, Promise<string | null>>()
 const APPLY_TICKET_MS = 5 * 60_000
 
-/** What the header's "Update idle sessions" did (#297), in one line: how many moved, and how many were busy */
+/** What "Update idle sessions" did (#297) */
 export function appliedVersionsText(restarted: number, busy: number): string {
   const sessions = (n: number) => (n === 1 ? '1 session' : `${n} sessions`)
   const keep = busy === 1 ? 'keeps its version' : 'keep their version'
@@ -26,7 +20,6 @@ export function appliedVersionsText(restarted: number, busy: number): string {
   return busy === 0 ? moved : `${moved}; ${busy} busy ${keep} for now`
 }
 
-/** The store's actions for updates and the agent CLIs' versions */
 type UpdateActions = Pick<
   AppState,
   | 'checkUpdate'
@@ -44,12 +37,9 @@ type UpdateActions = Pick<
 >
 
 /**
- * One request's answer for `update` (#2155), and whether it may still be shown: not once the host connection it was asked on is
- * gone (another platform, or a resync), nor once an answer to a later request is seated. The window's own check on connect, the
- * forced check as Updates opens, an install and the switches each ask the host on their own, and their answers can come back in
- * any order: seated as they arrive, an older answer would replace a newer one, and the person could decide on a stale "update
- * available" until the host's next event. The host's `update_status` events are not asked for: they are its newest state, and an
- * answer the host gives after one leaves after it on the same connection
+ * Seats an `update` answer only while its host connection stands and no later request's answer is seated (#2155): the
+ * checks, an install and the switches ask on their own, and answers come back in any order. `update_status` events
+ * need no seat: they are the newest state, ordered with the answers on one connection.
  */
 function answerSeat(set: StoreSet, get: StoreGet): () => { stale: () => boolean; seat: (update: AppState['update']) => void } {
   let asked = 0
@@ -71,15 +61,8 @@ function answerSeat(set: StoreSet, get: StoreGet): () => { stale: () => boolean;
 
 /** `ask` numbers each request's answer for this store (`answerSeat`) */
 export const updateActions = (set: StoreSet, get: StoreGet, ask = answerSeat(set, get)): UpdateActions => ({
-  /*
-   * The three below all follow the same shape: tell the host, and seat whatever state comes back as
-   * is.
-   *
-   * **Never drawn optimistically ahead of time.** This differs from other actions, and for a reason
-   * — if the screen got ahead of itself here, it could write "installing" while nothing is actually
-   * happening, and that is the worst lie possible about something that cannot be undone. The host
-   * keeps sending progress as events, so waiting does not freeze the screen.
-   */
+  // Never drawn ahead of the host: "installing" while nothing happens is the worst lie about what cannot be undone.
+  // Progress comes as events.
   async checkUpdate(force = true) {
     const platform = get().platform
     if (!platform) return
@@ -88,7 +71,7 @@ export const updateActions = (set: StoreSet, get: StoreGet, ask = answerSeat(set
       answer.seat(await platform.updates.status(force))
     } catch (e) {
       if (answer.stale()) return
-      // A version check must never break the screen — the app matters more than the check itself
+      // A failed check must never break the screen
       set({ toast: `Could not check for updates: ${errorMessage(e)}` })
     }
   },
@@ -170,10 +153,8 @@ export const updateActions = (set: StoreSet, get: StoreGet, ask = answerSeat(set
     if (unasked && typedWithin(TYPING_QUIET_MS)) {
       return void (await platform.updates.reportApply({ requestId, ticket, error: 'Someone is typing in Centralu, so nothing was relaunched. Try again in a minute.' }).catch(() => {}))
     }
-    /*
-     * Said, and heard, before the relaunch: the host counts this window closing as the relaunch only after it (#665
-     * review). Not heard (the host gone mid-swap), the relaunch goes ahead anyway, as the button's would.
-     */
+    // Said and heard first: the host counts this window closing as the relaunch only after it (#665). Unheard (the
+    // host mid-swap), the relaunch goes ahead, as the button's would.
     await platform.updates.reportApply({ requestId, ticket, started: true }).catch(() => {})
     const error = await get().applyUpdateNow()
     await platform.updates.reportApply({ requestId, ticket, ...(error ? { error } : {}) }).catch(() => {})

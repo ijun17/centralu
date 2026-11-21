@@ -1,7 +1,4 @@
-/**
- * A JSON value kept in localStorage, which may be missing (node), denied, or hold text that is not JSON: every such
- * case reads as nothing and writes as nothing. `undefined` is "nothing stored or readable".
- */
+/** localStorage missing (Node), denied or holding text that is not JSON reads as `undefined` and writes nothing */
 export function readStored(key: string): unknown {
   try {
     const raw = localStorage.getItem(key)
@@ -11,7 +8,6 @@ export function readStored(key: string): unknown {
   }
 }
 
-/** Keeps `value` under `key`; a page without storage, or with it denied, keeps nothing and says nothing */
 export function writeStored(key: string, value: unknown): void {
   try {
     localStorage.setItem(key, JSON.stringify(value))

@@ -6,14 +6,13 @@ import type {
 } from '@cc/protocol/client'
 
 /**
- * A command's last run as the screen holds it: the host's record (#60) and two facts only this window saw. Both are
- * the screen's own: a reload reads the host's record again and they are gone, which leaves a run without its end
- * time and a stop read as its exit code, never a wrong one.
+ * A command's last run (#60): the host's record plus two facts only this window saw. A reload loses them, leaving a
+ * run without its end time and a stop read as its exit code, never a wrong one.
  */
 export type CommandRun = CommandRunInfo & {
-  /** When its exit arrived here, so the commands list can say how long ago it ended rather than when it began */
+  /** When its exit arrived here, so the list can say when it ended */
   endedAt?: number
-  /** Stopped from Centralu (Stop in the commands list or on its terminal): its exit is a stop, not a failure */
+  /** Stopped from Centralu: its exit is a stop, not a failure */
   stopped?: boolean
 }
 
@@ -21,131 +20,73 @@ export type CommandRun = CommandRunInfo & {
 export type ProjectsSlice = {
   projects: Record<string, ProjectInfo>
   /**
-   * How many times, per project, we have heard "the working tree may have moved" (#160). Bumped
-   * by one each time `refreshProjectGit` actually goes and asks. The evidence panel's change list,
-   * history and collapsed strip hold their own lists, so a re-read that only updates `project.git`
-   * (the sidebar's summary) would not reach them. They subscribe to this counter and re-read
-   * together on turn end, window focus, approval, and branch switch.
+   * Raised each time `refreshProjectGit` asks (#160). The evidence panel's lists hold their own copies, which a
+   * `project.git` update does not reach; they subscribe to this and read again.
    */
   gitEpoch: Record<string, number>
-  /** Git, files and the viewer belong to the project — they must be viewable without a session */
+  /** Git, files and the viewer belong to the project, viewable without a session */
   focusedProjectId: string | null
   /**
-   * Per-project command run state — a projection of the host's `commands.state` (#60). The host's
-   * buffer holds the log body; this only holds the facts a badge needs to read (is it running, what
-   * did it end with). Why this lives in the store: "it is running" is not only the run window's own
-   * concern, it is a fact the tab badge and the collapsed strip must read too — otherwise leaving a
-   * dev server on and moving away would leave no trace of it visible anywhere. Keyed projectId →
-   * command → last run.
+   * projectId → command → last run, a projection of the host's `commands.state` (#60) without the log. In the store
+   * because the tab badge and the collapsed strip show a running command too.
    */
   commandRuns: Record<string, Record<string, CommandRun>>
   focusProject(id: string): void
-  /**
-   * Sets the project's worktree trunk (#76); a failure is thrown back to the dialog, which keeps it in place (#180).
-   */
+  /** Sets the worktree trunk (#76); a failure is thrown back to the dialog, which stays open (#180). */
   setWorktreeTrunk(projectId: string, baseBranch: string): Promise<void>
   /** `machine`: a folder on that linked machine, its path in that machine's terms (#82) */
   addProject(path: string, machine?: string | null): Promise<ProjectInfo>
   /**
-   * Makes a new project (#515): an empty folder `name` in `parent` (that machine's Desktop when absent), made by the
-   * host of `machine` (this computer's when absent), then registered as `addProject` registers one. With `source`, a
-   * clone of that repository instead of an empty folder.
+   * Makes a new project (#515): folder `name` in `parent` (default: that machine's Desktop) on `machine` (default: this
+   * computer), then registers it. With `source`, a clone of that repository instead of an empty folder.
    */
   createProject(name: string, parent?: string, machine?: string | null, source?: GitSource): Promise<ProjectInfo>
-  /** Re-reads the project list for projects the host made on its own (#515, `projects_changed`) */
+  /** On `projects_changed`: projects the host made on its own (#515) */
   refreshProjects(): Promise<void>
   /**
-   * A project just registered whose trust is still being asked about (M4, decision 3). Asked
-   * **once**, at registration — answering or dismissing it clears it. Nothing is blocked while it
-   * is being asked (it stands under that project in the sidebar): right after registering there is
-   * also a path where the new-session window pops up immediately, and stacking a window on a window
-   * would leave both half-read. A project left unanswered stays untrusted, and can be changed at any
-   * time from the project menu.
+   * A just-registered project whose trust is asked once (M4, decision 3), as a card under it in the sidebar, not a
+   * window: the new-session window may open at the same time. Unanswered stays untrusted.
    */
   trustAsk: string | null
   answerTrustAsk(trust: boolean): Promise<void>
-  /** Puts the trust card up under a project (#1141): the project menu's "Trust this project…" when it has apps to list */
+  /** The project menu's "Trust this project…" when it has apps to list (#1141) */
   askTrust(projectId: string): void
   /**
-   * Turns trust on and off. The app list follows from the host's broadcast
-   * (`external_apps_changed`).
-   *
-   * A session already running receives trust only when a session comes up (#92, the manager's
-   * `projectTrusted`) — a changed trust setting takes effect only from the next time that session
-   * restarts or resumes. That fact is stated in a single line **only when there is a running
-   * session**. Saying it when there is none would be a warning about nothing, and not saying it when
-   * there is one would let the person believe that turning off trust changed those sessions too, at
-   * that instant.
+   * The app list follows the host's `external_apps_changed`. A running session takes trust only when it comes up
+   * (#92), so the change is said in a line only when a session is running.
    */
   setProjectTrusted(projectId: string, trusted: boolean): Promise<void>
   /**
-   * Delete a project — the record here, and optionally the folder on disk.
-   *
-   * Two calls, in this order and not the other: the OS bin first (`fs.trashProjectFolder`; not
-   * Centralu's session archive), the record second. The
-   * path is only known from the record, so removing it first would leave nothing to point
-   * the OS bin at; and if the OS bin refuses (a browser has none), nothing has been deleted
-   * yet and the whole thing stops with the reason. The reverse order can lose the folder
-   * *and* the history in the failure case, which is the one case that matters.
+   * The folder goes to the OS bin first (`fs.trashProjectFolder`), the record second: the path is known only from the
+   * record, and a bin that refuses (a browser has none) stops it before anything is deleted.
    */
   deleteProject(projectId: string, deleteFiles: boolean): Promise<void>
-  /**
-   * Ask for this project's git status again, debounced (issue #41).
-   *
-   * `project.git` is measured at attach; without this, the sidebar's changed count would stay a snapshot from app
-   * start that an agent's edits and commits never move. Everything that shows git for a project reads that one field,
-   * so this writes back there rather than growing a second, parallel copy for the sidebar.
-   *
-   * Returns nothing and is safe to call from anywhere: the call is a *hint* that the tree
-   * may have moved, not a request the caller waits on.
-   */
+  /** Debounced (#41): a hint that the tree may have moved, writing `project.git`, which every git view reads. */
   refreshProjectGit(projectId: string): void
   /**
-   * Changing a repository on purpose, from inside the app (issue #49).
-   *
-   * The sidebar hears that a tree moved in three ways (#41) — a turn ending, an approval
-   * granted, the window regaining focus — and every one of them is a *guess* that something
-   * probably happened elsewhere. A git panel writing straight to `platform.git` would tell
-   * only itself, so **committing, the one change we make deliberately and know about, would be
-   * the only one the sidebar never hears**, and the count would sit on its old value until an
-   * unrelated signal happens to fire.
-   *
-   * So the writes come through here and the refresh is part of the operation rather than
-   * something each call site has to remember. Reads stay on `platform.git`: a panel asking
-   * for its own file list or a diff is nobody else's business, and routing those through the
-   * store would put a debounce in front of a list that has to repaint on the click.
-   *
-   * `push` is deliberately absent. It moves nothing the sidebar shows — `ProjectInfo['git']`
-   * is branch, changed count and is-repo, with no ahead/behind — so a refresh after it would
-   * be a status call whose answer can only be identical.
+   * Git writes go through the store (#49) so each one refreshes the sidebar's count; reads stay on `platform.git`, with
+   * no debounce in front. No `push`: it changes nothing `ProjectInfo['git']` shows.
    */
   gitStage(projectId: string, paths: string[], unstage?: boolean): Promise<void>
   gitCommit(projectId: string, message: string): Promise<{ ok: boolean; message?: string; cancelled?: true }>
-  /** Switching branch is the one of these that moves the **name** the sidebar shows, not the count */
+  /** Moves the branch name the sidebar shows, not only the count */
   gitCheckout(
     projectId: string,
     branch: string,
   ): Promise<{ ok: boolean; conflicts: string[]; message?: string }>
-  /**
-   * Replace this project's saved shell commands (issue #44).
-   * Adding one and deleting one both arrive here as "the list is this now".
-   */
+  /** Replaces the saved commands (#44): adding and deleting both send the whole list. */
   setProjectCommands(projectId: string, commands: SavedCommand[]): Promise<void>
-  /** Saves the instructions for agents started in the project (#1161 item 2), from the project menu's dialog */
+  /** The instructions for agents started in the project (#1161) */
   saveAgentInstructions(projectId: string, text: string): Promise<void>
-  /** Saves the worktree provisioning setup (#69) — called from the new-session window's worktree section */
+  /** The worktree provisioning setup (#69) */
   saveWorktreeSetup(projectId: string, setup: { command: string; copyFiles: string[] } | null): Promise<void>
-  /** Reads the host's run ledger — when the evidence panel views a project, so a running command stays visible even after just reloading the UI */
+  /** Reads the host's run ledger, so a running command stays visible after a reload */
   loadCommandRuns(projectId: string): Promise<void>
-  /** Runs a saved command (#44 → #60). If the same command is already running, the host kills it and starts fresh */
+  /** If the command is already running, the host kills it and starts it fresh (#60) */
   runCommand(projectId: string, command: string): Promise<void>
-  /** Stops a dev server — the outcome comes back through `terminal.onExit` and is recorded in `commandRuns`. The log survives */
+  /** The outcome comes back through `terminal.onExit` into `commandRuns`; the log survives */
   stopCommand(projectId: string, command: string): Promise<void>
-  /**
-   * Has the host watch these folders of the project for changes made outside (#34): the file tree's open folders. A
-   * registration that fails is said once until one succeeds again (#841); the tree itself still works
-   */
+  /** The host watches the file tree's open folders (#34); a failed registration is said once until one succeeds (#841) */
   watchProjectDirs(projectId: string, dirs: string[]): Promise<void>
-  /** Sidebar order (set by the person dragging) */
   reorderProjects(orderedIds: string[]): Promise<void>
 }

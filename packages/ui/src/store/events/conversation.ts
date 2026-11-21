@@ -16,26 +16,12 @@ import { omitKey } from '../patch.js'
 import { appendChat, stampSaid, subagentRow, type ChatItem } from '../transcript.js'
 import { notifyStateChange } from './notices.js'
 
-/**
- * A session's conversation: an event folded into the session through the core reducer and appended
- * to its rows, held in the pen when the session is not registered yet, and a native subagent's step
- * joined to its launch card.
- */
-
-/**
- * Calls of the Assistant's proposal tools that have not returned yet, as `sessionId:callId` (a Codex call id may be
- * unique only within its thread): their `tool_result` re-reads the lists (#703)
- */
+// Proposal tool calls not returned yet, as `sessionId:callId`: a Codex call id may be unique only within its thread
 const proposalCalls = new Set<string>()
 const PROPOSAL_CALLS_MAX = 50
 
-/** A native subagent's step (#222): app-wide in where it is handled, before the session guard. True when it was one */
 export function subagentStepEvent(e: NormalizedEvent, set: StoreSet, get: StoreGet): boolean {
-  /*
-   * A native subagent's step (#222). It is not the conversation: it changes no state, adds no row and never moves
-   * unread. It only joins a launch card's steps the person has opened, once every earlier step is read (`more`
-   * false) — appended past a page not read yet, it would leave a hole in the middle.
-   */
+  // docs/state-management.md §4: joins an opened launch card only once every earlier step is read, or it leaves a hole
   if (e.type === 'subagent_event') {
     if (e.stepSeq === undefined) return true
     const cur = get().subagentSteps[e.sessionId]?.[e.parentCallId]
@@ -49,7 +35,6 @@ export function subagentStepEvent(e: NormalizedEvent, set: StoreSet, get: StoreG
   return false
 }
 
-/** Any other event of a registered session: through the reducer, into the conversation, then the notices */
 export function conversationEvent(
   e: NormalizedEvent,
   sessionId: string,
@@ -59,9 +44,7 @@ export function conversationEvent(
 ): void {
   const cur = get().sessions[sessionId]
   if (!cur) {
-    // An event that arrived before the session was registered (the initial prompt streaming right
-    // away is one such case). Discarding it would lose the whole first turn, so it is held and
-    // replayed right after registration.
+    // Held and replayed after registration: the first turn can stream before it
     penEvent(sessionId, e, id, Date.now())
     return
   }
@@ -78,24 +61,15 @@ export function conversationEvent(
     if (e.type === 'session_live') fields.add('live')
   }
   /*
-   * `chat[id]` being **absent** means "history has not been read yet" — focusing reads that and
-   * calls for history. But a non-conversation event (a state change, context usage, and so on)
-   * also arrives here, and writing `[]` for it would make that session read as "read, and empty,"
-   * so **history is never called for again.** An event the host sends while resuming a session can
-   * arrive before the person ever opens it. So no slot is created for a session that had no
-   * conversation to append and no slot yet.
+   * An absent `chat[id]` means history is unread. A `[]` slot for a non-conversation event (one can come while
+   * resuming, before the person opens the session) would mean "read, and empty", and history would never be read.
    */
   const had = get().chat[sessionId]
   const appended = stampNew(had ?? [], appendChat(had ?? [], e), Date.now())
   const chat = had === undefined && appended.length === 0 ? undefined : appended
   /*
-   * The MCP-server and skill proposal lists are not re-read on the `tool_call` (#703). It arrives when the call starts,
-   * before the host has run it and saved the proposal, so a read on it would come back with the old list and the card
-   * would not show. The host broadcasts `orchestrator_proposals_changed` after it writes a list; that event's handler
-   * (in events/rereads.ts) is what re-reads them.
-   *
-   * A safety net for a host that predates that event (an old host still serving during a swap): the call's
-   * `tool_result` comes after the save, so it re-reads both lists. `centralu_run` may be either proposal (#512).
+   * For a host without `orchestrator_proposals_changed`: proposals are re-read on `tool_result`, which comes after the
+   * save, not `tool_call`, which comes before (#703). `centralu_run` may be either proposal (#512).
    */
   if (e.type === 'tool_call' && /(propose_mcp_server|propose_skill|centralu_run)$/.test(e.summary.tool)) {
     if (proposalCalls.size >= PROPOSAL_CALLS_MAX) proposalCalls.delete(proposalCalls.values().next().value!)
@@ -105,39 +79,27 @@ export function conversationEvent(
     void get().refreshMcpProposals()
     void get().refreshSkillProposals()
   }
-  /*
-   * A worktree suggestion (#69) — the same principle (pointing), carrying one extra value: the
-   * branch name. The adapter carries it in the title (there is no other channel). If the title is
-   * exactly the tool's own name, the suggestion has no name — the window opens with an empty name.
-   */
+  // A worktree suggestion's branch rides in the title, its only channel (#69); the bare tool name means none
   if (e.type === 'tool_call' && /propose_worktree_session$/.test(e.summary.tool) && cur.projectId) {
     const branch = /propose_worktree_session$/.test(e.summary.title) ? '' : e.summary.title
     set((st) => ({
       worktreeProposals: st.worktreeProposals.some(
         (p) => p.projectId === cur.projectId && p.branch === branch,
       )
-        ? st.worktreeProposals // The same suggestion arriving again does not queue up a second time (idempotent across replay and reconnect)
+        ? st.worktreeProposals // Idempotent across replay and reconnect
         : [...st.worktreeProposals, { projectId: cur.projectId as string, branch }],
     }))
   }
   /*
-   * **Unread tracking (`lastSeq`) advances only by the seq the host assigns within the session.**
-   *
-   * Not by the conversation item's render key (`chatSeq`, shared across every session): `lastSeq`
-   * flows through `markRead` into the host's `last_read_seq`, so after viewing a 200-message
-   * session, a single event arriving in a 2-message session would inflate that session's
-   * `last_read_seq` to around 201, and its unread dot would never appear again, even across a
-   * restart. The render key and the stored sequence are two different numbering schemes.
+   * `lastSeq` advances only by the host's per-session seq, never the render key (`chatSeq`, shared across sessions):
+   * it flows through `markRead` into the host's `last_read_seq`, and an inflated one hides unread for good.
    */
   const hostSeq = 'seq' in e && typeof e.seq === 'number' ? e.seq : null
   let withSeq = hostSeq != null ? bumpSeq(next, hostSeq) : next
-  // A message sent by me (or by the Assistant) also gets marked read by the host — the screen follows
+  // The host marks a sent message read; the screen follows
   if (e.type === 'user_message') withSeq = markReadPure(withSeq, e.seq)
-  /*
-   * A lock found after the session was already handed back (#168, item 5) — a slow background
-   * resume. The host has dropped the handle, so the session is dormant again, and its dormant line
-   * offers the same "Continue in a fork" as a lock found while waking.
-   */
+  // A lock a slow background resume found (#168 item 5): the host dropped the handle, so the session is dormant
+  // and offers "Continue in a fork" as a lock found while waking does
   const lockedLate = e.type === 'error' && e.error.code === 'conversation_locked' ? e.error.message : null
   if (lockedLate !== null) withSeq = { ...withSeq, live: false }
 
@@ -145,11 +107,7 @@ export function conversationEvent(
     const sessions = { ...st.sessions, [sessionId]: withSeq }
     const workingSince = trackWorkingSince(st.workingSince, sessions, Date.now())
     const stop = stopAfter(st.stopping[sessionId], cur.state, withSeq.state, workingSince[sessionId])
-    /*
-     * An off-screen conversation is cut back to the window (OFFSCREEN_TRIM_AT), never while a page of history is
-     * still on its way: that page is merged against the rows it was asked for. The focused session is never cut
-     * (docs/state-management.md §4).
-     */
+    // docs/state-management.md §4; never while a history page is on its way: it merges against the rows it asked for
     const trimmed =
       chat !== undefined &&
       chat.length > OFFSCREEN_TRIM_AT &&
@@ -164,12 +122,7 @@ export function conversationEvent(
       })
         ? trimWindow(chat)
         : null
-    /*
-     * A "Finished" card says the session is waiting for the person. Once the session starts another turn (a
-     * message from the person or from an agent), that is no longer true, and a card that stays says it is
-     * (#674). Only this session's finished cards go: its approval and error cards still describe something
-     * the person has not seen, and other sessions' cards are not about this one.
-     */
+    // A new turn makes this session's "Finished" cards untrue (#674); its approval and error cards stay
     const turnBegan = withSeq.state === 'working' && cur.state !== 'working'
     const notices = turnBegan
       ? st.notices.filter((n) => !(n.sessionId === sessionId && n.kind === 'done'))
@@ -193,8 +146,7 @@ export function conversationEvent(
           }
         : {}),
       chat: chat === undefined ? st.chat : { ...st.chat, [sessionId]: trimmed ? trimmed.items : chat },
-      // A turn begins because an event arrived — this is where its start instant is
-      // recorded, so the elapsed line survives remounting (issue #23)
+      // Recorded here, not in a view, so the elapsed line survives remounting (#23)
       workingSince,
       ...(stop !== st.stopping[sessionId]
         ? { stopping: stop ? { ...st.stopping, [sessionId]: stop } : omitKey(st.stopping, sessionId) }
@@ -215,9 +167,8 @@ export function conversationEvent(
 type Stop = { turn: number | undefined; failed?: string }
 
 /**
- * A Stop the person pressed (#1060) as its turn moves on. It goes when the turn ends. Through an approval or a question
- * the turn is the same one, but `workingSince` starts again when the session goes back to working, so the Stop moves to
- * that instant: otherwise the button would read Stop again while the stop is still on its way.
+ * A pressed Stop (#1060) goes when its turn ends. Back to working from an approval or question, `workingSince` restarts,
+ * so the Stop moves with it, or the button would read Stop again while the stop is on its way.
  */
 function stopAfter(
   stop: Stop | undefined,

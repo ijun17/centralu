@@ -1,9 +1,6 @@
 /**
- * Store regression tests: notices, toasts, updates and proposals waiting on the person.
- *
- * Ports go through `MockPlatform` (no ad-hoc mocking, or the contract falls apart). The
- * `pendingEvents` holding pen is module state, so it cannot be cleared between tests — each test
- * uses a different session id instead. Shared fixtures are in store.test-helpers.ts.
+ * Store tests: notices, toasts, updates and proposals waiting on the person. Ports go through `MockPlatform`.
+ * The `pendingEvents` pen is module state that tests cannot clear, so each test uses its own session id.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent, UpdateStatus } from '@cc/protocol'
@@ -17,14 +14,8 @@ import { holdList, resetStore, sessionInfo } from './store.test-helpers.js'
 
 beforeEach(resetStore)
 
-/**
- * Update status does not belong to a session (issue #43).
- *
- * `dispatchEvent`'s first line is `if (!sessionId) return`, and that is the widest door in this file.
- * Placing an app-wide event after it means whatever the host sends arrives and does nothing —
- * communication looks fine, there is no error, and it is the kind of defect that leaves no clue
- * anywhere to trace the cause. Order is the contract here, so this pins it down.
- */
+// `dispatchEvent` drops an event with no session silently: an app-wide event handled after that guard arrives and
+// does nothing, with no error (#43). The order is the contract.
 describe('update status (#43)', () => {
   const status = {
     current: '0.1.0-beta.2', latest: '9999.0.0', newer: true, auto: true, autoApply: false,
@@ -54,11 +45,8 @@ describe('update status (#43)', () => {
     spy.mockRestore()
   })
 
-  /**
-   * Answers come back in any order (#2155): the window's own check, the forced check as Updates opens and an install
-   * each ask on their own. Here the later request is answered first, then the earlier one: the earlier answer is older
-   * and must not replace the newer state on screen.
-   */
+  // The window's check, the forced check as Updates opens and an install each ask on their own, so answers come in any
+  // order; here the later request is answered first.
   describe('an answer older than the one on screen (#2155)', () => {
     function heldAnswers(platform: MockPlatform, method: 'status' | 'apply') {
       const answers: Array<(value: UpdateStatus) => void> = []
@@ -146,11 +134,8 @@ describe('update status (#43)', () => {
     apply.mockRestore()
   })
 
-  /**
-   * An agent's "Apply now" (#665): the host asks over the event stream, and the window answers with the checks its
-   * button makes; told to go, it runs the button's own `applyUpdateNow`. The mock plays the host's half
-   * (`agentApply`), the window's half is the store's.
-   */
+  // The host asks over the event stream; the window answers with its button's checks and, told to go, runs
+  // `applyUpdateNow`. The mock plays the host's half (`agentApply`).
   describe('an agent applying the installed update (#665)', () => {
     const installed = { ...status, current: '0.0.1', latest: '9999.0.0', phase: 'restart_required' as const }
     function windowOf(platform: MockPlatform) {
@@ -213,7 +198,6 @@ describe('update status (#43)', () => {
     })
   })
 
-  /** Installing must be started by a person — merely finding out does nothing on its own */
   it('merely learning of a new version installs nothing on its own', async () => {
     const platform = new MockPlatform()
     platform.registryVersion = '9999.0.0'
@@ -224,14 +208,7 @@ describe('update status (#43)', () => {
   })
 })
 
-/**
- * Composer focus simply calls the existing `wake()` — these are the properties that `wake` must keep.
- *
- * Picking from the sidebar (`focusSession`) and composer focus from a grid panel or restart both go
- * through the same door. A failure is only left in `wakeError`, never raised as a toast (focus is not
- * an action), and if it is already alive, nothing happens.
- */
-/** The installed agent CLIs (#297) — app-wide like update status, so the same door applies */
+// App-wide like update status, so handled before `dispatchEvent`'s session check
 describe('agent CLI versions (#297)', () => {
   it('the installed versions reach the store though they belong to no session', () => {
     useStore.getState().dispatchEvent({ type: 'agent_versions', status: { installed: { claude: '2.1.290' }, autoApply: true, checkedAt: 1 } })
@@ -254,12 +231,8 @@ describe('agent CLI versions (#297)', () => {
   })
 })
 
-/**
- * An MCP server suggestion card (option B) — the host says when a list changed, and clicking approve goes to the host.
- *
- * The screen never guesses the moment from the Assistant's `tool_call` (#703): that event arrives when the call
- * starts, before the host has saved the proposal, so a read on it returns the old list.
- */
+// The host says when a list changed. The Assistant's `tool_call` comes before the host saves the proposal, so a read
+// on it returns the old list (#703).
 describe('MCP server suggestions', () => {
   it('the card appears when the host saves the proposal after the tool_call arrived (#703)', async () => {
     const mock = new MockPlatform()
@@ -298,10 +271,8 @@ describe('MCP server suggestions', () => {
     expect(read).not.toHaveBeenCalled()
   })
 
-  /*
-   * A host that predates `orchestrator_proposals_changed` (an old host still serving during a swap) sends only the
-   * tool events. The result comes after the save, so it re-reads: the one place a guess about the tool name stays.
-   */
+  // An older host without `orchestrator_proposals_changed` (one still serving during a swap) sends only tool events. The
+  // result comes after the save, so it re-reads: the one place a guess at the tool name stays.
   it('the tool_result of a proposal call re-reads both lists, for a host that does not broadcast', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('mcp-s3', sessionInfo('mcp-s3'))
@@ -468,9 +439,7 @@ describe('pending proposals wait on the person', () => {
   })
 })
 
-/*
- * The settings-change toast states what the host actually did (#164), not always "(from next turn)."
- */
+// The toast states what the host did, not always "(from next turn)."
 describe('the settings-change toast (#164)', () => {
   it.each([
     ['after_turn', 'Effort: high (applies when this turn ends)'],
@@ -487,11 +456,8 @@ describe('the settings-change toast (#164)', () => {
   })
 })
 
-/*
- * The "always allow" notification uses the matcher actually sent (#170), not wording of the card's
- * own: a kind with no matcher (`other`) must not be announced as "Always allow in this session:
- * other" when no rule was kept.
- */
+// It names the matcher sent, not the card's wording: a kind with none (`other`) is not announced as "Always allow in
+// this session: other".
 describe('the always-allow notification (#170)', () => {
   async function answerAlways(detail: Record<string, unknown>, scope: 'session' | 'project' = 'session') {
     const platform = new MockPlatform()
@@ -526,10 +492,8 @@ describe('the always-allow notification (#170)', () => {
   })
 })
 
-/**
- * What the agent tools tell the person (#304): a fresh conversation and a notice are one quiet line each, live and
- * after reopening; a model switch the tool made updates the model shown without a toast.
- */
+// A fresh conversation and a notice are one quiet line each, live and reopened; a tool's model switch updates the
+// model shown without a toast.
 describe('resets, notices and switches the tool made (#304)', () => {
   const HOOK =
     'UserPromptSubmit operation blocked by hook:\n[node block-hook.mjs]: Prompts containing BLOCKME are not allowed here.'
@@ -688,11 +652,8 @@ describe('resets, notices and switches the tool made (#304)', () => {
     expect(useStore.getState().toast).toMatch(/Assistant changed/)
   })
 
-  /*
-   * #659: a window other than the caller (or the person's own window when an agent made the change) learns the new model
-   * and permission preset from the host's events, without a re-list. The mock emits what the host emits for
-   * `agents.updateSettings`.
-   */
+  // A window other than the caller (or any window, when an agent made the change) learns it from the host's events. The
+  // mock emits what the host emits for `agents.updateSettings`.
   it('a settings change another client made shows the new model and permission preset, without the Assistant toast (#659)', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('n-4', sessionInfo('n-4', { model: 'fable', permissionPreset: 'normal' }))

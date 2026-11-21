@@ -11,105 +11,53 @@ import type {
 /** Sessions: focus, the new-session window, waking, and lifecycle actions. */
 export type SessionsSlice = {
   sessions: Record<string, SessionSummary>
-  /**
-   * Which agent tools this machine has, as the host reports them.
-   *
-   * It arrives over the wire rather than being compiled into `@cc/protocol`, so a new adapter
-   * can appear without editing the protocol. It has to be held somewhere every screen can reach —
-   * the chips in the sidebar need the label and the mark synchronously, once per row.
-   */
+  /** The host's agent tools, sent over the wire so a new adapter needs no protocol change. */
   tools: ToolStatus[]
   focusedSessionId: string | null
   /**
-   * The project whose session-creation window is open (`null` means closed).
-   *
-   * Held in the store, not on the sidebar panel, because **the first-run screen needs to open this
-   * window.** The moment a project is created, the first-run
-   * screen disappears (`App` branches on whether any project exists), so the only way for that
-   * screen to hand off its next step is to reserve a window that will stand somewhere else, in
-   * place of the screen that is about to disappear.
+   * The project whose new-session window is open. In the store because the first-run screen opens it and then
+   * disappears as soon as a project exists.
    */
   newSessionFor: string | null
   /**
-   * A worktree suggestion from the manager (#69). Set by `propose_worktree_session`, and consumed
-   * when that project's new-session window opens — the window comes up with the worktree toggle on
-   * and the branch name filled in. The reason it is keyed to the project: letting it bleed into
-   * another project's window would contaminate the suggestion.
-   */
-  /**
-   * A queue (#69): when the manager suggests two branches back to back, a single slot would keep
-   * only the last one, and the first suggestion would have to be typed by hand after reading the
-   * name off the conversation. Each time the window opens, it consumes that project's
-   * oldest suggestion (FIFO).
+   * The manager's worktree suggestions (#69, `propose_worktree_session`), keyed to the project. A queue, so two in a row
+   * both survive: each opening of that project's new-session window takes the oldest.
    */
   worktreeProposals: { projectId: string; branch: string }[]
-  /**
-   * Whether the new-session window opens with the worktree checkbox on (#69). Turned on by the `+`
-   * on the manager's row, because a session created under a manager defaults to a worktree session.
-   * Turning it off in the window is free (a preset, not a requirement).
-   */
+  /** The new-session window's worktree checkbox starts on (#69): set by the `+` on a manager's row. */
   newSessionWorktree: boolean
-  /** The initial branch name for the new-session window (#69) — filled by a suggestion. An empty string means none */
+  /** The new-session window's branch name from a suggestion (#69); empty: none */
   newSessionBranch: string
   /**
-   * The session currently being woken up.
-   *
-   * A session wakes when it is used (#568): its composer takes the keyboard, or a message is sent to
-   * it. Selecting it alone does not wake it. Waking only on send would pile the whole process-startup
-   * time onto the wait for the first response, and a sleeping session has no process to ask, so it
-   * cannot even hand back its slash-skill list.
+   * Sessions being woken. A session wakes when used (#568): its composer takes the keyboard or a message is sent;
+   * selecting it alone does not. Waking on send only would add process startup to the first reply's wait.
    */
   resuming: Record<string, boolean>
-  /**
-   * **Why** waking it failed.
-   *
-   * No silent failures: a screen that says "sending a message will resume it automatically" when it
-   * will not leaves the person no way to find out why. The reason is written right there.
-   */
+  /** Why waking failed, shown where the screen would otherwise promise that sending resumes it. */
   wakeError: Record<string, string>
   /**
-   * Whether waking it failed **because another side is holding it**.
-   *
-   * This is never decided by pattern-matching the reason text with a regex — the moment the wording
-   * changes, that check breaks silently. The host sends this down as its own separate signal, and it
-   * is simply carried as is. Only when this is true is "split off and continue" offered (that is the
-   * only case where that path is actually open).
+   * Waking failed because another side holds the conversation: the host's own signal, never matched from the reason's
+   * wording. Only then is "split off and continue" offered.
    */
   wakeLocked: Record<string, boolean>
   /**
-   * Show a session.
-   *
-   * `preferGrid` is for the doors that alerts open (the inbox, the "done" cards): if the
-   * session already has a panel on the grid, go there instead of replacing the grid with
-   * one big pane. You put it on the grid to watch it; an alert about it is not a reason to
-   * take the other panels off the screen. Deliberate navigation — the sidebar, the palette —
-   * leaves this off: picking a row means "give me that one, large".
-   *
-   * `reveal: false` keeps a folded project folded (#205). Every other door unfolds the
-   * session's project, so the row it lands on is visible; see `focusSession` for the two
-   * callers that pass it.
+   * `preferGrid`: an alert's door (inbox, "done" cards) goes to the session's grid panel if it has one; the sidebar and
+   * palette mean "that one, large". `reveal: false` keeps a folded project folded (#205); see `focusSession`.
    */
   focusSession(id: string | null, opts?: { preferGrid?: boolean; reveal?: boolean; targetSeq?: number }): void
-  /**
-   * Goes to one thing that waits on the person (#703): a session, or a pending assistant proposal (an id from
-   * `isProposalId`), whose card stands on the Assistant's screen. The waiting list and "next waiting" use it.
-   */
+  /** A waiting session, or a pending assistant proposal (an `isProposalId` id) whose card is on the Assistant (#703). */
   openWaiting(id: string, opts?: { preferGrid?: boolean }): void
-  /** Goes to the next thing that waits on the person: the newest wait first (the order is core's, `nextWaitingSession`) */
+  /** The newest wait first (core's `nextWaitingSession`) */
   openNextWaiting(): void
-  /** Opens a search result at its stored conversation row. */
   openSearchHit(sessionId: string, seq: number): void
-  /** The search result the conversation is currently holding in sight, by session. */
+  /** The search result each conversation holds in sight. */
   searchTargets: Record<string, { seq: number; at: number }>
-  /** A reader moved away from a search result, so it no longer needs emphasis. */
   clearSearchTarget(sessionId: string, at: number): void
-  /** Opens/closes the session-creation window (`null` closes it) */
+  /** `null` closes the window */
   openNewSession(projectId: string | null, opts?: { worktree?: boolean }): void
   /**
-   * Starts a session in the project at once, with what the project remembers (its last tool, and that tool's model and
-   * effort: `createSession` reads them), and gives the new session's composer the keyboard (#543). A remembered tool that
-   * is logged out gives way to one that is not (the dialog's rule); when none can run, or the host refuses, the options
-   * window opens instead and states why: a one-click start must never end in "nothing happened".
+   * Starts a session with the project's remembered tool, model and effort and focuses its composer (#543). A logged-out
+   * tool gives way to one that is not; when none can run or the host refuses, the options window opens and says why.
    */
   startSessionNow(projectId: string): Promise<void>
   createSession(
@@ -117,56 +65,42 @@ export type SessionsSlice = {
     opts?: {
       tool?: ToolName
       model?: string
-      /** When given, this value is used instead of the project default — a handoff carries a dying session's settings whole this way */
+      /** Overrides the project default; a handoff carries the old session's settings this way */
       effort?: string
       verbosity?: string
       serviceTier?: string
       permissionPreset?: PermissionPreset
       initialPrompt?: string
-      /** An inherited handoff note — enters as a marker in the record, not as the first message (#102) */
+      /** Enters the record as a marker, not as the first message (#102) */
       handoff?: { from: string; note: string; fromSessionId?: string }
-      /** Resumes a previous session the tool already had (including a conversation created in a terminal) */
+      /** A session the tool already has, a terminal's included */
       resumeExternalId?: string
       importHistory?: boolean
-      /** Runs only this session in a git worktree (FR-2 option) */
       worktree?: boolean
-      /** The worktree branch name (#69). If empty, the host uses an automatic name */
+      /** Empty: the host picks a name (#69) */
       worktreeBranch?: string
-      /** Where to branch off from. If empty, the project's trunk, or if there is none, the current HEAD */
+      /** Empty: the project's trunk, else the current HEAD */
       worktreeBase?: string
     },
   ): Promise<SessionInfo>
-  /** Restarts only the agent (the conversation stays as is) */
+  /** Restarts only the agent; the conversation stays */
   restartSession(sessionId: string): Promise<boolean>
-  /** Moves the session to the session archive (#204); the two flags say what goes with it when it is deleted for good */
+  /** Moves it to the session archive (#204); the flags say what goes with it when it is deleted for good */
   deleteSession(sessionId: string, deleteWorktree?: boolean, deleteExternal?: boolean): Promise<void>
   /**
-   * The archive the dialog's Archive asks for when the person has not seen the host's losses (#1589, #1595). Null: done (archived
-   * with Undo on the toast, or failed with the toast saying why). Lines: not moved, and these are what it would lose; the dialog
-   * shows them and its next Archive is `deleteSession`. No lines: not moved, the session is not at rest or the host predates the
-   * check; the dialog then calls `deleteSession`. With the worktree deleted too only the losses are read: the store moves nothing then.
+   * The dialog's Archive before the person has seen the host's losses (#1589, #1595). Null: done (Undo or the failure on
+   * the toast). Lines: not moved, what it would lose; the dialog shows them, and its next Archive is `deleteSession`.
+   * No lines: not moved (not at rest, or an older host); the dialog calls `deleteSession`. With the worktree deleted
+   * too, only the losses are read.
    */
   archiveSession(sessionId: string, deleteWorktree: boolean, deleteExternal: boolean): Promise<string[] | null>
-  /**
-   * Brings a session back from the session archive (#204). A project its restore registered again is added here, and asked
-   * about trust as a newly added one is. Returns an error message, or null when it is back.
-   */
+  /** (#204) A project the restore registered again is added and asked about trust. Returns an error, or null when back. */
   restoreFromTrash(sessionId: string): Promise<string | null>
   /**
-   * Hands off and starts fresh (the way out of the 7-13 second resume delay on an old codex
-   * thread). The dying session writes a handoff note → the new session starts from
-   * that note → the old session (with deleteOld) is **actually** deleted, all the way down to the tool's
-   * own original. Destruction comes last: nothing is deleted until the new session is successfully
-   * up.
-   *
-   * tool: can also hand off to a different agent (the note is plain text, so it does not care which
-   * tool reads it). Switching tools does not carry over the model, effort, verbosity or speed — those
-   * are all tool-specific values, and handing codex's model name to claude would fail right at session
-   * creation.
-   * deleteOld: kept, the old session stays standing — a branch, not a switch.
-   * mode 'record' (#78, #694): asks the agent nothing and has
-   * the host build the note straight from the store's own transcript. 'agent': the departing session
-   * writes the note.
+   * Hands off to a fresh session (the way out of a 7-13 s resume of an old codex thread). With `deleteOld` the old one
+   * is deleted down to the tool's original, only once the new one is up. Another `tool` gets no model, effort,
+   * verbosity or speed: they are tool-specific. `mode: 'record'` (#78, #694): the host builds the note from the store's
+   * transcript; 'agent': the old session writes it.
    */
   handoffSession(
     sessionId: string,
@@ -184,32 +118,26 @@ export type SessionsSlice = {
   ): Promise<void>
   resumeSession(sessionId: string): Promise<boolean>
   /**
-   * Switches a session's agent (claude ↔ codex).
-   * **The conversation does not carry over** — the caller must tell the person that beforehand.
-   * A refusal is toasted here; `false` says it happened, so a caller does not show the switch as done.
+   * The conversation does not carry over; the caller tells the person first. A refusal is toasted here and returns
+   * `false`.
    */
   switchTool(sessionId: string, tool: ToolName): Promise<boolean>
-  /** Wakes a session the instant it is picked (so we do not wait for the first response) */
   wake(sessionId: string): Promise<void>
-  /**
-   * Branches off a locked conversation and continues it.
-   * The only way out that does not require going elsewhere to close another app — the original is
-   * left as is.
-   */
+  /** Branches off a locked conversation and continues it; the original is left as is. */
   forkConversation(sessionId: string): Promise<void>
   reorderSessions(projectId: string, orderedIds: string[]): Promise<void>
   rename(sessionId: string, name: string): Promise<void>
   markRead(sessionId: string): Promise<void>
   /**
-   * Done (#669, #1549): reads a finished turn or a stopped one, and clears a session's error, which moves it to idle.
-   * The error line stays in the conversation and nothing is retried or continued.
+   * Done (#669, #1549): reads a finished or stopped turn and clears an error, moving it to idle. The error line stays
+   * and nothing is retried or continued.
    */
   markDone: (sessionId: string) => Promise<void>
   /** Don't continue (#1415): the stopped turn Centralu would continue by itself waits for the person instead */
   stopContinue: (sessionId: string) => Promise<void>
   /**
-   * The person has an app's agent session on screen (#378): the host keeps it as theirs instead of deleting it when its
-   * run ends. Said at once, with nothing unread too, which `markRead` skips
+   * An app's agent session is on screen (#378): the host keeps it instead of deleting it when its run ends. Said even
+   * with nothing unread, which `markRead` skips.
    */
   markOpened(sessionId: string): Promise<void>
 }

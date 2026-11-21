@@ -1,18 +1,12 @@
 import type { Platform } from '@cc/platform/ports'
 import type { StoreGet } from './state.js'
 
-/** The read of one list now running: for which platform, and whether another ask came in meanwhile */
 type Reading = { platform: Platform; again: boolean; done: Promise<void> }
 const reading = new Map<string, Reading>()
 
 /**
- * Re-reads a list the host announces changes of: one read at a time, and once more afterwards if another ask came in
- * meanwhile, so reads never land out of order and an older answer never overwrites a newer one. An ask during a read
- * waits for that read and the one after it.
- *
- * Keyed by `key` and by the platform: a read that finishes after `attach` swapped the platform writes nothing, and the
- * new platform's ask starts its own read rather than being handed the old one's. A read that fails leaves the list as it
- * was; the next change or reconnect reads again.
+ * One read of a host list at a time, plus one more if asked meanwhile, so an older answer never overwrites a newer one.
+ * Keyed by platform too: a read that finishes after `attach` swapped the platform writes nothing.
  *
  * @param apply writes what was read; true asks for one more read (a value it had to withhold)
  */

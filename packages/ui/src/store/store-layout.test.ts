@@ -1,9 +1,6 @@
 /**
- * Store regression tests: the sidebar, screens, the workspace snapshot and navigation.
- *
- * Ports go through `MockPlatform` (no ad-hoc mocking, or the contract falls apart). The
- * `pendingEvents` holding pen is module state, so it cannot be cleared between tests — each test
- * uses a different session id instead. Shared fixtures are in store.test-helpers.ts.
+ * Store tests: the sidebar, screens, the workspace snapshot and navigation. Ports go through `MockPlatform`.
+ * The `pendingEvents` pen is module state that tests cannot clear, so each test uses its own session id.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { notifyPolicyOf, type ExternalAppInfo } from '@cc/protocol'
@@ -16,9 +13,8 @@ import { appInfo, resetStore, sessionInfo } from './store.test-helpers.js'
 beforeEach(resetStore)
 
 /*
- * Sidebar group folding (#666). The children of a session and the sessions of an app fold behind a chevron; the folded
- * keys live in the screen preferences (`prefs.foldedGroups`), so they are saved through `prefs.save` and come back on
- * attach. A pick makes its session visible again, except where `reveal: false` says the session is already on screen.
+ * The folded keys live in `prefs.foldedGroups`: saved through `prefs.save`, back on attach. A pick unfolds its
+ * session, except where `reveal: false` says the session is already on screen.
  */
 describe('sidebar group folding (#666)', () => {
   const tick = () => new Promise((r) => setTimeout(r, 0))
@@ -79,7 +75,6 @@ describe('sidebar group folding (#666)', () => {
     expect((await mock.prefs.load()).foldedGroups).toEqual(['session:unrelated'])
   })
 
-  // #1416: a child started on another machine stands in that machine's project, so that is the fold to open, not its parent's
   it('picking a child started on another machine opens its own project, and leaves its parent’s project and children folded', async () => {
     const mock = new MockPlatform()
     const hub = await mock.projects.add('/tmp/group-hub')
@@ -244,10 +239,8 @@ describe('sidebar group folding (#666)', () => {
 })
 
 /*
- * Sidebar folding (#205). A fold is remembered per project and survives a restart — carried in the
- * workspace snapshot. Because a picked session must be shown, the inbox, palette, notification card
- * and new-session all unfold that project, and what gets unfolded is remembered too. Exactly two
- * doors never unfold: restoring a snapshot, and clicking a grid panel.
+ * A fold is kept per project in the workspace snapshot. A picked session must be shown, so every door that picks one
+ * unfolds its project, and that is saved too; only restoring a snapshot and clicking a grid panel never unfold.
  */
 describe('sidebar folding (#205)', () => {
   const tick = () => new Promise((r) => setTimeout(r, 0))
@@ -267,7 +260,7 @@ describe('sidebar folding (#205)', () => {
     await tick()
     expect(folds(mock)).toEqual([b.id])
 
-    // Simulates reopening the app — feeds the same snapshot to a store reset back to the default (nothing folded)
+    // Reopening the app: the same snapshot, fed to a store reset to the default (nothing folded)
     useStore.setState({ foldedProjects: [] })
     await useStore.getState().attach(mock)
     expect(useStore.getState().foldedProjects).toEqual([b.id])
@@ -299,7 +292,6 @@ describe('sidebar folding (#205)', () => {
     useStore.getState().focusSession('fold-g1', { preferGrid: true })
     await tick()
 
-    // Never touches another project's fold
     expect(useStore.getState().foldedProjects).toEqual([b.id])
     expect(folds(mock)).toEqual([b.id])
   })
@@ -343,7 +335,7 @@ describe('sidebar folding (#205)', () => {
     expect([...(folds(mock) ?? [])].sort()).toEqual([a.id, c.id].sort())
   })
 
-  // The folder goes through its own door (#838 review): the file tree's trash refuses the project folder
+  // The file tree's trash refuses the project folder (#838 review)
   it('deleting a project with its folder trashes the folder through its own door, then removes the project', async () => {
     const mock = new MockPlatform()
     const a = await mock.projects.add('/tmp/trash-whole')
@@ -389,10 +381,7 @@ describe('sidebar folding (#205)', () => {
   })
 })
 
-/*
- * The project screen's arrangement (#203): per project, in the workspace snapshot, next to the fold. The panels are
- * explicitly chosen by the person and restored once the availability catalogs have loaded.
- */
+// Kept per project in the workspace snapshot; restored once the availability catalogs have loaded.
 describe('project screen arrangement (#203)', () => {
   const tick = () => new Promise((r) => setTimeout(r, 0))
   const stored = (mock: MockPlatform) =>
@@ -420,11 +409,8 @@ describe('project screen arrangement (#203)', () => {
     mock.sessions.set('arr-r1', sessionInfo('arr-r1', { projectId: a.id }))
     const saved = { [a.id]: { panels: ['session:arr-r1'] } }
     mock.workspaceSnapshot = { focusedSessionId: 'arr-r1', projectPanels: saved } as never
-    /*
-     * A crash right after restoring the focused session must not find the arrangement gone. Saves are held off for
-     * the whole restore (`restoringWorkspace`), so the stronger thing holds: the restore writes nothing, and the
-     * stored arrangement is exactly what it was.
-     */
+    // Saves are held off for the whole restore (`restoringWorkspace`), so a crash right after it finds the
+    // stored arrangement unchanged.
     const written: unknown[] = []
     const save = mock.workspace.save
     mock.workspace.save = async (snap) => {
@@ -530,7 +516,6 @@ describe('project screen arrangement (#203)', () => {
 })
 
 describe('the workspace snapshot has a single writer (U7)', () => {
-  // #2168: the switches are the host's alone (`prefs.notifyPolicy`); the snapshot carries no second copy
   it('changing the notify policy writes it to the host, not to the workspace snapshot, and a layout save leaves it there', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
@@ -560,7 +545,6 @@ describe('the workspace snapshot has a single writer (U7)', () => {
     expect((mock.workspaceSnapshot as { showIgnored?: boolean } | null)?.showIgnored).toBe(false)
   })
 
-  // The text size is a preference (#312 step 5), not part of the snapshot
   it('the text size is a preference and is not written into the snapshot', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
@@ -573,14 +557,8 @@ describe('the workspace snapshot has a single writer (U7)', () => {
     expect(mock.workspaceSnapshot).not.toHaveProperty('textSize')
   })
 
-  /*
-   * The ignored-files switch is remembered by the store, not the component (issue #17): on the
-   * component, leaving the git tab and coming back would reset it.
-   *
-   * The direction that matters is *off*, since on is the default (#17). Turning
-   * it off is the only version of this choice a person can make deliberately, so it is the
-   * one that has to survive a relaunch — and it has to survive the default too.
-   */
+  // The store keeps it, not the component, which leaving the git tab would reset (#17). On is the default,
+  // so off is the choice a person makes and the one that has to survive a relaunch.
   it('hiding ignored files survives the next run — a way of viewing belongs to the person', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('si-s1', sessionInfo('si-s1'))
@@ -591,26 +569,22 @@ describe('the workspace snapshot has a single writer (U7)', () => {
     await new Promise((r) => setTimeout(r, 0))
     expect((mock.workspaceSnapshot as { showIgnored?: boolean } | null)?.showIgnored).toBe(false)
 
-    // Simulates reopening the app — feeds the same snapshot to a store reset back to the default
+    // Reopening the app: the same snapshot, fed to a store reset to the default
     useStore.setState({ showIgnored: true })
     await useStore.getState().attach(mock)
 
     expect(useStore.getState().showIgnored).toBe(false)
   })
 
-  /*
-   * A stored `false` outranks the default; an *absent* field must not. The two are only
-   * distinguishable because the snapshot is read with a `typeof` check — read it as `??
-   * false` or `!!snap.showIgnored` instead and every older snapshot suddenly claims someone
-   * turned this off, so the default could never move again. That is what this pins.
-   */
+  // Only a `typeof` read tells an absent field from a stored `false`: read as `?? false`, every older
+  // snapshot would claim someone turned it off.
   it('a setting absent from the snapshot is left at its default — never having chosen is different from having turned it off', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('si-s2', sessionInfo('si-s2'))
     // A snapshot from before this setting existed: it has layout, but no opinion on this
     mock.workspaceSnapshot = { focusedSessionId: 'si-s2', panelOpen: true }
 
-    // Simulates just opening the app — starts from the default (on)
+    // Just opened: the default (on)
     useStore.setState({ showIgnored: true })
     await useStore.getState().attach(mock)
 
@@ -618,13 +592,7 @@ describe('the workspace snapshot has a single writer (U7)', () => {
   })
 })
 
-/**
- * The screen being viewed carries over a restart.
- *
- * The session comes back, and so must **the way it is viewed** — closed in the grid, it must not come
- * back up in the focus view. The order of restoration is the trap: `focusSession` forces `view` to `focus`
- * (because a picked session must be shown), so view restoration has to happen **after** that.
- */
+// The view comes back with the session. `focusSession` forces `view` to `focus`, so the view is restored after it.
 describe('view restoration', () => {
   it('closed in the grid, it comes back in the grid — session restoration cannot overwrite it', async () => {
     const mock = new MockPlatform()
@@ -646,7 +614,7 @@ describe('view restoration', () => {
     expect((mock.workspaceSnapshot as { view?: string } | null)?.view).toBe('grid')
   })
 
-  // #2133: the view was saved as 'orchestrator' before the rename, and a workspace an earlier build saved still opens the Assistant
+  // #2133: builds before the rename saved the view as 'orchestrator'
   it.each(['assistant', 'orchestrator'])('a workspace saved with view %s reopens the Assistant screen', async (view) => {
     const mock = new MockPlatform()
     mock.workspaceSnapshot = { view }
@@ -655,10 +623,7 @@ describe('view restoration', () => {
     expect(useStore.getState().view).toBe('assistant')
   })
 
-  /*
-   * #2220 (owner, 2026-11-12): when the saved screen cannot come back, the Assistant opens rather than the empty
-   * "Select a project or session". It happens before the first screen is shown, so there is no switch to animate.
-   */
+  // docs/state-management.md §5: a screen that cannot come back opens the Assistant (owner, #2220)
   it('a focused session that is gone opens the Assistant, saved as the screen', async () => {
     const mock = new MockPlatform()
     mock.workspaceSnapshot = { focusedSessionId: 'vw-gone', view: 'focus' }
@@ -707,10 +672,8 @@ describe('view restoration', () => {
 })
 
 /*
- * The restore must not save a half-restored state (`restoringWorkspace` in store.ts). Every setter the restore goes
- * through saves, so a save in the middle of it would write the defaults of every field restored later back over
- * the snapshot. The last setting restored (whether .gitignore's files show) is the one that shows it: turned off, it
- * is on again after a restart (seen 2026-09-30).
+ * Every setter the restore goes through saves, so a save midway (`restoringWorkspace`) would write the defaults of the
+ * fields restored later over the snapshot. The last one restored, `showIgnored`, shows it.
  */
 describe('restoring the workspace saves nothing until it is done', () => {
   const tick = () => new Promise((r) => setTimeout(r, 0))
@@ -751,12 +714,7 @@ describe('restoring the workspace saves nothing until it is done', () => {
     expect(notifyPolicyOf(useStore.getState().prefs)).toEqual({ approval: false, error: true, done: true, allDone: true, whenFocused: false, sound: true })
   })
 
-  /*
-   * The control rail is gone (#97), and a snapshot written by an older build still carries its width
-   * (`railWidth`). It must load like any other snapshot: the fields around it come back, and the next
-   * save simply stops writing it — an older build that reads the new snapshot falls back to its own
-   * default width.
-   */
+  // An older build reading the snapshot without `railWidth` falls back to its own default width.
   it('an old snapshot that still carries the control rail\'s width loads in full, and the next save drops it (#97)', async () => {
     const mock = new MockPlatform()
     const p = await mock.projects.add('/tmp/restore-rail')
@@ -785,11 +743,7 @@ describe('restoring the workspace saves nothing until it is done', () => {
     expect(mock.workspaceSnapshot).not.toHaveProperty('railWidth')
   })
 
-  /*
-   * The spin switches left with the orbit (#736). A snapshot an older build wrote still carries them: it loads in full,
-   * nothing reads them, and the next save stops writing them (an older build reading that snapshot falls back to its
-   * default, which is on).
-   */
+  // Nothing reads them; an older build reading the snapshot without them falls back to its default (on).
   it('an old snapshot that still carries the spin switches loads in full, and the next save drops them (#736)', async () => {
     const mock = new MockPlatform()
     mock.workspaceSnapshot = { panelWidth: 333, spinGrid: false, spinSessionIcon: false, showIgnored: false } as never
@@ -806,12 +760,7 @@ describe('restoring the workspace saves nothing until it is done', () => {
     expect(mock.workspaceSnapshot).not.toHaveProperty('spinSessionIcon')
   })
 
-  /*
-   * #2220: after an update, the lists `attach` reads before the restore take long, and the host and its subscriptions
-   * are live meanwhile: a save in that time (an app list that changed notes its arrivals and saves) would write this
-   * window's defaults over the stored snapshot, and the restore would read the defaults back — every project expanded
-   * and no screen.
-   */
+  // docs/state-management.md §5: the stored snapshot is unread from the start of `attach` (#2220)
   it('a save made while attach is still reading its lists does not write over the stored snapshot (#2220)', async () => {
     const mock = new MockPlatform()
     const p = await mock.projects.add('/tmp/restore-lists')
@@ -840,11 +789,8 @@ describe('restoring the workspace saves nothing until it is done', () => {
     expect(mock.workspaceSnapshot).toMatchObject({ foldedProjects: [p.id], view: 'grid', sidebarWidth: 301 })
   })
 
-  /*
-   * The host's first word (`connected`) arrives while the lists are still being read, and a reconnect reads an unread
-   * snapshot again (`readWorkspaceAgain`). That second read must not run beside the attach's own: it would lay the
-   * snapshot without its screen and let saves through, so the save that follows would store a window with no screen.
-   */
+  // `connected` arrives while the lists are read, and a reconnect reads an unread snapshot again (`readWorkspaceAgain`).
+  // Beside the attach's own read, it would lay the snapshot without its screen and let a screenless save through.
   it('the host connecting while attach reads its lists does not start a second read of the snapshot (#2220)', async () => {
     const mock = new MockPlatform()
     const p = await mock.projects.add('/tmp/restore-connect')
@@ -888,12 +834,7 @@ describe('restoring the workspace saves nothing until it is done', () => {
   })
 })
 
-/*
- * A snapshot that could not be read (#384): `workspace.load` failed (a timeout under load, a host that threw), or the
- * restore threw partway. Coming up as the defaults with no word, the next change would save those defaults over the
- * stored snapshot, which holds settings as well as the layout (the notification switches, the app spans,
- * `introSeen`). So it is said, and nothing is saved over the stored snapshot until it has been read.
- */
+// docs/state-management.md §5: a snapshot that could not be read is said, and not saved over until read (#384)
 describe('a workspace snapshot that could not be read', () => {
   const tick = () => new Promise((r) => setTimeout(r, 0))
   const stored = { view: 'focus', foldedProjects: ['kept-fold'], showIgnored: true, introSeen: true, sidebarWidth: 300 }
@@ -981,7 +922,7 @@ describe('a workspace snapshot that could not be read', () => {
     }
   })
 
-  // A row that never reads must not stop saving for good: past the last try, what the window holds is saved over it
+  // Otherwise a row that never reads stops saving for good
   it('that never reads is saved over with what the window holds, said once, after the last try', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
@@ -1021,7 +962,6 @@ describe('a workspace snapshot that could not be read', () => {
     }
   })
 
-  // A snapshot that reads but cannot be restored is a failed read too: the window must not stay unsaved for good
   it('that reads but cannot be restored is tried again, and saved over after the last try', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
@@ -1045,11 +985,7 @@ describe('a workspace snapshot that could not be read', () => {
   })
 })
 
-/*
- * A failed save is retried, not dropped (`workspaceSave` in store.ts). A machine frozen for hours times out every
- * save (seen 2026-09-30); dropped, every fold made meanwhile is gone after a restart, since the stored snapshot never
- * receives them.
- */
+// `workspaceSave`: a machine frozen for hours times out every save, and a dropped save loses every fold made meanwhile.
 describe('a workspace save that fails is sent again', () => {
   const tick = () => new Promise((r) => setTimeout(r, 0))
   const storedFolds = (mock: MockPlatform) =>
@@ -1107,7 +1043,7 @@ describe('a workspace save that fails is sent again', () => {
     }
   })
 
-  // #841 item 9: a save that stops trying past the last retry says so; silent, the layout is found lost after a restart
+  // #841 item 9: silent, the layout is found lost after a restart
   it('says so once the retries while connected run out', async () => {
     const mock = await attached()
     failSaves(mock, 100)
@@ -1220,11 +1156,8 @@ describe('a workspace save that fails is sent again', () => {
   })
 })
 
-/**
- * Back and forward between screens (#374). History is written by one subscriber, whichever action changed the
- * screen, so these go through the store's ordinary doors — the sidebar's, the grid button's, an app's — and read
- * what is on screen after each step.
- */
+// One subscriber records every screen change (docs/state-management.md §5a), so these go through the store's
+// ordinary doors and read what is on screen after each step.
 describe('back and forward between screens (#374)', () => {
   const live = async () => {
     const mock = new MockPlatform()
@@ -1290,11 +1223,8 @@ describe('back and forward between screens (#374)', () => {
     expect(st()).toMatchObject({ settingsOpen: false, focusedSessionId: 'nav-a' })
   })
 
-  /*
-   * A file and the git screen are pages of their own (owner, 2026-10-18): opened over a screen, back closes them onto
-   * it, forward opens them again, closing one (Esc, its close button) is a step back, and going to another screen
-   * closes them.
-   */
+  // Owner, 2026-10-18: back closes them onto the screen under them, forward opens them again, closing one
+  // (Esc, its close button) is a step back, and going to another screen closes them.
   describe('a file or the git screen as a page', () => {
     const page = () => ({ overlay: st().overlay?.kind ?? null, viewerPath: st().viewerPath, view: st().view, session: st().focusedSessionId })
     // Each from an empty history: the store is one module for the file, and resetStore leaves `nav` as it was

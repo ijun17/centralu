@@ -8,12 +8,9 @@ import { goodThemes } from './connection.js'
 import { RETRY_MS } from './retry.js'
 
 /**
- * The store's link to the host (connection.ts): attaching to a platform, what a drop and a return
- * do to the state, and the recovery's retries. The saved-workspace writer and the resync merge have
- * their own scenarios in store-layout.test.ts and store-connection.test.ts; these are the rules that had none.
- *
- * The subscriptions and the recovery's generation are module state, shared by every test here, so
- * each test uses session ids of its own.
+ * connection.ts: attaching, what a drop and a return do, the recovery's retries (the workspace writer and the resync
+ * merge are in store-layout and store-connection tests). Its subscriptions and the recovery's generation are module
+ * state, so each test uses its own session ids.
  */
 
 function sessionInfo(id: string, over: Partial<SessionInfo> = {}): SessionInfo {
@@ -52,10 +49,7 @@ afterEach(() => {
 })
 
 describe('attaching to a platform', () => {
-  /*
-   * A subscription is a fresh closure each time, so attaching again without dropping the old one
-   * would apply every event once per attach: streamed text would arrive doubled or tripled.
-   */
+  // Each subscription is a fresh closure: one not dropped would double or triple streamed text.
   it('attaching again applies each event once, not once per attach', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('att-1', sessionInfo('att-1'))
@@ -145,10 +139,7 @@ describe('the connection label', () => {
   })
 })
 
-/*
- * A host that died and was brought back knows none of the agent processes that were alive: they
- * died with it. The window knows which were running and wakes those, and only those.
- */
+// A host brought back knows none of the agent processes that died with it; the window wakes the ones it knew ran, only those.
 describe('reviving after a reconnect', () => {
   it('wakes what was running before the drop and the new host does not run, and nothing else', async () => {
     const mock = new MockPlatform()

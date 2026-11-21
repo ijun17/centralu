@@ -1,23 +1,13 @@
 /**
- * Whether this window is the one that raises the notification for an event (#2168). Every window hears the host's
- * events, so with two open each would raise its own banner and sound for one mail or approval. The windows of one machine
- * share their origin's IndexedDB (the desktop app's windows, a browser's tabs), whose `add` of a key already there fails
- * in every connection alike: the window whose `add` succeeds raises it, and the others leave it. So it is once per
- * machine, as the person sees it. (localStorage would not do: another process sees a write a moment later.)
- *
- * A key is kept `KEPT_MS`, so an event replayed after a reconnect is not raised again either. A page without IndexedDB,
- * or one that fails or does not answer within `CLAIM_BOUND_MS` (a test in Node, storage denied, a hung database), cannot
- * tell, and every window raises its own: a notification twice rather than none.
+ * Once per machine (#2168): the windows share their origin's IndexedDB, and the one whose `add` of the event's key
+ * succeeds raises the notification (not localStorage: another process sees a write a moment late). Kept `KEPT_MS`
+ * against reconnect replays. No IndexedDB, a failure or `CLAIM_BOUND_MS` passed: every window raises, twice not none.
  */
 const DB = 'centralu-notices'
 const STORE = 'raised'
 const KEPT_MS = 10 * 60_000
 
-/**
- * The window's connection, opened once. A connection that failed to open, that the browser closed (storage cleared, the
- * disk gone: `onclose`), that a claim failed on or that did not answer within the bound is dropped, and the next claim
- * opens another: kept, it would fail every later claim, and every window would raise every notification from then on
- */
+/** Dropped when it fails, the browser closes it (`onclose`) or a claim fails or times out: kept, it fails every claim */
 let opened: Promise<IDBDatabase> | null = null
 
 function database(idb: IDBFactory): Promise<IDBDatabase> {
@@ -39,10 +29,7 @@ function drop(connection: Promise<IDBDatabase>): void {
   if (opened === connection) opened = null
 }
 
-/**
- * How long a claim may take before the window raises the notification anyway: a claim answers in milliseconds, and an
- * IndexedDB that never answers (a hung open, a transaction that never settles) must not silence every window's
- */
+/** A claim answers in milliseconds; a hung IndexedDB must not silence every window's notification */
 export const CLAIM_BOUND_MS = 500
 
 export function firstToRaise(key: string): Promise<boolean> {

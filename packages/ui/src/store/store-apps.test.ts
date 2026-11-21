@@ -1,9 +1,6 @@
 /**
- * Store regression tests: external apps, the grid and pinned views.
- *
- * Ports go through `MockPlatform` (no ad-hoc mocking, or the contract falls apart). The
- * `pendingEvents` holding pen is module state, so it cannot be cleared between tests — each test
- * uses a different session id instead. Shared fixtures are in store.test-helpers.ts.
+ * Store tests: external apps, the grid and pinned views. Ports go through `MockPlatform`.
+ * The `pendingEvents` pen is module state that tests cannot clear, so each test uses its own session id.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
@@ -15,10 +12,7 @@ import { appInfo, resetStore, sessionInfo } from './store.test-helpers.js'
 
 beforeEach(resetStore)
 
-/**
- * An external app's "changed" (M4 B-5): the store only counts, per (project, app). Re-reading is the
- * open view's own job, through its state tool — the store never asks the host for it.
- */
+// The store only counts, per (project, app); re-reading is the open view's job, through its state tool.
 describe('an external app\'s change signal (M4 B-5)', () => {
   it('a broadcast only bumps that (project, app)\'s counter', async () => {
     const mock = new MockPlatform()
@@ -86,11 +80,9 @@ describe('an app the person just made (#2173)', () => {
   })
 })
 
-/**
- * The external app list (M4 A-8): the store holds a copy of the host's `apps.list`. The broadcast
- * (`external_apps_changed`) never carries what changed, so the whole list is re-read. While an app is
- * coming up, broadcasts arrive back to back (coming up → up), so reads overlap. If an overlapping read
- * overwrites the new list with an old one, the sidebar shows a running app as "coming up" forever.
+/*
+ * `external_apps_changed` does not say what changed, so the whole `apps.list` is re-read. An app coming up sends them back
+ * to back, so reads overlap; an old list landing last would show a running app as "coming up" forever.
  */
 describe('the external app list (M4 A-8)', () => {
   it('reads on the first attach, and re-reads every time a broadcast arrives', async () => {
@@ -135,10 +127,9 @@ describe('the external app list (M4 A-8)', () => {
   })
 })
 
-/**
- * Apps on the grid (#288). The grid's list holds tagged references, and an app's panel shows a view of its own,
- * apart from the app's pinned view that the app view and the project screen share (owner decision: the same app can
- * stand in more than one place, each its own view, one process).
+/*
+ * The grid holds tagged references; an app's panel has a view of its own, apart from the pinned view (owner decision:
+ * one app can stand in several places, each its own view, one process).
  */
 describe('apps on the grid (#288)', () => {
   const live = async () => {
@@ -210,10 +201,9 @@ describe('apps on the grid (#288)', () => {
   })
 })
 
-/**
- * A pinned view (M4 B-2): an opened view survives a focus change. Its instance is created once by the
- * host calling `home`, and released when closed. If it was closed while opening, the just-opened
- * instance is released too — otherwise a view nobody watches would hold onto the app forever.
+/*
+ * It survives a focus change: created once by the host calling `home`, released when closed. One closed while opening
+ * is released once open, or a view nobody watches would hold the app forever.
  */
 describe('a pinned view (M4 B-2)', () => {
   const live = async () => {
@@ -378,7 +368,7 @@ describe('a pinned view (M4 B-2)', () => {
 
     const restarting = useStore.getState().restartApp('p1/slider')
     expect(mock.closedViews).toEqual([old])
-    // Even if the screen's effect tries to open it now (it is an app that can be opened), it does not open — restart tears down the app just brought up
+    // The screen's effect may try to open it now; it does not, since the restart tears down the app just brought up
     await useStore.getState().startPinnedView('p1/slider')
     release()
     await restarting
@@ -406,11 +396,9 @@ describe('a pinned view (M4 B-2)', () => {
   })
 })
 
-/**
- * Reopening to follow new code (M4 C-4). The decision comes down to one thing: the list's fingerprint
- * (`codeStamp`) — if it differs from the code that was up when the view opened, it is stale HTML. If
- * it was unknown at open time (the app came up for the first time at that instant), only the first
- * value learned is recorded: reading that as a change would reopen a view that had just opened.
+/*
+ * A list `codeStamp` other than the one when the view opened means stale HTML. Unknown at open (the app came up that
+ * instant), the first value learned is recorded, not read as a change that would reopen a view just opened.
  */
 describe('reopening to follow new code (M4 C-4)', () => {
   const pinned = () => useStore.getState().pinnedViews

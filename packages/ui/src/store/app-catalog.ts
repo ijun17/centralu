@@ -4,39 +4,23 @@ import type { ExternalAppInfo } from '@cc/protocol/client'
 import { isApp, useStore } from './store.js'
 import { appTitleOf, machineNameOf } from './names.js'
 
-/**
- * One app registry (M4 A-8) — the external apps the host discovered, as a single list.
- *
- * An external app is a folder and a process the host discovered, so it has a scope (project or
- * user folder) and a status (starting, stopped, why). The screens (the app list in Settings, an
- * app's row in the sidebar, a pinned screen, a grid panel) all need to ask "what is this app, and
- * how is it right now" in one place. If each screen read the host's list on its own, the rule for
- * reading status (e.g. an app in an untrusted project cannot be opened) would have to exist once
- * per screen, and one of them would eventually drift out of sync.
- *
- * Every entry here is an external app (#97).
- */
+// The one app registry every screen reads (M4 A-8), so the rule for reading an app's status exists once.
 
-/** Turns status into the shape shown to a person. The judgment lives in this one place */
 export type AppStatusView = {
-  /** One or two words — used by the list and the sidebar row */
   label: string
-  /** Why it is this way. null for a status with no reason (floating, resting) */
   reason: string | null
-  /** Can it be opened right now. If not, the reason and the action to take (trust it, restart it) are shown instead of the screen */
+  /** If not, the reason and its action (trust it, restart it) show instead of the screen */
   runnable: boolean
-  /** Brightness in the list — only something blocked that the person needs to see is bright (the palette rule) */
+  /** Only something blocked that the person needs to see is bright */
   tone: 'quiet' | 'busy' | 'alert'
 }
 
 export type ExternalCatalogApp = {
   kind: 'external'
-  /** `appKeyOf` — an app is uniquely identified by (project, id) */
   key: string
   appId: string
-  /** null means a user-folder app */
+  /** null: a user-folder app */
   projectId: string | null
-  /** The name from the manifest, or the folder name if there is none (a broken manifest) */
   title: string
   info: ExternalAppInfo
   status: AppStatusView
@@ -44,42 +28,34 @@ export type ExternalCatalogApp = {
 
 export type AppCatalog = {
   external: ExternalCatalogApp[]
-  /** project id → that project's apps (alphabetical) */
   byProject: Record<string, ExternalCatalogApp[]>
-  /** The user folder's apps (alphabetical), this computer's only */
+  /** This computer's only */
   user: ExternalCatalogApp[]
-  /** Each linked machine's user-folder apps (#82), grouped under that machine in the sidebar */
+  /** Linked machines' user-folder apps (#82) */
   byMachine: Record<string, ExternalCatalogApp[]>
 }
 
 export const UNTRUSTED_REASON = "This project isn't trusted, so its apps don't run."
 
 /**
- * A user-folder app of a linked machine (#82). It opens like any app, through the hub (docs/plans/remote-hub.md §11),
- * but it has no project to name its machine, so whatever opens it names the machine as well (`openApp`'s `machine`).
- * A project app of a linked machine needs nothing of the kind: its project id is qualified.
+ * It has no project to name its machine, so whatever opens it names the machine too (`openApp`'s `machine`); a project
+ * app's qualified project id already does (docs/plans/remote-hub.md §11).
  */
 export function isRemoteUserApp(info: ExternalAppInfo): boolean {
   return !!info.machine && info.projectId === null
 }
 
-/** The `machine` an app's own calls name (runs, secrets, versions, the builder, Restart): only a linked machine's user-folder app has one */
+// The `machine` an app's own calls name (runs, secrets, versions, the builder, Restart)
 export function userAppMachine(info: ExternalAppInfo): string | undefined {
   return isRemoteUserApp(info) ? (info.machine ?? undefined) : undefined
 }
 
-/** The linked machines by id, for their names (`machineNameOf`) */
 type MachineNames = Readonly<Record<string, { name: string }>>
 
-/**
- * An app of a linked machine reads its status like this computer's: its view opens here through the hub (§11). `machines`
- * names the machine an app turned off there is off on (ux-writing.md §1)
- */
 export function appStatus(info: ExternalAppInfo, machines: MachineNames = {}): AppStatusView {
   /*
-   * Turned off on its computer (#1938): the copy of an app another computer runs for the same repository. Its status
-   * reads `stopped` (an older window's word for it) only when off is what stops it; an app also invalid, untrusted or
-   * not enabled reads that first, as the host's `blocker` orders them, so the row names what turning it on would not fix
+   * Turned off on its computer (#1938) reads `stopped` only when off is what stops it; invalid, untrusted or not
+   * enabled reads first, in the host's `blocker` order, so the row names what turning it on would not fix.
    */
   if (info.off === true && info.status === 'stopped') {
     const where = info.machine ? `${machineNameOf(machines, info.machine)}, so it does not start there` : 'this computer, so it does not start here'
@@ -101,12 +77,8 @@ export function appStatus(info: ExternalAppInfo, machines: MachineNames = {}): A
       return { label: 'Not trusted', reason: UNTRUSTED_REASON, runnable: false, tone: 'quiet' }
     case 'unconfirmed':
       /*
-       * An imported app is waiting on the person's review (M4 E-3) — either it just arrived and
-       * has not been enabled yet, or after being enabled, what it runs (server) or what it claims
-       * to use (uses) changed. Both are resolved only once the person looks and enables it. The
-       * reason is the host's own wording. An app held without an import mark (#1172: the record of
-       * imports could not be read) may have been enabled before and changed since; whether it was
-       * is in the reason, not in a mark, so it reads as needing review rather than as never enabled.
+       * An imported app waits on review (M4 E-3): new, or its `server` or `uses` changed since it was enabled. One
+       * without an import mark (#1172: the import record could not be read) may have been enabled: "Needs review".
        */
       return {
         label: !info.imported || info.imported.confirmedAt ? 'Needs review' : 'Not enabled',
@@ -121,20 +93,11 @@ export function appStatus(info: ExternalAppInfo, machines: MachineNames = {}): A
 
 const byTitle = (a: ExternalCatalogApp, b: ExternalCatalogApp) => a.title.localeCompare(b.title) || a.appId.localeCompare(b.appId)
 
-/**
- * A pure computation — shared by the hook and the tests.
- *
- * The order is alphabetical. There is no place yet to write a drag-to-reorder order on the host,
- * the way there is for sessions, and discovery order (the order folders were read in) differs by
- * filesystem, which could shuffle the sidebar's rows on every startup.
- */
+// Alphabetical: the host stores no app order, and discovery order differs by filesystem
 export function buildCatalog(external: readonly ExternalAppInfo[], machines: MachineNames = {}): AppCatalog {
   const ext: ExternalCatalogApp[] = external.map((info) => ({
     kind: 'external',
-    /*
-     * A linked machine's user-folder app has no project to tell it from this computer's app of the same id (both read
-     * `_user/<id>`), so its key names the machine (#82). A project app's key already does: its project id is qualified.
-     */
+    // Both machines' user-folder apps read `_user/<id>`, so a linked machine's key names it (#82)
     key:
       info.machine && !info.projectId ? `${info.machine}:${appKeyOf(null, info.appId)}` : appKeyOf(info.projectId, info.appId),
     appId: info.appId,
@@ -160,10 +123,7 @@ export function buildCatalog(external: readonly ExternalAppInfo[], machines: Mac
   }
 }
 
-/**
- * The listed apps by the key a sidebar row (and so a dragged panel) carries: `ExternalCatalogApp.key`, which names a
- * linked machine's user-folder app by its machine. A drop on the grid is looked up here, wherever it lands.
- */
+// By the key a sidebar row and so a dragged panel carries: a grid drop is looked up here
 export function catalogByKey(external: readonly ExternalAppInfo[]): Map<string, ExternalCatalogApp> {
   return new Map(buildCatalog(external).external.map((a) => [a.key, a] as const))
 }
@@ -176,27 +136,19 @@ export function useAppCatalog(): AppCatalog {
 
 const NONE: ExternalCatalogApp[] = []
 
-/** A single project's apps — used by the project's block in the sidebar */
 export function useProjectApps(projectId: string): ExternalCatalogApp[] {
   const external = useStore((s) => s.externalApps)
   const machines = useStore((s) => s.machines)
   return useMemo(() => buildCatalog(external, machines).byProject[projectId] ?? NONE, [external, machines, projectId])
 }
 
-/**
- * The user folder's apps — since they do not belong to a project, they get their own group in the sidebar. Every
- * machine's (#734): a linked machine's stand among this computer's, by title, each with its machine's badge.
- */
+// Every machine's (#734): a linked machine's stand among this computer's, by title
 export function useUserApps(): ExternalCatalogApp[] {
   const external = useStore((s) => s.externalApps)
   const machines = useStore((s) => s.machines)
   return useMemo(() => buildCatalog(external, machines).external.filter((a) => a.projectId === null), [external, machines])
 }
 
-/**
- * A single app — undefined if it is gone (the folder disappeared, the project was deleted). A user-folder app is this
- * computer's unless `machine` names a linked machine (#82).
- */
 export function useExternalApp(projectId: string | null, appId: string, machine?: string | null): ExternalCatalogApp | undefined {
   const external = useStore((s) => s.externalApps)
   const machines = useStore((s) => s.machines)
@@ -207,14 +159,12 @@ export function useExternalApp(projectId: string | null, appId: string, machine?
 }
 
 /**
- * Whether an open view of the app has to come down (B-2): its HTML is also the app's code, so it does not stay rendered
- * once its project is no longer trusted, its manifest broke, an imported app waits on review again (M4 E-3), or it is
- * turned off on its computer (#1938), which nothing of the view's starts again. One that failed or crashed stays: its
- * Restart is on the view. The host closes a view in a conversation by the same list (inline-views.ts `unavailable`).
+ * A view's HTML is the app's code, so it comes down when the app is untrusted, invalid, back in review or turned off
+ * (B-2, #1938). A failed or crashed app's view stays: its Restart is there. The host's `unavailable` is the same list.
  */
 export function viewMustClose(info: ExternalAppInfo): boolean {
   return info.status === 'untrusted' || info.status === 'invalid' || info.status === 'unconfirmed' || info.off === true
 }
 
-/** `uses` in plain words (`uses-lines.ts`, which imports nothing of the store) */
+// `uses-lines.ts` imports nothing of the store
 export { appCanLines, usesLines } from './uses-lines.js'
