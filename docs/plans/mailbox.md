@@ -1084,7 +1084,7 @@ Checked at send time and again at drain, as today (`service.ts:1366`).
 |---|---|---|
 | null: a session started outside any project, the orchestrator | **no** | It works in no repository, and the person started it |
 | a project of this host | `!project.trusted` | Today's flag, `projects.setTrusted` (`rpc.ts:689`) |
-| an id this host does not know (a deleted project) | **yes** (fail closed) | `projects.delete` (`rpc.ts:664`) also calls `MessageService.dismissProject`, so mail held for it does not wait for good; its senders get S13 |
+| an id this host does not know (a deleted project) | **yes** (fail closed) | `projects.delete` (`rpc.ts:664`) also calls `HeldMail.dismissProject`, so mail held for it does not wait for good; its senders get S13 |
 
 A session on a linked machine has no row here, so this host never decides on its project: until §14 the link is the
 gate (`mayReachAcross`). `askerFacts(...).trusted` (`asked-by.ts:27`) reads this same function from M3a, so the card
@@ -1155,7 +1155,7 @@ release per message.
   `mail.held` keeps Resend / Dismiss for `uncertain` and `failed` rows as today. Its `release` on a `policy` row is
   refused `trust_project`: the way out is trust.
 
-**On trust** (`MessageService.trustChanged(projectId)`, called from the `projects.setTrusted` handler after it writes):
+**On trust** (`HeldMail.trustChanged(projectId)`, called from the `projects.setTrusted` handler after it writes):
 
 - every row held `policy` whose sender's project is the project has `held` cleared (to null, not `released`), and
   each question such a row answers is settled `answered` (`MailboxRecords.settle` with the held row's id, D8);
@@ -1181,7 +1181,7 @@ Since D32 no row of this table holds, defers or refuses mail for how much of it 
 
 | Guard today | Keep? | Becomes | Why |
 |---|---|---|---|
-| — (new, F3) | **removed (D32)** | Was: a `message` with `depth` (hops, D9) above `MAX_DEPTH = 4` held `loop` until the person's Resume. `depth` is written 0 now; a row an earlier build held `loop` keeps its Resume (`MessageService.resumeHeld`) | The loop holds never caught a loop on the owner's store |
+| — (new, F3) | **removed (D32)** | Was: a `message` with `depth` (hops, D9) above `MAX_DEPTH = 4` held `loop` until the person's Resume. `depth` is written 0 now; a row an earlier build held `loop` keeps its Resume (`HeldMail.resumeHeld`) | The loop holds never caught a loop on the owner's store |
 | — (new, F3) | **removed (D32)** | Was: over `HOST_MAIL_TURNS_PER_HOUR = 120` mail-started turns in the hour, a wake to a session over its share (`HOST_SHARE = 10`) waited. Now the count only warns the person (last row) | It deferred work nobody had judged a loop |
 | Loop guard: 20 mail-started turns an hour per **thread**, no word from the person (`turns.ts:230`) | **removed (D32)** | Was: per unordered session pair (`MailboxRecords.pairTurnsSince`), held `loop` over 20. The same count now only warns the person (last row) | Two agents answering each other are left to their judgement and the person's warning |
 | Token guard: 200,000 new input tokens an hour, or 3 empty mail-started turns in a row, per session (`turns.ts:69-75`) | **removed (D32)** | Was: the session's mail told of without a turn, held `budget` until the person's Resume. A row an earlier build held `budget` was ended by store step 72 (#2243): held `dismissed`, no longer listed (the Resume path and the hold word go in a later contract step). Step 72 does not touch `loop`: only `budget` and `policy` were decided (#2243), the chain's `loop` Resume still works on them, and the owner's store has no `loop` rows | Its only holds on the owner's store were normal status checks |
@@ -2498,7 +2498,7 @@ New, additive, in `packages/protocol/src/commands/methods/mail.params.ts` and `.
 | `mail.chain` | `{ id: string; before?: string }` | `{ messages: MailItem[]; older: boolean }`: the message and its chain back, as §8.4 for the person, phantoms included. Marks the person's rows read |
 | `mail.send` | `{ to?: string; id?: string; text: string; needsReply?: boolean }` (default: true without `id`, false with it, D3) | `{ messageId: string }` or a refusal. With `id` and no `to`, an answer to that message's sender |
 | `mail.done` | `{ id: string }` | `{ settled: number }` |
-| `mail.dismissProject` | `{ projectId: string }` | `{ rows: number }`: §7.4's Dismiss (`MessageService.dismissProject`) |
+| `mail.dismissProject` | `{ projectId: string }` | `{ rows: number }`: §7.4's Dismiss (`HeldMail.dismissProject`) |
 
 Entities, in `entities/mail.ts`:
 

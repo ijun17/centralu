@@ -158,7 +158,7 @@ describe('the one hold and a refused delegation (§7.4, S15, S16)', () => {
     await w.advance(60_000)
     expect(w.to('a')).toEqual([])
     w.store.projects.setProjectTrusted('px', true)
-    for (const r of w.service.trustChanged('px')) w.delivery.poke(r.slice(r.lastIndexOf('/') + 1))
+    for (const r of w.service.holds.trustChanged('px')) w.delivery.poke(r.slice(r.lastIndexOf('/') + 1))
     await w.advance(2_000)
     expect(w.to('a')).toHaveLength(1)
     expect(w.to('a')[0]!.input.text).toContain(held.message.id)

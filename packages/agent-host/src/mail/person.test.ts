@@ -178,7 +178,7 @@ describe('the window against chains that change while it is open', () => {
     w.clock.t += 10
     const mine = (await w.person.reply(q.id, 'second', 'note')).messages.at(-1)
     // It leaves the chain (the project's held mail dismissed), then the next one comes
-    w.service.dismissProject('px')
+    w.service.holds.dismissProject('px')
     w.clock.t += 10
     const third = w.mail.send(A, { to: [PERSON], text: 'third', replyTo: q.id }).message
     expect(held.rootId).toBe(q.id)

@@ -21,11 +21,13 @@ import { buildMessageFrame, mailLine, type ListedMail, type MessageCalls, type M
 import { UlidMaker, messageIdOf } from './ids.js'
 import type { TurnReport } from './turn-report.js'
 import { answerAtRest, type LastResponse } from './last-response.js'
-import { droppedText, trustedText, type MailReach } from './reach.js'
+import type { MailReach } from './reach.js'
+import { HeldMail } from './held-mail.js'
 import { sendGuards } from './send-guards.js'
 import { StopNotices, type StopNoticeOptions } from './stop-notices.js'
 import {
   MAX_RECIPIENTS,
+  replyAnswers,
   hash16,
   MINUTE_MS,
   READ_CHAIN,
@@ -92,15 +94,6 @@ export type SendInput = {
  */
 export function waitsForReply(m: { question: boolean; note: boolean; reply: boolean; clarifies: boolean }): boolean {
   return m.reply || m.clarifies ? m.question : !m.note
-}
-
-/**
- * Whether a reply answers what it replies to, the one rule (docs/plans/mailbox.md §10.6.3): a message that waits for a reply is answered by any reply;
- * a task only by a reply marked as its answer that asks nothing back. Any other reply to a task is a message in its thread, and the task stays open, so
- * the last response at rest still answers it: an early "On it" closes nothing
- */
-export function replyAnswers(target: Pick<MailRow, 'kind' | 'needsReply'>, reply: { needsReply: boolean; answer?: boolean }): boolean {
-  return target.kind === 'task' ? reply.answer === true && !reply.needsReply : target.kind === 'message' && target.needsReply
 }
 
 /**
@@ -211,6 +204,8 @@ export class MessageService {
   private running = false
   /** Who hears that a session stopped or went (mailbox.md §10.6.1) */
   readonly stops: StopNotices
+  /** The person's acts on held mail: trusting or dismissing a project, resuming what an earlier build held (§7.4) */
+  readonly holds: HeldMail
 
   constructor(
     private readonly records: MailboxRecords,
@@ -234,6 +229,7 @@ export class MessageService {
     this.now = opts.now ?? Date.now
     this.ulids = opts.ids ?? new UlidMaker()
     this.stops = new StopNotices({ ...opts, records, reach, now: this.now, run: (fn) => this.run(fn), notice: (to, n) => this.centralu(to, n) })
+    this.holds = new HeldMail({ records, reach, now: this.now, run: (fn) => this.run(fn), notice: (to, n) => this.centralu(to, n), changed: (msg, to) => this.changed(msg, to) })
   }
 
   sessionAddress(sessionId: string): string {
@@ -351,7 +347,7 @@ export class MessageService {
       if (held.length > 0) this.changed(stored, [PERSON])
 
       // The sender's own row on what it answers (`replyAnswers`): settled, or while the answer is held, marked so it stays open until the person lets the
-      // answer through (D8, `trustChanged`). A task so answered gets no last response
+      // answer through (D8, `HeldMail.trustChanged`). A task so answered gets no last response
       const answers = target !== undefined && replyAnswers(target, { needsReply, answer: input.answer === true })
       if (target && answers && this.records.recipient(target.id, sender)) {
         if (held.length === 0) this.records.settle(target.id, sender, 'answered', now, stored.id)
@@ -759,7 +755,7 @@ export class MessageService {
 
   /**
    * The person says send it: mail held `uncertain` or `failed` goes now. Mail held for the project's trust has its own way out, and so does a
-   * row an earlier build held `loop` (`resumeHeld`)
+   * row an earlier build held `loop` (`HeldMail.resumeHeld`)
    */
   resendHeld(recipient: string, ids: readonly string[]): number {
     return this.run(() => {
@@ -810,68 +806,7 @@ export class MessageService {
     })
   }
 
-  // ── Trust (§7.4), and the holds of earlier builds ──
-
-  /**
-   * The person dismissed what an untrusted project sent out (or the project was deleted): its `policy` rows are deleted, with their messages when no row
-   * is left, the questions answers among them held open again (D8), and the refused records of its delegations go. Each sender is told once (S13)
-   */
-  dismissProject(projectId: string, label = this.reach.projectLabel(projectId)): { rows: number; senders: string[] } {
-    return this.run(() => {
-      const now = this.now()
-      const held = this.records.heldPolicy().filter((h) => h.senderProject === projectId)
-      // One message to several recipients is held in several rows: it is dropped, and counted, once
-      const messages = [...new Set(held.map((h) => h.row.messageId))].flatMap((id) => this.records.message(id) ?? [])
-      for (const m of messages) if (m.replyTo !== null) this.records.answerDropped(m.id)
-      const rows = this.records.deleteHeld(held.map((h) => h.row))
-      this.records.deleteRows(this.records.refusedRecords(projectId).map((p) => p.row))
-      const dropped = new Map<string, string[]>()
-      for (const m of messages) dropped.set(m.sender, [...(dropped.get(m.sender) ?? []), m.id])
-      for (const [sender, ids] of dropped) {
-        if (parseAddress(sender)?.kind !== 'session') continue
-        this.centralu(sender, { kind: 'notice', body: droppedText(ids, label), facts: {}, dedupeKey: `dropped:${sender}:${projectId}:${now}` })
-      }
-      for (const m of messages) this.changed(m, [PERSON])
-      return { rows, senders: [...dropped.keys()] }
-    })
-  }
-
-  /**
-   * The person trusted `projectId` (§7.4): the rows held `policy` for it go, in the order they were sent, the questions they answer are answered, and each
-   * caller whose delegations were refused for it gets one notice (S16) and loses the records. Returns the recipients for the delivery to poke
-   */
-  trustChanged(projectId: string): string[] {
-    return this.run(() => {
-      const now = this.now()
-      const pokes = new Set<string>()
-      for (const { row, senderProject } of this.records.heldPolicy()) {
-        const m = senderProject === projectId ? this.records.message(row.messageId) : undefined
-        if (!m) continue
-        // Let go, an unread row is delivered as the mail it is, also one an older build told of quietly while it held it (§6.3). What it answers
-        // (`replyAnswers`) is answered now; a task's answer is the reply its send marked on the task's row while it was held (`answerHeld`)
-        this.records.letGo(row.recipient, [m.id])
-        const target = m.replyTo === null ? undefined : this.records.message(m.replyTo)
-        const marked = target !== undefined && this.records.recipient(target.id, m.sender)?.answerId === m.id
-        if (target && replyAnswers(target, { needsReply: m.needsReply, answer: marked })) this.records.settle(target.id, m.sender, 'answered', now, m.id)
-        pokes.add(row.recipient)
-      }
-      const refused = this.records.refusedRecords(projectId)
-      const byCaller = new Map<string, MailRow[]>()
-      for (const p of refused) byCaller.set(p.row.recipient, [...(byCaller.get(p.row.recipient) ?? []), p.message])
-      for (const [caller, records] of byCaller) {
-        const calls = records.flatMap((m) => (m.facts.refused ? [`${m.facts.refused.tool} to ${m.facts.refused.target} ("${m.facts.refused.firstLine}")`] : []))
-        this.centralu(caller, {
-          kind: 'notice',
-          body: trustedText(this.reach.projectLabel(projectId), calls),
-          facts: { trusted: { project: projectId, refused: calls.slice(0, 10) } },
-          dedupeKey: `trusted:${caller}:${projectId}:${now}`,
-        })
-        pokes.add(caller)
-      }
-      this.records.deleteRows(refused.map((p) => p.row))
-      return [...pokes]
-    })
-  }
+  // ── The Assistant's requests (§7.6) ──
 
   /** The Assistant's turn on `asker`'s requests ended (§7.6): the requests that turn carried are settled `reported`. Returns how many */
   requestTurnEnded(assistant: string, asker: string, turnSeq: number): number {
@@ -907,26 +842,6 @@ export class MessageService {
   private askerOf(m: MailRow, assistant: string): string | undefined {
     const asker = this.isRequest(m, assistant) ? m.sender : m.kind === 'notice' && m.sender === CENTRALU ? m.facts.asker : undefined
     return asker !== undefined && parseAddress(asker)?.kind === 'session' ? asker : undefined
-  }
-
-  /**
-   * The person's Resume on a message an earlier build held `loop` (#2014): its rows are let go, marked `released` so a previous build still serving
-   * during a host swap does not hold them again, and the question it answers is answered (D8). Returns the rows
-   */
-  resumeHeld(messageId: string): number {
-    return this.run(() => {
-      const m = this.records.message(messageId)
-      const rows = m ? this.records.recipients(messageId).filter((r) => r.held === 'loop') : []
-      // Let go as unread mail to deliver, also a row an older build told of quietly while it held it (§6.3), and never held again
-      for (const r of rows) {
-        this.records.letGo(r.recipient, [messageId])
-        this.records.hold(r.recipient, [messageId], 'released')
-      }
-      if (m?.replyTo && rows.length > 0) this.records.settle(m.replyTo, m.sender, 'answered', this.now(), m.id)
-      // The delivery hears of it (it goes now), and so does the Inbox (it is no longer held)
-      if (m && rows.length > 0) this.changed(m, [...rows.map((r) => r.recipient), PERSON])
-      return rows.length
-    })
   }
 
   // ── Parties that go, parties that take over (§7.7) ──
