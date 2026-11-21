@@ -9,7 +9,7 @@ import { NO_GIT_MAINTENANCE } from './git-fixture.test-helpers.js'
 // @ts-expect-error — a plain .mjs script, so the board app can start it with Node alone
 import { failuresOf, guardWarnings, isTestFile, filesRunMs, isVitestFile, nodeBin, depErrorsOf, orphansOf, parseArgs, passingNewTests, prePr, realRunners, stackHeads, STEP_DIR, stepNumbers, stepsAddedByDiff, vitestTests } from '../scripts/pre-pr.mjs'
 // @ts-expect-error — a plain .mjs script, as above
-import { GUARD_REFS, removeRun, runDir, sweepStale, unlinkLinks } from '../scripts/pre-pr-worktrees.mjs'
+import { canonical, GUARD_REFS, removeRun, runDir, sweepStale, unlinkLinks } from '../scripts/pre-pr-worktrees.mjs'
 // @ts-expect-error — a plain .mjs script, as above
 import { interruptsSoFar, runTool } from '../scripts/interrupts.mjs'
 import { GUARDS } from './guards.js'
@@ -192,6 +192,24 @@ describe('what pre-pr reads', () => {
     const tests = vitestTests({ testResults: [{ name: join(root, 'a', 'x.test.ts'), assertionResults: [{ ancestorTitles: ['outer'], title: 'one', status: 'passed' }, { ancestorTitles: [], title: 'two', status: 'failed' }, { ancestorTitles: [], title: 'three', status: 'passed' }] }] }, root)
     expect(tests[0]).toEqual({ file: 'a/x.test.ts', name: 'outer > one', status: 'passed' })
     expect(passingNewTests({ reverted: tests, base: [{ file: 'a/x.test.ts', name: 'three', status: 'passed' }] })).toEqual([tests[0]])
+  })
+
+  it('names a file from a root given by another spelling of its folder, as vitest reports it by its real path', () => {
+    // A link stands in for a Windows temporary folder's 8.3 name: both reach the folder vitest names by its real path
+    const base = mkdtempSync(join(tmpdir(), 'cc-prepr-spelling-'))
+    try {
+      mkdirSync(join(base, 'real'))
+      symlinkSync(join(base, 'real'), join(base, 'link'), 'junction')
+      const name = join(canonical(join(base, 'real')), 'a', 'x.test.ts')
+      const report = { testResults: [{ name, status: 'failed', message: 'no', startTime: 1, endTime: 5, assertionResults: [{ ancestorTitles: [], title: 'one', status: 'failed', failureMessages: ['no'] }] }] }
+      const root = join(base, 'link')
+      expect(vitestTests(report, root).map((t: { file: string }) => t.file)).toEqual(['a/x.test.ts'])
+      expect(failuresOf(report, root).map((f: { file: string }) => f.file)).toEqual(['a/x.test.ts'])
+      expect(filesRunMs(report, root, ['a/x.test.ts'])).toBe(4)
+    } finally {
+      unlinkLinks(base)
+      rmSync(base, { recursive: true, force: true })
+    }
   })
 
   it('names the tests of a file with the real vitest without running one, the skipped and todo ones too', () => {

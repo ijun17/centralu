@@ -3,9 +3,13 @@
 // change the answer, and with the change reverted they often fail only at their time limit.
 import { readFileSync } from 'node:fs'
 import { relative } from 'node:path'
+import { canonical } from './pre-pr-worktrees.mjs'
 
-/** A path relative to `root`, with `/` on every system: the file a test is named by. */
-export const relFile = (root, name) => relative(root, name).split('\\').join('/')
+/**
+ * A path relative to `root`, with `/` on every system: the file a test is named by. vitest names a file by its real path, so
+ * `root` is read as the file system names it, not as given (a Windows temporary folder is given in its 8.3 form).
+ */
+export const relFile = (root, name) => relative(canonical(root), name).split('\\').join('/')
 
 /** A test as pre-pr and this reporter both name it: its file, and its describe titles and its own joined by ` > `. */
 export const testKey = (file, name) => `${file}\0${name}`
