@@ -30,7 +30,7 @@ export type ReportPart = { wrote?: true; cut?: true }
 const CUT_CONTINUED = 'An update of Centralu cut this turn and Centralu continued it.\n'
 
 /** What a report says of the person's part in the turn it reports (#1377): Centralu's own words, never the person's */
-export function personPartLine(turn: ReportPart | undefined): string {
+function personPartLine(turn: ReportPart | undefined): string {
   // An update cut the turn and Centralu continued it (#1966): its parent heard nothing of the cut, so the end says so
   const centralu = turn?.cut ? CUT_CONTINUED : ''
   if (turn?.wrote) return `${centralu}The person wrote in this session during this turn.\n`

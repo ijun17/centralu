@@ -28,7 +28,7 @@ import { DRIVE_PATH, walkLinks } from './link-walk.js'
 const OPEN_FLAGS = constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0)
 
 /** The formats a reply's image may be, by their first bytes. SVG is not one: see `sniffImage` */
-export const MESSAGE_IMAGE_KINDS = 'PNG, JPEG, GIF or WebP'
+const MESSAGE_IMAGE_KINDS = 'PNG, JPEG, GIF or WebP'
 
 /**
  * The image type its first bytes say, or null.

@@ -9,9 +9,9 @@ import { paidTokens, type Counted } from './cache-ledger.js'
  */
 
 /** How long counted requests wait in memory before they are written, and so the most a crash loses */
-export const FLUSH_MS = 60_000
+const FLUSH_MS = 60_000
 /** How often the limit windows are read while a session of the tool is live */
-export const SAMPLE_MS = 10 * 60_000
+const SAMPLE_MS = 10 * 60_000
 /** A turn end reads the limits at most this often per tool */
 export const TURN_END_GAP_MS = 2 * 60_000
 /** How long records are kept */

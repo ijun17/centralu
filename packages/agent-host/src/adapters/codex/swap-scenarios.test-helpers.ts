@@ -13,7 +13,7 @@ import type { AgentAdapter, AgentProcess, CreateSessionOpts, ProcessSource, Sess
  * whatever the thread does from there. A replay runs `after` alone, against the recorded process.
  */
 
-export type Side = {
+type Side = {
   readonly events: NormalizedEvent[]
   session(): SessionHandle
   /** The next event after the ones already waited for that `pick` accepts */

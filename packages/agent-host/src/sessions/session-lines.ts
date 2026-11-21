@@ -12,7 +12,7 @@ import { authorOf } from './transcript-view.js'
  * silently at 2,000 characters of its JSON, the middle of a long answer, which ask_project's cut sends the caller here to find,
  * could not be read at all.
  */
-export const LINE_MAX_CHARS = 2000
+const LINE_MAX_CHARS = 2000
 /** How much of one line a read from an offset shows: a long answer is read in a few calls, not one per 2,000 characters */
 export const LINE_WINDOW_CHARS = 8000
 
@@ -21,10 +21,10 @@ export const LINE_WINDOW_CHARS = 8000
  * lines of up to 2,000 characters each come back as about 80,000 characters, all of it read again on every later request of the
  * reader. Large enough that the common read is one call: each further call re-reads the reader's own context
  */
-export const READ_BUDGET_CHARS = 12_000
+const READ_BUDGET_CHARS = 12_000
 /** The smallest and largest `maxChars` a read takes; a value outside is brought to the nearest */
-export const READ_BUDGET_MIN = 2000
-export const READ_BUDGET_MAX = 40_000
+const READ_BUDGET_MIN = 2000
+const READ_BUDGET_MAX = 40_000
 
 /** What a read shows of a tool call: nothing, its first line cut at 100 characters, or its whole title */
 export type ToolLines = 'none' | 'titles' | 'full'

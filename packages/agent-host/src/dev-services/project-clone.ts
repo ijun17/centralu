@@ -16,7 +16,7 @@ import { rpcError } from '../rpc-error.js'
  */
 
 /** How long a clone may take before it is stopped and its folder removed */
-export const CLONE_TIMEOUT_MS = 10 * 60_000
+const CLONE_TIMEOUT_MS = 10 * 60_000
 
 /**
  * The settings that keep a clone from asking anyone anything:

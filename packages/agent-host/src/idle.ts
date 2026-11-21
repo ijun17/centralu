@@ -24,7 +24,7 @@ export type ActivitySnapshot = {
 }
 
 /** Whether one live session holds something a person would lose; a session with no process holds nothing (#290) */
-export function sessionBusy(s: IdleActivity): boolean {
+function sessionBusy(s: IdleActivity): boolean {
   return s.live === true && !atRest(s)
 }
 

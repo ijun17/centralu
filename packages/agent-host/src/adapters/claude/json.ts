@@ -12,7 +12,7 @@ export { str } from '../../json-value.js'
 export type ClaudeMessage = SDKMessage | SDKActiveGoalMessage
 
 /** The fields of `T` by the SDK's names, each read as `unknown`: what a reader may ask for, not what it may assume */
-export type Loose<T> = { readonly [K in keyof T]?: unknown }
+type Loose<T> = { readonly [K in keyof T]?: unknown }
 
 type LooseBlock<B> = B extends { type: infer K } ? { readonly type: K } & Loose<Omit<B, 'type'>> : never
 
@@ -31,7 +31,7 @@ export type ContentBlock = LooseBlock<SdkBlock>
 export type AssistantBody = { readonly content: readonly ContentBlock[]; readonly id?: unknown; readonly usage?: Loose<SdkUsage> | null }
 
 /** A user message's body as it is read: words, or blocks (the SDK's `MessageParam`) */
-export type UserBody = { readonly content: string | readonly ContentBlock[] }
+type UserBody = { readonly content: string | readonly ContentBlock[] }
 
 /** A user message as it is read: its body, and the record of the one tool result it may carry */
 export type UserRead = { readonly message: UserBody; readonly tool_use_result?: unknown }
@@ -65,7 +65,7 @@ export type ReadBlock = Extract<ContentBlock, { readonly type: (typeof READ_TYPE
  * A value is a block the readers act on: an object whose `type` is one of `READ_TYPES`. Its other fields stay `unknown`
  * and are checked as they are read, so this is all a block needs to be one.
  */
-export function isContentBlock(v: unknown): v is ReadBlock {
+function isContentBlock(v: unknown): v is ReadBlock {
   return isObj(v) && READ_TYPES.some((t) => t === v.type)
 }
 

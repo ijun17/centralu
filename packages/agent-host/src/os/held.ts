@@ -14,7 +14,7 @@ export const HELD_WAITS_MS: readonly number[] = [25, 50, 100, 200, 400, 800]
 const HELD_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY'])
 
 /** Whether a failure may be a hold that waiting ends */
-export const isHeld = (e: unknown): boolean => HELD_CODES.has(errnoCode(e) ?? '')
+const isHeld = (e: unknown): boolean => HELD_CODES.has(errnoCode(e) ?? '')
 
 /** Told of each refusal that is tried again: the error and the wait before the next try */
 export type HeldRetry = (e: unknown, waitMs: number) => void

@@ -20,7 +20,7 @@ import type { EndedTerminal } from '../lifecycle/update-ended.js'
 
 const require = createRequire(import.meta.url)
 
-export type { Pty, PtyModule } from './pty-slot.js'
+export type { PtyModule } from './pty-slot.js'
 
 export type TerminalHandle = {
   id: string

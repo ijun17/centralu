@@ -58,7 +58,7 @@ export function isMissingProgram(err: unknown): boolean {
  * enough). A third meaning of "grace", apart from `RUN_STOP_GRACE_MS` (a short program's TERM-to-KILL) and `KILL_GRACE_MS`
  * (an agent CLI's or app's): here nothing has been signalled yet, and the tool is waited for to tidy up by itself.
  */
-export const STOP_GRACE_MS = 2_000
+const STOP_GRACE_MS = 2_000
 
 /** Where a tool's process comes from (docs/plans/session-core.md §5, §7.2 PR 3) */
 export type ToolStart = {
@@ -88,7 +88,7 @@ export function startToolProcess(spec: LocalSpawnSpec, how: ToolStart = {}): Age
 }
 
 /** What `stderrTail` reads, line by line through `line` (`ToolStart.stderrLine`); the process is the one given */
-export function redactStderrTail(proc: AgentProcess, line: (line: string) => string | null): void {
+function redactStderrTail(proc: AgentProcess, line: (line: string) => string | null): void {
   const tail = proc.stderrTail?.bind(proc)
   if (!tail) return
   Object.defineProperty(proc, 'stderrTail', {

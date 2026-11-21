@@ -40,7 +40,7 @@ export type PtyStreamSink = (e: { terminalId: string; data?: string; exitCode?: 
  * The output cap. Once exceeded, the oldest part is dropped. A single build log commonly reaches tens of MB, and
  * holding all of it would fill the host's memory with logs instead of conversation.
  */
-export const PTY_OUTPUT_BYTES = 256 * 1024
+const PTY_OUTPUT_BYTES = 256 * 1024
 
 export type PtyStart = {
   cols: number

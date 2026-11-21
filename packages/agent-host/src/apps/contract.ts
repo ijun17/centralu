@@ -43,7 +43,7 @@ export const CENTRALU_MCP_NAME = RESERVED_NAME_PREFIX
  * Excluding underscores from the character rule makes `__` impossible to form (the second hole); the reserved-word check keeps
  * the name itself from being taken (the first). It runs first, so it survives a loosened character rule.
  */
-export function mcpServerNameError(name: string): string | null {
+function mcpServerNameError(name: string): string | null {
   // Reserved words are checked first — the order of validation is enforced by protocol's serverNameProblem
   switch (serverNameProblem(name)) {
     case 'reserved':

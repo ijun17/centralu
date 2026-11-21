@@ -49,7 +49,7 @@ export function centraluToolOfCall(call: { title?: string | null; kind?: string 
  */
 const OUT_OF_QUOTA_ANSWER = 'upgrade your plan to continue'
 
-export function cursorRefusalIn(answer: string): string | null {
+function cursorRefusalIn(answer: string): string | null {
   const words = answer.trim()
   return words.toLowerCase() === OUT_OF_QUOTA_ANSWER ? words : null
 }

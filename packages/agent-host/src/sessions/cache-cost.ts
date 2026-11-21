@@ -12,7 +12,7 @@ import type { CacheBilling } from '../adapters/contract.js'
  * it did not read from the cache stands in for them: it is what the provider caches for the next request, as for a rebuild.
  */
 
-export type CachePrices = { read: number; write5m: number; write1h: number }
+type CachePrices = { read: number; write5m: number; write1h: number }
 
 /** A model name as the tool says it (`gpt-5.6-sol`, `gpt-5.7`): the generation is read from `gpt-<major>.<minor>` */
 function gptGeneration(model: string | null | undefined): number | null {
@@ -20,7 +20,7 @@ function gptGeneration(model: string | null | undefined): number | null {
   return m ? Number(m[1]) + Number(m[2] ?? 0) / 100 : null
 }
 
-export function cachePrices(billing: CacheBilling, model?: string | null): CachePrices {
+function cachePrices(billing: CacheBilling, model?: string | null): CachePrices {
   if (billing === 'anthropic') return { read: 0.1, write5m: 1.25, write1h: 2 }
   const generation = gptGeneration(model)
   // A name we cannot read is billed as the current generation: only a model named as an older one has the old ratios

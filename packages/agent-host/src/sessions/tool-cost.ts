@@ -90,6 +90,6 @@ export function residentCost(profile: ToolProfile, capabilities: ToolServingCapa
   }
 }
 
-export function shortHash(value: unknown): string {
+function shortHash(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value ?? null)).digest('hex').slice(0, 12)
 }

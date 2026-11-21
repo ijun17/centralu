@@ -87,7 +87,7 @@ export function placeAppFolder(root: string, projectId: string | null, id: strin
  * pointing elsewhere (the same link that discovery and watching reject with their guard — creation
  * has to agree with them).
  */
-export function ensureDirInside(root: string, parts: readonly string[]): string {
+function ensureDirInside(root: string, parts: readonly string[]): string {
   for (let i = 1; i <= parts.length; i++) {
     const prefix = join(...parts.slice(0, i))
     try {

@@ -9,7 +9,7 @@ import type { PlatformPath } from 'node:path'
 import type { Duplex, Readable, Writable } from 'node:stream'
 import type { OsTraits, ToolLaunch } from './rules.js'
 
-export type HostPath = string
+type HostPath = string
 
 export type Env = Record<string, string | undefined>
 
@@ -225,7 +225,7 @@ export interface OsFilesAsync {
  * The OS's path rules: `path` is Node's `win32` or `posix` for the OS; relative paths resolve from the host's working folder
  * only through `env.cwd()`
  */
-export interface OsPaths {
+interface OsPaths {
   readonly path: PlatformPath
   /** The null device (`\\.\nul`, `/dev/null`): what git's `core.hooksPath` is set to so no hook runs */
   readonly devNull: HostPath
@@ -394,14 +394,14 @@ export interface OsProcesses {
  * Programs by name, the way the host finds and starts them (`env-path.ts`, `tool-launch.ts`); on Windows a name is never
  * started bare, as Windows looks in the child's working folder before PATH
  */
-export interface OsTools {
+interface OsTools {
   find(name: string): HostPath | null
   /** A program the host runs in a project's folder (`git`, `gh`): an absolute path on Windows, never a planted one */
   program(name: string): HostPath
   resolve(command: string, options?: { cwd?: HostPath; env?: Env }): ToolLaunch
 }
 
-export interface OsEnv {
+interface OsEnv {
   /** A variable, in any case on Windows (`Path` is `PATH`) */
   get(name: string): string | undefined
   all(): Env
@@ -414,7 +414,7 @@ export interface OsEnv {
   cwd(): HostPath
 }
 
-export type Timer = { cancel(): void }
+type Timer = { cancel(): void }
 
 /**
  * Time for the waits about the OS (a grace before a second shot, a retry while Windows holds a file, a poll). A real
@@ -426,10 +426,10 @@ export interface OsClock {
   sleep(ms: number, options?: { signal?: AbortSignal }): Promise<void>
 }
 
-export type SqliteOptions = { readonly?: boolean; fileMustExist?: boolean; timeout?: number }
+type SqliteOptions = { readonly?: boolean; fileMustExist?: boolean; timeout?: number }
 
 /** SQLite (better-sqlite3) on the real OS; the in-memory OS has none (`ENOSYS`) */
-export interface OsSqlite {
+interface OsSqlite {
   open(path: HostPath, options?: SqliteOptions): Database.Database
 }
 

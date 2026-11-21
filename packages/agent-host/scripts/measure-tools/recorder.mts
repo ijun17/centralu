@@ -23,7 +23,7 @@ import { createHash } from 'node:crypto'
 
 export type Usage = { input: number; cacheRead: number; cacheWrite: number; output: number }
 
-export type ToolUse = { id: string; name: string; input: unknown }
+type ToolUse = { id: string; name: string; input: unknown }
 
 /** One part of a request against the same session's previous request */
 export type PartChange = 'first' | 'same' | 'changed'
@@ -142,7 +142,7 @@ function stripText(text: string): string | null {
 }
 
 /** The request as it would be without Centralu's tools, for counting */
-export function withoutOurs(j: Record<string, any>): Record<string, any> {
+function withoutOurs(j: Record<string, any>): Record<string, any> {
   const messages = (j.messages as Record<string, any>[]).map((m) =>
     Array.isArray(m.content)
       ? {

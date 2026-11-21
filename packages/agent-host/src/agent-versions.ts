@@ -17,13 +17,13 @@ export type VersionSessions = {
 }
 
 /** What this needs of a session's process (the manager's `processes`) */
-export type VersionProcesses = {
+type VersionProcesses = {
   sessionIdle(sessionId: string): SessionIdle
   restartSession(sessionId: string): Promise<{ resumed: boolean; reason?: string }>
 }
 
 /** The lines a move writes into the conversation (the manager's `sessionSettings`) */
-export type VersionNotes = {
+type VersionNotes = {
   /** Writes one line into the conversation saying the session moved, so a restart is never silent */
   noteAgentMoved(sessionId: string, from: string, to: string): void
   /** Writes one line saying the move to `to` did not happen, and why (#841): logged only, it looked like nothing was tried */
@@ -31,10 +31,10 @@ export type VersionNotes = {
 }
 
 /** A tool as this service reads it: its adapter's `installedVersion` */
-export type VersionedTool = { tool: ToolName; installedVersion?: () => Promise<string | null> }
+type VersionedTool = { tool: ToolName; installedVersion?: () => Promise<string | null> }
 
 /** One installed CLI that changed version, for the capability check (#270) */
-export type ToolVersionChange = { tool: ToolName; from: string; to: string }
+type ToolVersionChange = { tool: ToolName; from: string; to: string }
 
 export type AgentVersionDeps = {
   tools: () => VersionedTool[]

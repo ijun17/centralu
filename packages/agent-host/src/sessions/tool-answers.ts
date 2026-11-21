@@ -78,7 +78,7 @@ export function cardsText(cards: readonly RoutedCard[]): string {
  * Where a running turn is (#1186), said after "still working": how long it has recorded nothing, and its last step,
  * which can be the session's own words (a command it runs), so quoted as JSON
  */
-export function progressText(p: TurnProgress | undefined): string {
+function progressText(p: TurnProgress | undefined): string {
   if (!p) return ''
   return ` It last recorded something ${p.quietFor} ago${p.lastStep ? `; its last step, as JSON: ${JSON.stringify(p.lastStep)}` : ''}.`
 }

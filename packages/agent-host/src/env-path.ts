@@ -45,7 +45,7 @@ export function fallbackDirs(
   ]
 }
 
-export const PROBE_TIMEOUT_MS = 3000
+const PROBE_TIMEOUT_MS = 3000
 
 /**
  * Asks the login shell for PATH. Interactive (-i) so .zshrc's nvm/mise init runs. Bounded (PA2): some shells ignore SIGTERM, and a config

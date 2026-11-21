@@ -19,7 +19,7 @@ import { insideFolder } from '../edit-grant.js'
 export type StepAnswer = { readonly grant: 'allow' } | { readonly grant: 'deny'; readonly message?: string }
 
 /** Which step answered: `own` Centralu's tool, `tool` one of the tool's steps, `auto`, `always`, `edits` */
-export type GrantStep = 'own' | 'tool' | 'auto' | 'always' | 'edits'
+type GrantStep = 'own' | 'tool' | 'auto' | 'always' | 'edits'
 
 /** The order's answer: a step's, or `ask` (the tool raises its card) */
 export type GrantAnswer = (StepAnswer & { readonly by: GrantStep }) | { readonly grant: 'ask' }

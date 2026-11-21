@@ -12,7 +12,7 @@ import { randomBytes } from 'node:crypto'
 const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
 const ID_RE = /^([a-z0-9][a-z0-9-]*)\.(t|m|w)_([0-9A-HJKMNP-TV-Z]{26})$/
 
-export type MailIdKind = 'thread' | 'message' | 'watch'
+type MailIdKind = 'thread' | 'message' | 'watch'
 
 export type ParsedMailId = { host: string; kind: MailIdKind; ulid: string }
 
@@ -71,14 +71,6 @@ function encodeTime(time: number): string {
     t = Math.floor(t / 32)
   }
   return out
-}
-
-/**
- * The least message id a host could have minted at `ms`: ids sort by the time they were made, so "the messages of the last
- * minute" is a range of the primary key, not a scan of every message. Only the prefix of a host's own ids is meaningful
- */
-export function messageIdFloor(host: string, ms: number): string {
-  return `${host}.m_${encodeTime(ms)}${'0'.repeat(16)}`
 }
 
 export const threadIdOf = (host: string, ulid: string): string => `${host}.t_${ulid}`

@@ -13,7 +13,7 @@
  */
 
 export const APP_GUIDE_TOPICS = ['overview', 'sessions', 'assistant', 'apps', 'approvals', 'settings', 'updates'] as const
-export type AppGuideTopic = (typeof APP_GUIDE_TOPICS)[number]
+type AppGuideTopic = (typeof APP_GUIDE_TOPICS)[number]
 
 /** One tool entry from the registry — the name and description (the same description given to the model) */
 export type GuideTool = { name: string; description: string }

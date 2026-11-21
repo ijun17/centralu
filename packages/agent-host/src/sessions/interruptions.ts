@@ -67,7 +67,7 @@ export function interruptionAfter(
  * with neither, and for a credits or spend limit, which no time resets: the `resumeAt` Codex reports beside it is its primary
  * window's, not this limit's. The one source of `Interruption.resetAt` and of a limit wait's time
  */
-export function limitReset(e: NormalizedEvent, limit: SessionLimit | undefined, now: number): number | undefined {
+function limitReset(e: NormalizedEvent, limit: SessionLimit | undefined, now: number): number | undefined {
   if (e.type === 'limit_reached' ? e.credits : limit?.credits) return undefined
   const said = Date.parse((e.type === 'limit_reached' ? e.resumeAt : limit?.resumeAt) ?? '')
   if (Number.isFinite(said)) return said

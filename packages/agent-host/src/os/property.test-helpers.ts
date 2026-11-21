@@ -11,7 +11,7 @@ export type Rng = {
   bool(p?: number): boolean
 }
 
-export function rng(seed: number): Rng {
+function rng(seed: number): Rng {
   let a = seed >>> 0
   const next = () => {
     a = (a + 0x6d2b79f5) >>> 0

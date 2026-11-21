@@ -117,7 +117,7 @@ export type FrameCodec = {
 }
 
 /** JSON-RPC 2.0 (ACP): a request or notification by its method, an answer to the tool's request by its id and result */
-export const jsonRpcCodec: FrameCodec = {
+const jsonRpcCodec: FrameCodec = {
   match(sent, want, ids) {
     if (typeof want.method === 'string') {
       if (sent.method !== want.method) return `the adapter sent ${describe(sent)} where the recording sends ${describe(want)}`

@@ -81,7 +81,7 @@ export function agentFrame(parentName: string, task: string, setupProblems: read
  * settings. Said to be the person's, from the project's settings on the computer the child runs on, so the child tells
  * them apart from the parent's task. Nothing when none are set.
  */
-export function projectInstructions(text: string): string[] {
+function projectInstructions(text: string): string[] {
   const t = text.trim()
   return t ? ['', "[The person's standing instructions for agents started in this project, from the project's settings on this computer:]", '', t] : []
 }

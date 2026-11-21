@@ -63,7 +63,7 @@ export type SelectionRun = {
   rebuilds?: number
 }
 
-export type CacheRows = (RequestRow & { total: number; lost: number | null })[]
+type CacheRows = (RequestRow & { total: number; lost: number | null })[]
 
 export type Summary = {
   definitions: Record<Cli, Record<string, ResidentCost>>

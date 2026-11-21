@@ -43,7 +43,7 @@ export async function initializeAppServer(client: CodexClient, sessionId: string
  * the person's `config.toml` without editing it. Sent on start and on resume alike (a resume's config is an override of
  * the resumed thread); nothing when Centralu does not control it, and the file's setting decides.
  */
-export function autoCompactConfig(opts: Pick<CreateSessionOpts, 'autoCompactTokens'>): Record<string, number> {
+function autoCompactConfig(opts: Pick<CreateSessionOpts, 'autoCompactTokens'>): Record<string, number> {
   return opts.autoCompactTokens ? { model_auto_compact_token_limit: opts.autoCompactTokens } : {}
 }
 
@@ -201,7 +201,7 @@ export const CODEX_SUBAGENT_TOOL = 'spawn_agent'
  * that changes profile while its thread lives on (a session the person turns the reader set off for, or back on)
  * keeps its tools' new rules from the tool descriptions alone until it starts a new thread.
  */
-export function developerInstructions(opts: CreateSessionOpts): { developerInstructions?: string } {
+function developerInstructions(opts: CreateSessionOpts): { developerInstructions?: string } {
   // An app attached as the thread starts adds the line on repository work (#957, #992)
   const apps = (opts.apps?.current().length ?? 0) > 0
   const tools = opts.centraluTools && opts.centraluBridge ? codexToolInstructionsFor(toolProfileOf(opts), undefined, apps, CODEX_SUBAGENT_TOOL) : undefined

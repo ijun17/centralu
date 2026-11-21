@@ -89,12 +89,12 @@ export type ProgramContext = {
 }
 
 /** A program: its exit code, or nothing for 0. Throwing writes the error to stderr and exits 1. */
-export type Program = (ctx: ProgramContext) => number | void | Promise<number | void>
+type Program = (ctx: ProgramContext) => number | void | Promise<number | void>
 /**
  * A program `runSync` can run: it answers at once, with its output as text (UTF-8) or bytes (a tool writing in a
  * console code page), and `ms`, how long it would take, for `timeoutMs`
  */
-export type SyncProgram = (ctx: { args: readonly string[]; cwd: string; env: Env; input: string }) => {
+type SyncProgram = (ctx: { args: readonly string[]; cwd: string; env: Env; input: string }) => {
   code?: number
   stdout?: string | Uint8Array
   stderr?: string | Uint8Array
@@ -104,12 +104,12 @@ export type SyncProgram = (ctx: { args: readonly string[]; cwd: string; env: Env
 /** spawnSync's `maxBuffer` when none is given */
 const SYNC_MAX_BUFFER = 1024 * 1024
 
-export interface MemoryPrograms {
+interface MemoryPrograms {
   /** Puts a program's file at `path` (folders made as needed) and runs `program` when it is started */
   add(path: string, program: Program, options?: { sync?: SyncProgram }): void
 }
 
-export type ProcessRow = {
+type ProcessRow = {
   pid: number
   ppid: number
   pgid: number
@@ -120,7 +120,7 @@ export type ProcessRow = {
   exit: OsExit | null
 }
 
-export interface MemoryClock extends OsClock {
+interface MemoryClock extends OsClock {
   /** Moves time on by `ms`, firing each timer that comes due in order, and letting what it starts run */
   advance(ms: number): Promise<void>
   /** Timers waiting */

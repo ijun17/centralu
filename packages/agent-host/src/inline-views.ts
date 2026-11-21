@@ -36,7 +36,7 @@ export type InlineLimits = {
   keptTotalMax: number
 }
 
-export const DEFAULT_INLINE_LIMITS: InlineLimits = {
+const DEFAULT_INLINE_LIMITS: InlineLimits = {
   // Matches the number of frames the UI renders — an instance beyond that count holds the app open but is never shown
   livePerSession: APP_VIEWS_LIVE_PER_SESSION,
   keptPerSession: 20,

@@ -25,14 +25,14 @@ export const InitializeResult = z.looseObject({
 export type InitializeResult = z.infer<typeof InitializeResult>
 
 const SelectOption = z.looseObject({ value: z.string(), name: nullish(z.string()) })
-export const ConfigOption = z.looseObject({
+const ConfigOption = z.looseObject({
   id: z.string(),
   category: nullish(z.string()),
   type: nullish(z.string()),
   currentValue: z.unknown().optional(),
   options: nullish(z.array(z.union([SelectOption, z.looseObject({ options: z.array(SelectOption) })]))),
 })
-export type ConfigOption = z.infer<typeof ConfigOption>
+type ConfigOption = z.infer<typeof ConfigOption>
 
 export const OpenedSession = z.looseObject({
   sessionId: nullish(z.string()),
@@ -46,8 +46,8 @@ export const SessionList = z.looseObject({
   nextCursor: nullish(z.string()),
 })
 
-export const StopReason = z.enum(['end_turn', 'max_tokens', 'max_turn_requests', 'refusal', 'cancelled'])
-export type StopReason = z.infer<typeof StopReason>
+const StopReason = z.enum(['end_turn', 'max_tokens', 'max_turn_requests', 'refusal', 'cancelled'])
+type StopReason = z.infer<typeof StopReason>
 
 export const PromptResult = z.looseObject({
   stopReason: z.union([StopReason, z.string()]),
@@ -78,10 +78,10 @@ const ToolCallContent = z.looseObject({
   oldText: nullish(z.string()),
   newText: nullish(z.string()),
 })
-export type ToolCallContent = z.infer<typeof ToolCallContent>
+type ToolCallContent = z.infer<typeof ToolCallContent>
 
-export const CallStatus = z.enum(['pending', 'in_progress', 'completed', 'failed'])
-export type CallStatus = z.infer<typeof CallStatus>
+const CallStatus = z.enum(['pending', 'in_progress', 'completed', 'failed'])
+type CallStatus = z.infer<typeof CallStatus>
 
 /** `tool_call` and `tool_call_update` share one shape: an upsert by id, every field but the id optional on an update */
 export const ToolCallFields = z.looseObject({
@@ -136,7 +136,7 @@ export const SessionUpdate = z.discriminatedUnion('sessionUpdate', [
 ])
 export type SessionUpdate = z.infer<typeof SessionUpdate>
 
-export const SessionNotification = z.looseObject({ sessionId: z.string(), update: z.looseObject({ sessionUpdate: z.string() }) })
+const SessionNotification = z.looseObject({ sessionId: z.string(), update: z.looseObject({ sessionUpdate: z.string() }) })
 
 /** One `session/update`, read: a known kind, or `other` with its name so it is logged and dropped */
 export type ReadUpdate = { sessionId: string; update: SessionUpdate } | { sessionId: string; other: string } | null
@@ -148,8 +148,8 @@ export function readUpdate(params: unknown): ReadUpdate {
   return u.success ? { sessionId: n.data.sessionId, update: u.data } : { sessionId: n.data.sessionId, other: n.data.update.sessionUpdate }
 }
 
-export const PermissionOptionKind = z.enum(['allow_once', 'allow_always', 'reject_once', 'reject_always'])
-export type PermissionOptionKind = z.infer<typeof PermissionOptionKind>
+const PermissionOptionKind = z.enum(['allow_once', 'allow_always', 'reject_once', 'reject_always'])
+type PermissionOptionKind = z.infer<typeof PermissionOptionKind>
 
 export const PermissionOption = z.looseObject({ optionId: z.string(), kind: z.union([PermissionOptionKind, z.string()]), name: nullish(z.string()) })
 export type PermissionOption = z.infer<typeof PermissionOption>

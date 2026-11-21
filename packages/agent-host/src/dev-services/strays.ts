@@ -254,7 +254,7 @@ export async function findStrays(
  * chose, so looking at only one side fails to recognize the same folder. Both are kept as
  * candidates.
  */
-export function resolveRoots(roots: readonly string[]): string[] {
+function resolveRoots(roots: readonly string[]): string[] {
   const out = new Set<string>()
   for (const r of roots) {
     out.add(r)

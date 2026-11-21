@@ -15,15 +15,15 @@ import { execText } from '../os/exec.js'
  */
 
 /** The floor (owner decision 2026-10-15): 2 GB free plus reclaimable */
-export const MEMORY_FLOOR_BYTES = 2 * 1024 ** 3
+const MEMORY_FLOOR_BYTES = 2 * 1024 ** 3
 /** How often a queued start reads memory again */
-export const MEMORY_RECHECK_MS = 15_000
+const MEMORY_RECHECK_MS = 15_000
 /**
  * How long a queued start waits before it gives up (CONTRIBUTING: "Can it wait forever?"). Half an hour: long enough for
  * a build or another agent's language server to finish, short enough that a start nobody remembers does not fire
  * hours later into a different situation.
  */
-export const MEMORY_WAIT_MAX_MS = 30 * 60_000
+const MEMORY_WAIT_MAX_MS = 30 * 60_000
 
 /**
  * Free plus reclaimable bytes from `vm_stat` (macOS): free, inactive and speculative pages times the page size the

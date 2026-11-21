@@ -138,7 +138,7 @@ export function readZipEntry(buf: Buffer, e: ZipEntry): Buffer {
 }
 
 /** An entry's bytes as stored (compressed by its `method`), found through its local header */
-export function zipEntryBytes(buf: Buffer, e: ZipEntry): Buffer {
+function zipEntryBytes(buf: Buffer, e: ZipEntry): Buffer {
   const start = zipEntryStart(buf.length, (pos, len) => buf.subarray(pos, pos + len), e)
   return buf.subarray(start, start + e.compressedSize)
 }

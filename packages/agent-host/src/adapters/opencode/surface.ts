@@ -27,7 +27,7 @@ async function gather(): Promise<SurfaceInputs> {
   return { version: version.trim(), help, initialize, bundle: JSON.stringify([...names].sort()) }
 }
 
-export function readOpenCodeSurface(inputs: SurfaceInputs): ToolSurface {
+function readOpenCodeSurface(inputs: SurfaceInputs): ToolSurface {
   const commands = [...(inputs.help ?? '').matchAll(/^ {2}opencode ([a-z][\w-]*)/gm)].flatMap((m) => (m[1] ? [m[1]] : []))
   return {
     version: `opencode ${inputs.version ?? 'unknown'}`,

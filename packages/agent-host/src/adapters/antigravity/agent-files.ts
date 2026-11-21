@@ -147,7 +147,7 @@ export function agyAppFinder(platform: Platform = HOST_PLATFORM, env: Env = proc
 // 5. put in place: `pkg` renamed to `<version>/` in one step, so the folder the launcher reads is whole or absent
 // 6. tidy: the temporary folder and any older version removed (best effort: a running session may hold its files)
 
-export type DownloadBody = { total: number | null; chunks: AsyncIterable<Uint8Array> }
+type DownloadBody = { total: number | null; chunks: AsyncIterable<Uint8Array> }
 
 /** What the install needs from the network and the disk's free space, apart for its tests */
 export type InstallIo = {

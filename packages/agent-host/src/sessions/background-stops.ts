@@ -10,7 +10,7 @@ import { sleep } from '../timing.js'
 
 /** Tasks named for another session's model: each description is a single framed field (#120), with how it ended */
 /** How long `agent_session stop` waits for the tool to report the end of the background work it stopped (#718) */
-export const STOP_REPORTED_MS = 3_000
+const STOP_REPORTED_MS = 3_000
 
 export function taskList(tasks: readonly BackgroundTask[], status = false): string {
   return tasks.map((t) => (status ? `${frameField(t.description)}: ${t.status}` : frameField(t.description))).join(', ')
