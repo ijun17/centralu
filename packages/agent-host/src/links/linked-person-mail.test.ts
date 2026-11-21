@@ -205,7 +205,7 @@ describe('the person marks done a thread with a machine that is not connected (#
 describe('which hub a machine session’s mail to the person goes to (`MailAcross.personTarget`)', () => {
   const across = (peers: { hubs: string[]; started?: { id: string; name: string }; linked?: string[] }) => {
     const a = new MailAcross({ hostId: 'hub-m', service: {} as never, records: { acrossRows: () => [], dueRecipients: () => [] } as never, reach: {} as never, ownEntries: () => [] })
-    const peer = (id: string) => ({ id, name: `Hub ${id}`, reachable: true, you: 'm1', call: async () => undefined })
+    const peer = (id: string) => ({ id, name: `Hub ${id}`, label: id, reachable: true, you: 'm1', call: async () => undefined })
     a.usePeers({ selfName: () => 'Remote box', hubs: () => peers.hubs.map(peer), hub: (id) => ((peers.linked ?? peers.hubs).includes(id) ? peer(id) : undefined), startingHub: () => peers.started ?? null })
     return a
   }
@@ -240,6 +240,15 @@ describe('the hubs that offered mail, kept for the next start (`MAIL_HUBS_KEY`)'
     expect(hubs(settings(JSON.stringify([{ id: 'hub-b', name: 'Old', you: 'm1', at: old }]))).mailHubs()).toEqual([])
     expect(hubs(settings('not json')).mailHubs()).toEqual([])
     expect(hubs(settings('[{"id":1}]')).mailHubs()).toEqual([])
+  })
+
+  it('keeps the label a hub offered for the next start; an older hub, which offers none, goes under one made from its name', () => {
+    const s = settings(null)
+    hubs(s).offer(1, { hub: { id: 'hub-a', name: 'Desk', label: 'desk-2' }, on: false, mail: true, you: 'm1' })
+    hubs(s).offer(2, { hub: { id: 'hub-b', name: 'Studio Mac' }, on: false, mail: true, you: 'm1' })
+    expect(hubs(s).mailHubs().map((x) => [x.id, x.label])).toEqual([['hub-a', 'desk-2'], ['hub-b', 'studio-mac']])
+    // Kept by a build from before labels
+    expect(hubs(settings(JSON.stringify([{ id: 'hub-c', name: 'Old box', you: 'm1', at: Date.now() }]))).mailHubs().map((x) => x.label)).toEqual(['old-box'])
   })
 
   it('30 days count from when the link was last up, not the offer, and a hub down that long is forgotten while running too', () => {

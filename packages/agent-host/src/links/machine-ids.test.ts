@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { SessionId } from '@cc/protocol'
-import { decodeNumber, encodeNumber, findMachine, qualifiedMachine, newMachineId, qualify, splitQualified } from './machine-ids.js'
+import { decodeNumber, encodeNumber, findMachine, hubLabel, qualifiedMachine, newMachineId, qualify, splitQualified } from './machine-ids.js'
 
 describe('machine-qualified ids (#82)', () => {
   it('a qualified id is still a valid session id, and splits back at its first dot', () => {
@@ -38,6 +38,14 @@ describe('machine-qualified ids (#82)', () => {
     expect(newMachineId('My.Box', new Set())).toBe('my-box')
     // Nothing usable in the name: a random one, still a machine id
     expect(newMachineId('서버', new Set())).toMatch(/^m-[0-9a-f]{6}$/)
+  })
+
+  it("makes a hub's label from its name, never one of its machines' ids or a role word, the same each time", () => {
+    expect(hubLabel('Studio Mac', [])).toBe('studio-mac')
+    expect(hubLabel('Studio Mac', ['studio-mac'])).toBe('studio-mac-2')
+    expect(hubLabel('Person', [])).toBe('person-2')
+    expect([hubLabel('서버', ['m1']), hubLabel('서버', ['m1'])]).toEqual(['hub', 'hub'])
+    expect(hubLabel('서버', ['hub'])).toBe('hub-2')
   })
 })
 

@@ -32,9 +32,9 @@ const tool = (host: Hub | Machine, from: string, args: Record<string, unknown>) 
 const idOf = (r: { text: string }) => /^Sent (\S+) /.exec(r.text)?.[1] ?? ''
 
 /** A machine with sessions w1 and c1 (c1 started by the hub as h1's child) and a hub with h1, linked, mail wired on both */
-async function rig(o: { machineSessions?: string[] } = {}) {
+async function rig(o: { machineSessions?: string[]; hubName?: string } = {}) {
   const machine = await machineHost({ sessions: o.machineSessions ?? ['w1', 'c1'], fromHub: ['c1'], mail: true })
-  const hub = await hubHost(machine.port, { mail: true, children: [child('c1')] })
+  const hub = await hubHost(machine.port, { mail: true, children: [child('c1')], ...(o.hubName ? { name: o.hubName } : {}) })
   // Mail out of an untrusted project does not cross (§5): the hub's project is trusted, as the machine's is
   await hub.mgr.setProjectTrusted('p-hub', true)
   await eventually(() => hub.machine().status === 'connected')
@@ -149,6 +149,15 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
     // By the hub's address it goes
     const r = await tool(machine, 'w1', { action: 'send', to: at(hub, 'h1'), text: 'hello' })
     expect(r.text).toMatch(/^Sent \S+ to "h1" \(session:hub-[0-9a-f]+\/h1\) on Hub mac\./)
+    expect(hub.store.mailbox.message(idOf(r))).toMatchObject({ sender: at(hub, 'm1.w1'), body: 'hello' })
+  })
+
+  it("a machine's session reaches a hub session by <label>.<id>, the label the hub offered, which is never one of the hub's machines", async () => {
+    // Named like its machine m1: the hub's own sessions go under another label, so m1.<id> stays that machine's
+    const { machine, hub } = await rig({ hubName: 'M1' })
+    expect(machine.hubs.mailHubs()[0]!.label).toBe('m1-2')
+    const r = await tool(machine, 'w1', { action: 'send', to: 'm1-2.h1', text: 'hello' })
+    expect(r.text).toMatch(/^Sent \S+ to "h1" \(session:hub-[0-9a-f]+\/h1\) on M1\./)
     expect(hub.store.mailbox.message(idOf(r))).toMatchObject({ sender: at(hub, 'm1.w1'), body: 'hello' })
   })
 
@@ -379,7 +388,7 @@ describe('what became of crossing mail is told after the link or the host was aw
       now: () => Date.now() + 11 * 60_000,
       toldAt: { get: () => Number(machine.store.settings.appSetting('mail.acrossToldAt')) || null, set: () => {} },
     })
-    const peer = { id: hub.id, name: hub.name, reachable: true, you: 'm1', call: async (method: string, params: unknown) => void told.push({ method, params }) }
+    const peer = { id: hub.id, name: hub.name, label: 'hub', reachable: true, you: 'm1', call: async (method: string, params: unknown) => void told.push({ method, params }) }
     later.usePeers({ selfName: () => 'Remote box', hub: () => peer, hubs: () => [peer] })
     await later.sync()
     expect(told).toEqual([{ method: 'hub.mailRows', params: { rows: [expect.objectContaining({ messageId: id, recipient: at(hub, 'm1.w1'), settled: 'done' })] } }])
@@ -403,7 +412,7 @@ describe('what became of crossing mail is told after the link or the host was aw
       ownEntries: () => [],
       toldAt: { get: () => settledAt + 5 * 60_000, set: () => {} },
     })
-    const peer = { id: hub.id, name: hub.name, reachable: true, you: 'm1', call: async (method: string, params: unknown) => void told.push({ method, params }) }
+    const peer = { id: hub.id, name: hub.name, label: 'hub', reachable: true, you: 'm1', call: async (method: string, params: unknown) => void told.push({ method, params }) }
     later.usePeers({ selfName: () => 'Remote box', hub: () => peer, hubs: () => [peer] })
     await later.sync()
     expect(told).toEqual([{ method: 'hub.mailRows', params: { rows: [expect.objectContaining({ messageId: id, settled: 'done' })] } }])

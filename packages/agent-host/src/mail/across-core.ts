@@ -3,10 +3,11 @@ import type { MailboxRecords } from '../dev-services/store/mailbox.js'
 import { isPeerAnswer } from '../rpc-error.js'
 import { durationText } from '../timing.js'
 import { PERSON, PERSON_ID, inHubTerms, parseAddress, sessionAddress } from './address.js'
-import type { FoundEntry } from './find.js'
+import { named, type FoundEntry } from './find.js'
 import type { MessageCalls } from './frame.js'
 import type { DelegationOrigin, MessageService } from './messages.js'
 import type { MailReach } from './reach.js'
+import type { RefComputers } from './session-refs.js'
 
 /**
  * What mail across a link (`MailAcross`, across.ts) is built on: where an address is and how the other side names it, the one call to the other side and
@@ -49,7 +50,8 @@ export type AcrossMachine = AcrossPeer & { id: string; tasks?: boolean; mail?: b
 export type AcrossPeers = {
   /** A hub, by its id, as it offered here; `you` is this machine's id there, null for a hub from before item 2 */
   hub?(id: string): (AcrossPeer & { you: string | null }) | undefined
-  hubs?(): (AcrossPeer & { id: string; you: string | null })[]
+  /** `label`: the prefix the hub's own sessions go under here (`hubLabel`) */
+  hubs?(): (AcrossPeer & { id: string; label: string; you: string | null })[]
   /** The hub that started a session here (`startingHub`), for `parent` */
   startingHub?(sessionId: string): { id: string; name: string } | null
   /** A machine this hub links, by its id */
@@ -154,6 +156,15 @@ export class AcrossCore {
       return dot < 0 ? { kind: 'here' } : { kind: 'machine', machineId: p.sessionId.slice(0, dot), sessionId: p.sessionId.slice(dot + 1) }
     }
     return { kind: 'hub', hubId: p.host }
+  }
+
+  /** The computers a session's `<computer>.<id>` names here (`SessionRefs`), read at each call */
+  refComputers(): RefComputers {
+    return {
+      machine: (id) => this.peers?.machine?.(id) !== undefined,
+      hubs: () => this.peers?.hubs?.() ?? [],
+      mirrored: (name) => named(this.peers?.machineDirectory?.().entries ?? [], name),
+    }
   }
 
   /** Whether `hostId` is a hub that links this host, reachable now or not: one that offered here on this run, or one kept from an earlier run that took mail (`LinkedHubs.peer`) */

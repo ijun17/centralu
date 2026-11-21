@@ -681,6 +681,22 @@ describe('a hub linked to another host (#82)', () => {
     expect(seen).toEqual(['open', 'close', 'opened', 'close'])
   })
 
+  it("gives a new machine an id that is never the label this hub's own sessions go under on its machines", () => {
+    const store = new Store()
+    const links = new Links({
+      hub: { version: RELEASE, protocolVersion: PROTOCOL_VERSION, dev: false },
+      broadcast: () => {},
+      terminal: () => {},
+      mirror: storeMirror(store),
+      ...nothingOwed(),
+      registry: storeRegistry(store),
+      tunnelFor: () => new DirectTunnel(lineFor(1)),
+      hubSelf: () => ({ id: 'hub-0000000a', name: 'Desk' }),
+    })
+    cleanups.push(() => links.stop())
+    expect(links.add({ name: 'Desk', sshTarget: 'desk' }).id).toBe('desk-2')
+  })
+
   describe('a remote host the link finds not running (remote-hub.md §10.9, decision 7)', () => {
     /** Links over a tunnel whose remote host runs once `startHost` has run, with every status and log line kept */
     async function linkTo(start: () => Promise<HostStart>, exec?: (command: unknown) => Promise<{ code: number; stdout: string; stderr: string }>, over: Partial<ConnectionLine> = {}) {
@@ -2244,6 +2260,13 @@ describe("the hub's Assistant reads the linked machines (#82 phase 4)", () => {
       expect.stringMatching(/^- w1 \[m1\.w1\] · project remote-project on Remote box · claude · idle/),
       expect.stringMatching(/^- coord \[m1\.coord\] · project remote-project on Remote box · claude · idle/),
     ])
+  })
+
+  it('reads a linked machine’s session by its name, as mail finds it', async () => {
+    const { tool } = await rig()
+    const r = await tool('read_session', { sessionId: 'w1', limit: 4 })
+    expect(r.isError).toBeFalsy()
+    expect(r.text).toContain('done 29')
   })
 
   it('reads a linked machine’s conversation there, around the spot recall found', async () => {

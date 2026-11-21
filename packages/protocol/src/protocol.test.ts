@@ -826,6 +826,14 @@ describe('forward compatibility (docs/protocol.md §4)', () => {
     expect(answer.parse({ ok: true, mail: true, tasks: true }).lacks).toBeUndefined()
   })
 
+  it("offers the label the hub's own sessions go under on a machine; an older peer on either side reads the other", () => {
+    const offer = { hub: { id: 'hub-0000000a', name: 'Hub mac', label: 'hub-mac' }, on: false, mail: true, you: 'm1' }
+    expect(RpcMethods['host.hubOffer'].params.parse(offer).hub.label).toBe('hub-mac')
+    expect(RpcMethods['host.hubOffer'].params.parse({ ...offer, hub: { id: 'hub-0000000a', name: 'Hub mac' } }).hub.label).toBeUndefined()
+    const before = z.object({ hub: z.object({ id: z.string(), name: z.string() }), on: z.boolean() })
+    expect(before.parse(offer).hub).toEqual({ id: 'hub-0000000a', name: 'Hub mac' })
+  })
+
   it('reads an update phase a newer host invented as under way, keeping its words (#844)', () => {
     const e = parseEventLenient({
       type: 'update_status',
