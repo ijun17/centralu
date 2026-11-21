@@ -246,7 +246,7 @@ if (args[0] === 'api' && args[1] === '-X') {
   const body = JSON.parse(stdin)
   if (method === 'POST' && path === 'repos/' + REPO + '/pulls') {
     if (st.prExists) fail('gh: Validation Failed (HTTP 422)\n', 1, JSON.stringify({ message: 'Validation Failed', errors: [{ message: 'A pull request already exists for ijun17:' + body.head + '.' }] }))
-    json({ number: 900, html_url: 'https://github.com/' + REPO + '/pull/900' })
+    json({ number: 900, html_url: 'https://github.com/' + REPO + '/pull/900', head: { sha: 'e'.repeat(40) } })
   }
   if (method === 'POST' && path === 'repos/' + REPO + '/issues') json({ number: 901, html_url: 'https://github.com/' + REPO + '/issues/901' })
   const comment = /^repos\/[^/]+\/[^/]+\/issues\/(\d+)\/comments$/.exec(path)
@@ -255,6 +255,12 @@ if (args[0] === 'api' && args[1] === '-X') {
   if (method === 'POST' && labels) {
     if (st.labelsRefused) fail('gh: Resource not accessible by integration (HTTP 403)\n', 1, '{"message":"Resource not accessible by integration"}')
     json(body.labels.map((name) => ({ name })))
+  }
+  const status = /^repos\/[^/]+\/[^/]+\/statuses\/(\w+)$/.exec(path)
+  if (method === 'POST' && status) {
+    st.statuses = { ...st.statuses, [status[1]]: [{ state: body.state, context: body.context, description: body.description }, ...((st.statuses ?? {})[status[1]] ?? [])] }
+    save()
+    json({ id: 1, state: body.state })
   }
   const pull = /^repos\/[^/]+\/[^/]+\/pulls\/(\d+)$/.exec(path)
   if (method === 'PATCH' && pull) {
@@ -270,6 +276,7 @@ if (args[0] === 'api' && args[1] === '-H') {
   process.stdout.write(text)
   process.exit(0)
 }
+if (args[0] === 'api' && /\/commits\/\w+\/statuses\?/.test(args[1])) json((st.statuses ?? {})[args[1].split('/')[4]] ?? [])
 if (args[0] === 'api' && /^repos\/[^/]+\/[^/]+$/.test(args[1])) json({ default_branch: 'main', permissions: { admin: true, maintain: true, push: true } })
 fail('fake gh: unexpected call ' + JSON.stringify(args) + '\n')
 `
@@ -282,8 +289,9 @@ let gitDirs: string[] = []
 let rt: ExternalApps | null = null
 let gh: FakeGh
 
-type Pr = { number: number; state: string; headRefName: string; baseRefName: string; headRefOid: string; mergeCommit: { oid: string } | null; isCrossRepository: boolean; title: string; body: string; isDraft: boolean; mergeable: string; url: string }
-type State = { mode: string; files: Record<string, string | null>; prs: Record<string, Pr>; prExists?: boolean; labelsRefused?: boolean }
+type Pr = { number: number; state: string; headRefName: string; baseRefName: string; headRefOid: string; mergeCommit: { oid: string } | null; isCrossRepository: boolean; title: string; body: string; isDraft: boolean; mergeable: string; url: string; labels?: { name: string }[] }
+type Status = { state: string; context: string; description: string }
+type State = { mode: string; files: Record<string, string | null>; prs: Record<string, Pr>; prExists?: boolean; labelsRefused?: boolean; statuses?: Record<string, Status[]> }
 
 const pr = (number: number, extra: Partial<Pr>): Pr => ({
   number,
@@ -725,9 +733,11 @@ describe('rebase_stack', { timeout: 60_000 * SLOW }, () => {
     expect(leftovers(s.work)).toEqual({ worktrees: 1, refs: '' })
   })
 
-  it('pushes the restacked branch with a lease, onto the merge commit, and moves the base', async () => {
+  it('pushes the restacked branch with a lease, onto the merge commit, carries its pre-pr status over, and moves the base', async () => {
     const s = stack()
     const before = checkout(s.work)
+    // open_pr's status on the head it replaces (#1886): the same change, so it holds for the new head
+    patchState((st) => (st.statuses = { [s.u2]: [{ state: 'success', context: 'pre-pr', description: 'tier:light; passed' }] }))
     runtime()
     const r = await call('rebase_stack', { pr: '#2', path: s.work, push: true })
     expect(r.isError).toBe(false)
@@ -737,8 +747,15 @@ describe('rebase_stack', { timeout: 60_000 * SLOW }, () => {
     expect(g(s.origin, 'rev-parse', `${head}^{tree}`)).toBe(g(s.origin, 'rev-parse', `${s.u2}^{tree}`))
     expect(g(s.origin, 'log', '--format=%s', `${s.squash}..${head}`)).toBe('up 2\nup 1')
     expect(r.data.summary).toBe(`#2 restacked onto main at ${head.slice(0, 7)}.`)
-    expect(r.data.steps.slice(2)).toEqual([`Pushed ${head.slice(0, 7)} to up on origin, where it was ${s.u2.slice(0, 7)}.`, "Moved #2's base from low to main."])
-    expect(writes()).toEqual([{ args: ['api', '-X', 'PATCH', 'repos/ijun17/centralu/pulls/2', '--input', '-'], stdin: '{"base":"main"}' }])
+    expect(r.data.steps.slice(2)).toEqual([
+      `Pushed ${head.slice(0, 7)} to up on origin, where it was ${s.u2.slice(0, 7)}.`,
+      `Carried the pre-pr status of ${s.u2.slice(0, 7)} over to ${head.slice(0, 7)}: the same change.`,
+      "Moved #2's base from low to main.",
+    ])
+    expect(writes()).toEqual([
+      { args: ['api', '-X', 'POST', `repos/ijun17/centralu/statuses/${head}`, '--input', '-'], stdin: JSON.stringify({ state: 'success', context: 'pre-pr', description: `carried from ${s.u2.slice(0, 7)} by rebase_stack; tier:light; passed` }) },
+      { args: ['api', '-X', 'PATCH', 'repos/ijun17/centralu/pulls/2', '--input', '-'], stdin: '{"base":"main"}' },
+    ])
     expect(checkout(s.work)).toEqual(before)
     expect(leftovers(s.work)).toEqual({ worktrees: 1, refs: '' })
   })
@@ -750,6 +767,8 @@ describe('rebase_stack', { timeout: 60_000 * SLOW }, () => {
     runtime()
     const r = await call('rebase_stack', { pr: 2, path: s.work, push: true })
     expect(r.isError, r.text).toBe(false)
+    // A head without the status has nothing to carry: the answer says what to run instead (#1886)
+    expect(r.data.steps).toContain(`${s.u2.slice(0, 7)} had no pre-pr status to carry over to ${r.data.head.slice(0, 7)}: run pre_pr on it before queue_merge.`)
     expect(r.data.steps.at(-1)).toBe("#2 is a draft, and no open pull request is based on up: if it is its stack's top now, mark it ready for review (mark_ready, or gh pr ready 2) so CI runs on it.")
   })
 
@@ -1073,6 +1092,8 @@ describe('open_pr runs pnpm pre-pr before it opens anything', { timeout: 60_000 
     expect(JSON.parse(writes()[0]!.stdin!).body).toContain(`no new test passes without the change.\n${line}`)
     const label = writes().find((w) => w.args[3] === 'repos/ijun17/centralu/issues/900/labels')!
     expect(JSON.parse(label.stdin!)).toEqual({ labels: ['tier:deep'] })
+    // The pre-pr status on the head pre-pr passed on, which queue_merge asks for (#1886)
+    expect(gh.state<State>().statuses).toEqual({ [c.tools]: [{ state: 'success', context: 'pre-pr', description: 'tier:deep; passed' }] })
   })
 
   it('opens the pull request when GitHub refuses the tier label, and says how to add it', async () => {
@@ -1099,6 +1120,8 @@ describe('open_pr runs pnpm pre-pr before it opens anything', { timeout: 60_000 
     // Not judged, so deep: skipping pre-pr never lowers the review (#1259)
     expect(JSON.parse(writes()[0]!.stdin!).body).toContain('only documents.\nTier: deep (pnpm pre-pr was not run, so the paths were not judged).')
     expect(JSON.parse(writes().find((w) => w.args[3] === 'repos/ijun17/centralu/issues/900/labels')!.stdin!)).toEqual({ labels: ['tier:deep'] })
+    // Skipped, the status says so and why, on the head the pull request opened at (#1886)
+    expect(gh.state<State>().statuses).toEqual({ ['e'.repeat(40)]: [{ state: 'success', context: 'pre-pr', description: 'tier:deep; skipped: The new test guards a Windows path that this branch only documents.' }] })
   })
 
   // #2283: the app runs on the hub, and a session a hub started on another computer gave its own checkout as path
@@ -1164,6 +1187,78 @@ describe('open_pr runs pnpm pre-pr before it opens anything', { timeout: 60_000 
   })
 })
 
+// --- pre_pr: pre-pr again on a head pushed after open_pr (#1886) -------------------------------------
+
+describe('pre_pr runs pnpm pre-pr on a pull request as it is now and posts the pre-pr status', { timeout: 60_000 * SLOW }, () => {
+  const tier = (name: string) => ({ name, line: `Tier: ${name}.`, because: [] })
+
+  it("runs it on the pull request's head and the ones under it, posts the status on the head it ran on, and raises the tier label", async () => {
+    const c = prePrCheckout()
+    patchState((s) => {
+      s.prs['5'] = pr(5, { headRefName: 'feat/low', baseRefName: 'main' })
+      s.prs['7'] = pr(7, { headRefName: 'feat/tools', baseRefName: 'feat/low', headRefOid: c.tools, labels: [{ name: 'tier:light' }] })
+    })
+    prePrAnswers({ ok: true, findings: [], notes: [], passed: passedAll(2), heads: [{ sha: c.low }, { sha: c.tools }], head: c.tools, tier: tier('deep') })
+    runtime()
+    const r = await call('pre_pr', { pr: 7, path: c.work })
+    expect(r.isError, r.text).toBe(false)
+    expect(r.text).toBe(`pnpm pre-pr passed on #7 at ${c.tools.slice(0, 7)}; posted the pre-pr status (tier:deep; passed). Labelled tier:deep, above its tier:light.`)
+    const ns = spaceOf(prePrCalls()[0]!.args)
+    expect(prePrCalls()[0]!.args.slice(-6)).toEqual(['--base', `${ns}/feat/low`, '--main', `${ns}/main`, '--stack', `${ns}/feat/low`])
+    expect(gh.state<State>().statuses).toEqual({ [c.tools]: [{ state: 'success', context: 'pre-pr', description: 'tier:deep; passed' }] })
+    expect(JSON.parse(writes().find((w) => w.args[3] === 'repos/ijun17/centralu/issues/7/labels')!.stdin!)).toEqual({ labels: ['tier:deep'] })
+  })
+
+  it('never lowers the tier label, and says so', async () => {
+    const c = prePrCheckout()
+    patchState((s) => (s.prs['7'] = pr(7, { headRefName: 'feat/tools', headRefOid: c.tools, labels: [{ name: 'tier:deep' }] })))
+    prePrAnswers({ ok: true, findings: [], notes: [], heads: [{ sha: c.tools }], head: c.tools, tier: tier('light') })
+    runtime()
+    const r = await call('pre_pr', { pr: 7, path: c.work })
+    expect(r.text).toBe(`pnpm pre-pr passed on #7 at ${c.tools.slice(0, 7)}; posted the pre-pr status (tier:light; passed). Its label stays tier:deep: a label only raises, so take it off by hand if the paths now ask for less.`)
+    expect(writes().map((w) => w.args[3])).toEqual([`repos/ijun17/centralu/statuses/${c.tools}`])
+  })
+
+  it('says the branch moved while it ran, and puts the status on the head it checked', async () => {
+    const c = prePrCheckout()
+    const read = 'f'.repeat(40)
+    patchState((s) => (s.prs['7'] = pr(7, { headRefName: 'feat/tools', headRefOid: read, labels: [{ name: 'tier:light' }] })))
+    prePrAnswers({ ok: true, findings: [], notes: [], heads: [{ sha: c.tools }], head: c.tools, tier: tier('light') })
+    runtime()
+    const r = await call('pre_pr', { pr: 7, path: c.work })
+    expect(r.data.warnings).toEqual([`#7 was at ${read.slice(0, 7)} when read, and pre-pr ran on ${c.tools.slice(0, 7)}: the branch moved meanwhile. The status is on ${c.tools.slice(0, 7)}; run pre_pr again if that is not its head now.`])
+    expect(Object.keys(gh.state<State>().statuses!)).toEqual([c.tools])
+  })
+
+  it('posts nothing when pre-pr finds something, or the pull request is not open', async () => {
+    const c = prePrCheckout()
+    patchState((s) => {
+      s.prs['7'] = pr(7, { headRefName: 'feat/tools', headRefOid: c.tools })
+      s.prs['8'] = pr(8, { headRefName: 'feat/tools', state: 'MERGED' })
+    })
+    prePrAnswers({ ok: false, findings: [{ check: 'tsc', message: 'tsc fails at feat/tools' }], notes: [], heads: [], head: c.tools })
+    runtime()
+    const r = await call('pre_pr', { pr: 7, path: c.work })
+    expect(r.isError).toBe(true)
+    expect(r.text).toBe(
+      'No pre-pr status on #7: pnpm pre-pr found 1 problem(s) on feat/tools; nothing was sent to GitHub. Fix them and push, or give prePrExempt (one check) or skipPrePr (all) with the reason they stand.\n[tsc] tsc fails at feat/tools',
+    )
+    expect((await call('pre_pr', { pr: 8, path: c.work })).text).toBe('No pre-pr status: #8 is merged; pre_pr checks an open pull request.')
+    expect(writes()).toEqual([])
+  })
+
+  it("posts a skipped status with the reason on a fork's head, and labels it deep", async () => {
+    const head = 'a'.repeat(40)
+    patchState((s) => (s.prs['7'] = pr(7, { headRefName: 'feat/tools', headRefOid: head, isCrossRepository: true, labels: [{ name: 'tier:light' }] })))
+    runtime()
+    const run = await call('pre_pr', { pr: 7 })
+    expect(run.text).toBe("No pre-pr status: pnpm pre-pr cannot fetch a fork's branch (feat/tools) here. Run it in that checkout, and give skipPrePr with what it said.")
+    const r = await call('pre_pr', { pr: 7, skipPrePr: 'Run in the fork: passed at aaaaaaa.' })
+    expect(r.text).toBe('pnpm pre-pr skipped for #7 at aaaaaaa; posted the pre-pr status (tier:deep; skipped: Run in the fork: passed at aaaaaaa.). Labelled tier:deep, above its tier:light.')
+    expect(gh.state<State>().statuses).toEqual({ [head]: [{ state: 'success', context: 'pre-pr', description: 'tier:deep; skipped: Run in the fork: passed at aaaaaaa.' }] })
+  })
+})
+
 describe('open_pr\'s pre-pr: exemptions, warnings, cancellation and time', { timeout: 120_000 * SLOW }, () => {
   const grandchild = () => (existsSync(join(root, 'pre-pr-grandchild.pid')) ? Number(readFileSync(join(root, 'pre-pr-grandchild.pid'), 'utf8')) : 0)
   // What the test has seen end is not signalled afterwards: its number may be someone else's by then (#1308)
@@ -1213,6 +1308,7 @@ describe('open_pr\'s pre-pr: exemptions, warnings, cancellation and time', { tim
     expect(r.isError, r.text).toBe(false)
     expect(prePrCalls()[0]!.args.slice(-2)).toEqual(['--exempt', `${check}=The reason it stands.`])
     expect(JSON.parse(writes()[0]!.stdin!).body).toContain(`\`pnpm pre-pr\` passed at ${c.tools.slice(0, 10)}.\nNot run, the ${check} check: The reason it stands.`)
+    expect(gh.state<State>().statuses![c.tools]![0]!.description).toBe(`tier:deep; passed without ${check}`)
   })
 
   it('opens nothing when the call is cancelled, and stops pre-pr\'s whole process tree and cleans up after it', async () => {

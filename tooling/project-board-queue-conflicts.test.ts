@@ -246,6 +246,8 @@ describe('the merge queue resolves a conflict with main itself, or hands it to t
     // Nothing lands from the rebased head until CI has passed on it
     expect(writes().filter((w) => w[0] === 'merge').map((w) => w[1])).toEqual(['76'])
     patchGh((s) => {
+      // The head the queue pushed has no pre-pr status: its own push of the change pre-pr passed on needs none (#1886)
+      s.noPrePr = '*'
       Object.assign(s.prs['77'], { headRefOid: tip, mergeStateStatus: 'CLEAN', mergeable: 'MERGEABLE' })
       s.checks[tip] = green('2026-10-17T09:00:00Z')
       s.runs[tip] = [ghRun('success', 1, tip)]
@@ -295,6 +297,8 @@ describe('the merge queue resolves a conflict with main itself, or hands it to t
     // Nothing lands from the head the queue made until CI has passed on it
     expect(writes().filter((w) => w[0] === 'merge')).toEqual([])
     patchGh((s) => {
+      // The head the queue pushed has no pre-pr status: its own merge of main needs none (#1886)
+      s.noPrePr = '*'
       Object.assign(s.prs['77'], { headRefOid: tip, mergeStateStatus: 'CLEAN', mergeable: 'MERGEABLE' })
       s.checks[tip] = green('2026-10-17T09:00:00Z')
       s.runs[tip] = [ghRun('success', 1, tip)]

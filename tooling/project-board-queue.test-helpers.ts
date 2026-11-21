@@ -148,6 +148,13 @@ if (args[0] === 'issue' && args[1] === 'view') {
 } else if (path && /\/actions\/runs\/\d+\/cancel$/.test(path)) {
   if (st.cancelError) fail(st.cancelError)
   write(['cancel', path.split('/')[5]])
+} else if (path && /\/commits\/[^/]+\/statuses\?/.test(path)) {
+  // A head's statuses, newest first: those posted, then the pre-pr status open_pr leaves (#1886), unless the test lists the head
+  // in noPrePr, or gives '*' for every head
+  const sha = path.split('/')[4]
+  const posted = (st.writes ?? []).filter((w) => w[0] === 'status' && w[1] === sha).reverse().map((w) => ({ state: w[2], context: w[3], description: w[4] }))
+  const none = st.noPrePr === '*' || (st.noPrePr ?? []).includes(sha)
+  out([...posted, ...(none ? [] : [{ state: 'success', context: 'pre-pr', description: 'tier:light; passed' }])])
 } else if (path && path.includes('/statuses/')) {
   const body = JSON.parse(stdin)
   write(['status', path.split('/statuses/')[1], body.state, body.context, body.description])

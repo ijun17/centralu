@@ -471,6 +471,8 @@ describe('the queue judges an integrated change again on each new head and befor
     patchGh((s) => {
       s.prs['600'].headRefOid = code
       passes(s, code)
+      // A record is judged by the queue, not by pre-pr: no pre-pr status is asked for (#1886)
+      s.noPrePr = '*'
     })
     await until((x) => stateOf(x, 600) === 'attention', 'attention')
     const item = (await call('merge_queue')).data.queue.find((i: any) => i.pr === 600)

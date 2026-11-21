@@ -67,8 +67,10 @@ import {
   POLL_MS,
   pushEvent,
   rerunRefused,
+  prePrMissing,
   resetFor,
 } from './queue.mjs'
+import { prePrPassed } from './pre-pr.mjs'
 import { GitError, isNetworkFailure } from './git.mjs'
 import { noteReadied, openedBy, readOpened } from './opened.mjs'
 import { mergeMain, statLine } from './queue-conflict.mjs'
@@ -651,7 +653,10 @@ async function pollItem(item, { now, ref, renew, save, landed = [], stillIntegra
   const at = new Date(now).toISOString()
   const { permissions, defaultBranch } = await permissionsOf(repo, now)
   const pr = await readPr(repo, item.pr, QUEUE_PR_FIELDS)
-  const base = { title: pr.title, ...resetFor(item, pr.headRefOid) }
+  // The head pnpm pre-pr is known to have passed on (#1886): queue_merge's, or the queue's own push onto it. An item queued
+  // before the field existed starts from the head it had
+  const accepted = item.prePrHead !== undefined ? item.prePrHead : (item.head ?? pr.headRefOid)
+  const base = { title: pr.title, prePrHead: accepted, ...resetFor(item, pr.headRefOid) }
   const view = { ...item, ...base }
   const events = []
   if (item.head && item.head !== pr.headRefOid) events.push({ kind: 'head', text: `${ref(repo, item.pr)}: head moved from ${short(item.head)} to ${short(pr.headRefOid)}; starting again on it.` })
@@ -685,6 +690,8 @@ async function pollItem(item, { now, ref, renew, save, landed = [], stillIntegra
     if (c.yielded) return { yielded: true }
     d = c.decision
     Object.assign(base, c.patch ?? {})
+    // The queue's own merge of the base, or restack, onto a head pre-pr passed on: the same change, so no pre-pr again
+    if (c.patch?.conflict?.outcome === 'pushed' && accepted === pr.headRefOid) base.prePrHead = c.patch.conflict.sha
     events.push(...c.events)
   } else if (item.conflict && item.conflict.head !== pr.headRefOid && !d) {
     // Fixed: a new head that no longer conflicts, pushed by the queue or by a session (#1182)
@@ -694,6 +701,12 @@ async function pollItem(item, { now, ref, renew, save, landed = [], stillIntegra
     base.conflict = null
     // Not behind everything queued while it was fixed (#1182): batches and the list take it first
     base.front = item.front ?? at
+  }
+  // A head pushed since it was queued needs the pre-pr status (#1886); not a record of integrate's, which the queue judges
+  // itself. A speed check, not a trust boundary (AGENTS.md "pre-pr's status")
+  if (!d && !item.auto && base.prePrHead !== pr.headRefOid) {
+    if (await prePrPassed(repo, pr.headRefOid)) base.prePrHead = pr.headRefOid
+    else d = prePrMissing({ n: ref(repo, item.pr), head: pr.headRefOid, accepted, base: pr.baseRefName })
   }
   // Handed over with integrate (#1259 step 3): judged on each new head; one that is not auto goes on to no CI or batch
   // A tier:<name> label above auto stops it on every poll, whatever the judge said of its head

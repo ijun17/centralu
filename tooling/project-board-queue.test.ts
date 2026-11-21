@@ -25,7 +25,7 @@ import { GitHubError, countsTowardLimit, isOutage } from '../.centralu/apps/proj
 // @ts-expect-error — plain .mjs of a Centralu app
 import { batchCandidates, batchLine, decideLanding, dispatchInputs, endBatch, formBatch, gateGreen, gathering, heavyRan, markBatchless, MOVED_CAP, needsFull, onlyCancelledByBatch, rebatchAfterMove, splitBatch, tierToRun } from '../.centralu/apps/project-board/batch.mjs'
 import { removeTree } from '../packages/agent-host/src/temp-dir.test-helpers.js'
-import { REPO_ROOT, R, SHA, SHA2, A, B, C, type Row, check, NOW, PROJECT, LISTS, MECHANICAL_FILES, deadPid, ghCheck, green, ghRun, ghPr, type Gh, ghState, appRef, root, rt, IDLE_SERVER, runtime, call, patchGh, writes, ghCalls, filesNamed, queueOnDisk, notices, pollUntil, until, polls, stateOf, morePolls, itemsOnDisk, forgetApp } from './project-board-queue.test-helpers.js'
+import { REPO_ROOT, R, SHA, SHA2, A, B, C, type Row, check, NOW, PROJECT, LISTS, MECHANICAL_FILES, deadPid, ghCheck, green, ghRun, ghPr, type Gh, ghState, appRef, root, rt, IDLE_SERVER, runtime, call, patchGh, writes, ghCalls, filesNamed, queueOnDisk, notices, pollUntil, until, polls, stateOf, morePolls, itemsOnDisk, forgetApp, seedQueue } from './project-board-queue.test-helpers.js'
 
 
 /**
@@ -1870,6 +1870,52 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     expect(ghCalls().length).toBe(before)
     expect((await call('merge_queue')).text).toMatch(/Paused until \d\d:\d\d:\d\d UTC: GitHub's rate limit was reached/)
     expect(writes()).toEqual([])
+  })
+
+  // #1886: open_pr and pre_pr post the pre-pr status on the head pre-pr passed on; a head pushed since has none
+  it("refuses a head without the pre-pr status, and says to run pre_pr on it", async () => {
+    runtime(ghState({ noPrePr: [SHA] }))
+    const r = await call('queue_merge', { pr: 77 })
+    expect(r.isError).toBe(true)
+    expect(r.text).toBe(
+      "Not queued: #77's head c0ffee0 has no pre-pr status: it was pushed after open_pr, or opened by a board that did not post one. Run pre_pr with pr #77: it runs pnpm pre-pr on c0ffee0 and posts the pre-pr status.",
+    )
+    expect(itemsOnDisk()).toEqual([])
+    expect(writes()).toEqual([])
+  })
+
+  it('stops a head pushed after it was queued, a rebase onto main as much as new commits, until it has the pre-pr status, then lands it', async () => {
+    runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11)] }, noPrePr: [SHA2] }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until(() => itemsOnDisk()[0]?.head === SHA, 'the first poll of its head')
+    // The author rebases onto main and pushes; CI passes on the new head
+    patchGh((s) => {
+      s.prs['77'].headRefOid = SHA2
+      s.checks[SHA2] = green()
+      s.runs[SHA2] = [ghRun('success', 1, SHA2)]
+    })
+    const q = await until((x) => stateOf(x) === 'attention', 'attention for the head without pre-pr')
+    expect(q.queue[0].reason).toEqual({
+      kind: 'pre-pr',
+      text: "#77's head moved since c0ffee0 to beef000, which has no pre-pr status: new commits, or a rebase onto main (the queue cannot tell them apart, so a rebase needs it too). Run pre_pr with pr #77: it runs pnpm pre-pr on beef000 and posts the pre-pr status. The queue carries on by itself once it is there.",
+    })
+    await morePolls(2)
+    expect(writes().filter((w) => w[0] === 'merge')).toEqual([])
+    expect(notices().filter((e) => e.text.includes('needs attention: pre-pr'))).toHaveLength(1)
+    // What pre_pr posts: the next poll carries on, with nothing queued again
+    patchGh((s) => (s.writes = [...(s.writes ?? []), ['status', SHA2, 'success', 'pre-pr', 'tier:light; passed']]))
+    await until((x) => stateOf(x) === 'merged', 'the head to land once it has the status')
+    expect(writes().find((w) => w[0] === 'merge')![2]).toEqual(expect.arrayContaining(['--match-head-commit', SHA2]))
+  })
+
+  // Mixed versions while the board is rolled out: an item an older board queued checked no status
+  it('takes an item an older board queued at the head it had, and asks for the pre-pr status only of a head pushed after that', async () => {
+    const at = new Date().toISOString()
+    const older = (pr: number) => ({ repo: R, pr, lowers: [], owner: 'tester', author: 'tester', state: 'ci', head: SHA, title: `feat(apps): change ${pr}`, queuedAt: at, updatedAt: at, reruns: {} })
+    seedQueue([older(77), older(78)])
+    runtime(ghState({ prs: { '77': ghPr(77), '78': ghPr(78, { headRefOid: SHA2 }) }, checks: { [SHA]: green(), [SHA2]: green() }, runs: { [SHA]: [ghRun('success')], [SHA2]: [ghRun('success', 1, SHA2)] }, noPrePr: [SHA, SHA2] }))
+    const q = await until((x) => stateOf(x, 77) === 'merged' && stateOf(x, 78) === 'attention', 'the one at its head to land, the moved one to stop')
+    expect(q.queue.find((i: any) => i.pr === 78).reason.kind).toBe('pre-pr')
   })
 
   it('takes an item out on unqueue, and changes nothing on GitHub', async () => {

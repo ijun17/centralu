@@ -34,6 +34,7 @@ const ORDER = [
   'edit_comment',
   'file_issue',
   'open_pr',
+  'pre_pr',
   'commit_check',
   'rebase_stack',
   'release_status',
