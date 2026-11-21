@@ -1,12 +1,8 @@
 import type { GroupAttention } from '../fold.js'
 
 /**
- * What a folded group says about the rows it hides (#666): how many, and a sign when one of them needs the person.
- *
- * The count is quiet (faint ink, no chip): it explains why the rows below are missing. The sign is the part that must
- * not be lost with the rows: a dot in the signal ink when a hidden row needs an answer (approval, question, error),
- * one step quieter when it is only unread. Pure white is spent on the first alone, the way a row's mark spends it on
- * "waiting for you" and nowhere else.
+ * What a folded group hides (#666): a quiet count, and a dot in the signal ink when a hidden row needs an answer, one
+ * step quieter when it is only unread (docs/themes.md "The urgency order").
  */
 export function FoldedMark({ count, attention, testId }: { count: number; attention: GroupAttention | null; testId: string }) {
   const label =

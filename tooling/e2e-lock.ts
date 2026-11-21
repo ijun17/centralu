@@ -506,6 +506,25 @@ export async function trackChild(h: Held, pid: number, opts: TrackOptions = {}):
   }
 }
 
+/** A run the runner started: its pid (none when it could not be started) and its exit code to come */
+export type StartedRun = { pid: number | undefined; done: Promise<number> }
+
+/**
+ * Starts the runner's runs one after another, each named in the lock (`track`, trackChild): a run starts only once the
+ * previous run's start-time lookup has settled, so a late answer about the previous run never names it over the next.
+ * That lookup sleeps between tries (up to ten seconds) and a signal does not cut it short; a signal starts no further run,
+ * so nothing waits on it then.
+ */
+export function runsInTurn(h: Held, track: (h: Held, pid: number) => Promise<void> = trackChild): (start: () => StartedRun) => Promise<number> {
+  let tracking: Promise<void> = Promise.resolve()
+  return async (start) => {
+    await tracking
+    const run = start()
+    if (run.pid !== undefined) tracking = track(h, run.pid)
+    return run.done
+  }
+}
+
 const minutes = (ms: number) => (ms < 90_000 ? `${Math.max(0, Math.round(ms / 1000))} s` : `${Math.round(ms / 60_000)} min`)
 
 /** What a waiting run says about the holder: who, doing what, where, since when */

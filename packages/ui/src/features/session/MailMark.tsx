@@ -15,8 +15,8 @@ import type { DeliveredMail } from '../../store/state/mail.js'
  * A line that names its messages (`delivered`, #2333) folds open in place to show them (`MarkLine`'s fold), each as a relayed message
  * is drawn (the sender over a bubble in the other side's colours, as a delegated task's message, #1948), its body cut at six lines,
  * with the way to its chain in the Inbox. Closed at first. The messages are read when it first opens, as a look in, so opening it
- * reads nothing for anyone; what was read is kept here, above the fold, so closing and opening again reads nothing more (#2333
- * review). A read that failed is tried again on the next open. A line from an older host, or stored before, names none and does not fold.
+ * reads nothing for anyone; what was read is kept here, above the fold, so closing and opening again reads nothing more (#2333).
+ * A read that failed is tried again on the next open. A line from an older host, or stored before, names none and does not fold.
  */
 export function MailMark({ text, delivered }: { text: string; delivered?: MailDelivered[] }) {
   const [read, setRead] = useState<Read | null>(null)

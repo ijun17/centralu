@@ -8,9 +8,5 @@ export type PlatformError = {
 
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'resync_required'
 
-/**
- * Which linked machine a per-machine question is for (#82, docs/plans/remote-hub.md): its agent
- * CLIs, its usage, its folders. Null or absent: this computer (the hub), which is what every call
- * meant before linked machines existed.
- */
+/** Which linked machine a question is for (#82, docs/plans/remote-hub.md); null or absent: this computer (the hub) */
 export type MachineRef = string | null | undefined

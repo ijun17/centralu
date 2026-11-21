@@ -1,42 +1,31 @@
 import { isInTurn, MIN_SUPPORTED_VERSION, releaseOf, turnsRunning, type HostActivity, type MachineInfo, type MachineStatus } from '@cc/protocol/client'
 
 /**
- * Linked machines on the screen (#82, docs/plans/remote-hub.md): which rows are away, what a link's
- * state and last error mean in words a person can act on, and what the version prompt offers. Pure,
- * so the rules are tested without a host or React.
+ * Linked machines on the screen (#82, docs/plans/remote-hub.md): which rows are away, what a link's state and last
+ * error mean in words a person can act on, and what the version prompt offers.
  */
 
-/** What the UI knows about one session or project's machine */
 type Placed = { machine?: string | null; unreachable?: boolean }
 
 /**
- * Whether a linked machine is away: its link is not up now, by its own row (`machine_status`), which the hub keeps
- * current. A machine the UI has no row for says nothing yet, so it is not called away. This is the one place that
- * decides it: a row's dimming and tooltip (`isAway`) and the machine badge's dashed border and dot read it, so the three
- * always agree (#1611).
+ * The one place that decides it, by the machine's own `machine_status` row (#1611); a machine with no row yet is not
+ * away. Row dimming, tooltips and the machine badge all read it.
  */
 export function machineAway(machine: Pick<MachineInfo, 'status'> | undefined): boolean {
   return machine !== undefined && machine.status !== 'connected'
 }
 
 /**
- * Whether a session or project on a linked machine is away: its machine is (`machineAway`). Away rows stay listed and
- * dimmed, and are never woken: waking one would only fail at the hub, and the machine's `machine_resync` wakes what has
- * to be woken once it is back. This computer's rows are never away.
- *
- * The row's own `unreachable` mark is not read here. It says only that the hub answered one list from its mirror,
- * a fact about that answer and not about the machine now, and it outlives the outage it was written in whenever a list
- * read lands late or fails (#1611): a second source for the same fact, which then disagrees with the machine's row.
+ * Away rows stay listed and dimmed and are never woken: `machine_resync` wakes them once the machine is back. The row's
+ * `unreachable` mark is not read: it is about one answer and outlives the outage when a list read lands late (#1611).
  */
 export function isAway(row: Placed | undefined, machines: Readonly<Record<string, MachineInfo>>): boolean {
   return !!row?.machine && machineAway(machines[row.machine])
 }
 
 /**
- * Whether this window may wake a row a reconnect found asleep (#1611, #1618, #2163): the one rule for a host back after a
- * drop and for a linked machine back after it was away. Not a row the hub lists from its mirror (its `live` is last heard,
- * not a fact), nor one on a machine that is away (its own resync wakes it), nor one in a turn with no process: an update
- * there cut it, and the host or machine continues it itself.
+ * The one rule for waking rows a reconnect found asleep, for a host and a linked machine (#1611, #1618, #2163). Not a
+ * mirrored row, nor an away machine's, nor one in a turn with no process: an update cut it, and its host continues it.
  */
 export function wakeable(
   row: (Placed & { live?: boolean; state?: unknown }) | undefined,
@@ -45,16 +34,11 @@ export function wakeable(
   return !!row && !row.live && !row.unreachable && !isAway(row, machines) && !isInTurn(row.state)
 }
 
-/**
- * Whether a row still stands for what the hub last heard rather than what its machine says now: it carries the mark
- * and its machine is away. The mark a row of a connected machine kept from an older answer does not count (#1611), so
- * the tool mark of such a row is drawn as any other.
- */
+/** The mark a connected machine's row kept from an older answer does not count (#1611) */
 export function isMirrored(row: Placed | undefined, machines: Readonly<Record<string, MachineInfo>>): boolean {
   return row?.unreachable === true && isAway(row, machines)
 }
 
-/** One word or two for a link's state, as Add project's machine menu and Settings say it */
 export const MACHINE_STATUS_LABEL: Record<MachineStatus, string> = {
   connected: 'connected',
   connecting: 'connecting',
@@ -70,30 +54,23 @@ export const MACHINE_STATUS_LABEL: Record<MachineStatus, string> = {
 }
 
 export type MachineProblem = {
-  /** What is wrong, in one sentence */
   title: string
-  /** What the person can do about it, when there is something; a command is quoted with backticks */
+  /** A command in it is quoted with backticks */
   fix: string | null
 }
 
-/**
- * The link's last error, turned into what to do (#82). The host's `error` keeps ssh's own last line
- * (`links/tunnel.ts`); these are the failures a person meets when linking a machine for the first
- * time, each with the one step that fixes it. Anything not recognised is shown as the host said it.
- */
+/** ssh's last line (`links/tunnel.ts`) turned into the one step that fixes it (#82); anything else shown as said */
 export function machineProblem(m: Pick<MachineInfo, 'status' | 'error' | 'name' | 'sshTarget'> & Partial<Pick<MachineInfo, 'shell' | 'autoReconnect'>>): MachineProblem | null {
-  // Disconnected on purpose (#1134): nothing is wrong, and the row says how it connects again
+  // Disconnected on purpose (#1134)
   if (m.status === 'connected' || m.status === 'disconnected') return null
   const e = m.error ?? ''
   if ((m.status === 'connecting' || m.status === 'starting') && !e) return null
   if (m.status === 'versions_differ') return { title: e || `${m.name} runs another version of Centralu`, fix: null }
-  // Does not answer at all (#1398): asleep, off or off the network. A state, so no error line; ssh's own line is the details
-  // The row adds when it was last connected and when it tries again (`awayNote`), so Centralu trying is not said twice
+  // A state, not an error (#1398); `awayNote` says when it tries again, so trying is not said twice
   if (m.status === 'away') return { title: `${m.name} is not reachable: asleep, off or off the network`, fix: m.autoReconnect === false ? tries(m) : null }
-  // Stopped there, by the person or after its hosts kept stopping (#1143): the host says which, and Start starts one
+  // By the person or after its hosts kept stopping (#1143)
   if (m.status === 'stopped') return { title: e || `Centralu is stopped on ${m.name}`, fix: 'Press Start to start it there' }
   if (m.status === 'not_running') {
-    // This computer tried to start it and says why; an older hub only said it was not serving
     return {
       title: e || `Centralu is installed on ${m.name}, but it is not serving`,
       fix: `Run \`${shims(m).centralu} serve --detach\` on ${m.name} (it keeps running after you log out), then reconnect`,
@@ -133,12 +110,11 @@ export function machineProblem(m: Pick<MachineInfo, 'status' | 'error' | 'name' 
   return e ? { title: e, fix: null } : { title: `${m.name} is away`, fix: tries(m) }
 }
 
-/** What an away machine's row says comes next (#1341): the host keeps trying only while Auto reconnect is on */
+/** The host keeps trying only while Auto reconnect is on (#1341) */
 function tries(m: Partial<Pick<MachineInfo, 'autoReconnect'>>): string {
   return m.autoReconnect === false ? 'Auto reconnect is off: press Connect to try again' : 'Centralu keeps trying'
 }
 
-/** How the app words an age: when something happened, relative to `now` */
 export function formatAgo(when: number, now: number): string {
   const min = Math.floor((now - when) / 60_000)
   if (min < 1) return 'just now'
@@ -149,11 +125,7 @@ export function formatAgo(when: number, now: number): string {
   return day < 30 ? `${day}d ago` : `${Math.floor(day / 30)}mo ago`
 }
 
-/**
- * What the row of a machine that is `away` adds under its headline (#1398): when it was last connected and when the
- * hub tries again, both relative to `now`; each null when there is nothing to say. The raw ssh line is `error`, shown
- * as details by the row
- */
+/** Under an away row's headline (#1398); the raw ssh line is `error`, shown as details */
 export function awayNote(m: Pick<MachineInfo, 'lastConnectedAt' | 'nextAttemptAt'>, now: number): { lastConnected: string | null; next: string | null } {
   const inMin = (ms: number) => {
     const min = Math.ceil(ms / 60_000)
@@ -166,11 +138,8 @@ export function awayNote(m: Pick<MachineInfo, 'lastConnectedAt' | 'nextAttemptAt
 }
 
 /**
- * What the machine's row says about a host this computer started there (plan §10.9, decision 7):
- * started in the background, or, where Windows blocks starting it that way, only while linked.
- * `note` adds what the hub did on the way: why it is linked only while linked, or that it installed its
- * own Node there because the machine's was too old (#699).
- * Null when the host was already running.
+ * A host this computer started there (docs/plans/remote-hub.md §10.9, decision 7): in the background, or only while
+ * linked where Windows blocks that. `note`: why, or that it installed its own Node (#699). Null: it was running.
  */
 export function hostStartNote(m: Pick<MachineInfo, 'hostStarted' | 'status'>): string | null {
   const s = m.hostStarted
@@ -180,10 +149,8 @@ export function hostStartNote(m: Pick<MachineInfo, 'hostStarted' | 'status'>): s
 }
 
 /**
- * The one sentence a machine's row says when its host runs with administrator rights (#702): on Windows an account in
- * the Administrators group linked over ssh gets a full token, with no UAC split, so every agent there runs as an
- * administrator. Not a refusal: the person may want it. The way out is a standard account with its own ssh key. Null
- * when the host did not say so.
+ * Windows gives an Administrators account over ssh a full token with no UAC split, so every agent runs elevated (#702).
+ * Not a refusal: the person may want it.
  */
 export function elevatedNote(m: Pick<MachineInfo, 'elevated' | 'name' | 'shell'>): { title: string; fix: string } | null {
   if (m.elevated !== true) return null
@@ -195,11 +162,8 @@ export function elevatedNote(m: Pick<MachineInfo, 'elevated' | 'name' | 'shell'>
 }
 
 /**
- * The one sentence a machine's row says when its host runs in a network logon (#1224): the logon Windows OpenSSH gives
- * a key login carries no password, so the user's Credential Manager vault stays locked there and Git cannot use a
- * sign-in saved in Windows (nor save one). The way out is the person's own sign-in on that computer, where Centralu
- * starts its host when someone is signed in (`centralu serve --detach`, through the sign-in task). An SSH remote needs
- * no saved sign-in. Null when the host did not say so.
+ * Windows OpenSSH's key login is a network logon with no password: the Credential Manager vault stays locked, so Git
+ * cannot use (or save) a sign-in saved in Windows (#1224). The sign-in task moves the host into the person's sign-in.
  */
 export function logonNote(m: Pick<MachineInfo, 'logon' | 'name'> & Partial<Pick<MachineInfo, 'handover'>>): { title: string; fix: string } | null {
   if (m.logon !== 'network') return null
@@ -213,38 +177,22 @@ export function logonNote(m: Pick<MachineInfo, 'logon' | 'name'> & Partial<Pick<
   return { title, fix: `Sign in on ${m.name}: Centralu moves into your sign-in once its agents are idle. ${ssh}` }
 }
 
-/**
- * What the version prompt offers for a link held at `versions_differ` (plan §4): bring the older
- * side up to the newer one, or connect anyway when the protocols match. Across protocols nothing
- * connects, and the prompt says which side to update.
- */
+/** docs/plans/remote-hub.md §4: across protocols nothing connects; on one protocol "connect anyway" is offered */
 export type VersionPrompt = {
-  /** The two sides speak one protocol: "connect anyway" is possible */
   compatible: boolean
-  /**
-   * Held only because the remote runs a release below `MIN_SUPPORTED_VERSION` (#1143): one protocol, and this computer
-   * names the remote as the side to update. The oldest version this computer works with, else null
-   */
+  /** Set when held only because the remote is below `MIN_SUPPORTED_VERSION` on one protocol (#1143) */
   minimum: string | null
-  /** Which side to update, when that is known (one channel, no dev build) */
+  /** Known only on one channel with no dev build */
   older: 'hub' | 'remote' | null
-  /** The version to bring the older side to */
   target: string | null
-  /** For an older remote, the exact command to run there, for when this computer cannot update it */
+  /** For when this computer cannot update an older remote itself */
   remoteCommand: string | null
-  /**
-   * This computer can update the remote itself (`machines.update`, plan §10.5): the remote is older,
-   * this computer runs a published release, and the machine runs no command of the person's own
-   */
+  /** The remote is older, this computer runs a published release, and the machine runs no command of the person's */
   updateHere: boolean
-  /** One sentence for the person */
   text: string
-  /** The command to restart the remote's host with, in its shell's terms: `centralu`, or `centralu.cmd` on PowerShell (#688) */
+  /** `centralu.cmd` on PowerShell (#688) */
   centralu: string
-  /**
-   * The link waits for the person (`versions_differ`: another protocol). False when it is connected
-   * and the update is only offered: one protocol connects whatever the app versions (#689)
-   */
+  /** False when connected and the update only offered: one protocol connects whatever the app versions (#689) */
   held: boolean
 }
 
@@ -252,10 +200,9 @@ export function versionPrompt(m: Pick<MachineInfo, 'name' | 'status' | 'versions
   const v = m.versions
   if (!v) return null
   const held = m.status === 'versions_differ'
-  // Connected on one protocol with an older side: the update is offered, not required
   if (!held && !(m.status === 'connected' && v.compatible && v.older)) return null
   const hub = v.hub.version
-  // A local build installs the release it was cut from (#689), so that is what the other side is brought to
+  // A local build installs the release it was cut from (#689)
   const hubRelease = releaseOf(hub)
   const remote = v.remote.version
   const target = v.older === 'hub' ? remote : v.older === 'remote' ? hubRelease : null
@@ -279,15 +226,9 @@ export function versionPrompt(m: Pick<MachineInfo, 'name' | 'status' | 'versions
   return { compatible: v.compatible, minimum, older: v.older, target, remoteCommand, updateHere, text, held, centralu: shims(m).centralu }
 }
 
-/** Plural for counts in a sentence: "1 terminal", "2 terminals" */
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 
-/**
- * What the "Update <machine>" prompt says will stop (plan §10.5): the remote's host stops while it
- * switches, and with no keeper there (Linux and Windows remotes today) its agents end with it. Their
- * sessions resume on the new version through their stored ids; a turn in progress is lost. `activity`
- * is the remote's own count (`machines.activity`); unknown is said as "anything running"
- */
+/** With no keeper on the remote, its agents end with its host (docs/plans/remote-hub.md §10.5) */
 export function updateStops(name: string, activity: HostActivity | null | undefined): string {
   const after = 'Sessions resume on the new version; a turn in progress is lost.'
   if (!activity) {
@@ -306,12 +247,7 @@ export function updateStops(name: string, activity: HostActivity | null | undefi
   return `Updating stops Centralu on ${name} while it switches, and with it ${list}. ${after}`
 }
 
-/**
- * What the "Update <machine>" prompt says when sessions there are in a turn (#1399): the update installs beside and waits for them,
- * and stops nothing before they are done. Null when none is, or the machine cannot say (then `updateStops` words it), or the hub
- * does not wait (`MachineInfo.updateWaits` absent: a hub from before #1399 stops at once and ignores `when`, so the window must not
- * promise a wait there)
- */
+/** Null without `hubWaits`: a hub without `MachineInfo.updateWaits` stops at once and ignores `when` (#1399) */
 export function updateWaits(name: string, activity: HostActivity | null | undefined, hubWaits: boolean | undefined): string | null {
   const n = turnsRunning(activity)
   if (!activity || n === 0 || hubWaits !== true) return null
@@ -343,7 +279,6 @@ const AUTOSTART_TEXT: Record<string, string> = {
   status: 'Asking whether it starts at boot…',
 }
 
-/** The row's line while the hub installs, updates, rolls back or removes Centralu there, or changes its start at boot; null otherwise */
 export function operationNote(m: Pick<MachineInfo, 'operation'>): string | null {
   const o = m.operation
   if (!o) return null
@@ -356,26 +291,19 @@ export function operationNote(m: Pick<MachineInfo, 'operation'>): string | null 
         : o.kind === 'rollback'
           ? `Rolling back to ${o.target ?? 'the earlier version'}`
           : 'Removing Centralu'
-  // What holds an update that waits, and how many (#1579); a host that sent no count gets the plain step text
+  // A host that sent no count gets the plain step text (#1579)
   if (o.step === 'wait_idle' && o.count !== undefined) return `${what}: waiting for ${count(o.count, 'session', 'sessions')} in a turn…`
   if (o.step === 'wait_open' && o.count !== undefined) return `${what}: waiting for ${o.count === 1 ? '1 open terminal or command there (Cancel, then Update, closes it)' : `${o.count} open terminals or commands there (Cancel, then Update, closes them)`}…`
   return `${what}: ${STEP_TEXT[o.step] ?? o.step}…`
 }
 
-/**
- * What Settings, Machines says while this computer's automatic updates are on (#1508): they cover the linked machines too.
- * Null while they are off, when every update of a machine is the person's
- */
+/** Automatic updates cover the linked machines too (#1508) */
 export function followHubLead(autoApply: boolean): string | null {
   return autoApply
     ? "While automatic updates are on, linked machines follow this computer's version: each one on an older release is updated once no session there is in a turn."
     : null
 }
 
-/**
- * The row's line when this computer's own update of the machine to its version did not go through (#1508, `followHub`): why,
- * and whether it tries once more. Null while none failed
- */
 export function followHubNote(m: Pick<MachineInfo, 'followHub'>): string | null {
   const f = m.followHub
   if (!f) return null
@@ -383,31 +311,22 @@ export function followHubNote(m: Pick<MachineInfo, 'followHub'>): string | null 
   return `Updating it to ${f.version} by itself did not go through: ${f.failed.replace(/[.\s]+$/, '')}. ${next}`
 }
 
-/**
- * What to tell a person to type on the machine: a Windows PowerShell gets the `.cmd` shims, as the bare
- * names resolve to the `.ps1` ones a default execution policy blocks (#688)
- */
+/** PowerShell resolves the bare names to the `.ps1` shims a default execution policy blocks (#688) */
 function shims(m: Partial<Pick<MachineInfo, 'shell'>>): { npm: string; centralu: string } {
   return m.shell === 'powershell' ? { npm: 'npm.cmd', centralu: 'centralu.cmd' } : { npm: 'npm', centralu: 'centralu' }
 }
 
-/** What the row says about the Centralu this computer installed there; null when it installed none */
 export function installNote(m: Pick<MachineInfo, 'install'>): string | null {
   const i = m.install
   if (!i?.current) return null
-  // A dev build made there from a commit (`pnpm remote-dev`, #1036) is never mistaken for a release
+  // `pnpm remote-dev` (#1036)
   const dev = i.current.source?.kind === 'dev' ? `, a dev build of ${i.current.source.commit.slice(0, 10)}${i.current.source.dirty ? ' with uncommitted changes' : ''}` : ''
   return `Installed from this computer: Centralu ${i.current.version}${dev}${i.previous ? ` (${i.previous.version} kept to roll back to)` : ''}`
 }
 
-/** The row's start-at-boot switch: what it says, whether it is on, and what it does not do there yet */
 export type AutostartRow = { label: string; on: boolean; note: string | null }
 
-/**
- * The reverse direction's switch (#550, docs/plans/remote-hub.md §12.7, owner decision 2026-10-18): its label, the
- * question turning it on asks once (what it allows, and what it does not), and the row's note when it is on but cannot
- * work. Null from a hub that predates it
- */
+/** The reverse direction's switch (#550, docs/plans/remote-hub.md §12.7) */
 export function asksRow(m: Pick<MachineInfo, 'asks' | 'name'>): { label: string; on: boolean; confirm: string; note: string | null } | null {
   if (!m.asks) return null
   return {
@@ -422,12 +341,8 @@ export function asksRow(m: Pick<MachineInfo, 'asks' | 'name'>): { label: string;
 }
 
 /**
- * The start-at-boot switch of a machine's row (docs/plans/remote-hub.md §10.4, owner decision 4: per machine, off by
- * default), from what the machine said it would use. Null where it offers nothing (macOS, a Linux without systemd, WSL
- * without interop) or has not said (a machine that predates it, or never answered).
- *
- * The note says where the switch falls short of "at boot": a systemd user manager that starts only at login because
- * enabling lingering there needs an administrator, and a Windows task, which runs at sign-in.
+ * docs/plans/remote-hub.md §10.4 (per machine, off by default). Null on macOS, a Linux without systemd, WSL without
+ * interop, or a machine that never said.
  */
 export function autostartRow(m: Pick<MachineInfo, 'autostart' | 'name'>): AutostartRow | null {
   const a = m.autostart

@@ -1,4 +1,4 @@
-/** The key-pairing fields of `prove`, `proof` and `hello` (#1711, docs/plans/key-pairing.md §4.3, slice 2): additive */
+/** The key-pairing fields of `prove`, `proof` and `hello` (docs/plans/key-pairing.md §4.3): additive */
 import { describe, expect, it } from 'vitest'
 import { LINK_NONCE_BYTES, LINK_PUBLIC_KEY_BYTES, LINK_SIGNATURE_BYTES, PROTOCOL_VERSION, base64urlLength, base64urlShape, parseClientFrame, parseServerFrame } from './index.js'
 

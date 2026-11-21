@@ -12,7 +12,6 @@ import {
   wireSegments,
 } from './paths.js'
 
-/** A repository a new project is cloned from (#515): https, ssh and scp-like only */
 describe('a clone source', () => {
   it('takes https, ssh:// and user@host:path addresses', () => {
     for (const ok of [
@@ -61,7 +60,6 @@ describe('a clone source', () => {
   })
 })
 
-/** Which repository a remote names (#1038): every way to write one address is one key, two repositories are two */
 describe('a remote address as one repository', () => {
   it('reads https, ssh and scp-like addresses of one repository as the same', () => {
     const one = [
@@ -90,7 +88,7 @@ describe('a remote address as one repository', () => {
     )
   })
 
-  // A folder names a repository only on its own computer (#1038 review): two machines' local remotes are never one
+  // A folder names a repository only on its own computer: two machines' local remotes are never one
   it('has no key for a local path, a file:// address, or nothing', () => {
     for (const url of [
       'C:\\repos\\app.git',
@@ -106,7 +104,6 @@ describe('a remote address as one repository', () => {
   })
 })
 
-/** A new project's folder name (#515): one segment, and nothing a Windows checkout of it would choke on */
 describe('a new folder name', () => {
   it('is one segment: no separator, no climbing, not empty', () => {
     for (const bad of ['', '.', '..', 'a/b', 'a\\b', '../up', '/abs', 'x\u0000y', 'tab\there']) {
@@ -155,19 +152,12 @@ describe('a new folder name', () => {
   })
 })
 
-/**
- * The wire encoding (issue #47).
- *
- * These pin the wire helpers against `node:path`, which is what the host reaches for once a path
- * stops being a wire path and becomes a place on a disk. Pinning both flavours — `posix` and
- * `win32` — is the point: the running machine is only ever one of them, so the disagreement that
- * matters is the one this file can see and the machine cannot.
- */
+// Wire paths (docs/protocol.md §3.1), pinned against node:path's `posix` and `win32` both: the host uses node:path
+// once a path is a place on a disk, and the machine running this is only one of them.
 
 describe('wire paths are POSIX', () => {
   it('the root is the empty part, and it contributes no separator', () => {
-    // `/a.ts` would be absolute, and every check downstream refuses those — the bug would read
-    // as "the root folder is the one place you cannot drop a file"
+    // `/a.ts` would be absolute, which every check downstream refuses
     expect(wireJoin('', 'a.ts')).toBe('a.ts')
     expect(wireJoin('sub', 'a.ts')).toBe('sub/a.ts')
     expect(wireJoin('sub', 'deep', 'a.ts')).toBe('sub/deep/a.ts')
@@ -196,11 +186,8 @@ describe('wire paths are POSIX', () => {
     }
   })
 
-  /**
-   * `\` is an ordinary character in a file name on the machines this runs on today, so a wire
-   * path can legitimately contain one and it must survive intact. The host is where that stops
-   * being true — `baseName` there asks the platform whether the result is still a name.
-   */
+  // `\` may be part of a POSIX file name, so a wire path keeps it; the host's `baseName` asks the platform
+  // whether the result is still a name
   it('a backslash is a character, not a separator', () => {
     expect(wireBaseName('sub/a\\b.txt')).toBe('a\\b.txt')
     expect(wireSegments('a\\b/c.ts')).toEqual(['a\\b', 'c.ts'])
@@ -218,8 +205,7 @@ describe('native paths are read under either separator', () => {
     const dir = 'C:\\Users\\me\\proj'
     expect(osPathBaseName(dir)).toBe(win32.basename(dir))
     expect(osPathBaseName(dir)).toBe('proj')
-    // …which is exactly what reading only `/` could not do: the whole string comes back as one
-    // segment, and a project ends up named after its full path
+    // Reading only `/` returns the whole string, and a project ends up named after its full path
     expect(posix.basename(dir)).toBe(dir)
   })
 

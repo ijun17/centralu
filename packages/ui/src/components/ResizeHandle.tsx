@@ -1,24 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 /**
- * The lane-width resize handle.
+ * The lane resize handle. The size is measured from the pane's own rect, not window.innerWidth: once the layout is
+ * pushed past the window that reference drifts, the drag grows more than the hand moved and the screen scrolls
+ * sideways. Double-click resets to the default, the way back from an accidental drag.
  *
- * Width is calculated relative to the actual edge of the element the handle is attached to.
- * Using the window's own edge (window.innerWidth) as the reference means the reference point
- * drifts the instant the layout is pushed past the window, producing a feedback loop where
- * dragging makes it grow even larger (dogfooding: "it grew larger than what was dragged and the
- * screen started scrolling sideways"). Using the element's own rect lets the calculation
- * self-correct even once it has been pushed out of place.
- *
- * Double-clicking resets it to the default — there must be a way back after an accidental drag.
- *
- * #842 item 11:
- *  - **Only the primary button drags.** A right-click, or a Ctrl+click (the context menu on macOS), started a drag whose
- *    mouseup the context menu swallowed, so the edge followed the pointer until the next click.
- *  - **A drag ends if the handle goes away mid-drag** (the panel closed under it by ⌘B): the owner is told, or the
- *    panel's width animation stayed off for good. It also ends when the window loses focus, where no mouseup comes.
- *  - **The keyboard resizes it**: it is a focusable separator, and the arrows move the edge (Shift for a bigger step),
- *    Home and End go to the limits.
+ * #842 item 11: only the primary button drags (a right-click or macOS Ctrl+click's menu swallows the mouseup, so the
+ * edge would follow the pointer). A drag also ends for the owner when the handle unmounts (⌘B closed the panel), else
+ * its width animation stays off, and on window blur, where no mouseup comes. It is a focusable separator: arrows move
+ * the edge (Shift more), Home and End go to the limits.
  */
 export function ResizeHandle({
   side,
@@ -29,18 +19,14 @@ export function ResizeHandle({
   max,
   onDraggingChange,
 }: {
-  /**
-   * The edge the handle is attached to.
-   * 'left'/'right' resizes width, 'top' resizes height — the boundary between two panels
-   * stacked vertically.
-   */
+  /** The edge the handle is on: `top` resizes the height of a pane stacked under another */
   side: 'left' | 'right' | 'top'
   onResize: (width: number) => void
   onReset: () => void
   testId: string
   min: number
   max: number
-  /** Animation must be turned off while dragging — interpolating every frame cannot keep up with the hand */
+  /** The owner turns its animation off while dragging: interpolating every frame cannot keep up with the hand */
   onDraggingChange?: (dragging: boolean) => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
@@ -52,7 +38,6 @@ export function ResizeHandle({
     return rect ? Math.round(side === 'top' ? rect.height : rect.width) : null
   }, [side])
 
-  // A drag in progress when the handle unmounts still has to be ended for the owner
   const draggingRef = useRef(false)
   draggingRef.current = dragging
   const onDraggingChangeRef = useRef(onDraggingChange)
@@ -83,7 +68,7 @@ export function ResizeHandle({
       setNow(sizeOf())
     }
 
-    // If text gets selected while dragging, the cursor jumps
+    // Text selected while dragging makes the cursor jump
     document.body.style.cursor = side === 'top' ? 'row-resize' : 'col-resize'
     document.body.style.userSelect = 'none'
     window.addEventListener('mousemove', onMove)
@@ -140,11 +125,7 @@ export function ResizeHandle({
 /** The arrows move the edge by this much, Shift by four times as much */
 export const KEY_STEP = 16
 
-/**
- * The size a key moves a handle to, or null when the key is not a resize (a pure function: tests attach here). The
- * arrow that points the way the edge moves grows the pane: → for a handle on a pane's right edge, ← for one on its left
- * edge, ↑ for one on its top edge.
- */
+/** The size a key moves a handle to, or null; the arrow pointing the way the edge moves grows the pane */
 export function keyResize(
   e: { key: string; shiftKey: boolean; altKey?: boolean; metaKey?: boolean; ctrlKey?: boolean },
   side: 'left' | 'right' | 'top',

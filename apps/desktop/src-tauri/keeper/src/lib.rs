@@ -11,7 +11,7 @@
 //!
 //! It is a crate of its own so that the keeper's link cannot reach Tauri, WebKit or AppKit by
 //! accident: its dependencies are `serde`, `serde_json` and `libc`, and anything else has to be
-//! added here, in plain sight. A later step starts the keeper from verified content outside the
+//! added here, in plain sight. The macOS shell starts the keeper from verified content outside the
 //! window's bundle, where it must not need the window's frameworks.
 
 pub mod data_folder;

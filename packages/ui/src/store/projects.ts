@@ -6,20 +6,12 @@ import { coalescedRead } from './single-flight.js'
 import { machinesHoldingMirror } from './machines.js'
 import { inOrder, omitKey, stillInOrder } from './patch.js'
 
-/**
- * Projects in the store: the list and its reads, which leave alone a project this window is writing
- * (`writingProject`), adding and making one, trust, deletion, the git summary and its writes, the
- * worktree setup and the saved commands. `projectActions` holds the store's actions for them.
- */
-
-/** What a project carries that any client may change through the host (#719); `git` and the identity stay as the window has them */
+/** What any client may change through the host (#719); `git` and the identity stay as the window has them */
 const PROJECT_SETTING_KEYS = ['trusted', 'commands', 'worktreeSetup', 'agentInstructions', 'worktreeManager', 'defaultTool', 'defaultModels', 'fromUserFolder'] as const satisfies readonly (keyof ProjectInfo)[]
 
 /*
- * The writes this window has made to a project and not seen settle (#719). A list read that began before a write
- * finished may carry the value from before it, and taking that over the window's own newer value would hide a command
- * just added: the next whole-list save would then drop it on the host. So a read leaves a project alone while a write
- * of its own is in flight or finished after the read began, and reads it again once the write is done.
+ * A list read begun before this window's write finished may carry the old value, which the next whole-list save would
+ * write back (#719). So a read leaves a project alone while its write is in flight or finished after the read began.
  */
 const projectWrites = { clock: 0, flying: new Map<string, number>(), last: new Map<string, number>(), held: new Set<string>() }
 
@@ -40,10 +32,8 @@ export async function writingProject<T>(projectId: string, refresh: () => void, 
 }
 
 /**
- * One read of the project list (`list`, begun when the write clock stood at `began`), taken over the rows already listed. New projects join at the end; a listed row keeps
- * its place and takes the host's value of the settings another client can change (trust, commands, worktree setup,
- * defaults: #719, and whether it is a folder of the user folder: #1301) and keeps its object when none of them differs. `git` is left alone: it has its own refresh, and a
- * list read does not carry the freshest count. A project this window is writing is left as it is (`projectWrites`).
+ * A listed row keeps its place and its object unless a `PROJECT_SETTING_KEYS` value differs. `git` is left alone: it has
+ * its own refresh, and a list read is not the freshest count.
  * @returns whether a project had to be skipped after its write was already done, so one more read is due
  */
 function applyProjects({ list, began }: { list: ProjectInfo[]; began: number }, set: StoreSet): boolean {
@@ -70,34 +60,18 @@ function applyProjects({ list, began }: { list: ProjectInfo[]; began: number }, 
   return again
 }
 
-/**
- * A project the person registered from this window (adding a folder, or making one, #515) joins the list, and is asked
- * about once for trust — unless it is already trusted (the same folder chosen again).
- */
+/** Asked about once for trust (#515), unless already trusted (the same folder chosen again) */
 function joinProject(s: Pick<AppState, 'projects' | 'trustAsk'>, p: ProjectInfo): Pick<AppState, 'projects' | 'trustAsk'> {
   return { projects: { ...s.projects, [p.id]: p }, trustAsk: p.trusted ? s.trustAsk : p.id }
 }
 
 /**
- * How long a project's git refresh waits for the next trigger before it runs (issue #41).
- *
- * The triggers arrive in bursts, not singly: three sessions in one project finishing
- * seconds apart, an approval granted and the turn it unblocked ending right after, a
- * focus and a visibilitychange for one alt-tab. Each of those would otherwise be its own
- * `git status` over the same working tree. One trailing window per project collapses a
- * burst into one measurement, and it has to be short enough that the number has already
- * moved by the time the eye goes looking for it — 800ms is under the glance.
- *
- * The delay also puts the measurement *after* the write it was told about, which matters
- * for the approval trigger: the edit lands in the moment following the "allow", not in it.
+ * One trailing window per project (#41) collapses a burst of triggers (sessions ending together, focus plus
+ * visibilitychange) into one `git status`. 800 ms is under a glance, and lands after the edit an "allow" let through.
  */
 const GIT_REFRESH_MS = 800
 
-/**
- * Pending git refreshes, one timer per project — module scope for the same reason
- * `subscriptions` is: nothing on screen reads a timer, so keeping it out of the store
- * costs no renders.
- */
+// Outside the store: nothing on screen reads a timer
 const gitRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 /** Whether two git summaries say the same thing — a refresh that found nothing must not redraw */
@@ -114,7 +88,6 @@ function sameGit(a: ProjectInfo['git'], b: ProjectInfo['git']): boolean {
   )
 }
 
-/** The store's actions for projects */
 type ProjectActions = Pick<
   AppState,
   | 'setWorktreeTrunk'
@@ -207,11 +180,7 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
           const p = s.projects[projectId]
           return p ? { projects: { ...s.projects, [projectId]: { ...p, trusted } } } : {}
         })
-        /*
-         * Trust changed here (#1141): the project is looked at afresh at the next read of the app list, which the host
-         * sends for the change. The apps it has then were on its card, so none is news, even ones whose list had not
-         * arrived when the person pressed Trust; untrusted, it is no longer watched
-         */
+        // Trust changed (#1141): the apps it has at the next app list read were on its card, so none is news
         forgetArrivalsOf(get, set, projectId)
         const running = Object.values(get().sessions).some((x) => x.projectId === projectId && x.live)
         if (running) set({ toast: 'Running sessions here pick up the new trust when they restart or resume.' })
@@ -225,21 +194,13 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
     const platform = get().platform
     if (!platform || !get().projects[projectId]) return
     if (deleteFiles) {
-      /*
-       * The project folder has a door of its own (#838): the file tree's trash refuses the project folder, so a link in
-       * a repository (`old-build -> .`) cannot send it there. The host resolves it, so no absolute path is built here.
-       * The hand that deletes lives in the shell (Rust), and what that hand does is **move to trash** (the fs port's
-       * rule: "Not a delete — that is the whole decision").
-       */
+      // Its own door (#838): the file tree's trash refuses the project folder, so a repository link (`old-build -> .`)
+      // cannot send it there. The shell moves it to the trash, never deletes.
       const r = await platform.fs.trashProjectFolder(projectId)
       if (!r.supported) throw new Error(r.reason ?? 'This build cannot delete files')
     }
     await platform.projects.remove(projectId)
-    /*
-     * Sessions also disappear through the host's own `session_deleted`, but they are cleared here as
-     * well: waiting for that event would leave a session row on screen for a project that no longer
-     * exists.
-     */
+    // Not left to `session_deleted`: waiting would leave rows of a project that is gone
     set((s) => {
       const projects = omitKey(s.projects, projectId)
       const doomed = Object.values(s.sessions)
@@ -251,11 +212,7 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
         projects,
         sessions,
         ...forgetSessions(s, new Set(doomed)),
-        /*
-         * What was kept per project goes with it. The id can come back (restoring one of its sessions from the session archive
-         * re-adds the project under its old id), and then it starts the way a newly added project does: the deletion
-         * stopped its command runs, and a git epoch of 0 and folded folders are the defaults anyway.
-         */
+        // A project re-added under its old id (a session restored from the archive) starts as a new one
         gitEpoch: omitKey(s.gitEpoch, projectId),
         expandedDirs: omitKey(s.expandedDirs, projectId),
         commandRuns: omitKey(s.commandRuns, projectId),
@@ -278,58 +235,32 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
       setTimeout(() => {
         gitRefreshTimers.delete(projectId)
         const platform = get().platform
-        // The project can be gone by the time the window closes (removed, or a reconnect
-        // rebuilt the list). Measuring a folder nobody is showing helps no one.
+        // The project can be gone by now (removed, or a reconnect rebuilt the list)
         if (!platform || !get().projects[projectId]) return
-        // Makes the panel's own held list re-read at the same moment too (#160). Bumped even when
-        // the summary is unchanged — editing the same file again leaves the change count the same
-        // while the content has changed
+        // Re-reads the panel's own list too (#160), even with the summary unchanged: a second edit keeps the count
         set((s) => ({ gitEpoch: { ...s.gitEpoch, [projectId]: (s.gitEpoch[projectId] ?? 0) + 1 } }))
         void platform.projects
           .gitStatus(projectId)
           .then(({ git }) =>
             set((s) => {
               const cur = s.projects[projectId]
-              /*
-               * Nothing new is not an update. This runs after every turn and every return to
-               * the window, and "the count is the same" is the common answer — handing every
-               * row a fresh object each time would re-render the whole sidebar to redraw
-               * identical text.
-               */
+              // The common answer is "the same": a fresh object every turn would re-render the whole sidebar
               if (!cur || sameGit(cur.git, git)) return {}
-              // git did not answer in time: the last count still stands rather than reading as none (#850 review)
+              // git did not answer in time: the last count still stands rather than reading as none (#850)
               if (git?.unknown && cur.git) return {}
-              /*
-               * **Only `git` is taken from the answer.** The host rebuilds the rest of
-               * ProjectInfo from its own defaults, so swallowing the whole row would let a
-               * reply that landed mid-`setProjectCommands` undo the list being edited.
-               * This action was asked for one field; it writes one field.
-               */
+              // Only `git`: the host fills the rest from defaults, which would undo a `setProjectCommands` in flight
               return { projects: { ...s.projects, [projectId]: { ...cur, git } } }
             }),
           )
-          /*
-           * Silence on failure, deliberately. This is a number in the margin that nobody
-           * asked for — a repo that has just been deleted, or a host that dropped the
-           * project, must not put a toast in front of someone who was doing something else.
-           * The stale count stays, which is exactly where we were before.
-           */
+          // Silent: a margin number nobody asked for must not toast. The stale count stays.
           .catch(() => {})
       }, GIT_REFRESH_MS),
     )
   },
 
   /*
-   * The three writes (issue #49). Each does the thing, then says the tree moved — the
-   * `await` matters, because a status read that overtakes its own commit measures the repo
-   * as it was and writes that back as news.
-   *
-   * Staging is in here even though it rarely moves the number (porcelain counts one line per
-   * changed path whether it is staged or not). "Rarely" is not "never" — staging a file whose
-   * content matches HEAD drops it out of status entirely — and the debounce plus `sameGit`
-   * mean an answer identical to the last one costs one call and re-renders nothing. The
-   * alternative is a rule about which writes qualify, which is the kind of rule that is
-   * silently wrong for a year.
+   * The writes (#49) refresh after the await: a status read that overtakes its commit writes the old repo back as news.
+   * Staging refreshes too: it can drop a file matching HEAD from status, and an unchanged answer re-renders nothing.
    */
   async gitStage(projectId, paths, unstage) {
     await get().platform!.git.stage(projectId, paths, unstage)
@@ -338,8 +269,7 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
 
   async gitCommit(projectId, message) {
     const res = await get().platform!.git.commit(projectId, message)
-    // Refresh even when the commit was refused: git can reject *after* moving something
-    // (a hook that stages, a partial index update), and the count must not be left guessing.
+    // Even when refused: git can reject after moving something (a hook that stages, a partial index update)
     get().refreshProjectGit(projectId)
     return res
   },
@@ -356,7 +286,7 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
     if (!platform || !before) return
     await writingProject(projectId, () => void get().refreshProjects(), async () => {
       await platform.projects.setWorktreeSetup(projectId, setup)
-      // The summary line must match the next time it opens — follows the host's own normalizing rule (an empty setup means `null`)
+      // The host's normalizing rule: an empty setup is `null`
       const clean = setup && (setup.command || setup.copyFiles.length) ? setup : null
       set((s) => {
         const now = s.projects[projectId]
@@ -383,22 +313,17 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
     const before = get().projects[projectId]
     if (!platform || !before) return
     await writingProject(projectId, () => void get().refreshProjects(), async () => {
-      // Draw it first. This is a list being edited by hand, and a row that appears only after
-      // a round trip reads as a click that missed.
+      // Drawn first: a row that appears only after a round trip reads as a missed click
       set((s) => ({ projects: { ...s.projects, [projectId]: { ...(s.projects[projectId] ?? before), commands } } }))
       try {
         const saved = await platform.projects.setCommands(projectId, commands)
         set((s) => {
           const now = s.projects[projectId]
-          // The project could have gone while we were away; nothing to correct if so
+          // The project may be gone meanwhile
           return now ? { projects: { ...s.projects, [projectId]: { ...now, commands: saved } } } : {}
         })
       } catch (e) {
-        /*
-         * Put the old list back and say so. A command that looks saved and is gone at the
-         * next launch is the worse half of this: the menu would then say "nothing saved yet",
-         * which reads as never having added it rather than as having lost it.
-         */
+        // The old list back, said: a command that looks saved and is gone next launch reads as never added
         set((s) => {
           // Only the list goes back (#842 item 3): a rename made meanwhile stays, and a project removed meanwhile is not revived
           const now = s.projects[projectId]
@@ -432,7 +357,7 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
         }
       })
     } catch {
-      // If it could not be read, it is re-read the next time the panel opens — the badge is just dark for a moment
+      // Re-read the next time the panel opens
     }
   },
 
@@ -440,7 +365,7 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
     const platform = get().platform
     if (!platform) return
     try {
-      // The size is re-measured for real once the log window (`CommandLog`) attaches — this is only a starting value
+      // A starting size; `CommandLog` measures the real one when it attaches
       const info = await platform.commands.run(projectId, command, 100, 30)
       set((s) => ({
         commandRuns: {
@@ -449,7 +374,7 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
         },
       }))
     } catch (e) {
-      // No silent failures — believing it started when it did not leaves someone waiting on a log that never comes
+      // Said: believing it started leaves someone waiting on a log that never comes
       set({ toast: `Could not run: ${errorMessage(e)}` })
     }
   },
@@ -457,11 +382,8 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
   async stopCommand(projectId, command) {
     const platform = get().platform
     if (!platform) return
-    /*
-     * Marked before asking, so its exit reads as a stop and not as a failure (`CommandRun.stopped`): a dev server ends
-     * with whatever code its signal gives it, and "exit 143" drawn as a failure after pressing Stop reads as a crash. Only
-     * the run that is running now is marked; a re-run meanwhile is a new record without the mark.
-     */
+    // Marked before asking, so its exit reads as a stop: "exit 143" drawn as a failure after Stop reads as a crash.
+    // Only the run running now is marked; a re-run meanwhile is a new record.
     const mark = (stopped: boolean) =>
       set((s) => {
         const r = s.commandRuns[projectId]?.[command]
@@ -477,7 +399,7 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
     try {
       await platform.commands.stop(projectId, command)
     } catch (e) {
-      // As `runCommand` (#841 item 11): a stop that failed left the badge lit with no word, read as "it is stopping"
+      // As `runCommand` (#841 item 11): a stop that failed silently would leave the badge lit, read as "it is stopping"
       mark(false)
       set({ toast: `Could not stop: ${errorMessage(e)}` })
     }
@@ -490,24 +412,14 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
       await platform.fs.watch(projectId, dirs)
       watchFailureSaid.delete(projectId)
     } catch (e) {
-      /*
-       * Watching is a side glance, so the tree goes on (#34), but a failure swallowed whole left a tree that stopped
-       * following what an agent or Finder changed with no word of it (#841). Said once: the tree asks again with every
-       * folder opened
-       */
+      // The tree goes on (#34) but says it (#841), or it silently stops following changes. Once: every opened folder asks again
       if (watchFailureSaid.has(projectId)) return
       watchFailureSaid.add(projectId)
       set({ toast: `The file tree will not follow changes made outside it: ${errorMessage(e)}` })
     }
   },
 
-  /**
-   * Sidebar order.
-   *
-   * **The screen changes first, and the save follows.** If a dragged item waited for a round trip to
-   * the server before moving, the hand would feel like it stumbled. If saving fails, it reverts to
-   * whatever the host says is true — it is never left silently out of sync.
-   */
+  /** The screen moves first and the save follows: a drag that waits for a round trip feels like it stumbled */
   async reorderProjects(orderedIds) {
     const platform = get().platform
     if (!platform) return
@@ -519,11 +431,7 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
       // A machine that could not take the order answers from the hub's mirror; a connected one is read again (#1611)
       for (const id of machinesHoldingMirror(get())) void get().recoverMachine(id)
     } catch (e) {
-      /*
-       * The projects as they are now, in the order from before the drag (#842 item 3): one deleted meanwhile stays
-       * deleted. And only while the order shown is still this drag's: a later drag that was saved is not undone by this
-       * one failing.
-       */
+      // Only the order goes back (#842), and only while the order shown is still this drag's
       set((s) => ({
         ...(stillInOrder(s.projects, orderedIds) ? { projects: inOrder(s.projects, Object.keys(before)) } : {}),
         toast: `Could not save order: ${errorMessage(e)}`,

@@ -1,31 +1,29 @@
 //! The keeper (#280, option C step 1).
 //!
 //! The keeper is **its own executable, `centralu-keeper`** (#440), shipped next to the window's
-//! executable and linking no Tauri and no webview. Until 0.1.0-beta.11 it was the window's
-//! executable started as `centralu --keeper`; that still works and turns into `centralu-keeper`
-//! (`exe.rs`), because keepers already installed hand over that way. Who it is for macOS privacy
-//! permissions did not change: macOS judges a process by the app that started its tree (the
-//! responsible process, measured for #440 in docs/spikes/2026-10-thin-shell-tcc.md), and the window starts
-//! the keeper either way.
+//! executable and linking no Tauri and no webview; `centralu --keeper` refuses unless a debug window
+//! asks (`exe.rs`, #461). For macOS privacy permissions it is the app that started it: macOS judges a
+//! process by the app that started its tree (the responsible process, measured for #440 in
+//! docs/spikes/2026-10-thin-shell-tcc.md).
 //!
 //! What it does:
-//!   - holds the host: launches it, restarts it by the same rules the app used, stops it;
+//!   - holds the host: launches it, restarts it by the same rules as the window's direct path, stops it;
 //!   - runs every host from a per-build copy under the data folder (`source.rs`);
 //!   - answers a user-only control socket (`server/`) through which the app attaches, learns
 //!     the host's port, token and build, and asks it to stop (for good, or for an update);
 //!   - applies background mode: with it off (the default) the keeper and host stop when the last
-//!     window detaches, as quitting the app always did; with it on they keep running.
+//!     window detaches; with it on they keep running.
 //!
-//! It no longer holds the host's agents, terminals and commands (step 2's children service, gone in
-//! #1895 step 4): the host spawns its own, and an update stops them and continues their turns.
+//! It does not hold the host's agents, terminals and commands (#1895 step 4): the host spawns its
+//! own, and an update stops them and continues their turns.
 //!
 //! **The front door** (`front_door.rs`, step 3): one loopback port and one token for the keeper's whole
 //! life, relayed byte for byte to the host, so clients and Codex bridges never learn a host's own port.
 //!
-//! A keeper runs one build for its whole life (#1895 step 4, PR 4): the blue-green swap to another build
-//! (step 3) and the handoff to another build's keeper (step 4) are gone. An update or another build is a
-//! stop: the window stops this keeper (`stop {forUpdate}`, or a plain `stop`) and starts its own build's
-//! keeper (docs/plans/keeper-removal.md §2.3).
+//! A keeper runs one build for its whole life (#1895 step 4, PR 4): it neither swaps to another build nor
+//! hands over to another build's keeper. An update or another build is a stop: the window stops this
+//! keeper (`stop {forUpdate}`, or a plain `stop`) and starts its own build's keeper
+//! (docs/plans/keeper-removal.md §2.3).
 //!
 //! A keeper the macOS shell started runs from verified content, `<data>/content/<version>/`
 //! (`content.rs`, thin-shell plan §10 step 5), and its hosts run from that copy as well.
@@ -155,8 +153,8 @@ pub struct KeeperView {
     pub attached: usize,
     /// The host's last activity report: a session working or waiting, a terminal, a command run.
     pub busy: bool,
-    // `swap` and `keepsAgents` went with the swap (#1895 step 4, PR 4): every window build since step 3 reads both as
-    // optional, so an earlier window attached to this keeper reads their absence as no swap and unknown.
+    // No `swap` or `keepsAgents` (#1895 step 4, PR 4): every window build since step 3 reads both as optional, so an
+    // earlier window attached to this keeper reads their absence as no swap and unknown.
     /**
      * Which credential `status.token` is (#1405): `full`, the front door's token, for a window;
      * `limited`, the limited credential (`limited.rs`), for any other process. Absent from a keeper
@@ -227,8 +225,7 @@ pub struct IdleInput {
  *
  * - A window attached: never.
  * - A window expected back (`window_expected`): not yet, whatever the mode. Once its grace runs out,
- *   the rules below apply. (An announced relaunch, #352, held a keeper the same way until #1895 step 4
- *   PR 3: an update now stops the keeper.)
+ *   the rules below apply.
  * - No window has attached since start: after `STARTUP_GRACE`, whatever the mode. The app that
  *   launched it died before attaching, and nobody else knows it is there.
  * - Background mode off: at once. Detaching already stops it; this catches a detach that raced

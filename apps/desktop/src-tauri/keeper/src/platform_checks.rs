@@ -10,7 +10,7 @@
 //!     place that asks which OS this is for a decision;
 //!   - `WINDOW_INTEGRATION`: the window's own OS integration, which is not runtime and stays where it
 //!     is (§3.3: menus, traffic lights, trash, `code`);
-//!   - `NOT_YET`: the sites that were there when this test was written, with their count. That list
+//!   - `NOT_YET`: the sites outside the OS layer still to move, with their count. That list
 //!     may only shrink: a file listed here may not gain a check, and a file that loses one must lower
 //!     its count in the same change (the test fails on a stale count, so the list stays exact). Each
 //!     step of the plan that moves a module into `os/` removes its rows; step 12 leaves it empty.
@@ -35,7 +35,7 @@ const WINDOW_INTEGRATION: &[&str] = &["src/ide.rs", "src/os_integration.rs", "sr
 /// Today's sites outside the OS layer, with how many each has. Only shrinks.
 const NOT_YET: &[(&str, usize)] = &[
     // The keeper is unix-only until step 9 gives the OS layer a Windows half: the keeper's module and
-    // its executable. The host supervisor's half went with the keeper handoff (#1895 step 4, PR 4).
+    // its executable.
     ("keeper/src/lib.rs", 1),
     ("src/bin/centralu-keeper.rs", 2),
     // The window's start and quit (step 7). Its own OS integration (the badge, the trash, app links,

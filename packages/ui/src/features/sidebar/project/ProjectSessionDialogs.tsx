@@ -27,7 +27,7 @@ export function ProjectSessionDialogs({
         <ConfirmDelete
           sessionId={confirming}
           name={sessions.find((s) => s.id === confirming)?.name ?? 'Session'}
-          // This session's own tool, not the project default — this sentence states where the transcript ends up, so it must not be wrong
+          // Its own tool, not the project default: the dialog says where the transcript stays
           tool={sessions.find((s) => s.id === confirming)?.tool ?? defaultTool}
           onCancel={() => setConfirming(null)}
           onDone={() => setConfirming(null)}
@@ -42,13 +42,12 @@ export function ProjectSessionDialogs({
         <ConfirmHandoff
           name={sessions.find((s) => s.id === handingOff)?.name ?? 'Session'}
           tool={sessions.find((s) => s.id === handingOff)?.tool ?? defaultTool}
-          // Determining a dead session (#78): one that has errored or hit a rate limit — the other tool is
-          // pre-selected (the note from the record is every session's default, #694, and archiving the original is too, #1477)
+          // Errored or rate-limited (#78): the other tool is pre-selected
           dead={(() => {
             const s = sessions.find((x) => x.id === handingOff)
             return s ? s.state === 'error' || !!s.limit : false
           })()}
-          // Asking the agent is blocked while a card is up — the request would go through as the answer to a question (#174, same determination as the store)
+          // While a card is up the request would go in as its answer (#174, the store's own rule)
           blocked={(() => {
             const s = sessions.find((x) => x.id === handingOff)
             return s ? handoffBlockedBy(s) : null
@@ -60,7 +59,7 @@ export function ProjectSessionDialogs({
           backgroundTasks={backgroundCount(sessions.find((x) => x.id === handingOff)?.backgroundTasks ?? [])}
           onCancel={() => setHandingOff(null)}
           onConfirm={(tool, deleteOld, mode) => {
-            // The dialog closes and progress is shown inside the session — the handoff request and its text stay in the conversation as is
+            // Progress shows in the session, where the request stays in the conversation
             void handoffSession(handingOff, { tool, deleteOld, mode })
             setHandingOff(null)
           }}

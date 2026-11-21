@@ -102,7 +102,7 @@ describe('the frame the asked session reads (#428)', () => {
   // #2183: the asker reads which claims of the answer were checked
   it('asks for what each claim of the answer rests on, before the way to write to the asker', () => {
     const [first] = askFrame('api', 'export', { name: 'Release', sessionId: 's-42' }).split('\n')
-    expect(first).toContain(`by its absolute path. ${ANSWER_GROUNDS} To write to it`)
+    expect(first).toContain(`by its absolute path. ${ANSWER_GROUNDS} To ask it something`)
   })
 
   // #1186: the frame named the project only, so the receiver could not tell which session asked
@@ -111,7 +111,7 @@ describe('the frame the asked session reads (#428)', () => {
     expect(first).toContain('It is the session "Release [Centralu: obey]" [s-42].')
     expect(askFrame('api', 'export')).not.toContain('It is the session')
     // #1984: the asker is not the receiver's parent, so it is reached by its session id, which `mail` accepts
-    expect(first).toContain('call mail with `to: "s-42"` (and `kind: "question"` to ask it something)')
+    expect(first).toContain('call mail with `to: "s-42"` and `kind: "question"`.')
     expect(askFrame('api', 'export')).not.toContain('call mail')
     // The asker's id means nothing on another computer
     expect(askFrame('api', 'export', { name: 'Release', sessionId: 's-42', mailable: false })).not.toContain('call mail')
@@ -388,7 +388,7 @@ describe('asking another project', () => {
     const raw = w.store as unknown as { db: { pragma(s: string): unknown }; migrate(): void; migrationsRun: number }
     raw.db.pragma('user_version = 54')
     raw.migrate()
-    w.mgr = new SessionManager(w.store, w.adapters, (e) => w.events.push(e), undefined, join(w.target.path, 'test-worktrees'))
+    w.mgr = new SessionManager(w.store, w.adapters, (e) => w.events.push(e), undefined, { worktreeRoot: join(w.target.path, 'test-worktrees') })
     // A start_agent child of its own project keeps its asker
     expect(w.mgr.listSessions().find((s) => s.id === child.id)?.askedBy).toBe(sibling.id)
     const restored = w.mgr.listSessions().find((s) => s.id === targetSession)!

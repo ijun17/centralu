@@ -759,6 +759,23 @@ typing in one does not leave the screen; objection 2 of §5.4 holds here too —
 the focus view. Every empty screen explains that this project's sessions and apps can be dragged
 in from the sidebar, in the empty grid's wording and style. If the project has no sessions, it also
 offers New session; creating one leaves the panel list empty until the person adds it.
+
+### 5.6 Saved commands ([#60](https://github.com/ijun17/centralu/issues/60))
+
+A project's saved commands open as a dropdown under the session header's button, drawn from what a person does with
+them (owner, 2026-10-19). A saved command is its command string, and wherever a name is shown its command is shown
+with it. A run lives in the store (`commandRuns`), shared with the evidence panel's terminal tab and the header button,
+so it goes on with the window closed; the host keeps only the last run's log per command, replaced by the next run.
+
+| Decision | Why |
+|---|---|
+| **Each row carries its own Run** at its start (Stop while it runs) | The common act is "start the dev server" or "run the tests": one click, where pick-then-Run takes two and a look at a second place |
+| **Each row says how it stands**: a breathing dot and the time running, or how the last run ended and how long ago. Running is the plain ink, not white; a failed run is the dashed grey ring | The list answers "what is running and how did the last run end" at a glance; nothing here waits on the person |
+| **The log opens in place under its row** (a click on the row, or Space), one at a time; the window keeps the last log after a run ends | The window stays a short list until a log is asked for; a running log also stands in the terminal tab |
+| Restart beside a running row; rename and remove on hover or focus, remove at the far end | A removal cannot be undone, so it stands away from Run |
+| **Adding is command first**; the name field shows once there is a command. The commands the agent ran in the session are offered under the field, most repeated first | A command just seen is kept in one click |
+| Keys: the list takes the keyboard, ↑↓ move, ↵ runs (on a running row it opens the log), Space opens or closes the log, Esc closes | Enter never stops or restarts a server |
+
 ---
 
 ## 6. System architecture

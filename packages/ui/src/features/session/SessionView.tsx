@@ -20,43 +20,29 @@ import { UntrustedNotice } from '../project/UntrustedNotice.jsx'
 import { COMPOSER_REACH } from './foldedComposer.js'
 
 /**
- * When a grid or project-screen panel folds its composer (owner, 2026-11-07, doubling the 2026-10-20 line): once the open
- * composer, at its resting one-line height, would take more than a sixth of the panel. A one-line composer is about
- * 95px, so a panel under about 570px folds it: the two-row grid of an ordinary window (panels of 330–420px) as well
- * as a three-row one. It stays a share of the composer's own height, not a pixel height, so a larger text size
- * (a taller composer against the same panel) folds sooner, as it did at a third.
- *
- * Unfolding waits until it would take under 16%, so a panel dragged slowly across the line does not flip at every pixel.
- * The folded card also measures a few pixels taller than the open one (its own border and padding), which widens that
- * band a little: with the usual composer, a panel folds below about 570px and opens again above about 620px.
+ * The composer's resting height as a share of the panel that folds it (docs/design-system.md §7): a
+ * share, so a larger text size folds sooner. Unfolding waits for 16% so a slow drag does not flip
+ * at every pixel; the folded card's own border widens the band (folds below ~570px, opens above ~620px).
  */
 const FOLD_SHARE = 1 / 6
 const UNFOLD_SHARE = 0.16
 
-/** How long the card takes to slide up into place when a pane opens its composer (the fold's own `duration-300`, `.cc-composer-rise`) */
+/** The fold's own `duration-300`, `.cc-composer-rise` */
 const RISE_MS = 300
 
-/** The run-command window brings xterm, so it loads when first opened (components/lazy.tsx) */
+/** Brings xterm, so loaded on first open */
 const CommandRunnerOverlay = lazyComponent(() =>
   import('./CommandRunner.jsx').then((m) => m.CommandRunnerOverlay),
 )
 
-/**
- * The focus view — one chosen session at full width.
- *
- * The session screen itself is drawn by SessionPane. Grid cells use **the same component**: a
- * copy would leave the other side holding a stale value whenever a model or permission changed
- * on one side. This only decides what to show and hands off the actual rendering.
- */
+/** The focus view: one session at full width, drawn by the SessionPane grid cells use too */
 export function SessionView() {
   const session = useFocusedSession()
-  // Until the host's first lists arrive nothing is said here (owner, 2026-10-18): the session being restored may be
-  // about to open, so "Select a project or session" would flash first. Once known, the line fades in.
+  // Nothing until the first lists arrive (owner, 2026-10-18): the session being restored may be about to open
   const listed = useStore((s) => s.connection === 'connected' || Object.keys(s.sessions).length > 0)
 
   if (!session) {
     if (!listed) return <div className="flex-1" data-testid="empty-focus-waiting" />
-    // With a project picked and no session, App shows the project screen (ProjectView, #203) instead of this
     return (
       <div
         className="cc-fade flex flex-1 flex-col items-center justify-center gap-3 text-center"
@@ -73,17 +59,7 @@ export function SessionView() {
   return <SessionPane sessionId={session.id} />
 }
 
-/**
- * A single session's screen — header, conversation, composer.
- *
- * **Both the focus view and the grid use this.** That is why changing the model in a grid cell
- * is immediately reflected in the sidebar and the focus view: they all read a single store
- * instead of each holding a copy of the state.
- *
- * An unsent draft is held by the **session**, not by this component. That is why it survives
- * switching screens but does not follow when switching sessions — back when the component held
- * it, both of those behaved the opposite way.
- */
+/** One session's screen, for the focus view and the grid alike, so both read one store */
 export function SessionPane({
   sessionId,
   headerExtra,
@@ -91,101 +67,35 @@ export function SessionPane({
   foldWhenShort = false,
 }: {
   sessionId: string
-  /**
-   * A button added to the right of the header (the grid's "dismiss").
-   *
-   * Taken as a slot because the grid once tried laying its own button over the cell with
-   * absolute positioning, and its size and vertical alignment ended up out of step with the
-   * header's own buttons. Putting it in the same row means alignment never needs fixing — it
-   * cannot drift apart in the first place.
-   */
+  /** In the header's row (the grid's dismiss), so it aligns with the header's own buttons */
   headerExtra?: ReactNode
-  /**
-   * Whether the composer may collapse when the pane is short (the grid and the project screen).
-   *
-   * Collapsing came from a two-row grid leaving too little room to read (a user, 2026-09-10) — of a
-   * 370px cell, the input area took up 95px, and only 22px of that was the actual text field.
-   * Collapsed, the card sits wholly below the pane's bottom edge (owner, 2026-11-07), and it rises above the
-   * conversation once a hand comes near the bottom. It was a setting until 2026-10-20; now the pane decides by
-   * its own height (`FOLD_SHARE`), so a tall panel keeps the composer open and a short one folds it.
-   */
+  /** The grid and the project screen: the composer folds in a short pane (`FOLD_SHARE`) */
   foldWhenShort?: boolean
-  /**
-   * Uses the header as **the handle that moves the pane** (the grid).
-   *
-   * When supplied, this header is no longer the handle that closes the window. That is because
-   * in the focus view the header is the title bar, but in the grid it is not — the same
-   * component's header means something different depending on where it sits. This does not
-   * leave the component to guess at that difference on its own.
-   */
+  /** The grid's: the header moves the pane, where in the focus view it is the title bar */
   headerDrag?: (e: DragEvent<HTMLElement>) => void
 }) {
   const session = useStore((s) => s.sessions[sessionId])
   const chat = useStore((s) => s.chat[sessionId] ?? EMPTY_CHAT)
-  /*
-   * The directory a path in this conversation would be relative to (#39): the session's folder, its worktree when it
-   * has one (#1209), so a link opens the file the agent changed rather than the main checkout's.
-   *
-   * It is read from this session rather than from whatever is focused because a grid cell
-   * renders this same component for a session that is not the focused one — asking the
-   * focused session would resolve one pane's paths against another pane's project. The
-   * assistant has no project at all and so gets null, which is what stops its messages
-   * from linking anywhere (see `parseFileRef`).
-   */
+  // Paths resolve against this session's folder or worktree (#39, #1209), not the focused one's;
+  // the Assistant gets null, so its messages link nowhere (`parseFileRef`)
   const projectRoot = useSessionFolder(sessionId)
   const markRead = useStore((s) => s.markRead)
 
-  /*
-   * Whether the Run menu is open — held here rather than inside it (issue #44).
-   *
-   * In the grid this header is the handle that moves the panel, and `draggable` reaches
-   * everything inside it: press on a menu row, move a few pixels, and the browser drags the
-   * panel instead of letting the click land. The header already learned the neighbouring
-   * half of this lesson — a `draggable` ancestor is why the whole cell stopped being one.
-   */
+  // Held here, not in the menu (#44): in the grid the `draggable` header would drag the panel on a menu press
   const [runOpen, setRunOpen] = useState(false)
-  // The run window goes back up the way it came down (usePresence keeps it for its exit)
   const runPresence = usePresence(runOpen)
   const scrollRef = useRef<HTMLDivElement>(null)
-  /**
-   * Whether the collapsed composer is raised (only meaningful while `fold` holds).
-   *
-   * Four triggers are **OR'd together**: a hand near the bottom (hover), **a hand over the
-   * raised card**, focus in the input field, or that row's menu (model, permissions) being
-   * open. Even after the mouse leaves, it stays up while focus or the menu is still alive — the
-   * ground must not disappear while someone is in the middle of typing.
-   *
-   * Why hover over the card needs its own trigger (reported by a user on 2026-09-10): the strip
-   * (COMPOSER_REACH, below) is what **raises** the composer while it is collapsed. A raised card
-   * extends above that strip, so the moment a hand moved up to click the input field, it left
-   * the strip and the card dropped back down — **it could not be clicked.**
-   */
+  // What raises a folded card, any of them: a hand at the bottom strip or over the raised card
+  // (which reaches above the strip), focus in it, its menu, a drop that landed (#116)
   const [nearComposer, setNearComposer] = useState(false)
   const [overComposer, setOverComposer] = useState(false)
   const [composerFocused, setComposerFocused] = useState(false)
   const [composerMenu, setComposerMenu] = useState(false)
-  /**
-   * Whether something dropped on the pane became an attachment, **and is therefore raised**
-   * (#116).
-   *
-   * A collapsed composer sits off-screen. If a file lands there, there is no room to see it get
-   * attached, and it becomes indistinguishable from nothing happening — hence a fifth trigger
-   * alongside the other four. It drops back down when the hand leaves the pane entirely (see
-   * onMouseLeave below), the same rule as hover.
-   */
   const [droppedIn, setDroppedIn] = useState(false)
-  /**
-   * Whether something droppable is hovering over the pane — the same signal as the composer's
-   * border, but sized to the whole pane
-   */
   const [dragOver, setDragOver] = useState(false)
   const composerDrop = useRef<ComposerDrop>(null)
-  /*
-   * An item dragged out of an app view lands here as an event, not a drop (#308): the page never
-   * hears a drag from another origin, so the view's relay reports where it ended and the frame
-   * hands the link to the element under that point (app-frame/dragRelay.ts). Anywhere on the pane
-   * counts, as for a file (#116): the composer may be folded away.
-   */
+  // A drag out of an app view arrives as an event, not a drop (#308): a page never hears another
+  // origin's drag (app-frame/dragRelay.ts)
   const paneRef = useRef<HTMLElement>(null)
   useEffect(() => {
     const pane = paneRef.current
@@ -201,27 +111,18 @@ export function SessionPane({
     return () => pane.removeEventListener(APP_LINK_DROP_EVENT, onAppDrop)
   }, [])
   const composerRef = useRef<HTMLDivElement>(null)
-  // On a linked machine that is away (#82): dimmed, and nothing here tries to wake it
+  // On a linked machine that is away (#82): nothing here tries to wake it
   const away = useSessionAway(sessionId)
   const notes = useSessionNotes(session, away)
-  /*
-   * A short pane folds its composer, unless a note with a button shows above it (owner, 2026-11-07): the raised card
-   * would cover Done, Continue or Retry. The pane stays open for as long as the note does and folds when it goes.
-   */
+  // Not while a note with a button shows (docs/design-system.md §7)
   const short = useShortPane(foldWhenShort, paneRef, composerRef, notes.hasButton)
   const fold = short && !notes.hasButton
-  /*
-   * Opening the composer is a slide too (owner: every fold and unfold is animated, design-system §9): the card comes up
-   * from below the pane's edge into the place it takes in the layout, as it went down. The pane clips while it does,
-   * since it is no longer clipping once open. It is decided during render (the change of `fold`), so the first frame
-   * of the open pane already has the card below the edge, and it is not an effect that races the paint. Under reduced
-   * motion it does not move, as the fold's own slide does not.
-   */
+  // Opening slides the card up (design-system §9), decided in render so the first open frame has it below the edge
   const [prevFold, setPrevFold] = useState(fold)
   const [rising, setRising] = useState(false)
   if (prevFold !== fold) {
     setPrevFold(fold)
-    // A card that was raised (a hand, a caret, a menu, a drop) is already in its place: it has nowhere to come up from
+    // A raised card is already in its place
     const raised = nearComposer || overComposer || composerFocused || composerMenu || droppedIn
     setRising(!fold && !raised && !window.matchMedia('(prefers-reduced-motion: reduce)').matches)
   }
@@ -232,14 +133,7 @@ export function SessionPane({
   }, [rising])
   const composerUp = !fold || nearComposer || overComposer || composerFocused || composerMenu || droppedIn
 
-  /*
-   * The height the raised card takes up — **found by measuring it** (reported by a user on
-   * 2026-09-13).
-   *
-   * It cannot be a constant: an attachment adds a row, and the input field grows up to five
-   * lines. This value becomes the margin below the conversation, so any mismatch leaves that
-   * much of the last line hidden under the card.
-   */
+  // Measured, as attachments and up to five lines change it; the space under the conversation
   const [composerH, setComposerH] = useState(0)
   useLayoutEffect(() => {
     const el = composerRef.current
@@ -252,28 +146,15 @@ export function SessionPane({
   }, [fold])
 
   const loadHistory = useStore((s) => s.loadHistory)
-  /*
-   * "Loaded" means having a history cursor (#79). While this was judged by whether there were
-   * conversation rows, a session whose rows came from an event arriving first, and that was
-   * only ever seen in a grid cell, had never actually loaded history — with no cursor, "Load
-   * earlier messages" never appeared either.
-   */
+  // The pane fetches what it shows (the grid shows without selecting). Loaded means a history
+  // cursor (#79): rows can come from an event first
   const loaded = useStore((s) => !!s.history[sessionId])
   useEffect(() => {
     if (!loaded) void loadHistory(sessionId)
   }, [sessionId, loaded, loadHistory])
 
-  /*
-   * Marking read: reaching the latest point by scroll, or 3 seconds of focus (the judgment
-   * itself lives in core).
-   *
-   * **Only counts while the app is in front** (#161). This used to always pass `focused: true`,
-   * so a turn that finished behind another window still counted as read 3 seconds later — the
-   * person never saw the result, yet the unread mark cleared and it dropped down the inbox
-   * order too. "Seen" has to match the criterion used by `turn_complete`'s notification and by
-   * `Notices` (`appFocused` and actually on screen). Coming back to the app flips `appFocused`
-   * and restarts the 3-second count.
-   */
+  // Read only while the app is in front (#161), as `turn_complete`'s notification and `Notices` judge seen;
+  // coming back restarts the 3 seconds
   const appFocused = useStore((s) => s.appFocused)
   useEffect(() => {
     if (!session || !appFocused) return
@@ -286,10 +167,7 @@ export function SessionPane({
     return () => clearTimeout(t)
   }, [session, chat.length, markRead, appFocused])
 
-  /*
-   * An app's agent session on screen is the person's (#378): said the moment it is shown in front, not after the
-   * 3 seconds above: a short run ends, and its session is deleted, inside them
-   */
+  // An app's agent session is opened the moment it shows (#378): a short run is deleted inside 3 seconds
   const markOpened = useStore((s) => s.markOpened)
   const sessionShownId = session?.id
   const shownAppSession = !!session?.appId
@@ -297,10 +175,9 @@ export function SessionPane({
     if (sessionShownId && shownAppSession && appFocused) void markOpened(sessionShownId)
   }, [sessionShownId, shownAppSession, appFocused, markOpened])
 
-  // Avoid rendering even at the moment the session disappears (deleted, archived)
   if (!session) return null
 
-  // A brand-new session (nothing said, nothing stored) offers the other tool, and the past conversations to resume
+  // A brand-new session offers the other tool and past conversations to resume
   const starting =
     !!session &&
     session.kind === 'worker' &&
@@ -310,35 +187,16 @@ export function SessionPane({
     chat.length === 0
 
   return (
-    /*
-      min-h-0 is not optional.
-      A flex child's min-height defaults to auto, so it **cannot shrink smaller than its
-      content.** That meant a long conversation stretched this pane and pushed the composer
-      off-screen entirely (this showed up immediately in the grid, where cell height is
-      fixed — the composer just was not visible at all).
-    */
+    // min-h-0: a flex child's min-height is auto, so a long conversation would push the composer out of a grid cell
     <section
       /*
-       * With `fold`, this is **clip, not hidden.**
-       *
-       * The collapsed composer sits below the pane — that is scrollable overflow.
-       * `overflow:hidden` only clips the picture; the box is still a scroll container, so the
-       * moment the browser gives focus to the off-screen input field, it tries to **scroll the
-       * whole pane up** to show it (measured: the pane scrolled 85px, the header disappeared
-       * upward, and the button that had just been pressed never received its mouseup, so the
-       * click vanished entirely). `clip` never creates a scroll container, so there is nowhere
-       * for it to scroll up to in the first place.
+       * Clip, not hidden: a hidden box is still a scroll container, and focusing the folded input
+       * scrolled the pane 85px up, header gone and the pressed button's mouseup lost.
        */
       ref={paneRef}
       className={`relative flex min-h-0 min-w-0 flex-1 flex-col bg-surface-floor ${fold || rising ? 'overflow-clip' : ''}`}
       data-testid="session-view"
-      /*
-       * The composer rises when a hand comes near the bottom. Detection uses **coordinates, not
-       * a fake element** — laying down a transparent detection plate would take that much area
-       * away from selecting conversation text or clicking links. The zone is the bottom
-       * 54px (COMPOSER_REACH), since nothing of the folded card shows to aim at: easy to aim for, while not triggering while passing
-       * through the middle of the conversation.
-       */
+      // By coordinates: a transparent strip would take selecting and links from that area
       onMouseMove={
         foldWhenShort
           ? (e) => {
@@ -355,34 +213,14 @@ export function SessionPane({
             }
           : undefined
       }
-      /*
-       * The whole pane is a drop target (#116) — not just the composer.
-       *
-       * While the composer is collapsed (a short grid or project panel), the only place that
-       * could actually accept a drop was off-screen. Someone carrying a file over
-       * had nothing to aim at.
-       *
-       * Handling it here fixes all three screens at once: the focus view, a grid cell, and the
-       * assistant are all this same component. In the grid it also means it attaches to
-       * **the session of the cell it was dropped on** — not the focused session. Each cell
-       * calls its own composer for the same reason.
-       */
+      // The whole pane takes a drop (#116), for its own session: a folded composer is out of sight
       onDragOver={(e) => {
-        // Reordering (sessions, projects) has its own owner for that spot — this passes it
-        // through untouched. A link from outside the window is taken like a file (#308)
+        // Reordering is someone else's; a link from outside the window is taken like a file (#308)
         if (!isFileDrag(e.dataTransfer.types) && !isOutsideLink(e.dataTransfer.types)) return
         /*
-         * If it is over the composer, the highlight belongs to it (the composer lights up its
-         * border in ink-muted). If both light up at once, it says how many places would accept the
-         * drop instead of where it would actually land.
-         *
-         * Turning it off happens here too: moving from the pane's background onto the composer
-         * is not leaving the pane, so the dragleave below never fires for it.
-         *
-         * Why this is not judged with `defaultPrevented` — the window's floor guard (App.tsx)
-         * has already blocked every drag during the capture phase, so by the time this runs
-         * that value is always true. What needs asking is not "was it blocked" but "whose spot
-         * is this".
+         * Over the composer, the highlight is its own, and one place lights, not two. Turned off
+         * here, as onto the composer is no dragleave of the pane. Not `defaultPrevented`: App.tsx's
+         * floor guard already prevented every drag in the capture phase.
          */
         if (composerRef.current?.contains(e.target as Node)) {
           setDragOver(false)
@@ -392,14 +230,12 @@ export function SessionPane({
         setDragOver(true)
       }}
       onDragLeave={(e) => {
-        // A leave event also fires when moving into a child, so this only reacts to actually leaving
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false)
       }}
       onDrop={(e) => {
         if (!isFileDrag(e.dataTransfer.types) && !isOutsideLink(e.dataTransfer.types)) return
         setDragOver(false)
-        // Something dropped exactly on the composer was already accepted by it — accepting it
-        // again here would attach it twice
+        // The composer took its own drop already
         if (composerRef.current?.contains(e.target as Node)) return
         e.preventDefault()
         void composerDrop.current?.accept(e.dataTransfer).then((landed) => {
@@ -407,12 +243,8 @@ export function SessionPane({
         })
       }}
     >
-      {/*
-        A way of saying this can accept a drop (#116). **The same signal** as the composer
-        lighting up its border in ink-muted, sized to the whole pane instead — no new color, and it
-        never lights up for reordering at all. Placed below the composer (z-20) so it does not
-        cover a raised card and its shadow.
-      */}
+      {/* The composer's drop border, pane-sized (#116);
+          under the raised card (z-20) */}
       {dragOver && (
         <div
           className="pointer-events-none absolute inset-0 z-10 rounded-lg border border-ink-muted"
@@ -429,7 +261,7 @@ export function SessionPane({
         headerDrag={headerDrag}
       />
 
-      {/* Outside the composer: its height decides when a grid panel folds the composer, and a line of notice is not part of that */}
+      {/* Outside the composer, whose height decides the fold */}
       <UntrustedNotice projectId={session.projectId} className="shrink-0 border-b border-line-chrome px-4 py-1.5" />
 
       {starting && session?.projectId && (
@@ -438,20 +270,7 @@ export function SessionPane({
       <ChatStream
         yieldSpace={starting}
         bottomPeek={fold}
-        /*
-         * The card's full height is reserved **always** — it is never resized on rise
-         * (reported by a user on 2026-09-13).
-         *
-         * At first this only reserved it while raised (24px at rest). Saving space looked like
-         * the right call, but that meant the card rising **moved the conversation upward**. And
-         * the gesture that raises it is lowering a hand toward the bottom — exactly the motion
-         * of reaching for a question card's answer button. Reaching to press it made the button
-         * run away upward.
-         *
-         * Not creating a moving target is worth more than the space it costs. So the empty
-         * space is there from the start, and the card only settles onto it or drops away — the
-         * conversation never moves by even one pixel.
-         */
+        // Always the card's full height, so its rise never moves the conversation (docs/design-system.md §7)
         bottomPad={fold ? composerH : undefined}
         scrollRef={scrollRef}
         chat={chat}
@@ -463,80 +282,29 @@ export function SessionPane({
         activity={session.activity}
       />
 
-      {/*
-        A session with no process (after the host restarts). The transcript still exists, so it
-        can be read. This tells the person it can be continued before they say anything to it —
-        better than reporting failure after they have already sent something (FR-10).
-      */}
+      {/* No process (FR-10): said before the person writes,
+          not as a failure after */}
       {away ? <AwayNote machine={session.machine ?? null} /> : notes.dormant && <DormantNote sessionId={session.id} />}
 
-      {/*
-        The last turn stopped before it finished, and nobody here chose that (#698): the network, a quit, or the tool's
-        own interrupt. Said above the composer with the one action that goes on, since the state alone (error, idle,
-        waiting for input) looks the same as a turn that ended.
-      */}
+      {/* A turn stopped by nobody here (#698); the state alone
+          looks like a turn that ended */}
       {notes.error && <ErrorNote sessionId={session.id} />}
 
       {notes.interrupted && session.interruption && (
         <InterruptedNote sessionId={session.id} interruption={session.interruption} />
       )}
 
-      {/*
-        Collapsed (requested by a user on 2026-09-10): a rounded card waits wholly below the pane's
-        bottom edge (owner, 2026-11-07), then rises. **Not explained in words** — the rounded corners themselves say
-        this is a card that can rise.
-
-        Still absolutely positioned (does not touch the conversation's layout height). But it
-        **does not overlay** it: empty space the height of the card is always reserved below the
-        conversation, and the card only settles onto that space or drops away (reported by a
-        user on 2026-09-13). The original virtue was "overlay instead of pushing", but the cost
-        of that virtue was not being able to read the last few lines — it hid exactly what a
-        hand reaching down to read was reaching for. Pushing the content up on rise was not the
-        answer either: the gesture that summons the card is the same gesture as reaching for a
-        question card's answer button, so the button being reached for ran away.
-      */}
+      {/* Folded: absolutely placed over the reserved space
+          (docs/design-system.md §7) */}
       <div
         className={
           fold
-            ? /*
-               * The bottom corners are rounded too — at **the same radius** as the pane
-               * (reported by a user on 2026-09-10). The pane is clipped with rounded-lg, and a
-               * square card bottom gets cut by that curve into a sharp, broken-looking corner.
-               * Drawing the same curve leaves nothing for it to be cut by. The curve it meets is
-               * inside the pane's 1px border, so it is the pane's radius minus that pixel.
-               */
+            ? // Bottom corners on the pane's clip curve: its radius less its 1px border
               `absolute inset-x-0 bottom-0 z-20 rounded-t-lg rounded-b-[calc(var(--radius-lg)-1px)] border border-line bg-surface-floor px-1 pt-1 transition-[translate,box-shadow] duration-300 ease-out motion-reduce:transition-none ${
                 composerUp
-                  ? /*
-                     * The shadow's job is **to separate the card from the text it covers.**
-                     * It covers the most while raised, so it is cast far (25px). Its darkness
-                     * was tuned with a ruler (it bottoms out at 12 over the pane's floor then,
-                     * #1d1d1d; the floor was #120e0a from 2026-11-05 and is #1d1d1d again since #2335, and the shadow was not re-tuned). At rest
-                     * the card is out of sight and casts none.
-                     */
+                  ? // Cast far (25px) to part the card from the text it covers; tuned over the #1d1d1d floor (it bottoms out at 12 there)
                     'translate-y-0 shadow-(--shadow-dock-raised)'
-                  : /*
-                     * At rest the card is **wholly below the pane's bottom edge** (owner,
-                     * 2026-11-07): `translate-y-full` moves it down by its own height, and the
-                     * pane's `overflow-clip` hides it. Nothing of it shows, shadow included, so
-                     * the shadow is off here and fades in as the card rises (it is in the
-                     * transition above).
-                     *
-                     * The pane showed 26px of the card at first, then 16 (reported by a user on
-                     * 2026-09-11: "the input is not visible"), then 32 (2026-11-06, #2018). The
-                     * owner meant the fold height, not the sliver, in that last one and wants it
-                     * all the way down, as it was before: the bottom edge of a short panel is not
-                     * a place to show a half of an input field.
-                     *
-                     * The card is moved, not resized, so what reads its height is untouched: the
-                     * space reserved under the conversation (composerH), and the fold and unfold
-                     * shares, which are taken from the open composer's resting height.
-                     *
-                     * What raises it is not the card but the pane's bottom strip
-                     * (COMPOSER_REACH, 54px), so a hand summons it from anywhere along the
-                     * bottom, though nothing marks the spot. Focus (a key into the field) and a
-                     * file dropped on the pane raise it too.
-                     */
+                  : // Moved, not resized, so composerH and the fold shares read the same height
                     'translate-y-full shadow-none'
               }`
             : rising
@@ -546,15 +314,11 @@ export function SessionPane({
         ref={composerRef}
         data-testid="composer-shell"
         data-up={fold ? composerUp || undefined : undefined}
-        /*
-          Followed whether folded or not: the pane folds and unfolds as it is resized (`useShortPane`), and a card that
-          folds while the person is typing in it has to know it is in use and stay up.
-        */
+        // Followed when open too: a card that folds under a resize while in use stays up
         onMouseEnter={() => setOverComposer(true)}
         onMouseLeave={() => setOverComposer(false)}
         onFocusCapture={() => setComposerFocused(true)}
         onBlurCapture={(e) => {
-          // Focus moving within the same box has not actually left it (attach button ↔ input field)
           if (!e.currentTarget.contains(e.relatedTarget as Node)) setComposerFocused(false)
         }}
       >
@@ -566,8 +330,8 @@ export function SessionPane({
         />
       </div>
 
-      {/* The frequently used commands window (#60) — opens inside the pane. In a grid cell,
-      the window is that cell's size */}
+      {/* The commands window (#60),
+          the pane's size */}
       {runPresence.shown && session.projectId && (
         <CommandRunnerOverlay
           projectId={session.projectId}
@@ -580,11 +344,7 @@ export function SessionPane({
   )
 }
 
-/**
- * Whether a pane that may fold its composer is short enough to (`FOLD_SHARE`). Measured from the pane itself with a
- * ResizeObserver, not from the window: a grid's rows, a project screen's panel sizes and the text size all decide it.
- * Both heights are layout pixels (`offsetHeight`), so the text size's zoom cancels out of the share.
- */
+/** From the pane, not the window; both heights in layout pixels, so the text size's zoom cancels out */
 function useShortPane(
   enabled: boolean,
   paneRef: RefObject<HTMLElement | null>,
@@ -599,8 +359,7 @@ function useShortPane(
       setShort(false)
       return
     }
-    // While a note holds the composer open it is not the folded card the fold line was drawn for (that card measures a
-    // few pixels taller): the answer from before stands, and the measure runs again as the note goes
+    // A note holds it open: the open card measures shorter than the folded one, so the last answer stands
     if (held) return
     const measure = () => {
       const paneH = pane.offsetHeight
@@ -619,10 +378,8 @@ function useShortPane(
 }
 
 /**
- * The composer at rest (#2190): its input card at one line, with its controls and footer. A long draft grows the field (up to
- * five lines) and must not fold the composer from under the person writing it, and a row above the card (the report choice, an
- * attachment strip, a notice) comes and goes with what the person is doing, so neither counts: the panel's height decides that.
- * The card is marked by `Composer` (`data-composer-card`); the rows are whatever the form holds before it, found by where the card starts, so a new row needs no entry here.
+ * The composer at rest (#2190): the card at one line with its footer. A long draft and the rows above
+ * the card (attachments, a notice) come and go with the person's work, so they must not fold it.
  */
 function restingHeight(shell: HTMLElement): number {
   const card = shell.querySelector<HTMLElement>('[data-composer-card]')

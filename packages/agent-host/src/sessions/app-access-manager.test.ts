@@ -90,7 +90,7 @@ beforeEach(async () => {
     ['claude', claude],
     ['codex', codex],
   ])
-  mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
+  mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), { worktreeRoot: join(root, 'worktrees') })
   mgr.prLookup = async () => null
   rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot, reservedIds: ['control'], shared: (ref) => readAppFlag(store.settings, 'shared', ref), off: (ref) => readAppFlag(store.settings, 'off', ref) })
   mgr.apps.useExternalApps(rt, { toolListWaitMs: 10_000 })

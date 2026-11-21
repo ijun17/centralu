@@ -1,33 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store/store.js'
 
-/** How long the gust takes to pass (must match cc-gust in the CSS — it is removed from the DOM
- * once it ends) */
+/** Must match cc-gust in the CSS */
 const GUST_MS = 1100
 
-/**
- * A single gust that tells the body, not the eye, that a response has finished.
- *
- * Instead of writing "finished" in text, the screen takes one breath. It can be noticed without
- * being read, and since it leaves nothing behind once it passes, it does not clutter the screen.
- *
- * It is removed from the DOM once it passes. Leaving it transparent would mean an element
- * covering the whole screen is always floating there — harmless right now since it has no
- * pointer-events, but something left lingering like that ends up covering something eventually.
- */
+/** Leaves the DOM once it passes: a transparent full-screen layer left behind ends up covering something */
 export function Gust() {
-  /*
-   * Only one thing is watched: the completion timestamp.
-   *
-   * Whether it is "visible" is not decided here — the store already made that call at the exact
-   * moment completion happened. Multiplying that judgment here as well would make the answer true
-   * again at the moment a session becomes visible after switching, blowing a gust when nothing
-   * new actually finished. Not putting screen state in the dependency list is the whole point of
-   * this component.
-   */
+  // Only the timestamp: the store judged visibility when the session finished. Reading screen state here would blow a
+  // gust when a session that finished earlier comes into view
   const at = useStore((s) => s.completion?.at ?? null)
   const [blowing, setBlowing] = useState<number | null>(null)
-  /** A timestamp that already blew does not blow again — one gust per event */
   const blown = useRef<number | null>(null)
 
   useEffect(() => {
@@ -45,8 +27,8 @@ export function Gust() {
       data-testid="gust"
       aria-hidden
     >
-      {/* key: even when the same session finishes back to back, the animation restarts from the
-          beginning */}
+      {/* key: when the same session finishes back to back, the animation
+          restarts */}
       <div key={blowing} className="cc-gust" />
     </div>
   )

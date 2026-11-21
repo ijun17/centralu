@@ -2,10 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { UpdateStatus } from '@cc/protocol'
 import { agentApplyVerdict, applyOffer, applyWords, installedUpdate, autoApplyDecision, updateStateText, type AutoApplyInput } from './apply-update.js'
 
-/**
- * Applying an installed update (#352): what the update line offers, and when the automatic mode
- * relaunches by itself.
- */
+/** Applying an installed update (#352): what the update line offers, and when the automatic mode relaunches */
 const installed: UpdateStatus = {
   current: '0.1.0-beta.10',
   latest: '0.1.0-beta.11',
@@ -55,7 +52,7 @@ describe('external installs', () => {
     }
     // An install of it that failed does not hide the build that is there to apply, and says how it failed
     expect(installedUpdate({ ...past, phase: 'failed', error: 'EACCES' }, OLD_WINDOW, disk)).toMatchObject({ phase: 'restart_required', latest: disk.version, error: 'EACCES' })
-    // #2131 review: npm took it and the copy was not replaced; the line says how to finish it
+    // #2131: npm took it and the copy was not replaced; the line says how to finish it
     const half = 'npm installed 0.1.0-beta.12, but the copy at /Applications/Centralu.app was not replaced (busy). Quit Centralu, then run "centralu install" in a terminal.'
     const line = installedUpdate({ ...past, phase: 'failed', error: half }, OLD_WINDOW, disk)!
     expect(updateStateText(line, applyOffer(line, OLD_WINDOW, disk))).toBe(`Installed 0.1.0-beta.11. Apply it to relaunch into it. ${half}`)
@@ -77,8 +74,8 @@ describe('applyOffer', () => {
    * `restart_required`. Offering a relaunch there would relaunch into the same build forever.
    */
   /*
-   * #665 review: the shell's `ready` means only "another build than this window". Measured: host latest 0.3.0, window
-   * 0.2.0, bundle on disk 0.0.5 answered ready with version 0.0.5, and the button offered a relaunch into the past.
+   * #665: the shell's `ready` means only "another build than this window". Measured: host latest 0.3.0, window
+   * 0.2.0, bundle on disk 0.0.5 answers ready with version 0.0.5, which must not become a relaunch into the past.
    */
   it('offers Apply now only into the installed version, read from the bundle, and only forward', () => {
     const host = { ...installed, latest: '0.3.0' }
@@ -226,7 +223,7 @@ describe('agentApplyVerdict', () => {
     expect(applyOffer(installed, OLD_WINDOW, ready)).toEqual({ kind: 'apply' })
     expect(await agentApplyVerdict(port(ready), installed, OLD_WINDOW)).toEqual({ ready: true, version: installed.latest })
     expect(await agentApplyVerdict(port({ ready: true, version: '0.1.0-beta.12' }), null, OLD_WINDOW)).toEqual({ ready: true, version: '0.1.0-beta.12' })
-    // #2131 review: the host offers a release past the build on disk, which can still be applied
+    // #2131: the host offers a release past the build on disk, which can still be applied
     expect(await agentApplyVerdict(port(ready), { ...installed, phase: 'idle', latest: '0.1.0-beta.12' }, OLD_WINDOW)).toEqual({ ready: true, version: '0.1.0-beta.11' })
   })
 
@@ -263,9 +260,9 @@ describe('applyWords', () => {
   })
 
   /**
-   * Review of #1895 step 3: an absent `restartsHost` was read as "the keeper holds them", so Windows and Linux (whose check
-   * is empty), a browser, a window before its first check and one not attached to a keeper all promised that agents keep
-   * going and that the update applies by itself once idle, neither of which happens there
+   * Review of #1895 step 3: an absent `restartsHost` does not mean "the keeper holds them". On Windows and Linux (whose
+   * check is empty), in a browser, in a window before its first check and in one not attached to a keeper, agents do not
+   * keep going and the update does not apply by itself once idle, so the words promise neither
    */
   it('promises nothing it cannot tell: no keep-going and no applying by itself without a signal', () => {
     const unknown = [undefined, null, { ready: false }, { ready: false, reason: 'not attached to the background keeper' }, { ...ready }]

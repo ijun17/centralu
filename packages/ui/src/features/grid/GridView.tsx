@@ -30,33 +30,9 @@ import { useRealSize } from './real-size.js'
 import { droppedGridList, droppedGridPanel, gridTakes } from './drop.js'
 
 /**
- * Grid — several sessions, and apps, on one screen.
- *
- * The spec (§5.4) originally left the grid out of v1. The first of three reasons given —
- * "at 600×400 per panel, neither the conversation nor the composer reads well" — still holds.
- * That is why the column count is **computed from the width**, so a panel never shrinks below
- * the minimum width (core's columnsFor). As the window narrows, columns drop, eventually down
- * to one.
- *
- * The height is measured too, but only as a guard — see MAX_PANEL_H. It changes nothing
- * on an ordinary screen, so a panel's shape here is still decided by the width.
- *
- * A panel uses the **same component (SessionPane)** as the focus view. A separate copy would
- * let a model change here leave the sidebar holding a stale value — two screens, but there has
- * to be one truth.
- *
- * An app can stand here too (#288), dropped from its sidebar row like a session, and moved and
- * removed the same way. Its panel shows the app's view the way the project screen does — opened by
- * the app's `home`, laid over the panel from PinnedApps (an iframe that moves loses its document),
- * hidden rather than unloaded while another screen is looked at, torn down first when it is removed
- * — but it is the grid's own view, not the one the app view and the project screen share
- * (`gridAppViewKey`): the same app can stand in both places, each its own document, one process.
- * Nothing puts an app here but a hand; the grid stays "only what was put there".
- *
- * Each app panel costs a view instance on the host and a frame (the sandbox proxy and the app's
- * document inside it) in the page, kept while the grid is left for another screen. Nothing caps
- * their number beyond what the screen fits: the grid holds only what a person put on it, and
- * every panel already needs the minimum width.
+ * Grid: sessions and apps on one screen (docs/product-spec.md §5.4). Columns come from the width so no panel drops below
+ * the minimum width; the height only guards (core's MAX_PANEL_H). A panel is the focus view's SessionPane, one truth for
+ * both; an app panel has the grid's own view (`gridAppViewKey`), laid over it from PinnedApps (apps/views.md).
  */
 export function GridView() {
   const panels = useStore((s) => s.gridPanels)
@@ -66,37 +42,21 @@ export function GridView() {
   const appsByKey = useMemo(() => catalogByKey(externalApps), [externalApps])
   const ensureGridAppView = useStore((s) => s.ensureGridAppView)
   const openApp = useStore((s) => s.openApp)
-  /*
-   * The selected panel. For a long time "selected" meant nothing in the grid — reasonably so,
-   * since twelve panels stand there identically and it is a screen for looking, not reading. It
-   * gained meaning once a path opened from notices into the grid (store's preferGrid): the
-   * person arriving needs to know **which panel brought them here**, and to type a reply next,
-   * the composer of that panel has to already have focus.
-   */
+  // The selected panel: one arriving from notices (store's preferGrid) sees which panel brought them, its composer focused
   const focusedSessionId = useStore((s) => s.focusedSessionId)
   const focusSession = useStore((s) => s.focusSession)
   const setGridPanels = useStore((s) => s.setGridPanels)
   const setGridPanelSpan = useStore((s) => s.setGridPanelSpan)
   const appSpans = useStore((s) => s.appSpans)
   const ref = useRef<HTMLDivElement>(null)
-  /*
-   * In real pixels, measured again whenever the size changes, since the column count derives from it
-   * (real-size.ts). The height is only a guard — it splits a row off a screen tall enough to make a
-   * panel absurd (MAX_PANEL_H)
-   */
+  // In real pixels (real-size.ts)
   const { width, height } = useRealSize(ref)
   const { cardOf, place, snapshotScroll, liftPanel, dragging, setDragging, previewOf, dropMark, aim, clearDrag, endDrag } =
     usePanelDrag()
 
   /*
-   * Put focus on the selected panel's composer.
-   *
-   * A person coming from notices into the grid came **to reply** — the panel merely lighting up
-   * does not tell their hand which composer to type into, leaving them to hunt for it among
-   * twelve panels. This value changes in two cases: brought in from outside (the case this
-   * effect exists for), and changed by putting a hand on the panel itself (onFocusCapture) — in
-   * the latter case the composer already holds focus, so the focus() call below does nothing and
-   * never takes focus away from the person.
+   * Focus the selected panel's composer: one arriving from notices came to reply. A hand on the panel (onFocusCapture)
+   * already put focus there, so then this does nothing.
    */
   useEffect(() => {
     if (!focusedSessionId) return
@@ -104,20 +64,12 @@ export function GridView() {
     input?.focus()
   }, [focusedSessionId, cardOf])
 
-  /*
-   * Do not draw a deleted session, or an app the list does not have, even if it is still in the layout (leave the
-   * stored value as is). The screen works in panel keys (core's `gridPanelKey`): a session's is its id, an app's
-   * `app:<project | _user>/<appId>`.
-   */
+  // A deleted session or an app the list lacks is not drawn but stays stored. The screen works in core's `gridPanelKey`.
   const known = new Set(Object.keys(sessions))
   const shown = visibleGridPanels(panels, known, new Set(appsByKey.keys()))
   const byKey = new Map(shown.map((p) => [gridPanelKey(p), p] as const))
   const visible = shown.map(gridPanelKey)
-  /*
-   * How many cells each panel asks for (#306): a session one, an app what its placement, the person's setting for the
-   * app or the app's recommendation says (core's `explainGridSpan`). The columns are chosen with the spans counted in
-   * (`arrangeGrid`); with every span 1 × 1 that is the grid `columnsFor` gave before spans existed.
-   */
+  // The cells each panel asks for (#306, core's `explainGridSpan`); a session asks for one
   const askedOf = (id: string): { span: GridSpan; from: GridSpanSource } => {
     const p = byKey.get(id)
     if (!p || p.kind === 'session') return { span: ONE_CELL, from: 'default' }
@@ -134,36 +86,17 @@ export function GridView() {
   const room = windowSpanRoom(width, height)
 
   /*
-    While a panel is dragged the grid rearranges live (#53). The old inset edge line said
-    "before/after this neighbour", but the grid reflows on drop — so the line pointed at a
-    layout that stopped existing the moment you let go. The only display that cannot lie
-    about the destination is the destination itself, so we show it: the drop then changes
-    nothing visually.
-
-    The preview is **derived**, not stored. The committed order stays in `panels` until the
-    drop, so cancelling (Escape, dropping outside — both surface as dragend without drop)
-    is nothing more than clearing `over`. Two states that must agree cannot disagree if one
-    of them does not exist. A permutation of the same ids also keeps `cols`/`rows` fixed —
-    cells must not change size mid-drag, or the cell the hand is aiming at moves.
-
-    Sidebar drags get no preview: dataTransfer payloads are unreadable during dragover
-    (browser security), so the grid cannot know *which* session is inbound until the drop —
-    and a phantom new cell would change every cell's size anyway.
+    While a panel is dragged the grid shows the drop's result live (#53): an edge line would point at a layout the drop
+    reflows away. The preview is derived, not stored, so a cancel (dragend without drop) only clears `over`. A sidebar
+    drag gets none: dataTransfer data is unreadable during dragover, and a new cell would resize every cell anyway.
   */
   const preview = previewOf(visible)
   const order = preview ?? visible
-  /*
-   * Every panel's cell. A drag's preview is the same panels in another order, packed into the same columns, so the cell
-   * the hand is aiming at keeps its width (#53). With spans the preview can need a row more or less than the committed
-   * order — the one case where cells change height mid-drag; the destination it shows is still the real one.
-   */
+  // A preview packs into the same columns, so the aimed-at cell keeps its width; with spans its height can change (#53)
   const laid = preview ? packGrid(order.map((id) => askedOf(id).span), cols, gridSpanRoom(cols, height)) : arranged
   const rows = laid.rows
 
-  /*
-   * Every app panel shows its view, so every app on the grid has one. Opening it is the view's own business (it calls
-   * `home` when the app can run), so an untrusted, invalid or stopped app stands here with its reason and its button.
-   */
+  // Every app on the grid gets a view; the view opens itself (`home`), so an app that cannot run shows why, with a button
   const appKeys = shown.flatMap((p) => (p.kind === 'app' ? [appKeyOf(p.projectId, p.appId, p.machine)] : [])).join('\n')
   useEffect(() => {
     for (const key of appKeys ? appKeys.split('\n') : []) {
@@ -175,7 +108,6 @@ export function GridView() {
   // After every render: a panel can move without changing size (a drag's preview), and the view laid over it has to move with it
   useLayoutEffect(() => placeSlots())
 
-  /** What a drop on the grid stands for — a session or an app that exists, or null (drop.ts) */
   const dropped = (e: DragEvent<HTMLElement>): GridPanel | null =>
     droppedGridPanel((type) => e.dataTransfer.getData(type), known, appsByKey)
 
@@ -187,7 +119,6 @@ export function GridView() {
   /** Commits the order the screen shows while a panel is dragged — the drop must not change the screen (#53) */
   const commitPreview = (order: string[]) => void setGridPanels(order.map((k) => byKey.get(k)!))
 
-  /** A panel's header picked up — the panel carries what its sidebar row carries (drop.ts) */
   const startDrag = (id: string, e: DragEvent<HTMLElement>) => {
     const p = byKey.get(id)
     if (!p) return
@@ -198,16 +129,12 @@ export function GridView() {
     setDragging(id)
   }
 
-  /** Removing only takes it off the screen — see the session panel's × below */
   const removePanel = (id: string) => void setGridPanels(panels.filter((p) => gridPanelKey(p) !== id))
 
   return (
     <section
       ref={ref}
-      /*
-        Does not scroll. If there might be more below, that makes it a list, not a control
-        room — "seeing it all at a glance" only holds if what is on screen is everything there is.
-      */
+      // Does not scroll: a glance shows everything there is
       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface-deck p-2"
       data-testid="grid"
       onDragOver={(e) => {
@@ -218,11 +145,7 @@ export function GridView() {
         if (!panel) return
         e.preventDefault()
         snapshotScroll()
-        /*
-          Dropping a grid panel on the padding or a gap: the screen is showing the preview,
-          so that is what must survive the drop. Falling through to dropPanel here would
-          append-or-ignore — the arrangement the user is looking at would silently revert.
-        */
+        // A grid panel dropped on the padding or a gap commits the preview; dropPanel would revert what the screen shows
         if (gridPanelKey(panel) === dragging && preview) {
           commitPreview(preview)
         } else {
@@ -243,12 +166,8 @@ export function GridView() {
       ) : (
         <div
           /*
-            Height is divided up the same way width is. Counting the row count up front and
-            giving each row an equal share makes the grid fit the screen exactly no matter how
-            many panels there are — no leftover space and nothing overflowing. Shares are cut to
-            whole pixels, and the remainder goes to the last row and column (wholePixelTracks).
-            The 0 in minmax(0, 1fr) matters: at the default min-content, a panel with more
-            content would push its row wider.
+            Rows share the height as columns share the width, so any count fits the screen exactly (wholePixelTracks).
+            The 0 in its minmax(0, 1fr): at the default min-content, a panel with more content would widen its row.
           */
           className="grid min-h-0 flex-1"
           style={{
@@ -268,25 +187,12 @@ export function GridView() {
                 key={id}
                 ref={place(id)}
                 /*
-                A panel wears the same four looks as the sidebar's mark (`lookOf`, styles/index.css `.cc-panel`):
-                with several panels on screen, a single small indicator is not something the eye can
-                track to find which one is answering or calling — the grid is a screen for **looking**,
-                not reading, so it has to be caught out of the corner of the eye.
-              */
-                /*
-                The selected panel is not highlighted with a border (the conclusion of two
-                rounds of dogfooding). The first time, it failed to update, so a single panel
-                stayed lit for days; once that was fixed to follow the hand, the judgment came
-                back that the indicator was not needed at all — the cursor and the composer's
-                focus outline already say where the person is typing. Only the look of the
-                session's state remains.
+                The whole panel wears the sidebar mark's four looks (`lookOf`, `.cc-panel`): the grid is for looking, and
+                a small indicator is lost among panels. The selected panel gets no border: the cursor and focus show it.
               */
                 className={panelClass(dragging === id)}
                 data-look={look}
-                /*
-                  Placed by hand rather than by the browser's auto-flow, because a spanning panel's place has to be
-                  known to count the rows (core's `packGrid`). With every span 1 × 1 it is the same row-by-row order.
-                */
+                // Placed by hand, not auto-flow: counting the rows needs a spanning panel's place (core's `packGrid`)
                 style={{
                   gridColumn: `${cell.col + 1} / span ${cell.cols}`,
                   gridRow: `${cell.row + 1} / span ${cell.rows}`,
@@ -295,37 +201,24 @@ export function GridView() {
                 data-focused={(panel.kind === 'session' && focusedSessionId === id) || undefined}
                 data-testid={`grid-panel-${id}`}
                 /*
-                The panel the hand touches is the selected panel (dogfooding: on launch it
-                stayed frozen on whichever session had been restored, and never moved). It is no
-                longer used for drawing anything, but the value still does real work: markRead
-                clears this panel's unread mark, and "the last session looked at" (the one
-                warmed up on the next launch) becomes the session the hand actually went to.
-                Because of preferGrid the view stays put, and since WKWebView does not give focus
-                on a button click, the × button does not move it. A project the sidebar has
-                collapsed is not expanded (#205) — the session is already visible in this panel,
-                and expanding it every time someone types into the panel would make collapsing
-                pointless.
+                The touched panel is selected: markRead clears its unread mark, and it is the session warmed up on the
+                next launch. preferGrid keeps the view; WKWebView gives no focus on a button click, so × selects nothing.
+                A collapsed project stays collapsed (#205): the session already shows here.
               */
                 onFocusCapture={() => {
                   // An app's panel holds no session to select
                   if (panel.kind === 'session' && focusedSessionId !== id)
                     focusSession(id, { preferGrid: true, reveal: false })
                 }}
-                /*
-                Where the dragged thing lands relative to this panel. The edge line that used
-                to draw this is gone — the reflow shows it — but tests and assistive tech
-                still need the relation as a value, not as a pixel position to reverse-engineer.
-              */
+                // Where the drag lands relative to this panel, as a value for tests and assistive tech (the reflow draws it)
                 data-drop={dropMark(id)}
                 onDragOver={(e) => {
                   if (!gridTakes(e.dataTransfer.types)) return
                   e.preventDefault()
                   e.stopPropagation()
                   /*
-                  Over the dragged panel itself: keep the last target instead of clearing it.
-                  The reflow routinely puts the dragged panel under the pointer (hover B's far
-                  half → the panels swap → the pointer is now on the dragged panel). Clearing
-                  here would snap the preview back and the two orders would flicker in a loop.
+                  Over the dragged panel itself, `aim` keeps the last target: the reflow often puts it under the pointer,
+                  and clearing would snap the preview back and flicker between the two orders.
                 */
                   aim(id, e)
                 }}
@@ -337,8 +230,7 @@ export function GridView() {
                   if (!dragged) return
                   e.preventDefault()
                   e.stopPropagation()
-                  // A grid panel commits exactly what the preview shows — anything else could
-                  // make the drop change the screen, which is what #53 removes
+                  // A grid panel commits exactly the preview, so the drop changes nothing on screen (#53)
                   if (gridPanelKey(dragged) === dragging && preview) return commitPreview(preview)
                   const r = e.currentTarget.getBoundingClientRect()
                   dropPanel(dragged, id, dropsLeft(r, e.clientX))
@@ -377,32 +269,16 @@ export function GridView() {
                   />
                 ) : (
                   /*
-                Removing only takes it off the screen — the session stays in the sidebar and
-                keeps running. That is why it is called "remove", not "delete".
-
-                Passed as a header slot. It used to sit absolutely positioned on top of the
-                panel, which left its size and height out of sync with the header's restart
-                button (12px vs 14px, different flow). Placed on the same line, there is nothing
-                left to line up.
+                × removes, not deletes: the session keeps running in the sidebar. A header slot, not an absolute
+                overlay, so it lines up with the header's restart button.
               */
                   <SessionPane
                     sessionId={id}
-                    /*
-                  Folding the composer exists **only in the grid** and on project screens (user request, 2026-09-10),
-                  and since 2026-10-20 only when the panel is short (SessionPane's FOLD_SHARE, under about 570px since 2026-11-07,
-                  twice the first line): the focus view has
-                  plenty of room, and folding there would only leave the person having to unfold it every time.
-                */
+                    // Only the grid and project screens fold a short panel's composer; the focus view has room (docs/design-system.md §7)
                     foldWhenShort
                     /*
-                  The **only** handle for moving a panel is the header.
-                  The whole panel used to be draggable, but with a draggable ancestor the
-                  browser will not let text inside it be selected — selecting text in the
-                  conversation dragged the panel instead.
-
-                  At the same time, this header is not a handle for moving the window. In the
-                  focus view the header doubles as the title bar, but not here — left as is,
-                  trying to move a panel dragged the whole app window instead (dogfooding).
+                  Only the header moves a panel: under a draggable ancestor text cannot be selected. Unlike the focus
+                  view's, this header does not move the window.
                 */
                     headerDrag={(e) => startDrag(id, e)}
                     headerExtra={

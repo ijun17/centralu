@@ -6,12 +6,8 @@ import { useWhileVisible } from '../../app/useWhileVisible.js'
 import { applyOffer, installedUpdate, type ApplyOffer } from './apply-offer.js'
 import { trackTyping, typedWithin, TYPING_QUIET_MS } from './typing.js'
 
-/**
- * Applying an installed update (#352): what the update line offers once the host has installed a
- * newer version, and when "Apply updates automatically when idle" relaunches by itself.
- *
- * The decisions are pure so the rules are tested without a window; the hooks below only feed them.
- */
+// Applying an installed update (#352): what the update line offers once installed, and when the automatic apply
+// relaunches by itself. The decisions are pure, tested without a window; the hooks only feed them.
 
 export { applyOffer, installedUpdate, agentApplyVerdict, type ApplyOffer, type AgentApplyVerdict } from './apply-offer.js'
 export { typedWithin, TYPING_QUIET_MS } from './typing.js'
@@ -29,18 +25,13 @@ export type AutoApplyInput = {
 }
 
 /**
- * Whether "Apply updates automatically when idle" relaunches now, and if not, what it waits for.
- *
- * - Only with the setting on, an install finished, and a relaunch that starts another build.
- * - Never from a window that already runs the installed version: that window is the relaunched
- *   one, and a relaunch from it would loop.
- * - Never while busy: a session working, waiting for an approval or a question, a terminal or a
- *   command running (the host's one idle rule, `hostBusy`, reported through the keeper). Unknown
- *   counts as busy, as it does for the switch's question.
- * - Never while someone is typing.
- * - Never from a window without a keeper's busy report (`idleReported`) whose update stops the host (#1895): nothing
- *   reports whether the host is busy there, and waiting for a report that never comes would only say "something is
- *   running" for good. The person presses the button. With a keeper the report is there, so it waits for idle as before.
+ * Whether "Apply updates automatically when idle" relaunches now, and if not, what it waits for. It relaunches only
+ * with the setting on, an install finished, and a relaunch that starts another build. Never:
+ * - from a window that already runs the installed version: it is the relaunched one, and relaunching would loop;
+ * - while busy: a session working or waiting for an approval or question, a terminal or command running (the host's one
+ *   idle rule, `hostBusy`, via the keeper); unknown counts as busy, as for the switch's question; or while typing;
+ * - from a window without a keeper's busy report (`idleReported`) whose update stops the host (#1895): nothing reports
+ *   whether the host is busy there, so the person presses the button.
  */
 export function autoApplyDecision(i: AutoApplyInput): { apply: boolean; waitingFor?: string } {
   const u = i.update
@@ -120,8 +111,8 @@ export function useRelaunchCheck(): RelaunchCheck | null | undefined {
 
 /**
  * The check Updates asks for as Settings opens (#43): **each time it opens, not each time it mounts** (#2155). Settings
- * reopened during its closing fade is still mounted, so a check tied to the mount asked nothing and showed what it had
- * as it closed. Only with automatic checking on, and not over a check or an install under way.
+ * reopened during its closing fade is still mounted, so a check tied to the mount would ask nothing and show what it
+ * had as it closed. Only with automatic checking on, and not over a check or an install under way.
  */
 export function useUpdateCheckWhileOpen(): void {
   const open = useStore((s) => s.settingsOpen)
@@ -207,12 +198,8 @@ export function useAutoApplyUpdate(): string | null {
 }
 
 /**
- * "Where things stand right now," in one line.
- *
- * **The order itself is the judgment.** Whatever is in progress comes first, the outcome comes
- * after. In particular, `error` must never come after `latest` — the moment a brief network
- * drop gets read back as "you are up to date," the check erases its own finding (this is
- * exactly how #42 stayed hidden for an entire release).
+ * Where things stand, in one line. The order is the judgment: in progress first, then the outcome, and `error` before
+ * `latest`, or a brief network drop reads as "up to date" and the check erases its own finding (#42).
  */
 export function updateStateText(u: UpdateStatus | null, offer: ApplyOffer | null): string {
   if (!u) return 'Not checked yet'

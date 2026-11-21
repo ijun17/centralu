@@ -15,14 +15,9 @@ import { ToolMark } from '../marks/ToolMark.jsx'
 import type { TreeRow } from '../tree.js'
 
 /**
- * One session's row in the sidebar tree: the open button with its marks and badges, the in-place
- * rename, the ⋯ menu, and the fold toggle for the sessions it started. A project's own list and the
- * list under one of its apps draw the same row; what differs is `inApp` (one level deeper, its own
- * test id) and what a drop on it does (`onReorder`).
- *
- * Drawn again only when its own session, its children or a prop changed (`sameRow`). The list is rebuilt for every
- * event of any session in it, a streamed reply's every piece included, and drawing every row for each of them was most
- * of what the window allocated while sessions worked out of view. So the callers pass functions that stay the same.
+ * One session's row in a project's list or under one of its apps (`inApp`). Redrawn only when its session, children or
+ * a prop changed (`sameRow`): the list is rebuilt on every streamed piece of any session, and redrawing every row was
+ * most of what the window allocated while sessions worked out of view. So callers pass stable functions.
  */
 export const SessionListRow = memo(SessionListRowView, sameRow)
 
@@ -81,12 +76,7 @@ function SessionListRowView({
       projectId={projectId}
       nested={inApp ? depth + 1 : nested}
       level={Math.min((inApp ? 2 : 1) + depth, MAX_LEVEL) as keyof typeof INDENT}
-      /*
-       * A child row cannot be dragged — position is membership (#69). Letting a row
-       * drawn indented under a parent be moved by hand would make the new position read
-       * as membership, while the actual membership (parentSessionId) stays unchanged,
-       * and the screen would end up lying.
-       */
+      // A child row is not draggable: its position states membership (#69), which a drag would not change
       draggable={renaming !== s.id && !nested}
       onReorder={(draggedId, before) => onReorder(s.id, draggedId, before)}
     >
@@ -96,7 +86,7 @@ function SessionListRowView({
           initial={s.name}
           onDone={(name) => {
             setRenaming(null)
-            // No reason for a round trip when the name is unchanged (and no reason for a failure toast either)
+            // An unchanged name makes no round trip (nor a failure toast)
             if (name && name !== s.name) void renameSession(s.id, name)
           }}
         />
@@ -114,29 +104,14 @@ function SessionListRowView({
             // Opening a row of a hover-expanded project leaves the saved fold as it is (#1578): it folds when the pointer leaves
             onClick={(e) => focusSession(s.id, e.currentTarget.closest('[data-hover-expanded]') ? { reveal: false } : undefined)}
             onKeyDown={foldKeys(children.length > 0, childrenFolded, (next) => setGroupsFolded([groupKey], next))}
-            /*
-              Double-clicking the name edits it in place — the same convention as file
-              explorers and tab names, so the hand knows it before the person even finds
-              the button. The pencil button is a second entry point for a person who does
-              not know that convention: keeping only one of the two would leave half the
-              people unable to rename anything.
-            */
+            // Double-click renames, as in file explorers; the menu's Rename is the way for whoever does not know that
             onDoubleClick={() => setRenaming(s.id)}
             data-testid={`${inApp ? 'app-session-row' : 'session-row'}-${s.id}`}
-            // The open row inside the tinted group — the same word an app row and the project's name row use
+            // The same word an app row and the project's name row use
             aria-current={focused ? 'page' : undefined}
-            /*
-              Unread (FR-16) is stated by the name's brightness (the text-ink on the
-              truncate span below). It is also kept as an attribute so a test can see a
-              fact not otherwise present on screen — asserting a class name would break
-              the test every time the color gets adjusted.
-            */
+            // Unread (FR-16) is the name's brightness; the attribute lets tests see it without asserting a class
             data-unread={(unread && !focused) || undefined}
-            /*
-              The right padding has to clear the menu button that appears on hover
-              (ROW_MENU_PAD): a long name that ran in underneath it would be text hidden
-              under a button, which is worse than text truncated.
-            */
+            // ROW_MENU_PAD clears the hover menu button: a name hidden under it is worse than truncated
             className={`flex w-full items-center gap-2 border-l-2 py-1.5 ${ROW_PAD} ${ROW_MENU_PAD} text-left text-md transition-colors ${
               focused
                 ? 'border-l-ink-muted bg-surface-hover/40 text-ink'
@@ -144,9 +119,7 @@ function SessionListRowView({
             }`}
           >
             {/*
-              One mark states two things: the letter is the tool, the border is the
-              state. A separate dot right next to the mark would read as overlapping the
-              two, and blur both instead.
+              One mark: the letter is the tool, the border the state
             */}
             <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !isMirrored(s, machines)} interruption={s.interruption ?? null} openQuestions={s.pendingQuestions.length} unread={isUnread(s)} background={{ tasks: s.backgroundTasks, testId: `background-mark-${s.id}` }} />
             <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
@@ -154,9 +127,7 @@ function SessionListRowView({
               <FoldedMark count={children.length} attention={groupAttention(children)} testId={`children-folded-${s.id}`} />
             )}
             {/*
-              Merged (#69) — this branch's work has landed on the trunk. A sign that it
-              is history, not ongoing work. Cleaning it up is the person's, in the delete
-              dialog, or the session that started it (agent_session delete, #561).
+              Merged (#69): cleaned up by the person or its starter (agent_session delete, #561)
             */}
             {s.merged && (
               <span
@@ -168,9 +139,7 @@ function SessionListRowView({
               </span>
             )}
             {/*
-              The PR chip (#76 stage 3) — this branch's pull request, measured through
-              gh. Not drawn once merged is showing: a merged PR also lights up the merged
-              badge, and stating the same outcome twice on a 13px row blurs both.
+              The branch's PR, read through gh (#76 stage 3); not beside merged, which says the same
             */}
             {s.pr && !s.merged && (
               <span
@@ -183,32 +152,17 @@ function SessionListRowView({
               </span>
             )}
             {/*
-              Background work still running (#290) is the dot on the tool mark above, not a chip of its own (owner, 2026-11-05).
+              Background work (#290) is the mark's dot
             */}
             {/*
-              An unread dot used to be here and **was removed** (dogfooding, 2026-09-02).
-
-              It was stating the same fact for a third time on this row: the tool mark's
-              border already states the state (an ink-muted ring when a turn ends), and the
-              name's brightness already states unread (the text-ink above). Since all
-              three lit up together when a turn ended while the person was away, the dot
-              added no information, only the question "what is that now" — and that
-              question was actually asked. The determination logic (lastReadSeq, markRead)
-              is unchanged.
+              No unread dot: the mark and the name's brightness already say it
             */}
           </button>
           {/*
-            One menu instead of four icons (pencil, handoff, worktree, delete) — a
-            dogfooding request, the same grammar as the project row. With four icons it
-            turned into an unlabeled game of matching pictures, and two of them (handoff,
-            delete) were the kind that must not be pressed by mistake.
+            One labeled menu, not icons (SessionMenu)
           */}
           {/*
-            The right padding has to match the project header's px-3 — the two are
-            buttons standing in the same vertical column in the sidebar, and leaving them
-            at 4px and 12px stood out immediately to the eye (a dogfooding finding).
-            Fixing only one side would put them out of alignment again, so the value is
-            kept matched.
+            right-3 matches the project header's px-3: the two ⋯ buttons share a column
           */}
           <span
             className={`absolute right-3 top-1/2 flex -translate-y-1/2 items-center transition-opacity focus-within:opacity-100 group-hover/row:opacity-100 ${
@@ -216,12 +170,12 @@ function SessionListRowView({
             }`}
             data-testid={`session-actions-${s.id}`}
           >
-            {/* A plain button like the project's ⋯ — a named menu opens right away, so a tooltip is noise */}
+            {/* No tooltip, as the project's ⋯ */}
             <button
               type="button"
               aria-label={`Actions for ${s.name}`}
               onClick={(e) => {
-                // Reading it inside the updater is too late — React clears currentTarget once the handler returns
+                // Read now: React clears currentTarget once the handler returns
                 const el = e.currentTarget
                 setSessionMenu((cur) => (cur?.id === s.id ? null : { id: s.id, el }))
               }}

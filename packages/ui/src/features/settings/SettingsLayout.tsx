@@ -1,15 +1,7 @@
 import { useState, type HTMLAttributes, type ReactNode } from 'react'
 
-/**
- * The parts every Settings category is laid out with, so the pages read as one window (owner, 2026-10-19).
- *
- * - `SettingsPage`: the category's name and one short line under it.
- * - `SettingsGroup`: a card of rows split by hairlines, with an optional small heading above it.
- * - `SettingsRow`: a label (and a short hint under it) on the left, its control on the right, centred.
- * - `More`: the rest of an explanation, one press away. It stays in the page while closed (`hidden`), so what a row
- *   says for safety is still there for a screen reader's search and for a test that reads the section's text; it is
- *   only out of the way.
- */
+// The parts every Settings category is laid out with, so the pages read as one window. `More` stays in the page while
+// closed (`hidden`): what a row says for safety stays there for a screen reader's search and a test reading the text.
 export function SettingsPage({
   title,
   lead,
@@ -133,7 +125,7 @@ export function SettingsRow({
   )
 }
 
-/** "More": the rest of a hint, opened in place. Kept in the page while closed, see the file's note */
+/** "More": the rest of a hint, opened in place; kept in the page while closed (see the file's top) */
 export function More({ children, label = 'More' }: { children: ReactNode; label?: string }) {
   const [open, setOpen] = useState(false)
   return (

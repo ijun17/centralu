@@ -26,7 +26,7 @@
 //! only as strong as the path. What this closes is the easy path: a script asking the socket for
 //! the token, or running a copy of `node` named `centralu`.
 //!
-//! **Linux.** No Linux window starts a keeper since #1895 step 4 PR 7 (`start_plan.rs`). A window there
+//! **Linux.** No Linux window starts a keeper (#1895 step 4 PR 7, `start_plan.rs`). A window there
 //! runs from its AppImage's mount, whose path changes at every launch, so a keeper would accept only
 //! the window that started it (its `--bundle-path`), and this is a limit to settle before a Linux
 //! keeper is ever brought back (docs/plans/keeper-removal.md §2.4).
@@ -313,7 +313,7 @@ mod tests {
         assert!(judge_attaching(refused(), None, &mut known, |_| true).is_err(), "no pid or start");
     }
 
-    /// #2119 review: the window ends while its path is judged and another process takes its pid. The path was the
+    /// #2119: the window ends while its path is judged and another process takes its pid. The path was the
     /// window's, but the process now behind the pid is not: it is refused, and not remembered for later attaches
     #[test]
     fn a_pid_another_process_takes_while_the_path_is_judged_is_neither_taken_nor_remembered() {
@@ -349,7 +349,7 @@ mod tests {
         assert_eq!(judge_path_of(|| None, || Ok(())), (Ok(()), None), "no start named: the path's answer, and nothing to remember");
     }
 
-    /// #2119 review: a remembered window whose process ended leaves the list, so it does not grow for the keeper's life
+    /// #2119: a remembered window whose process ended leaves the list, so it does not grow for the keeper's life
     #[test]
     fn a_remembered_window_whose_process_ended_is_dropped() {
         let window = Attached { pid: 40, started: 1_000 };

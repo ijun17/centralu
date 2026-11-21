@@ -2,11 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ChatItem } from '../../../store/store.js'
 import { answerEnds, bubbleOf, dayBreaks, joinsNext } from './answerBubble.js'
 
-/*
- * The agent's answer as a bubble (owner, 2026-10-18): its text rows share one bubble, drawn in pieces; tool calls,
- * reasoning, images and markers stand outside it and split it; the answer's time goes under its last bubble only;
- * a divider names each new day.
- */
+// The agent's answer as a bubble (docs/design-system.md §7): what splits it, where its time goes, the day dividers
 
 let key = 0
 const user = (at?: number): ChatItem => ({ kind: 'user', seq: ++key, text: 'ask', ...(at === undefined ? {} : { at }) })

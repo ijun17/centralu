@@ -3,11 +3,8 @@ import { awayNote, CHECKING, folderNote } from './deleteNote.js'
 
 const LEFT_ALONE = 'The folder on disk is left alone.'
 
-/**
- * What the Delete project dialog says of the folder (#1301): an ordinary project's folder is left alone, while the host may move a
- * folder of the user folder registered in place to app-trash/ once nothing can restore the project (#1204). Never put as certain, a
- * project inside an app folder is not called one, a path that could not be checked is said so, and nothing is said on a guess.
- */
+// The folder sentence (#1301): an ordinary folder is left alone; a user-folder folder registered in place may go to
+// app-trash/ once nothing can restore the project (#1204), never put as certain and never said on a guess.
 describe('the Delete project dialog\'s sentence about the folder', () => {
   it('is today\'s for an ordinary project, and for one from a host that does not send the mark or the answer', () => {
     expect(folderNote({})).toBe(LEFT_ALONE)

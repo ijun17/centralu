@@ -18,10 +18,7 @@ export function ActionRow({
   danger?: boolean
   /** Shown but not pressable, with `title` saying why (a linked machine that is not connected, #734) */
   disabled?: boolean
-  /**
-   * The row's action is under way (#1533): it reads as disabled and presses nothing, but stays focusable, so a keyboard
-   * user who pressed it does not lose their place in the menu when the button would have been disabled under their focus
-   */
+  /** Under way (#1533): reads as disabled and presses nothing, but keeps focus, which a disabled button would drop */
   pending?: boolean
   title?: string
   /** A mark at the row's right end (a machine's link state, #734) */

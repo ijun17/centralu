@@ -1,19 +1,8 @@
 import { AppDragMessage, type AppId } from '@cc/protocol/client'
 
-/**
- * The page's half of an item dragged out of an app view (#308).
- *
- * The page never hears that drag: a drag that starts in a document of another origin is not handed
- * to this one (agent-host views/drag-relay.ts has the measurement). The host adds a relay to every
- * view that posts, through the view's bridge, the drag's link and text when it starts and the point
- * where it ended. This turns that point into one in the page, and hands the link to whatever lies
- * there as a DOM event, `APP_LINK_DROP_EVENT`, bubbling from the element under the point. A session
- * pane listens for it (SessionView) and puts the link into its composer; anywhere else it falls
- * through and nothing happens, as a drop on a spot that takes nothing.
- *
- * An event rather than a call: this feature does not know what a session is, and the element under
- * the point is how the page already says what is there.
- */
+// The page's half of a drag out of an app view (docs/apps/view-theme-layout-drag.md "Dragging an item out of a view").
+// The link goes out as a DOM event bubbling from the element under the end point, so this feature need not know what a
+// session is; a session pane (SessionView) takes it, anywhere else it falls through.
 
 export const APP_LINK_DROP_EVENT = 'cc-app-link-drop'
 
@@ -29,17 +18,10 @@ export type AppLinkDrop = {
 type Box = { left: number; top: number; width: number; height: number }
 type End = Extract<AppDragMessage, { phase: 'end' }>
 
-/**
- * How long a started drag waits for its end. A drag is a hand held down, so minutes is already
- * generous; past it, an end that arrives belongs to no drag the person is making.
- */
+/** A drag is a hand held down, so minutes is generous; a later end belongs to no drag the person is making */
 export const DRAG_START_TTL_MS = 120_000
 
-/**
- * The frame's content box in the page: its border box less its borders. The borders are measured
- * in layout pixels, and scaled by how the frame's box is drawn (`rect.width / offsetWidth`), so a
- * page zoom (the text size setting zooms the root) does not move the box.
- */
+/** Border box less borders; the borders are in layout pixels, scaled by `rect.width / offsetWidth` so the root zoom does not move the box */
 function contentBox(frame: HTMLIFrameElement): Box {
   const rect = frame.getBoundingClientRect()
   const cs = getComputedStyle(frame)
@@ -52,12 +34,8 @@ function contentBox(frame: HTMLIFrameElement): Box {
 }
 
 /**
- * Where a view's `dragend` happened, in the page. The engines disagree on what that point is
- * measured from (`PlatformCapabilities.frameDragEndInPage`, platform engine.ts has the measurement):
- * WebKit gives the frame's own coordinates, as the spec has it, and Chromium the page's. In the
- * frame's coordinates the point is scaled by the content box over the view's own size, so a zoomed
- * page and a view that reports its size in its own pixels still meet; the view fills its proxy,
- * which fills the frame (proxy-page.ts). In the page's it is the point as it came.
+ * WebKit's `dragend` is in the frame's coordinates, Chromium's in the page's (`frameDragEndInPage`, measured in platform
+ * engine.ts). Frame coordinates scale by the content box over the view's size; the view fills its proxy, which fills the frame.
  */
 export function pagePoint(end: Pick<End, 'x' | 'y' | 'width' | 'height'>, box: Box, inPage: boolean): { x: number; y: number } {
   if (inPage) return { x: end.x, y: end.y }
@@ -67,16 +45,8 @@ export function pagePoint(end: Pick<End, 'x' | 'y' | 'width' | 'height'>, box: B
 const inside = (p: { x: number; y: number }, b: Box) => p.x >= b.left && p.x < b.left + b.width && p.y >= b.top && p.y < b.top + b.height
 
 /**
- * One view's relay: what it started, and where it ends. Built per frame (AppFrame), fed every
- * relay message its bridge receives.
- *
- * What the view says is the app's word, so nothing is taken on trust beyond being a link and a title
- * for a draft: the shape is checked (`AppDragMessage`), an end only counts after a start from the
- * same view and within `DRAG_START_TTL_MS`, the frame must hold the page's focus (pressing on an item
- * to drag it gives its frame focus; measured in both engines, `document.activeElement` was the frame
- * after the drag), and the link only ever goes into a draft the person sends themselves. An end
- * inside the frame is the app's own drop (a card moved between the board's columns), and one over
- * another frame lands on a view, not on the page.
+ * One view's relay, built per frame and fed every relay message. The messages are the app's word, so the doc's checks
+ * apply: shape, a start from this view within `DRAG_START_TTL_MS`, the frame holding focus, no end inside or over a frame.
  */
 export class DragRelay {
   private started: { uri: string; text: string; at: number } | null = null
@@ -89,7 +59,7 @@ export class DragRelay {
     private readonly now: () => number = Date.now,
   ) {}
 
-  /** One relay message. Returns the drop it handed out, or null when it handed out nothing */
+  /** Returns the drop handed out, or null */
   take(params: unknown): AppLinkDrop | null {
     const parsed = AppDragMessage.safeParse(params)
     if (!parsed.success) return null

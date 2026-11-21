@@ -9,16 +9,7 @@ import { replayPendingEvents, sessionFromInfo } from '../sessionList.js'
 import { bumpChatKeysAbove, messagesToChat, nextChatKey, type ChatItem } from '../transcript.js'
 import type { Draft } from '../state/conversation.js'
 
-/**
- * A session's place in the list: opening the new-session dialog or starting one at once, creating it,
- * moving it to the session archive and back, its name, its read position and its order.
- */
-
-/**
- * Where a session sat in the window when it was archived: what the person had typed and not sent, and its place in each project's
- * grid. The archive clears both (`forgetSessions`), and Undo puts them back. Not kept: the scroll position and which panel had
- * the focus.
- */
+/** What the archive clears (`forgetSessions`) and Undo puts back; the scroll position and panel focus are not kept */
 type WindowPlace = { draft: Draft | null; grids: { projectId: string; at: number }[] }
 
 function windowPlaceOf(s: AppState, sessionId: string): WindowPlace {
@@ -58,7 +49,7 @@ function putWindowPlaceBack(set: StoreSet, get: StoreGet, sessionId: string, pla
   if (place.grids.length > 0) get().saveWorkspace()
 }
 
-/** The toast after a session went to the archive: Undo is the archive's own Restore, and the window's side of the session comes back with it */
+/** Undo is the archive's own Restore, and the window's side of the session comes back with it */
 function announceArchived(set: StoreSet, get: StoreGet, sessionId: string, name: string, place: WindowPlace): void {
   set({
     toast: `Archived ${name} · Settings → Archive keeps it`,
@@ -77,21 +68,8 @@ function announceArchived(set: StoreSet, get: StoreGet, sessionId: string, name:
 }
 
 /**
- * Of the model and effort this project has remembered for this tool, keep only what **that tool
- * still accepts** (#107).
- *
- * Saving per tool is not enough by itself: models retire. A name picked yesterday may not be on
- * today's list, and sending it as is kills the session with a 400 on the first turn — a trade that
- * loses the session to preserve one remembered value. So it is checked at the moment of use, and
- * dropped if absent.
- *
- * **Nothing is dropped if the list could not be read.** `supported: false` means "unknown right now,"
- * not "that model does not exist," and dropping it for being unknown would silently erase what the
- * person chose during a moment the tool happened not to respond.
- *
- * Effort is dropped **together with** the model. Effort is a handle on the model
- * (`ModelOption.efforts`), so leaving it behind would land a `high` of unknown origin onto the
- * tool's default model.
+ * The remembered model only if the tool still offers it (#107): a retired one kills the session with a 400. An unread
+ * list (`supported: false`) drops nothing. Effort goes with its model, a handle on it (`ModelOption.efforts`).
  */
 async function usableDefaults(
   platform: Platform,
@@ -115,16 +93,8 @@ async function usableDefaults(
 const startingNow = new Set<string>()
 
 /**
- * Sets a new session's conversation to its opening prompt (#172) — **never overwrites.**
- *
- * The host broadcasts `session_created`, `handoff` and `user_message`, in that order, before the
- * response — the screen registers the session from the first one, so the other two are already
- * attached to this conversation by the time the response arrives. This used to overwrite the
- * conversation with a single pending opening prompt when the response came in, which erased the
- * handoff marker, and left behind a pending row whose confirming event had already passed, so the
- * same prompt appeared twice when history was later read. If the same sentence is already attached,
- * nothing new is set; if not, it is appended after what is there (an event arriving after the
- * response then confirms this row).
+ * Never overwrites (#172): the host broadcasts `session_created`, `handoff` and `user_message` before the response, so
+ * they are drawn already, and an overwrite would drop the handoff marker and draw the prompt twice.
  */
 function withOpeningPrompt(
   chat: Record<string, ChatItem[]>,
@@ -139,7 +109,6 @@ function withOpeningPrompt(
   }
 }
 
-/** The store's actions that create, list and remove sessions */
 type LifecycleActions = Pick<
   AppState,
   | 'openNewSession'
@@ -158,11 +127,7 @@ type LifecycleActions = Pick<
 
 export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions => ({
   openNewSession(projectId, opts) {
-    /*
-     * A suggestion (#69) is consumed **at the moment it is opened** — no matter which door opens it
-     * (the project's +, the manager's +, the suggestion row). Leaving it behind would contaminate an
-     * unrelated window opened next.
-     */
+    // A suggestion (#69) is consumed when any door opens it, or it would leak into the next dialog
     const queue = get().worktreeProposals
     const at = projectId !== null ? queue.findIndex((p) => p.projectId === projectId) : -1
     const prop = at >= 0 ? queue[at] : undefined
@@ -182,11 +147,8 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
     startingNow.add(projectId)
     try {
       let tool = project.defaultTool ?? get().tools[0]?.name ?? ''
-      /*
-       * The host does not check a login when it creates a session: a tool that is logged out would fail on the first
-       * turn instead. So the same rule as the dialog's applies first: a remembered tool that cannot run gives way to
-       * one that can, and when none can the dialog opens, which states why. Failing to ask is not "unusable".
-       */
+      // The host checks no login when it creates a session, so the dialog's rule applies here: a tool that cannot run
+      // gives way, and with none the dialog says why. Failing to ask is not "unusable".
       const found = await platform.agents.detect(project.machine ?? null).catch(() => [])
       const usable = (t: string) => {
         const d = found.find((x) => x.name === t)
@@ -212,12 +174,7 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
     const platform = get().platform!
     const project = get().projects[projectId]!
     const tool = opts?.tool ?? project.defaultTool ?? get().tools[0]?.name ?? ''
-    /*
-     * The project's memory is pulled out **only for this tool** (#107). There used to be a single
-     * model per project, and that one value was carried regardless of which tool was used — so even
-     * when a handoff deliberately cleared the model on a tool switch (`sameTool ? … : undefined`),
-     * this line filled it right back in.
-     */
+    // Only this tool's memory (#107): one model per project would refill what a tool-switching handoff clears
     const remembered = await usableDefaults(platform, tool, project.defaultModels?.[tool], project.machine)
     // The host records the tool as this project's default while it makes the session (#719): a list read must not undo it
     const info = await writingProject(
@@ -227,10 +184,9 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
         platform.agents.createSession({
           projectId,
           cwd: project.path,
-          // The chosen value travels straight to the host — the preset used to be pinned to 'normal' and the model was not even passed
           tool,
           model: opts?.model ?? remembered.model ?? undefined,
-          // Effort follows the memory too (#69 ⑤) — remembering only the model meant Opus came back but high still had to be pressed again
+          // Effort follows the memory too (#69)
           effort: opts?.effort ?? remembered.effort ?? undefined,
           verbosity: opts?.verbosity,
           serviceTier: opts?.serviceTier,
@@ -244,32 +200,18 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
           worktreeBase: opts?.worktreeBase,
         }),
     )
-    /*
-     * Registered from the host's answer, over a row `session_created` may have registered already: the host broadcasts it
-     * before the response, and replacing that row would wind `lastSeq` back (#2171).
-     */
+    // Over the row `session_created` may have registered: replacing it would wind `lastSeq` back (#2171)
     set((s) => ({
       sessions: { ...s.sessions, [info.id]: sessionFromInfo(info, s.sessions[info.id]) },
-      /*
-       * The tool the person picks here becomes the project's default, as the host decides for a pick made in the
-       * window (session-start.ts `personsPick`, #2350); this optimistic update shows it at once.
-       */
+      // The pick becomes the project's default, as the host decides (`personsPick`, #2350); shown at once
       projects:
         opts?.tool && s.projects[projectId]
           ? { ...s.projects, [projectId]: { ...s.projects[projectId], defaultTool: opts.tool } }
           : s.projects,
-      // The starting prompt was also said by me — it must show in the conversation (a gap caught by e2e)
-      // Why `pending` is set: the host also stores the first prompt and announces it via `user_message`
-      // — without this marker, the replayed event would draw the same message a second time (the same rule as `send()`)
+      // `pending`, so the host's `user_message` for it confirms the row rather than drawing it twice, as in `send()`
       chat: opts?.initialPrompt ? withOpeningPrompt(s.chat, info.id, opts.initialPrompt) : s.chat,
     }))
-    /*
-     * `focusedSessionId` is not set directly — it goes through `focusSession` instead, where the
-     * "a picked session must be shown" view enforcement lives. Setting it directly used to be fine:
-     * while a dialog was in use, the screen was already the focus view. Once onboarding started
-     * opening the Assistant view first (#63), that created the combination where a session created
-     * there was **never shown** (caught by e2e).
-     */
+    // Through `focusSession`, which shows it: onboarding opens the Assistant first (#63)
     get().focusSession(info.id)
 
     // An imported session already has past conversation piled up on the host — pull it onto the screen
@@ -282,15 +224,11 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
       }
     }
 
-    // Replays events held from before registration, in order
     replayPendingEvents(get)
     return info
   },
 
-  /**
-   * Archives a session (#204). The toast says where it went: a session that leaves the sidebar with no word
-   * about where is the retired hide-a-session feature again (FR-20).
-   */
+  /** The toast says where it went (#204): leaving the sidebar unannounced is the retired hide-a-session again (FR-20) */
   async deleteSession(sessionId, deleteWorktree, deleteExternal) {
     const platform = get().platform
     if (!platform) return
@@ -306,14 +244,10 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
   },
 
   /**
-   * The archive the dialog's Archive asks for when the person has not seen the host's losses (#1512, #1589, #1595). Null: it is done
-   * (archived, the toast offers Undo; or failed, the toast says why). Lines: not moved, and these are what the archive would lose
-   * and Undo does not bring back; the dialog shows them and its next Archive is `deleteSession`. No lines: not moved because the
-   * session is not at rest; the dialog then moves it with `deleteSession` if it is still open (the person's answer is enough).
-   *
-   * With the worktree kept the host's own check decides and moves (`agents.archiveIfAtRest`, read then move). With the worktree
-   * deleted too that check cannot be used (it never removes one), so only the losses are read (`agents.archiveLosses`); none means
-   * no lines, and the dialog moves the session with `deleteSession` if it is still open.
+   * The dialog's Archive before the person has seen the host's losses (#1512, #1589, #1595). Null: done (archived, or
+   * failed and said). Lines: not moved, what the archive would lose. No lines: not at rest; the dialog moves it with
+   * `deleteSession` if still open. With the worktree deleted the host's at-rest check cannot run (it never removes one),
+   * so only the losses are read.
    */
   async archiveSession(sessionId, deleteWorktree, deleteExternal) {
     const platform = get().platform
@@ -355,15 +289,7 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
     }
   },
 
-  /**
-   * Renaming a session (issue #5).
-   *
-   * **Passed to the host first, and the screen is fixed only after.** Drawing it optimistically first
-   * would leave the new name on screen and the old one in the database on failure — the moment the
-   * list is re-fetched, the name would revert with no explanation. This is a kind of mistake this
-   * store has been burned by more than once. A failure is raised as a toast the same way as
-   * `respondApproval`/`answerQuestion`.
-   */
+  /** The host first, the screen after (#5): a failed optimistic name would revert unexplained at the next list read */
   async rename(sessionId, name) {
     const next = name.trim()
     if (!next) {
@@ -391,11 +317,7 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
     try {
       await get().platform!.agents.markRead(sessionId, s.lastSeq)
     } catch (e) {
-      /*
-       * Offline, or the host is being swapped (#842 item 14). Callers fire this and forget it (opening a session, Done in
-       * the waiting list), so a rejection here was an unhandled one. Said, not thrown: the session stays unread, which is
-       * what the host still holds, and Done that seemed to do nothing says why.
-       */
+      // Offline or mid-swap (#842). Callers fire and forget, so said, not thrown; the session stays unread, as the host holds it
       set({ toast: `Could not mark as read: ${errorMessage(e)}` })
       return
     }
@@ -424,22 +346,15 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
       set({ toast: `Could not clear the error: ${errorMessage(e)}` })
       return
     }
-    /*
-     * The state is the host's to say: it sends `idle` when it cleared the error, and sends nothing when something newer
-     * happened (a Continue from another window that already failed again or is waiting on an approval). Forcing `idle` here
-     * wiped such a card. Only the read mark is this window's to move.
-     */
+    // The state is the host's to say: forcing `idle` would wipe a newer card from another window. Only the read mark is ours.
     set(ifSessionStill(sessionId, (st, cur) => ({ sessions: { ...st.sessions, [sessionId]: markReadPure(cur, s.lastSeq) } })))
     // Done that cleared nothing says why, instead of seeming to do nothing
     if (result.newer) set({ toast: 'A newer error arrived. It stays marked' })
   },
 
   /*
-   * An app's agent session the person opened stays theirs (#378 review). The host hears "opened" through `markRead`
-   * only, and `markRead` above sends nothing when nothing is unread, which is how an app-agent session usually opens:
-   * the app's request is read as it arrives. A run that ended in the 3 seconds before the read mark then deleted the
-   * session the person was looking at. The read position sent is the one the host already has (it keeps the larger),
-   * so this moves nothing; it only says the session is on screen.
+   * An opened app-agent session stays the person's (#378): `markRead` sends nothing when nothing is unread, usual for
+   * these, and a run ending before the 3-second read mark would delete it. It sends the host's own position: moves nothing.
    */
   async markOpened(sessionId) {
     const s = get().sessions[sessionId]
@@ -466,11 +381,7 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
     try {
       await platform.agents.reorderSessions(projectId, orderedIds)
     } catch (e) {
-      /*
-       * Only the order goes back (#842 item 3): the sessions as they are now, in the order from before the drag. Putting
-       * `before` back whole lost every session created and every state change made while the save was out. And only
-       * while the order shown is still this drag's: a later drag that was saved is not undone by this one failing.
-       */
+      // Only the order goes back (#842, `inOrder`), and only while the order shown is still this drag's
       set((st) => ({
         ...(stillInOrder(st.sessions, orderedIds)
           ? { sessions: inOrder(st.sessions, Object.keys(before)) }

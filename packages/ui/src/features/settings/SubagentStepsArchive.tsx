@@ -6,16 +6,10 @@ import { LoadFailed } from '../../components/LoadFailed.jsx'
 import { SettingsCard, SettingsEmpty } from './SettingsLayout.jsx'
 
 /**
- * A session's subagent steps in Settings → Archive (#418): what each live session's steps take, with the way to move them
- * to the session archive while the session stays, and a trashed set of steps as a row of the session archive.
- *
- * The steps of the native subagents a session launched (#222) are kept under their launch cards and read only when a
- * card is opened, so nothing showed what they took: the measured store held 46 MB of them, all one session still in use,
- * and the only way to let them go was to delete the conversation. The session archive is where this screen says what the store
- * holds, so they are said here.
- *
- * The list of what sessions hold is drawn in the shared Settings card (owner, 2026-10-31), its action the shared `Button`; a trashed set of steps
- * is a row of the session archive list, drawn as the archived sessions beside it are.
+ * Subagent steps in Settings → Archive (#418): what each live session's steps take, a way to archive them while the
+ * session stays, and archived steps as an archive row. Native subagents' steps (#222) are read only from their launch
+ * cards, so nothing else shows their size (one measured store: 46 MB, one session in use), and otherwise only deleting
+ * the conversation frees them.
  */
 
 /** A count and its noun, the count through the shared formatter (`formatCount`): "1 run", "1.2k steps" */
@@ -33,9 +27,9 @@ type RowState = {
 }
 
 /**
- * What each live session's subagent steps take, largest first, each with "Archive": at once, with Undo on the toast (#1512). `sessions` null while it is
- * read; `error` when reading it failed. `unreached`: linked machines whose sessions could not be read (#841's rule), each
- * named; with one, the list is never said to be empty, since it is not the whole of it.
+ * What each live session's subagent steps take, largest first, each with "Archive" at once and Undo on the toast
+ * (#1512). `sessions` null while read; `error` when the read failed. `unreached`: linked machines not read (#841's
+ * rule), each named; with one, the list is never called empty.
  */
 export function SubagentStepsHeldList({
   sessions,

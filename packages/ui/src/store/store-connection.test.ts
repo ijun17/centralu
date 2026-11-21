@@ -1,9 +1,6 @@
 /**
- * Store regression tests: the connection: reconnects, live events, linked machines and offline marks.
- *
- * Ports go through `MockPlatform` (no ad-hoc mocking, or the contract falls apart). The
- * `pendingEvents` holding pen is module state, so it cannot be cleared between tests — each test
- * uses a different session id instead. Shared fixtures are in store.test-helpers.ts.
+ * Store tests: reconnects, live events, linked machines and offline marks. Ports go through `MockPlatform`.
+ * The `pendingEvents` pen is module state that tests cannot clear, so each test uses its own session id.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { isAway } from '@cc/core'
@@ -56,7 +53,7 @@ describe('handling resync_required (U3)', () => {
     mock.sessions.set('u3-s2', sessionInfo('u3-s2', { name: 'created during the disconnect' }))
     mock.setConnectionState('resync_required')
 
-    // The label logic draws everything other than `connected` as 'Disconnected' — leaving this value set would be a lie
+    // The label draws anything but `connected` as 'Disconnected'
     expect(useStore.getState().connection).toBe('connected')
     await vi.waitFor(() => expect(useStore.getState().sessions['u3-s2']).toBeDefined())
     expect(useStore.getState().sessions['u3-s2']!.name).toBe('created during the disconnect')
@@ -73,11 +70,8 @@ describe('handling resync_required (U3)', () => {
     await vi.waitFor(() => expect(spy).toHaveBeenCalledWith('u3-s3'))
   })
 
-  /*
-   * #173: while a resync re-read only the focused session, another session's conversation was left
-   * holding a gap, and opening it later did not re-read it either, since a cursor already existed —
-   * the gap stayed unfilled until the app was reopened.
-   */
+  // #173: re-reading only the focused session leaves a gap in the others' conversations, which opening them does not
+  // fill, since their cursor exists.
   it('a resync also fills the gap from the store for other sessions holding a conversation', async () => {
     const mock = new MockPlatform()
     const rows = (id: string, from: number, to: number) =>
@@ -106,7 +100,7 @@ describe('handling resync_required (U3)', () => {
 /** Lets every pending promise and zero-delay timer run */
 const settle = () => new Promise((r) => setTimeout(r, 0))
 
-// #841 items 9 and 10: what the window could not read was dropped with no word
+// #841 items 9 and 10: what the window cannot read is said, not dropped
 describe('what the window could not read is said', () => {
   it('a reconnect that cannot read the session list after its retries says so', async () => {
     const mock = new MockPlatform()
@@ -181,11 +175,7 @@ describe('what the window could not read is said', () => {
   })
 })
 
-/**
- * A reconnect's recovery while the host keeps talking. The session list is read with a request, and live
- * events keep arriving until its answer does; the hub answers only once every linked machine has, so the
- * list can be older than them. The recovery used to apply the rows as they stood.
- */
+// docs/state-management.md §5: the recovery's session list can be older than the live events, so it is merged, not applied.
 describe('reconnect recovery against live events', () => {
   it('a relaunched window keeps re-attachment events when recovery overtakes its initial list (#640)', async () => {
     const mock = new MockPlatform()
@@ -430,7 +420,7 @@ describe('merging the session list on reconnect (U4)', () => {
     mock.sessions.get('u4-s2')!.name = 'merge-complete marker'
     mock.setConnectionState('disconnected')
     mock.setConnectionState('connected')
-    // The name update is the proof that "the merge actually ran" — preview preservation is checked on top of that
+    // The name shows the merge ran; the kept preview is checked on top of that
     await vi.waitFor(() => expect(useStore.getState().sessions['u4-s2']!.name).toBe('merge-complete marker'))
 
     expect(useStore.getState().sessions['u4-s2']!.preview).toBe(preview)
@@ -451,12 +441,8 @@ describe('merging the session list on reconnect (U4)', () => {
   })
 })
 
-/*
- * #173: if the socket drops, the client refuses an `agents.send` that never got an answer with
- * `connection_lost`. The host may already have received that message, but the screen used to raise a
- * failure toast and put the text back into the composer — sending it again then sends the same
- * instruction twice.
- */
+// #173: a dropped socket refuses an unanswered `agents.send` with `connection_lost`, but the host may have it; a failure
+// toast and the text back in the composer would have the person send it twice.
 describe('a message sent at the instant of disconnect (#173)', () => {
   async function sendingWhenTheLineDrops(delivered: boolean) {
     const mock = new MockPlatform()
@@ -500,11 +486,7 @@ describe('a message sent at the instant of disconnect (#173)', () => {
   })
 })
 
-/*
- * Linked machines (#82, docs/plans/remote-hub.md). The hub lists another machine's sessions with `machine` set and their
- * ids qualified; while that machine is away it answers from its mirror with `unreachable`. When the machine comes back it
- * sends `machine_resync`, and the UI recovers **that machine alone**: its rows, its open conversations, its wakes.
- */
+// docs/state-management.md §7: `machine_resync` recovers that machine alone: its rows, its open conversations, its wakes.
 describe('linked machines (#82)', () => {
   const box = (over: Partial<MachineInfo> = {}): MachineInfo => ({
     id: 'box', name: 'Box', sshTarget: 'me@box', shell: 'posix', wslDistro: null, command: null, status: 'connected',
@@ -550,10 +532,8 @@ describe('linked machines (#82)', () => {
   })
 
   /*
-   * #1902: an update restarts a machine's host. Its terminals begin again at 1 and its Run commands start with new run ids, so a
-   * view that kept the old ones draws another shell under an old tab or stays on a run that is gone. The machine's own resync is
-   * the word the window gets (the connection to this computer's host did not change), and it reaches the views as a count
-   * that is the machine's alone (resyncsOf) and as the run ledger read again.
+   * #1902: an update restarts a machine's host: terminals count from 1 again and runs get new ids. The machine's resync is
+   * the only word the window gets; it reaches the views as that machine's count (`resyncsOf`) and the run ledger read again.
    */
   it("a machine's resync counts for that machine's projects only, and reads their runs again with the new run ids", async () => {
     const mock = new MockPlatform()
@@ -795,11 +775,8 @@ describe('linked machines (#82)', () => {
   })
 })
 
-/*
- * One source for "is this machine there" (#1611): the machine's own row. The `unreachable` mark on a row says only that
- * the hub answered one list from its mirror, and a list read that lands late or fails leaves it behind while the machine
- * says connected. Such a row is never dimmed, and is read again at the next word the hub has about the machine.
- */
+// docs/state-management.md §7: away comes from the machine's own row, never a row's `unreachable` mark (#1611). A row
+// still marked is read again at the hub's next word about the machine.
 describe('a machine the hub says is connected is never shown away (#1611)', () => {
   const box = (over: Partial<MachineInfo> = {}): MachineInfo => ({
     id: 'box', name: 'Box', sshTarget: 'me@box', shell: 'posix', wslDistro: null, command: null, status: 'connected',
@@ -848,7 +825,6 @@ describe('a machine the hub says is connected is never shown away (#1611)', () =
     expect(away()).toEqual({ project: true, session: true })
   })
 
-  // #1822: a session working when the link dropped is not shown running while it is down, and its real state comes back
   it('a session working on a machine whose link drops is no longer working, until the machine is read again', async () => {
     const { mock } = await pair()
     mock.sessions.get('box.cm-1')!.state = 'working'
@@ -863,7 +839,6 @@ describe('a machine the hub says is connected is never shown away (#1611)', () =
     await vi.waitFor(() => expect(useStore.getState().sessions['box.cm-1']!.state).toBe('working'))
   })
 
-  // #2146 review: a session paused on its background work there is not counted as working while its machine cannot be heard
   it('a session paused on background work on a machine whose link drops is no longer paused, until the machine is read again', async () => {
     const { mock } = await pair()
     const there = mock.sessions.get('box.cm-1')!
@@ -1043,10 +1018,8 @@ describe('a machine the hub says is connected is never shown away (#1611)', () =
   })
 })
 
-/*
- * Last in the file: it replays thousands of events, and the render keys they take are module state that the
- * #79 cursor tests above measure from.
- */
+// Last in the file: it replays thousands of events, and their render keys are module state the #79 cursor tests above
+// measure from.
 describe('the pen for events before registration is bounded (#392)', () => {
   const call = (sessionId: string, i: number) =>
     ({ sessionId, type: 'tool_call', callId: `c${i}`, summary: { tool: 'Read', title: `read ${i}` } }) as NormalizedEvent
@@ -1082,7 +1055,7 @@ describe('the pen for events before registration is bounded (#392)', () => {
     mock.sessions.set('pen-later', sessionInfo('pen-later'))
     await useStore.getState().attach(mock)
     expect(useStore.getState().chat['pen-never']).toBeUndefined()
-    // A pen still inside the window is replayed as before
+    // A pen still inside the window is still replayed
     expect(useStore.getState().chat['pen-later']!.map(line)).toEqual(['read 1'])
   })
 })

@@ -6,23 +6,17 @@ import { mockError } from './mock-error.js'
 
 /** The mock terminal, behind the `terminal` port */
 export class TerminalsMock {
-  /**
-   * The mock terminal. Does not spawn a real shell — it fakes only **the property of being
-   * bound to a cwd**, since what is being verified is "does the same terminal carry over when
-   * the session changes," not the shell itself.
-   */
+  /** No shell: only the binding to a cwd, since the check is whether a terminal carries over between sessions */
   terminalState: {
     byCwd: Map<string, { id: string; title: string; history: string; alive: boolean }[]>
     input: { terminalId: string; data: string }[]
     resized: { terminalId: string; cols: number; rows: number }[]
     closed: string[]
   } = { byCwd: new Map(), input: [], resized: [], closed: [] }
-  /** For tests: when set, opening a terminal fails with this reason */
   createError: string | null = null
   termHandlers = new Set<(e: { terminalId: string; data: string }) => void>()
   termExitHandlers = new Set<(e: { terminalId: string; exitCode: number | null }) => void>()
 
-  /** For tests: makes a terminal produce some output */
   emitTerminal(terminalId: string, data: string): void {
     for (const [, list] of this.terminalState.byCwd) {
       for (const t of list) if (t.id === terminalId) t.history += data
@@ -30,7 +24,7 @@ export class TerminalsMock {
     deliver(this.termHandlers, { terminalId, data })
   }
 
-  /** For tests: the shell has died — an exit that is not a command run (runId) rides the same lane */
+  /** The shell died; a command run's exit (runId) rides the same lane */
   emitTerminalExit(terminalId: string, exitCode: number | null): void {
     for (const [, list] of this.terminalState.byCwd) {
       for (const t of list) if (t.id === terminalId) t.alive = false

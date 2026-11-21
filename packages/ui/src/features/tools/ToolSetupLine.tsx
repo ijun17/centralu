@@ -10,7 +10,7 @@ import { useMachineName } from '../../store/selectors.js'
 import { setupOf, setupView, type SetupView } from './setupLine.js'
 import { useToolSetupActions } from './useToolSetup.js'
 
-/** What a place says for a tool the person sets up from a terminal: each place keeps its own words for it (a different sentence in each) */
+/** Each place's own words for a tool set up from a terminal */
 export type TerminalHints = {
   /** Installed, signed out: "<tool> needs a login, run <command> in a terminal" */
   login: (label: string, command: string) => string
@@ -19,15 +19,9 @@ export type TerminalHints = {
 }
 
 /**
- * A tool's setup line (#59, owner 2026-10-27): the one piece the new-session dialog, the first-run assistant card and
- * the new-app dialog show where a tool cannot be used yet. It says why in one line and gives the action the state allows:
- * Install (with progress and Stop, then Retry on a failure), Sign in (with "Waiting for the browser…" and Stop, then
- * Retry after a timeout), only a sentence on a linked machine, and the terminal command for a tool Centralu does not set
- * up (as before).
- *
- * `shown` is whether the tool is blocked. When it turns false (a sign-in succeeded) the line fades out and folds away
- * (`Fold`), still saying what it said, and the caller's Start enables at once: nothing here delays input.
- * `refusal` is a reason that is not about setup (a tool that cannot keep what this start asks): said as plain text.
+ * A tool's setup line (#59), shared by the new-session dialog, the first-run card and the new-app dialog: why the tool
+ * cannot be used yet, with the action its state allows (`setupView`). `shown` off folds it away still saying what it said
+ * (docs/design-system.md §9). `refusal`: a reason not about setup, said as plain text.
  */
 export function ToolSetupLine({
   status,
@@ -52,20 +46,16 @@ export function ToolSetupLine({
   /** Reads the list again (a linked machine's install is followed by asking; this computer's by events) */
   redetect?: () => void
   testId: string
-  /** Placement and type of the line in its place */
   className: string
 }) {
   const linked = !!machine
   const machineName = useMachineName(machine)
   const live = useStore((s) => s.toolSetups[status?.name ?? ''])
-  // A tool the list does not know (a linked machine's host that predates it) is not found there: said as before, never an empty line
+  // A tool the list does not know (an older linked host) gets the terminal install line, never an empty one
   const view: SetupView = refusal ? { kind: 'ready' } : status ? setupView(setupOf(status, live, linked), linked) : shown ? { kind: 'terminal_install' } : { kind: 'ready' }
   const actions = useToolSetupActions(status?.name ?? '', machine, view.kind === 'installing', redetect)
 
-  /*
-   * What it said last, with the words it was said in (the tool's name, its command, the machine), kept while it fades
-   * out: the render that turns `shown` off already reads a tool that is ready, or another tool that was picked
-   */
+  // What it said last, kept while it fades: the render that turns `shown` off already reads a ready or another tool
   const now = { view, refusal: refusal ?? null, label, login, detail: status?.detail ?? 'not installed', machineName }
   const last = useRef(now)
   if (shown && (refusal || view.kind !== 'ready')) last.current = now

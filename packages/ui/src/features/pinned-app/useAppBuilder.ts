@@ -4,17 +4,9 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
 
 /**
- * This app's builder session (M4 C-2, C-5) — shared by the pinned view's input row and the
- * "Builder" panel.
- *
- * **This asks the host.** It must not pick a session by looking only at its app field (`appId`):
- * the builder session is not the only session standing under an app (an agent an app asked for
- * stands under that app too, D-1). Which one is the builder session is decided by the host's own
- * registry (`apps.builder`).
- *
- * When it asks again: whenever a session appears or disappears (the count changes). The builder
- * session may have been deleted, or one may have been started somewhere else (the Assistant's
- * create_app, another dialog). Each ask is one lightweight round trip.
+ * This app's builder session (M4 C-2, C-5), for the input row and the Builder panel. Asked of the host (`apps.builder`):
+ * a session's `appId` does not tell, as an agent an app asked for stands under it too (D-1). Asked again when the
+ * session count changes (deleted, or started elsewhere such as create_app); one light round trip.
  */
 export type AppBuilder = {
   /** The builder session's id — undefined while still being asked, null if there is none */
@@ -22,7 +14,7 @@ export type AppBuilder = {
   /** Started by the person when there is none (`apps.createBuilder`; the host chooses the tool) */
   start(): Promise<void>
   starting: boolean
-  /** The reason it could not be started — exactly the host's own wording */
+  /** Why it could not start, in the host's words */
   error: string | null
 }
 
@@ -39,7 +31,7 @@ export function useAppBuilder(projectId: string | null, appId: string, machine?:
     platform.apps
       .builder(appId, projectId, machine ?? undefined)
       .then((b) => alive && setId(b?.id ?? null))
-      // If asking fails, it is treated as none existing — pressing start, the host returns the existing one if there already is one (one per app)
+      // A failed ask reads as none: on start the host returns the existing one (one per app)
       .catch(() => alive && setId(null))
     return () => {
       alive = false
@@ -51,7 +43,7 @@ export function useAppBuilder(projectId: string | null, appId: string, machine?:
     setError(null)
     try {
       const b = await platform.apps.createBuilder(appId, projectId, undefined, machine ?? undefined)
-      // Registered through the same path as the host's session_created — arriving twice still counts once
+      // As the host's session_created; arriving twice counts once
       useStore.getState().dispatchEvent({ type: 'session_created', sessionId: b.id, session: b })
       setId(b.id)
     } catch (e) {

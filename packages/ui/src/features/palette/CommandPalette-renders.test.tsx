@@ -1,9 +1,6 @@
 /**
- * A closed palette is not drawn again for the events of sessions: it is mounted for the window's life, and the sessions
- * map it lists changes with every event of every session, a streamed reply's every piece included.
- *
- * Real React and the real store; a closed palette draws nothing, so the node test run needs no DOM (as in
- * update-check-on-open.test.ts).
+ * A closed palette, mounted for the window's life, is not drawn again for every session event (each streamed piece
+ * included). Real React and store; it draws nothing, so the node run needs no DOM (as update-check-on-open.test.ts).
  */
 import { act, createElement, Profiler } from 'react'
 import { createRoot, type Root } from 'react-dom/client'

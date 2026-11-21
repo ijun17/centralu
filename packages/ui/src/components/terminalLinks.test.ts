@@ -42,11 +42,7 @@ describe('terminal HTTP links', () => {
     expect(linksAt(4)).toMatchObject([{ text: 'https://example.com/', range: { start: { x: 4, y: 4 }, end: { x: 22, y: 4 } } }])
   })
 
-  /*
-   * window.open opens nothing in the desktop webview (WKWebView) — with no new-window handler,
-   * wry drops the request (#159). Opening has to go through the given opener function (the
-   * platform port).
-   */
+  // window.open opens nothing in WKWebView: with no new-window handler wry drops it (#159), so the port's opener is used
   it('opens an activated link through the given opener, not window.open', () => {
     const { term, linksAt } = fakeTerm('go https://example.com')
     const opened: string[] = []

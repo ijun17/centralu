@@ -11,7 +11,7 @@ import { BranchIcon } from '../../../components/icons.jsx'
 /**
  * A worktree proposal (#69) — one door, and this is only a finger pointing at it, with one value riding along: the branch name. The project's ⋯
  * menu button lights up, and its New session (the door) brings up a dialog with the worktree toggle already on and
- * the name pre-filled; the sidebar's + it used to name is gone (owner, 2026-10-18: sessions start from the menu). Creating it is, to the very end, the person's own act.
+ * the name pre-filled (owner, 2026-10-18: sessions start from the menu). Creating it is, to the very end, the person's own act.
  */
 export function WorktreeProposalRow({ item }: { item: Extract<ChatItem, { kind: 'tool' }> }) {
   const branch = item.title && !/propose_worktree_session$/.test(item.title) ? item.title : null
@@ -40,8 +40,8 @@ export function WorktreeProposalRow({ item }: { item: Extract<ChatItem, { kind: 
 }
 
 /**
- * The way back to the session that asked for this one (#371 part B), a row of the header's ⋯ menu (#2213; it was a badge
- * beside the name). The caller may since have been deleted; the row then says so, not pressable, rather than disappearing,
+ * The way back to the session that asked for this one (#371 part B), a row of the header's ⋯ menu (#2213). The caller may
+ * since have been deleted; the row then says so, not pressable, rather than disappearing,
  * since the session still did that asker's work. A session of the same project started this one with start_agent (#561):
  * the session, not the project, is named; one of another project is named with its project.
  */

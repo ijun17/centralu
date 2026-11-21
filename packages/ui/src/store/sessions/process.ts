@@ -4,12 +4,6 @@ import type { AppState, StoreGet, StoreSet } from '../state.js'
 import { ifSessionStill, omitKey } from '../patch.js'
 import { trackWorkingSince } from '../sessionList.js'
 
-/**
- * A session's agent process: resuming, waking, forking or restarting it, stopping its turn or its
- * background tasks, and switching its tool or settings.
- */
-
-/** The store's actions for a session's agent process */
 type ProcessActions = Pick<
   AppState,
   | 'resumeSession'
@@ -52,13 +46,7 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
     }
   },
 
-  /**
-   * Wakes a sleeping session ahead of time (the instant it is picked).
-   *
-   * **A failure leaves its reason behind.** It is not raised as a toast — that would make the screen
-   * noisy while someone is scanning through the list. Instead it is written onto that session's own
-   * hint line, so whoever is looking can see why it is not resuming.
-   */
+  /** A failure goes on the session's hint line, not a toast, which would be noise while scanning the list */
   async wake(sessionId) {
     const s = get()
     const session = s.sessions[sessionId]
@@ -117,28 +105,15 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
     })
   },
 
-  /**
-   * Restarts only the agent. The conversation record is left as is; only the process is replaced —
-   * creating a new session when a tool goes unresponsive would cut off the context.
-   */
+  /** Replaces only the process: a new session for an unresponsive tool would cut off the context */
   async restartSession(sessionId) {
     const platform = get().platform
-    /*
-     * **Prevents a second press** (dogfooding).
-     *
-     * Restarting kills the process and brings it back up, which takes a few seconds, and the screen
-     * stayed silent through it. So the person pressed it again, and the second press **killed the
-     * process that had just come up** — the exact button pressed to fix something was the one causing
-     * the breakage.
-     *
-     * The lock is the same `resuming` that `wake` and `fork` use. All three state the same fact — "this
-     * session's process is being replaced right now" — so keeping a separate indicator for each would
-     * leave one button looking fine while another was mid-flight.
-     */
+    // A second press would kill the process just brought up. One `resuming` lock with `wake` and `fork`: all three say
+    // the process is being replaced, so no button looks free while another is mid-flight.
     if (!platform || get().resuming[sessionId]) return false
     set((s) => {
       const sessions = { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, state: 'idle' as const } }
-      // Restarting ends whatever turn was running — its clock goes with it (issue #23)
+      // Restarting ends the running turn, and its clock (#23)
       return {
         sessions,
         workingSince: trackWorkingSince(s.workingSince, sessions, Date.now()),
@@ -158,7 +133,7 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
       )
       return r.resumed
     } catch (e) {
-      // Letting this throw and stop here would leave the lock stuck forever — the button would stay dead
+      // Not thrown: the lock would stay stuck and the button dead
       set({ toast: `Could not restart: ${errorMessage(e)}` })
       return false
     } finally {
@@ -172,7 +147,7 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
     try {
       await get().platform!.agents.interrupt(sessionId)
     } catch (err) {
-      // Silence after failing to stop would leave someone believing it stopped and waiting — the exact kind of failure this project forbids
+      // Said: silence would leave someone believing it stopped
       set((s) => ({ toast: `Could not stop: ${errorMessage(err)}`, stopping: omitKey(s.stopping, sessionId) }))
     }
   },
@@ -206,12 +181,7 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
               [sessionId]: {
                 ...s.sessions[sessionId]!,
                 tool: info.tool,
-                /*
-                 * The model and its dependent settings are decided by the host (see the comment on
-                 * `manager.switchTool`) — if the screen did not follow along, the menu would keep
-                 * showing 'sonnet' turned on while the session itself actually ran on codex's default,
-                 * a screen that gets more wrong the more it is read.
-                 */
+                // The host decides the model and its settings (`manager.switchTool`); the menu follows it
                 model: info.model,
                 effort: info.effort,
                 verbosity: info.verbosity,
@@ -247,12 +217,7 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
           },
         },
       })))
-      /*
-       * States exactly what changed. This used to say "Perms:" for anything that was not the model —
-       * so even changing effort showed "Perms: normal," and what the screen said no longer matched
-       * what had just been done. (Adding verbosity, #54, created a third place to lie, which is why
-       * this is being fixed now.)
-       */
+      // One wording per setting (#54): a single "Perms:" would say "Perms: normal" after an effort change
       const changed =
         s.model !== undefined
           ? `Model: ${info.model ?? 'Default'}`
@@ -263,11 +228,7 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
               : s.serviceTier !== undefined
                 ? `Speed: ${info.serviceTier ?? 'default'}`
                 : `Perms: ${info.permissionPreset}`
-      /*
-       * When it takes effect is also stated as it actually happened (#164). This used to always say
-       * "(from next turn)," but the host could replace the process mid-turn on the spot and lose the
-       * turn in progress. It now returns what the host actually did.
-       */
+      // As it happened (#164): a process replaced mid-turn is not announced as "(from next turn)"
       const when =
         info.applied === 'restarted' ? 'agent restarted'
         : info.applied === 'after_turn' ? 'applies when this turn ends'

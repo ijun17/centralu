@@ -9,9 +9,8 @@ const LEFT_ALONE = 'The folder on disk is left alone.'
 export const CHECKING = 'Checking what happens to the folder…'
 
 /**
- * What the dialog adds for a project whose machine is not connected (#2330): the delete is taken now and done there once
- * the machine is connected again, so everything the sentences before it say happens then, on that machine. The lead is
- * the project tooltip's for the same state (`ProjectDetail`).
+ * Added when the project's machine is not connected (#2330): the delete is taken now and done there on reconnect, so
+ * what the sentences before it say happens then. The lead is the project tooltip's for that state (`ProjectDetail`).
  */
 export function awayNote(machineName: string): string {
   return `Not connected to ${machineName}, so the project only leaves the list now. The rest happens on ${machineName} when it is connected again.`
@@ -26,18 +25,12 @@ const COMING_BACK =
 const WHEN = 'when no session that could bring the project back is left in Centralu’s session archive and no other project is at the folder'
 
 /**
- * What the Delete project dialog says of the folder when the person has not asked for it to go to the Trash (#1301).
- *
- * An ordinary project's folder is left alone. A folder of the user folder that was registered in place (#1141) is not: it is
- * the app, and nothing in the user folder lists it any more, so the host **may** move it to `app-trash/` in the data folder of
- * the computer it is on (#1204) — never put as certain: the move also waits for the folder to carry the adoption's mark, and for
- * every project and trash path to resolve.
- *
- * `outlook` is the host's answer, asked when the dialog opens with real-path matching: a project added again through a junction,
- * a link or a `subst` drive counts; one inside an app folder is told so without being called an app folder itself; one whose
- * path could not be told from an app folder's says so. `'pending'` while it comes. From a host without the call (`null`) the
- * mark `ProjectInfo.fromUserFolder` decides (set by spelling alone), and a host from before the mark leaves it absent: the
- * ordinary sentence.
+ * The dialog's folder sentence when the Trash box is off (#1301). An ordinary folder is left alone; a user-folder folder
+ * registered in place (#1141) is the app, listed nowhere else, so the host may move it to `app-trash/` in its
+ * computer's data folder (#1204), never put as certain (`WHEN`).
+ * `outlook` is the host's real-path answer: a junction, link or `subst` drive counts; a project inside an app folder is
+ * told so; an unresolvable path says so. `'pending'` while it comes. `null` (a host without the call): the mark
+ * `ProjectInfo.fromUserFolder`, set by spelling alone, decides; a host that sends no mark gets the ordinary sentence.
  */
 export function folderNote(project: Pick<ProjectInfo, 'fromUserFolder'>, outlook: DeleteOutlook | 'pending' | null = null): string {
   if (outlook === 'pending') return CHECKING

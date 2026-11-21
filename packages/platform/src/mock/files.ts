@@ -3,24 +3,16 @@ import { MemoryFs } from './memory-fs.js'
 
 /** The `fs` port over MemoryFs, with the records tests read (reads, watches, trashed and revealed paths) */
 export class FilesMock {
-  /** For tests: which project a file was read from and shown for — an eye on whether the grid's neighboring-panel link goes to its own project (#182) */
   readonly fileOps: { op: 'read' | 'reveal'; projectId: string; path: string; sessionId?: string }[] = []
-  /**
-   * For tests: what a session's own folder (its worktree) holds where it differs from the project's, by session and
-   * path (#1209). A read through that session finds these first, as the host reads the worktree's copy.
-   */
+  /** A session's worktree files that differ from the project's, read first as the host does (#1209) */
   readonly sessionFiles = new Map<string, Record<string, string>>()
   readonly memoryFs = new MemoryFs()
-  /** The set of watched paths registered via fs.watch (#34) — tests check what the screen asked to watch */
   watchedDirs = new Map<string, string[]>()
-  /** For tests: what was sent to the trash and what was opened in the file manager (#18/#19) */
   readonly trashed: string[] = []
-  /** Projects whose whole folder went to the trash (`trashProjectFolder`, #838) */
   readonly trashedProjects: string[] = []
   readonly revealed: string[] = []
   readonly revealedImages: string[] = []
 
-  /** For tests: when set, the file search fails with this reason */
   searchError: string | null = null
 
   readonly fs = {
@@ -29,7 +21,7 @@ export class FilesMock {
       return this.memoryFs.search(query, limit)
     },
     listDir: async (_projectId: string, path: string) => this.memoryFs.listDir(path),
-    // Only records the watch set — tests check the screen's reaction by emitting fs_changed directly
+    // Only records the set; a test emits fs_changed itself
     watch: async (projectId: string, paths: string[]) => {
       this.watchedDirs.set(projectId, [...paths])
       return { watched: paths.length }

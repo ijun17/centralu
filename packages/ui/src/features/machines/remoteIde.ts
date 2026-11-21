@@ -16,11 +16,8 @@ export type RemoteIde = {
 
 /**
  * "Open in VS Code" for a project on a linked machine (#82, docs/plans/remote-hub.md §6): a Remote-SSH link to the
- * machine's own path (`remoteIdeUrl` in core), opened through the platform port like any other link.
- *
- * Null for this computer's projects, which keep their own IDE and file manager actions, and for a machine VS Code
- * cannot reach this way (a WSL distro behind Windows' ssh, a target a link cannot carry): the button is not drawn, so
- * nobody presses one that cannot work. The reason is in `remoteIdeSupport` and in the plan.
+ * machine's own path (core's `remoteIdeUrl`). Null for this computer's projects and for a machine VS Code cannot reach
+ * this way (a WSL distro behind Windows' ssh, a target a link cannot carry; `remoteIdeSupport`), so no dead button shows.
  */
 export function useRemoteIde(projectId: string | null | undefined): RemoteIde | null {
   const platform = usePlatform()

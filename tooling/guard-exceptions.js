@@ -236,3 +236,52 @@ export const ARCHIVE_ALLOWED = [
   { file: "agent-host\\/src\\/dev-services\\/store\\/", text: "\\b(?:[a-z]\\.)?trash\\b(?=[),]| =| TEXT| FROM| (?:as|AS)\\b)|\\btrashed_at\\b|\\b(?:as|AS) trashed?\\b|^trash$|\\bsubagent_messages_trash\\b", why: "SQL on the `sessions.trash` and `subagent_messages.trashed_at` columns" },
   { own: true, file: "protocol\\/src\\/commands\\/files\\.ts$", text: "^trash$", why: "the `fs.resolve` purpose \"trash\": the entry that goes to the OS bin" },
 ]
+
+/**
+ * The source files `guard/comments` holds above its 35% share of comment lines (#2355), each at its share now. Most are
+ * type declarations whose fields each keep one line the type cannot say (what absence means, what an older peer does, a
+ * unit, a security consequence); the rest keep platform facts, races or measured numbers. The guard holds each number as a
+ * ceiling, and tooling/guards-checks.test.ts fails until a change that brings a file down lowers its line (at or under
+ * 35%, removes it).
+ */
+export const COMMENT_SHARE_HELD = {
+  files: {
+    'packages/core/src/grid/layout.ts': 44,
+    'packages/platform/src/ports/apps.ts': 38,
+    'packages/platform/src/ports/fs.ts': 49,
+    'packages/platform/src/ports/lifecycle.ts': 56,
+    'packages/platform/src/ports/preferences.ts': 43,
+    'packages/platform/src/ports/projects.ts': 56,
+    'packages/platform/src/ports/system.ts': 63,
+    'packages/protocol/src/app-id.ts': 40,
+    'packages/protocol/src/call-budget.ts': 40,
+    'packages/protocol/src/commands/methods/apps.params.ts': 48,
+    'packages/protocol/src/commands/methods/assistant.params.ts': 42,
+    'packages/protocol/src/commands/methods/host.params.ts': 55,
+    'packages/protocol/src/commands/methods/projects.params.ts': 47,
+    'packages/protocol/src/commands/methods/sessions.params.ts': 45,
+    'packages/protocol/src/commands/methods/settings.params.ts': 54,
+    'packages/protocol/src/entities/apps.ts': 36,
+    'packages/protocol/src/entities/sessions.ts': 38,
+    'packages/protocol/src/entities/tools.ts': 41,
+    'packages/protocol/src/entities/usage.ts': 37,
+    'packages/protocol/src/turn-who.ts': 48,
+    'packages/ui/src/features/files/dragPath.ts': 42,
+    'packages/ui/src/features/session/RunMenu.tsx': 43,
+    'packages/ui/src/features/session/autocompleteState.ts': 38,
+    'packages/ui/src/features/session/dragLink.ts': 49,
+    'packages/ui/src/features/session/guiCommands.ts': 41,
+    'packages/ui/src/features/sidebar/layout.ts': 53,
+    'packages/ui/src/store/state/appViews.ts': 49,
+    'packages/ui/src/store/state/apps.ts': 50,
+    'packages/ui/src/store/state/assistant.ts': 41,
+    'packages/ui/src/store/state/conversation.ts': 55,
+    'packages/ui/src/store/state/layers.ts': 45,
+    'packages/ui/src/store/state/layout.ts': 54,
+    'packages/ui/src/store/state/mail.ts': 60,
+    'packages/ui/src/store/state/notifications.ts': 43,
+    'packages/ui/src/store/state/preferences.ts': 50,
+    'packages/ui/src/store/state/projects.ts': 54,
+    'packages/ui/src/store/state/sessions.ts': 47,
+  },
+}

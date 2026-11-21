@@ -10,17 +10,9 @@ import { Tooltip } from '../../components/primitives.jsx'
 import { usePresence } from '../../components/presence.js'
 import { useStore } from '../../store/store.js'
 
-/**
- * A session's background work, on screen (#290).
- *
- * On 2026-10-04 two background subagents stopped when the person interrupted the turn to rephrase a message, and
- * nothing on screen said they were gone; it took four hours for anyone to notice. So what runs behind the turn is
- * counted where the session is named (the header, the sidebar row), and the list it opens keeps a
- * task that ended — stopped, failed or completed — with how it ended, for as long as one still runs. When the last one ends
- * the badge goes with the list (owner, 2026-11-12, #2213), and what ended is in the conversation.
- *
- * The count leaves out what the tool calls ambient (housekeeping, not activity), and ended tasks: it answers "is
- * something still running back there".
+/*
+ * A session's background work (#290), counted where the session is named, as an interrupt can stop it unsaid. The list
+ * keeps ended tasks while one runs; the badge goes with the last (#2213). The count leaves out ended and ambient tasks.
  */
 
 const KIND: Record<BackgroundTask['kind'], string> = {
@@ -38,8 +30,8 @@ const STATUS: Record<BackgroundTask['status'], string> = {
 
 /**
  * What the list's header counts: the tasks running, by the same rule as the capsule's number (ambient ones are left
- * out). The list is only open while work runs (#2213). The header used to count every running row, so a session with one real
- * and one ambient task said "1" on the capsule and "2 running" in the list (#1143 U25).
+ * out). The list is only open while work runs (#2213). Counting every running row would make a session with one real
+ * and one ambient task say "1" on the capsule and "2 running" in the list (#1143 U25).
  */
 export function listCount(tasks: readonly BackgroundTask[]): string {
   return `${backgroundCount(tasks)} running`
@@ -74,7 +66,7 @@ export function BackgroundTasksBadge({
   /*
    * Closes on an outside click, Esc or the window losing focus (useDismiss), like the session settings menu — an open
    * list must not wall off the header. "Outside" is outside both the button and the list: the list is not inside the
-   * button's box in the DOM any more.
+   * button's box in the DOM.
    */
   useDismiss({ open, onClose: () => setOpen(false), refs: [buttonRef, listRef], returnFocusTo: buttonRef })
   // The last one ended: nothing left to hold open

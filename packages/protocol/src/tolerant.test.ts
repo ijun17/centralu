@@ -8,7 +8,7 @@ import { currentSession, missingDefaults, withoutDefaultedFields } from './test-
 describe('a client reads an older host (protocol.md §4, #280)', () => {
   it('a session list without the fields added since gets their defaults, backgroundTasks included', () => {
     const old = withoutDefaultedFields(SessionInfo, currentSession('s1')) as Record<string, unknown>
-    // What a beta.7 host sent: no backgroundTasks (#305)
+    // What a beta.7 host sent: no backgroundTasks
     expect(old).not.toHaveProperty('backgroundTasks')
     const [read] = parseRpcResult('sessions.list', [old])
     expect(read!.backgroundTasks).toEqual([])
@@ -23,7 +23,7 @@ describe('a client reads an older host (protocol.md §4, #280)', () => {
     const fine = withoutDefaultedFields(SessionInfo, currentSession('s2'))
     const read = parseRpcResult('sessions.list', [odd, fine])
     expect(read).toHaveLength(2)
-    // Kept as it came — what this client did with every value before it parsed any
+    // Kept as it came, as an unparsed result would be
     expect(read[0]!.state).toBe('daydreaming')
     expect(read[0]!.backgroundTasks).toEqual([])
     expect(read[1]!.backgroundTasks).toEqual([])

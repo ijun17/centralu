@@ -8,7 +8,7 @@ describe('the thread’s state', () => {
   it('is a word, with how it ended when it is done and did not finish, and a word a newer host wrote as it wrote it', () => {
     expect(threadStateLabel({ state: 'running', outcome: null, ask: null })).toBe('Running')
     expect(threadStateLabel({ state: 'review', outcome: null, ask: null })).toBe('In review')
-    // Blockers went with threads: an older host's word is shown as it wrote it, not as a state this window has
+    // This window has no blocked state: an older host's word is shown as it wrote it, not as a state this window has
     expect(threadStateLabel({ state: 'blocked', outcome: null, ask: null })).toBe('blocked')
     expect(threadStateLabel({ state: 'done', outcome: 'finished', ask: null })).toBe('Done')
     expect(threadStateLabel({ state: 'done', outcome: 'dropped', ask: null })).toBe('Done (dropped)')
@@ -26,7 +26,7 @@ describe('the thread’s state', () => {
 describe('held mail', () => {
   it('says why, and frees a pause with Resume on the thread, the rest by sending it', () => {
     expect(heldLabel('loop')).toMatchObject({ action: 'Resume', kind: 'resume-thread' })
-    // `budget`, which no build sets now (#2247), reads as any word this window does not know
+    // `budget`, which no build sets (#2247), reads as any word this window does not know
     expect(heldLabel('budget')).toEqual({ why: 'budget', action: 'Send now', kind: 'release' })
     expect(heldLabel('policy')).toMatchObject({ action: 'Release', kind: 'release' })
     expect(heldLabel('uncertain').action).toBe('Send again')

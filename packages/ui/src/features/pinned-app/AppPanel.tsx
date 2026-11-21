@@ -8,25 +8,9 @@ import { IconButton } from '../../components/IconButton.jsx'
 import { registerSlot } from './slots.js'
 import { DragShield } from './dragShield.jsx'
 
-/**
- * An app's panel, on the project screen (#203) or the grid (#288): a header that moves the panel,
- * and a slot its view is laid over (slots.ts) — the view itself stands in PinnedApps, because an
- * iframe that moves loses its document.
- *
- * The pinned view's own header (Runs, Secrets, Versions, Builder, close) is not drawn in a panel —
- * each of those opens a side panel a slot has no room for. "Open" goes to the app view, where they
- * are.
- *
- * The header says the app's name and its status in words (`app.status.label`: running, stopped,
- * untrusted…), as the sidebar row does; why an app cannot run is said by the view itself in the
- * slot, with its reason and its button, never a blank frame.
- *
- * While anything is dragged the panel lays a transparent cover over its view (dragShield.tsx), so a drag over the view
- * is the panel's to hear, not the frame's. The view stays in sight; the dragged panel's own view is dimmed with it.
- *
- * On the grid the header also carries the panel's span in cells (#306): a small "2×1" that opens a picker, so the
- * person sizes the panel where they are looking at it. The project screen passes none — its panels are all one size.
- */
+// An app's panel on the project screen (#203) or grid (#288): a header that moves it, and a slot its view is laid over
+// (slots.ts) and covered during drags (dragShield.tsx). The view's side panels need room, so Open goes to the app view.
+// Status in words, as the sidebar; why it cannot run is the view's to say. The grid adds the span picker (#306).
 
 /** Where a grid panel's span comes from, in the words the picker's "default" line uses */
 const FROM_WORDS: Record<Exclude<GridSpanSource, 'placement'>, string> = {
@@ -67,7 +51,6 @@ export function AppPanel({
   appId: string
   /** The key of the view laid over this panel's slot: the app's pinned view, or its grid view */
   viewKey: string
-  /** This panel is the one being dragged */
   dragged: boolean
   onDragStart: (e: DragEvent<HTMLElement>) => void
   onOpen: () => void
@@ -137,10 +120,8 @@ export function AppPanel({
           <CloseIcon size={14} />
         </IconButton>
       </div>
-      {/*
-        Focusable: the view laid over it is after every panel in the document, so this is where Tab from the header
-        reaches it — focus is handed on to the view (slots.ts).
-      */}
+      {/* Focusable: the view's place in the Tab order,
+          handing focus on to it (slots.ts) */}
       <div
         ref={slot}
         className="min-h-0 flex-1 outline-none"

@@ -145,7 +145,7 @@ export function AddMachineForm({ onDone, canCancel }: { onDone: () => void; canC
       }}
       /*
         Typing here must not reach the app's shortcuts. A plain Esc still does (#842 item 8): it is how Settings closes,
-        and stopping it here left Settings open for as long as a field of this form had the keyboard.
+        and stopping it here would leave Settings open for as long as a field of this form has the keyboard.
       */
       onKeyDown={(e) => {
         if (!isPlainEscape(e.nativeEvent)) e.stopPropagation()

@@ -1,8 +1,5 @@
-/**
- * What a first worktree is likely to be missing (#1512): a new worktree has only the tracked files, so no gitignored
- * `.env` and, unless the lockfiles match, no installed dependencies. The dialog offers both as chips to press, shown
- * with the command in the field they fill; nothing is picked for the person.
- */
+// What a first worktree likely lacks (#1512): it has only tracked files, so no ignored `.env` and, unless the lockfiles
+// match, no installed dependencies. The dialog offers both as chips; nothing is picked for the person.
 
 /** The install command a project folder's lockfile names, or null when it has none the dialog knows */
 export function installCommandFor(rootFileNames: readonly string[]): string | null {

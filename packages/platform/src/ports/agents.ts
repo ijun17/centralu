@@ -26,13 +26,10 @@ import type {
   SleepPolicy,
 } from '@cc/protocol/client'
 
-/** What `agents.usage` answers (docs/protocol.md): the limits, or why there are none, with the cache figures beside them */
 export type UsageAnswer = {
   supported: boolean
   reason?: string
-  /** `supported: false` with this: the tool has no way to report limits (#1616), as against a read that failed */
   notReported?: boolean
-  /** The host is still reading the tool's own command (`usage` is nothing yet, or the last, older answer); it stands in until `usage(tool, machine, { settle: true })` (#1623) */
   provisional?: boolean
   usage: UsageSnapshot | null
   cache?: CacheStats
@@ -40,205 +37,123 @@ export type UsageAnswer = {
 }
 import type { Unsubscribe, ConnectionState, MachineRef } from './common.js'
 
+/** docs/protocol.md §3 holds the contracts not noted here */
 export interface AgentPort {
   createSession(params: CreateSessionParams): Promise<SessionInfo>
   send(sessionId: string, text: string, attachments?: Attachment[]): Promise<void>
-  /** Saves a pasted image and returns its path (so base64 does not end up in the conversation record) */
+  /** Saves a pasted image and returns its path, so base64 stays out of the conversation record */
   saveAttachment(sessionId: string, name: string, mime: string, dataBase64: string): Promise<Attachment>
   respondApproval(
     sessionId: string,
     requestId: string,
     decision: ApprovalDecision,
     scope?: ApprovalScope,
-    /** The pattern that "always allow" targets (computed by core) */
+    /** The pattern "always allow" targets, computed by core */
     matcher?: string,
   ): Promise<void>
-  /** Answers the options (AskUserQuestion) — the answer goes to the model as that tool's result */
+  /** Answers AskUserQuestion; the answers go to the model as that tool's result */
   answerQuestion(sessionId: string, requestId: string, answers: QuestionAnswer[]): Promise<void>
   interrupt(sessionId: string): Promise<void>
-  /** Stops one background task the session listed as stoppable (#290); its ending arrives as an event */
   stopBackgroundTask(sessionId: string, taskId: string): Promise<void>
-  /** Takes the ended background tasks off the session's list (#290) */
   clearBackgroundTasks(sessionId: string): Promise<void>
-  /** Sidebar order (the person sets it by dragging). Sends the whole order at once */
   reorderSessions(projectId: string, orderedIds: string[]): Promise<SessionInfo[]>
-  /**
-   * The app's one and only assistant. **Calling it creates one if it does not exist.**
-   * It does not belong to a project, so projectId is null.
-   */
+  /** Creates the one Assistant if it does not exist; its projectId is null */
   assistant(): Promise<SessionInfo>
-  /**
-   * Returns it if it exists, and **does not create one if it does not** (#63). Used by
-   * whichever screen is opening — creation happens in assistant(), at the moment the
-   * person asks the first question (lazy startup).
-   */
+  /** Never creates it (#63): creation waits for the person's first question */
   assistantPeek(): Promise<SessionInfo | null>
-  /** The tool the Assistant runs on (#63, the card choice on the intro screen). Only meaningful before it is created */
+  /** Only meaningful before the Assistant is created (#63) */
   configureAssistant(tool: ToolName): Promise<void>
-  /**
-   * Grid layout — sessions and apps, in order (#288). Adding, removing and reordering all come
-   * through this one call; the answer is the list as stored (unknown sessions left out).
-   */
   grid(): Promise<GridPanel[]>
   setGridView(panels: GridPanel[]): Promise<GridPanel[]>
-  /** The models available to pick and each model's reasoning strength (what the tool reports through its official API) */
   models(tool: ToolName, machine?: MachineRef): Promise<{ supported: boolean; reason?: string; models: ModelOption[] }>
-  /** Restarts only the agent attached to the session (the conversation stays as is) */
+  /** Restarts only the agent; the conversation stays */
   restartSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }>
   /**
-   * Moves the session to the session archive (#204) — nothing is destroyed here; `TrashPort` is the way out.
-   * `deleteWorktree` and `deleteExternal` choose what goes with it when it is deleted for good from the session archive:
-   * the worktree, and the tool's own conversation file (codex rollout, claude JSONL). Both stay until then.
+   * Moves the session to the session archive (#204); `TrashPort` is the way out. The flags choose what goes when it is
+   * deleted for good from there: the worktree, and the tool's own conversation file.
    */
   deleteSession(sessionId: string, deleteWorktree?: boolean, deleteExternal?: boolean): Promise<void>
   /**
-   * The archive for a session that looks idle (#1512), decided by the host at the last moment: it moves the session only when
-   * nothing it holds would be lost and it is at rest; otherwise nothing moves and `asks` says what would be lost (empty when it
-   * was only busy).
+   * Archives only when nothing would be lost and the session is at rest (#1512); otherwise `asks` lists what would be
+   * lost (empty when it was only busy).
    */
   archiveIfAtRest(sessionId: string, deleteExternal?: boolean): Promise<{ archived: true } | { archived: false; asks: string[] }>
-  /**
-   * What archiving the session would lose and Undo does not bring back (#1595), read only: the lines the archive dialog shows before
-   * anything moves, also when the worktree goes with the session.
-   */
+  /** Read only: what archiving would lose that Undo does not bring back (#1595), worktree included */
   archiveLosses(sessionId: string): Promise<string[]>
-  /** Where the session's agent will compact next time its process starts (#1376), as the host that runs it decides */
+  /** Where the agent compacts next time its process starts, as its host decides (#1376) */
   autoCompact(sessionId: string): Promise<{ controlled: boolean; share: number; tokens: number | null }>
-  /** The material needed to ask the person whether it is fine to delete. Null if it is not a worktree session */
+  /** Null when it is not a worktree session */
   worktreeStatus(
     sessionId: string,
   ): Promise<{ path: string; branch: string; dirty: boolean; changedFiles: number; more?: boolean; unknown?: boolean } | null>
-  /**
-   * A dead-agent handoff record (#78) — the host creates it without calling that session's
-   * tool. The host writes it to the notes location in the data folder and returns the
-   * absolute path (#102, #142); text is for the preview.
-   */
+  /** A dead agent's handoff (#78), made without its tool; written to the data folder's notes (absolute `path`) */
   exportHandoffRecord(sessionId: string, toTool?: ToolName): Promise<{ text: string; path: string }>
   /**
-   * The note for a live handoff (#142) — the first human message after afterSeq (the last seq
-   * right before the request) is the request, and the host puts the agent's last answer after
-   * that in the same spot.
-   * Null means "not yet": either a turn is running, or there is no answer.
+   * A live handoff (#142): the first human message after `afterSeq` is the request, and the agent's answer after it is
+   * the note. Null: not yet (a turn is running, or no answer).
    */
   exportHandoffNote(sessionId: string, afterSeq: number): Promise<{ text: string; path: string } | null>
-  /** The Assistant's list of proposed MCP servers (propose_mcp_server → the ones waiting for approval) */
   mcpProposals(): Promise<{ proposals: { name: string; command: string; args: string[]; why?: string }[] }>
-  /** The person's answer to a proposal — if approved, the app registers it and restarts the Assistant */
+  /** Approving registers it and restarts the Assistant */
   resolveMcpProposal(name: string, approve: boolean): Promise<void>
-  /** The Assistant's list of proposed skills (#71 — propose_skill → the ones waiting for approval) */
   skillProposals(): Promise<{ proposals: { name: string; content: string; why?: string }[] }>
-  /** The person's answer to a skill proposal — if approved, saves it to the DB and restarts the Assistant */
+  /** Approving saves it and restarts the Assistant */
   resolveSkillProposal(name: string, approve: boolean): Promise<void>
-  /** The list of approved skills — viewed and deleted from Settings (a skill that cannot be deleted is worse than none) */
   assistantSkills(): Promise<{ skills: { name: string; content: string }[] }>
   deleteAssistantSkill(name: string): Promise<void>
-  /**
-   * Previous sessions the tool has kept (including ones created from the terminal).
-   * If supported=false, a reason comes with it — even an older tool version does not block
-   * "new session".
-   */
+  /** The tool's kept sessions, terminal ones included; `supported: false` comes with a reason */
   listExternalSessions(
     projectId: string,
     tool: ToolName,
     limit?: number,
   ): Promise<{ supported: boolean; reason?: string; sessions: ExternalSession[] }>
-  /**
-   * Revives a dead session (FR-10). If resumed=false, a reason comes with it.
-   * If `lockedElsewhere`, "fork and continue" can be offered without even reading the reason.
-   */
+  /** Revives a dead session (FR-10). `lockedElsewhere`: offer "fork and continue" without reading the reason */
   resumeSession(
     sessionId: string,
   ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }>
-  /**
-   * Forks off a locked conversation and continues it as this session.
-   * Leaves the original as is — does not take away a conversation another app was using.
-   */
+  /** Continues a locked conversation as a fork; the original, which another app may use, is left as is */
   forkConversation(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }>
-  /**
-   * Switches the session's agent (claude ↔ codex).
-   * **The conversation does not carry over** — the new tool does not know the old conversation.
-   * The record stays in our own store.
-   */
+  /** The conversation does not carry over to the new tool; the record stays in the store */
   switchTool(sessionId: string, tool: ToolName): Promise<SessionInfo>
-  /**
-   * Changes model, permissions and reasoning strength mid-conversation (FR-7).
-   * The fields are defined by the protocol — restating them here would let a later-added field
-   * silently drop out.
-   */
+  /** FR-7. The fields come from the protocol, so a field added there cannot drop out here */
   updateSettings(sessionId: string, settings: Omit<UpdateSettingsParams, 'sessionId'>): Promise<UpdateSettingsResult>
   rename(sessionId: string, name: string): Promise<void>
   markRead(sessionId: string, seq: number): Promise<void>
   /**
-   * Done on a session in error (#1549): it goes to idle and what the window saw (up to `seq`) is read; the error line stays in the
-   * conversation. `cleared` is false when a newer row exists (`newer`: a later error) and the state is left for the person to look at.
+   * An error session goes idle, read up to `seq` (#1549); the error line stays. `cleared: false` when a newer row
+   * exists (`newer`: a later error), left for the person.
    */
   clearError(sessionId: string, seq: number): Promise<{ cleared: boolean; newer: boolean }>
-  /** Don't continue (#1415): the stop Centralu would continue by itself is left for the person. `stopped`: false when nothing waited */
+  /** Leaves to the person the stop Centralu would continue by itself (#1415); `stopped: false` when nothing waited */
   stopContinue(sessionId: string): Promise<{ stopped: boolean }>
   listSessions(): Promise<SessionInfo[]>
   loadMessages(sessionId: string, limit?: number, beforeSeq?: number): Promise<StoredMessage[]>
-  /**
-   * The steps of the native subagent one card launched (#222), oldest first, paging forward from `afterSeq`. Asked only
-   * when the person opens that card's steps — they are never part of `loadMessages`.
-   */
+  /** One launch card's native subagent steps (#222), oldest first from `afterSeq`; never in `loadMessages` */
   loadSubagentMessages(sessionId: string, parentCallId: string, afterSeq?: number, limit?: number): Promise<StoredMessage[]>
-  /**
-   * How many of one launch card's steps are in the session archive (#418), so the card says they were moved there rather than
-   * that none were recorded. A host before it does not answer.
-   */
   subagentTrashed(sessionId: string, parentCallId: string): Promise<{ steps: number }>
-  /**
-   * A local image one of this session's replies names, read by the host the session runs on (`messages.image`). The
-   * window cannot load a file path itself; the host reads only a path a reply wrote, only a real PNG, JPEG, GIF or WebP,
-   * and at most 10 MB, and says why when it does not (docs/security-boundaries/desktop.md "Images a reply names").
-   */
+  /** A local image a reply names, read by the session's host (`messages.image`); limits: docs/security-boundaries/desktop.md "Images a reply names" */
   messageImage(sessionId: string, path: string): Promise<MessageImage>
   capabilities(tool: ToolName, machine?: MachineRef): Promise<AdapterCapabilities>
-  /**
-   * This session's slash commands (skills).
-   * ready=false does not mean "none" — it means the tool is not ready yet.
-   */
+  /** `ready: false` means the tool is not ready yet, not that there are none */
   commands(sessionId: string): Promise<{ ready: boolean; commands: CommandInfo[] }>
-  /**
-   * Account usage and limits (FR-9). Handles only subscription limits. Also what the prompt cache did lately, as that
-   * machine's host counted it (`cache`, absent from a host that predates it).
-   * `sameAccountAsHub`: for a linked machine, the limits are this computer's because both are logged in to one account (#726)
-   */
   usage(tool: ToolName, machine?: MachineRef, opts?: { settle?: boolean }): Promise<UsageAnswer>
-  /**
-   * Limit readings and tokens over time, as that machine's host stored them (`usage.history`, docs/agent-host/usage.md "Usage over time"):
-   * the rows are summed per day or hour and per session, project, model or tool. A host that predates it rejects the call.
-   */
   usageHistory(
     range: { from: string; to: string; groupBy: 'day' | 'hour'; by: UsageHistoryBy; tool?: ToolName },
     machine?: MachineRef,
   ): Promise<UsageHistory>
   detect(machine?: MachineRef): Promise<ToolStatus[]>
-  /**
-   * Centralu's own install and sign-in of a tool that has them (#59: Antigravity). Each answers at once with the setup as it
-   * stands; how it goes on comes as `tool_setup` events. Install runs on `machine`; sign-in is this computer's only
-   * (a linked machine's line says to sign in there).
-   */
   installTool(tool: ToolName, machine?: MachineRef): Promise<ToolSetup>
   cancelInstallTool(tool: ToolName, machine?: MachineRef): Promise<ToolSetup>
   signInTool(tool: ToolName): Promise<ToolSetup>
   cancelSignInTool(tool: ToolName): Promise<ToolSetup>
-  /**
-   * The agent CLIs installed now, and whether idle sessions move to a newer one by themselves (#297). `force: false`
-   * (the window gaining focus) takes a reading from moments ago.
-   */
   versions(force?: boolean, machine?: MachineRef): Promise<AgentVersions>
-  /** "Move idle sessions to a newly installed agent CLI" on or off (#297) */
   setAutoApplyVersions(enabled: boolean, machine?: MachineRef): Promise<AgentVersions>
-  /** Restarts every idle session that runs an older CLI on the installed one; the busy ones are listed (#297) */
   applyVersions(machine?: MachineRef): Promise<{ restarted: string[]; busy: string[] }>
-  /** When idle sessions go to sleep (#568): this host's setting */
   sleepPolicy(): Promise<SleepPolicy>
-  /** "Put idle sessions to sleep after" (#568); null never */
   setSleepPolicy(afterMinutes: number | null): Promise<SleepPolicy>
   /**
-   * Event stream — receives events from the moment of subscription onward. `id` is what every window of this host calls
-   * the event (#2168), so they can agree on which of them tells the person; none where the host names none
+   * Events from the moment of subscribing. `id` is the same in every window of this host (#2168), so they agree on
+   * which tells the person; none where the host names none
    */
   subscribe(handler: (event: NormalizedEvent, id?: string) => void): Unsubscribe
   onConnectionChange(handler: (state: ConnectionState) => void): Unsubscribe

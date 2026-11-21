@@ -10,19 +10,16 @@ import type { Emit } from './event-bus.js'
 
 /** The installed agent CLIs and the sleep policy (#297, #568) */
 export class AgentVersionsMock {
-  /** The installed agent CLIs and the "move idle sessions" setting (#297) — on by default, like the host */
+  /** `autoApply` is the "move idle sessions" setting, on by default as on the host */
   agentVersions: AgentVersions = { installed: {}, autoApply: true, checkedAt: null }
-  /** "Put idle sessions to sleep after" (#568), as the host keeps it */
   sleepPolicy: SleepPolicy = { afterMinutes: 15 }
-  /** Scenario helper (#297): as if the host read these installed versions (used from Playwright) */
   setInstalledVersions(installed: Record<string, string | null>): void {
     this.agentVersions = { ...this.agentVersions, installed: { ...installed }, checkedAt: this.clock.now() }
     this.emit({ type: 'agent_versions', status: { ...this.agentVersions, installed: { ...installed } } })
   }
   readonly agents: Pick<AgentPort, 'versions' | 'sleepPolicy' | 'setSleepPolicy' | 'setAutoApplyVersions' | 'applyVersions'> = {
-    // Like the host (#297): the reading is the host's; this mock never reads a real CLI
     versions: async () => ({ ...this.agentVersions, installed: { ...this.agentVersions.installed } }),
-    // Like the host (#568): the setting is the host's, 15 minutes until changed; the mock puts nothing to sleep itself
+    // The mock puts nothing to sleep itself
     sleepPolicy: async () => ({ ...this.sleepPolicy }),
     setSleepPolicy: async (afterMinutes: number | null) => {
       this.sleepPolicy = { afterMinutes }
@@ -33,10 +30,7 @@ export class AgentVersionsMock {
       this.emit({ type: 'agent_versions', status: { ...this.agentVersions } })
       return { ...this.agentVersions }
     },
-    /**
-     * Like the host (#297): a live session that runs an older CLI is restarted on the installed one when it is idle by
-     * the one busy rule (`atRest`: no turn, no card, no background work), and listed as busy otherwise.
-     */
+    /** As the host (#297): restarted when `atRest` (no turn, card or background work), else listed as busy */
     applyVersions: async () => {
       const restarted: string[] = []
       const busy: string[] = []

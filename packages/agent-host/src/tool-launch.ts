@@ -120,27 +120,18 @@ export function programPath(
   return path
 }
 
-/**
- * What is spawned on Windows for a program that is not on PATH: a path under `%SystemRoot%\System32` that only an
- * administrator can make, so the spawn reports the program missing (ENOENT, which every caller already reads as "not
- * installed") and Windows looks for it nowhere else. Given the bare name, Windows process creation looks in the child's
- * working folder before PATH, and the host runs git, gh and codex in a project's folder: a `git.exe`, `gh.exe` or
- * `codex.exe` committed there ran whenever the tool itself was not installed (#838, reproduced on Windows 11).
- */
-export function notOnPath(name: string, env: Record<string, string | undefined> = process.env): string {
-  return rulesNotOnPath(name, env)
+/** What is spawned for a program the lookup did not find (`notOnPath` in os/rules.ts): missing, never the bare name */
+export function notOnPath(name: string, env: Record<string, string | undefined> = process.env, platform: NodeJS.Platform = process.platform): string {
+  return rulesNotOnPath(name, env, familyOf(platform))
 }
 
-/**
- * An agent CLI (`claude`, `codex`) to spawn: the path found on PATH; when there is none, the bare name off Windows (the
- * spawn searches PATH and nothing else there) and `notOnPath` on Windows, never the bare name.
- */
+/** An agent CLI (`claude`, `codex`) to spawn: the path found on PATH, else `notOnPath`, so not found is not installed */
 export function toolCommand(
   name: string,
   platform: NodeJS.Platform = process.platform,
   find: (name: string) => string | null = (n) => whichTool(n),
 ): string {
-  return find(name) ?? (platform === 'win32' ? notOnPath(name) : name)
+  return find(name) ?? notOnPath(name, process.env, platform)
 }
 
 /** An agent CLI by name, as it is started: what `toolCommand` finds, through its shim's entry on Windows (`launchFor`) */

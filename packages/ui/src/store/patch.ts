@@ -1,8 +1,5 @@
 import type { AppState } from './state.js'
 
-/** Small helpers the store's actions write state with, in every module that holds them */
-
-/** A new object with one key removed (never mutates state directly) */
 export function omitKey<T>(obj: Record<string, T>, key: string): Record<string, T> {
   const next = { ...obj }
   delete next[key]
@@ -10,13 +7,8 @@ export function omitKey<T>(obj: Record<string, T>, key: string): Record<string, 
 }
 
 /**
- * A `set` that updates one session **after** awaiting an RPC (#163) — changes nothing if
- * `session_deleted` arrived in the meantime.
- *
- * The post-await `set` used to spread `{ ...s.sessions[id]!, … }`. If the session was deleted while
- * awaiting, that revived a near-empty row (`{"live":true}`), which broke code that iterates all
- * sessions (`s.touchedPaths is not iterable`). Every post-await session update now goes through this
- * gate, so any future addition gets the same rule.
+ * Every post-await update of one session goes through this (#163): it changes nothing once `session_deleted`
+ * arrived, where spreading the deleted row would revive a near-empty one that breaks code iterating all sessions.
  */
 export function ifSessionStill(
   sessionId: string,
@@ -29,12 +21,8 @@ export function ifSessionStill(
 }
 
 /**
- * `current`, with its keys in the order `order` names (#842 item 3); keys `order` does not name keep their place after
- * those, and names no longer in `current` are skipped.
- *
- * What a failed reorder puts back. It used to put back the whole map as it was before the drag, so anything that
- * happened while the save was out went with it: a session created meanwhile vanished, a state change was undone, and a
- * project deleted meanwhile came back. Only the order was the reorder's to undo.
+ * What a failed reorder puts back (#842): only the order, never the map from before the drag, which would undo what
+ * changed while the save was out. Keys `order` does not name keep their place after those it does.
  */
 export function inOrder<T>(current: Record<string, T>, order: readonly string[]): Record<string, T> {
   const next: Record<string, T> = {}

@@ -7,10 +7,10 @@ use super::*;
 use std::io::BufReader;
 
 /**
- * `kill_group` reaches the whole group the host leads and nothing outside it (#350). It used to
- * run `/bin/kill -TERM -<pid>`, which procps-ng 4.0.4 (Ubuntu 24.04) turns into a signal to the
- * group named by the pid's first digit: there the leader and its child below survived, and a
- * pid starting with 1 sent SIGTERM to every process of the user, this test's runner included.
+ * `kill_group` reaches the whole group the host leads and nothing outside it (#350). It does not
+ * use `/bin/kill -TERM -<pid>`, which procps-ng 4.0.4 (Ubuntu 24.04) turns into a signal to the
+ * group named by the pid's first digit: there the leader and its child below survive, and a
+ * pid starting with 1 sends SIGTERM to every process of the user, this test's runner included.
  * macOS's `kill` reads the argument as a group, so only a Linux run tells the two apart.
  */
 #[cfg(unix)]
@@ -178,8 +178,7 @@ fn the_members_a_reaped_host_left_behind_still_get_term() {
     assert!(member_gone, "the member of a reaped host's group was left running");
 }
 
-/// The dev host runs the source from the workspace root; moving this crate (#440) moved the
-/// root one folder further up.
+/// The dev host runs the source from the workspace root, four folders above this crate (#440).
 #[test]
 fn the_workspace_root_is_the_repository_root() {
     assert!(Path::new(&workspace_root()).join("pnpm-workspace.yaml").is_file(), "{}", workspace_root());
@@ -244,8 +243,8 @@ fn a_supervisor_that_gave_up_can_be_claimed_again() {
 }
 
 /// #840 item 10: a quit that comes while a host is being launched (the launcher copying a build,
-/// say) found no child to stop, and the host started a moment later ran on, unsupervised. It is
-/// stopped as soon as it has started.
+/// say) finds no child to stop. The host started a moment later is stopped as soon as it has
+/// started, not left to run on unsupervised.
 #[cfg(unix)]
 #[test]
 fn a_host_launched_while_quitting_is_stopped_at_once() {
@@ -418,9 +417,8 @@ fn compares_versions_as_numbers_not_text() {
  * Tests run on threads of one process, and a thread that forks while another holds a script open
  * for writing hands that descriptor to its child until the child execs. Linux then refuses to run
  * the script (`ETXTBSY`, "Text file busy"). `check_node_version` passes a node it cannot run, so
- * the test saw `Ok` where it expected the too-old error: `keeper e2e (linux)`, job 113426245878,
- * `explains_the_old_version_when_there_is_nothing_newer`, "called `unwrap_err()` on an `Ok` value".
- * Here the only process that ever has the file open for writing has exited before the test runs it.
+ * a test would see `Ok` where it expects the too-old error. Here the only process that ever has
+ * the file open for writing has exited before the test runs it.
  */
 fn fake_node(version: &str, name: &str) -> String {
     let name = format!("{name}-{}", std::process::id());
@@ -497,10 +495,9 @@ fn the_floor_is_the_npm_packages_engines_and_nothing_else() {
     assert!(below_floor(&floor_text(just_below), floor));
 }
 
-/// The keeper, the hub and the launcher each check a Node against the floor, and they disagreed on
-/// `v22.14.0-rc.1` (let through here, below it there) and on `v22` and `v22.x.1` (below it here, let
-/// through there). One fixture now pins the three; the hub's and the launcher's tests read it too
-/// (`packages/agent-host/src/links/node-floor.test.ts`).
+/// The keeper, the hub and the launcher each check a Node against the floor, and must agree,
+/// including on `v22.14.0-rc.1`, `v22` and `v22.x.1`. One fixture pins the three; the hub's and the
+/// launcher's tests read it too (`packages/agent-host/src/links/node-floor.test.ts`).
 #[test]
 fn the_floor_check_agrees_with_the_hubs_and_the_launchers() {
     const FIXTURE: &str = include_str!("../../../../../../tooling/fixtures/node-floor.json");
@@ -550,7 +547,7 @@ fn passes_when_the_version_cannot_be_read() {
 /// Checks that this Mac's login shell's own node is actually picked out.
 ///
 /// A unit test alone cannot confirm "asks the shell instead of using a fixed path" — since
-/// that is the entire point of this fix, this touches the real thing once. Passes silently
+/// that is the entire point, this touches the real thing once. Passes silently
 /// in an environment with no node (there is no basis to block it there).
 #[cfg(unix)]
 #[test]
@@ -560,8 +557,8 @@ fn finds_the_node_this_shell_knows() {
         return;
     }
     // Asked the way the probe asks (`ask_shell`): bounded, no stdin, a session of its own. An interactive shell in the
-    // background group of a terminal's session is stopped (SIGTTOU), and a plain `output()` never returned: under WSL a
-    // full run hung here (#1883).
+    // background group of a terminal's session is stopped (SIGTTOU), and a plain `output()` never returns: under WSL a
+    // full run hangs here (#1883).
     let is_node = |line: &str| Path::new(line.trim()).is_absolute().then(|| line.trim().to_string());
     let Some(expected) = ask_shell(&shell, "command -v node", std::time::Duration::from_secs(30), is_node) else {
         return;
@@ -601,9 +598,8 @@ fn reports_every_place_it_looked_when_nothing_is_there() {
     assert!(err.contains("/nope/a/node") && err.contains("/nope/b/node"), "{err}");
 }
 
-/// Windows (#14): Node discovery used to be the login shell plus unix folders under `$HOME`,
-/// so a packaged Windows build could never find Node. These are the folders the installers
-/// people actually use put it in.
+/// Windows (#14): the login shell and unix folders under `$HOME` find no Node on a packaged
+/// Windows build. These are the folders the installers people actually use put it in.
 #[test]
 fn looks_where_windows_installers_put_node() {
     let env = |name: &str| {
@@ -655,8 +651,8 @@ fn falls_back_to_a_real_path_when_the_shell_says_nothing() {
 
 #[test]
 fn looks_where_version_managers_actually_put_node() {
-    // This used to be only the two Homebrew locations and /usr/bin — nvm, mise and volta
-    // users got stuck here.
+    // Not only the two Homebrew locations and /usr/bin: nvm, mise and volta put Node under the
+    // home directory.
     let paths = node_paths_under("/home/tester");
     for expected in [
         "/opt/homebrew/bin/node",
@@ -781,8 +777,8 @@ fn the_token_is_the_first_line_on_the_hosts_stdin_and_never_printed() {
 
 /**
  * Ends what a test started in a process group, pass or fail (#1861). The scripts these tests run ignore TERM on
- * purpose, so a test that failed on an assertion, or ended before its kill step, left them looping for days (a WSL run
- * left fifteen). Held by a test as soon as it has the pid; when it drops, the group gets SIGKILL and, where the system
+ * purpose, so a test that fails on an assertion, or ends before its kill step, would leave them looping for days. Held
+ * by a test as soon as it has the pid; when it drops, the group gets SIGKILL and, where the system
  * can tell (Linux), the drop checks that no live process of the group is left. It cannot run when the test binary is killed:
  * the scripts end by themselves then (they stop looping once their parent is gone).
  */

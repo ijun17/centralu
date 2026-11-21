@@ -424,8 +424,11 @@ describe('cause and clarifications (D9, §9.7)', () => {
     const w = world()
     const t = w.mail.task(ORC, W, { text: 'build it', origin: 'start_agent', delivered: true })
     w.startTurn(W, t.id)
-    const q = w.send(W, { to: [ORC], text: 'which branch?' })
+    const q = w.send(W, { to: [ORC], text: 'which branch?', question: true })
     expect(q.message).toMatchObject({ kind: 'message', needsReply: true, causeId: t.id, depth: 0, facts: { clarifies: t.id } })
+    // Not marked a question, it waits for nothing (`waitsForReply`, #2357); a note to anyone else neither
+    expect(w.send(W, { to: [ORC], text: 'done: PR #12' }).message).toMatchObject({ needsReply: false, facts: { clarifies: t.id } })
+    expect(w.send(W, { to: [B], text: 'fyi', note: true }).message.needsReply).toBe(false)
     // It is not a request: the Assistant's relation word, the ask count and the work pick all leave it out
     expect(w.records.requestsSince([W], ORC, NOW)).toBe(0)
     for (let i = 0; i < 3; i++) w.send(W, { to: [ORC], text: `clarify ${i}` })
@@ -443,7 +446,7 @@ describe('cause and clarifications (D9, §9.7)', () => {
     const w = world()
     const t = w.mail.task(PERSON, W, { text: 'build it', origin: 'person', delivered: true })
     w.startTurn(W, t.id)
-    const q = w.send(W, { to: [PERSON], text: 'which branch?' }).message
+    const q = w.send(W, { to: [PERSON], text: 'which branch?', question: true }).message
     expect(q.facts.clarifies).toBe(t.id)
     // A third session may read it only if it was sent it: here B cannot answer
     expect(refusedFor(() => w.send(B, { replyTo: q.id, text: 'main', to: [W] }))).toBe('unknown_message')

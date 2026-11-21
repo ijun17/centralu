@@ -4,30 +4,14 @@ import { coveringLayerOpened } from '../store/layers.js'
 import { useStore } from '../store/store.js'
 
 /**
- * How a popover, a menu or a modal goes away: one set of rules, written once (#428).
- *
- * Seven popovers each had their own copy, and the copies had drifted. The sidebar's row menu let its Escape travel on,
- * so the same press also closed the inbox behind it; only the span picker closed when the window lost focus (a click
- * into an app's view never reaches this document as a mousedown, but it takes focus out of it); only it gave focus
- * back to its button.
- *
- * - **Escape** closes the innermost open thing only: the press is claimed (`stopPropagation`), so the inbox, a modal or
- *   a layer under it does not close along with it. Capture phase on the window, so a row below that stops its own
- *   events cannot swallow it. A composition's Esc (#181) is not one.
- * - **A press outside** every element of `refs` closes it (capture phase, for the same reason). `refs` holds the
- *   trigger too, or pressing the trigger closes it on mousedown and its click reopens it (unless the trigger's own handler
- *   copes, as the sidebar menus' do). Leave `refs` out when
- *   something else catches outside presses (a backdrop under the popover, or a modal's own scrim).
- * - **The window losing focus** closes it, unless `closeOnBlur` is off: the popovers that sit over an app's view need it,
- *   a modal or a popover with a backdrop (which covers the view) does not.
- * - **A window opening over the screen** (the palette, the inbox, settings, usage) closes it, unless `closeOverWindow` is
- *   off. Those windows hear Escape on the window after this capture listener has claimed it, so a popover left open
- *   under them took the key and the window on top stayed (⌘K, then Esc, closed the hidden popover). A popover has
- *   nothing the person can still reach under a window anyway.
- * - **`returnFocusTo`**: Escape gives focus back to the trigger, since the person is on the keyboard. A press outside
- *   or a blur does not: they moved focus on purpose. Only when focus is the popover's or nobody's: a composer the person
- *   is typing in (WebKit does not focus a button on click, so focus may never have left it) keeps the keyboard.
- *
+ * How a popover, a menu or a modal goes away, written once (#428).
+ * - Escape closes the innermost open thing only (`stopPropagation`), in the capture phase on the window, so a row that
+ *   stops its own events cannot swallow it. A composition's Esc (#181) is not one.
+ * - A press outside `refs` closes it; `refs` holds the trigger too, or its mousedown closes and its click reopens.
+ *   Leave `refs` out when a backdrop or a modal's scrim catches outside presses.
+ * - The window losing focus closes it unless `closeOnBlur` is off: a click into an app's view takes focus but is no mousedown here.
+ * - A window opening over the screen closes it unless `closeOverWindow` is off: those windows hear Escape after this listener.
+ * - `returnFocusTo` gets focus after Escape only, when focus is the popover's or nobody's (WebKit does not focus a button on click).
  * `onClose` may be a new function every render; the listeners stay.
  */
 export function useDismiss({

@@ -8,14 +8,9 @@ import { AppReviewDetails } from './AppReviewDetails.jsx'
 import { Button } from '../../components/Button.jsx'
 
 /**
- * An imported app waiting on the person's confirmation (M4 E-3) — a confirmation window stands
- * in the pinned-view slot. Either it just arrived and has not been enabled yet, or after being
- * enabled, what it runs (server) or what it uses (uses) changed. Enabling it makes the host
- * check this window's key against the current manifest and record it — if it changed in the
- * meantime, it is rejected, and this window reads again to show what changed.
- *
- * Once enabled, the list changes to follow the broadcast, and in that same spot, now that it has
- * become an openable app, the pinned view opens the app itself (the screen calls home).
+ * An imported app awaiting confirmation in the pinned slot: new, or its server or `uses` changed since enabling. The host
+ * checks this window's key against the current manifest and refuses a stale one, and this re-reads. Once enabled, the
+ * slot opens the app itself.
  */
 export function ReviewAndEnable({ app }: { app: ExternalCatalogApp }) {
   const platform = usePlatform()
@@ -39,7 +34,7 @@ export function ReviewAndEnable({ app }: { app: ExternalCatalogApp }) {
       setToast(`Enabled ${app.title}`)
       void refresh()
     } catch (e) {
-      // It changed in the meantime — show the reason and read the new window (the person sees what changed and enables it again)
+      // Changed meanwhile: show the reason and the new review
       setEnableError(errorMessage(e))
       void read.reload()
     } finally {

@@ -66,7 +66,7 @@ beforeEach(async () => {
   codex.readExternalHistory = undefined
   codex.detect = async () => ({ tool: 'codex', installed: true, loggedIn: true, detail: 'test' })
   const adapters = new Map<ToolName, AgentAdapter>([['codex', codex]])
-  mgr = new SessionManager(store, adapters, (e) => events.push(e), () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), root)
+  mgr = new SessionManager(store, adapters, (e) => events.push(e), () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), { worktreeRoot: root })
   mgr.prLookup = async () => null
   rpc = createRpcHandler(mgr, adapters)
   projectId = ((await rpc('projects.add', { path: root })) as { id: string }).id

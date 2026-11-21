@@ -19,22 +19,12 @@ import { Badge } from '../../../components/Badge.jsx'
 import { Button } from '../../../components/Button.jsx'
 
 /*
- * One row of the conversation (#428): which card a chat item is drawn as, and the cards that
- * draw a row back into themselves. `ToolCard` and `SubagentSteps` stay in this file because a
- * launch card draws its subagent's steps with `ChatRow` — split out, the three would import each
- * other in a circle (tooling/dependency-cruiser.cjs forbids one).
+ * One row of the conversation (#428). `ToolCard` and `SubagentSteps` stay in this file: a launch card
+ * draws its subagent's steps with `ChatRow`, and split out the three would import each other in a
+ * circle (tooling/dependency-cruiser.cjs forbids one).
  */
 
-/**
- * A single message bubble row.
- *
- * **The reason for memo is streaming.** While a response streams, each delta only changes the
- * last row (the store's message_delta leaves every other item's identity untouched), and
- * without memo, every visible bubble on screen was re-rendered **entirely** on each chunk — with
- * a long answer filling the screen, that means re-parsing markdown many times over (measured:
- * 2.7 renders per character). Markdown itself is already memoized, but that alone cannot stop
- * the shell above it from running fresh every time.
- */
+/** Memo, as a delta changes only the last row: without it every visible row re-renders (measured: 2.7 renders per character) */
 export const ChatRow = memo(function ChatRow({
   item,
   projectRoot,
@@ -45,40 +35,27 @@ export const ChatRow = memo(function ChatRow({
 }: {
   item: ChatItem
   projectRoot: string | null
-  /** The owner of projectRoot — so file links open in this pane's project (#182) */
+  /** projectRoot's project, so file links open in this pane's (#182) */
   projectId?: string | null
   sessionId: string
-  /**
-   * This is a row the list is about to detach — if it has an app view, sends teardown and
-   * collapses it (M4 B-1)
-   */
+  /** The list is about to detach the row: an app view in it is torn down (M4 B-1) */
   leaving?: boolean
-  /**
-   * A subagent's step drawn inside its launch card (#222), not a row of the conversation. An app
-   * view stands under the parent's own calls only — the host opens none for a subagent's.
-   */
+  /** A subagent's step in its launch card (#222); the host opens no app view for one */
   nested?: boolean
 }) {
   if (item.kind === 'user') {
     const relayed = isRelayed(item)
     return (
       <div className="flex flex-col items-end" data-testid="msg-user">
-        {/*
-          A message that came in through delegation (FR-11). Placed in the same spot (right) as
-          the person's own messages — to the session it is equally "a directive received" —
-          with a source name above it and the agent bubble's fill (surface-raised, solid line border). No color is used
-          (the palette rule): the distinction is the surface step.
-        */}
+        {/* A delegated message (FR-11): on the person's side, as a directive received,
+            under its source (docs/design-system.md §7) */}
         {item.from && (
           <div className="pb-0.5 text-xs text-ink-muted" data-testid="msg-user-from">
             {item.from.name} <FromArrowIcon />
           </div>
         )}
-        {/*
-          A message sent by an in-conversation app view (M4 B-1). A person chose to send it, but
-          the app wrote it — shown in the same look as a delegated message (deeper fill, a
-          one-line source), noting that the source is an app rather than a session.
-        */}
+        {/* An app view's message (M4 B-1): the person chose to send it,
+            the app wrote it */}
         {item.fromApp && (
           <div className="pb-0.5 text-xs text-ink-muted" data-testid="msg-user-from-app">
             {item.fromApp.name} app <FromArrowIcon />
@@ -90,26 +67,12 @@ export const ChatRow = memo(function ChatRow({
             script {item.fromScript.credential} <FromArrowIcon />
           </div>
         )}
-        {/*
-          A string with no whitespace, like a long URL or path, does not wrap under the default
-          rule. That makes the bubble spill sideways and puts a horizontal scrollbar on the
-          whole conversation (found in dogfooding). whitespace-pre-wrap keeps line breaks the
-          person typed, and break-words breaks even a long chunk that otherwise could not wrap.
-        */}
-        {/*
-          Contrast against the background (surface-floor) is what makes "something I said" visible.
-          surface-raised plus line was only two steps apart (#1d1d1d and #292929 then; Dark's wider
-          steps, #725, made them #282320 and #3a3531, ΔL* 8.4 apart; #2c2c2e and #3a3a3c, 6.4, since #2335), and was effectively invisible
-          in a dark room (found in dogfooding). This lifts it to surface-hover (#48484a on a #1d1d1d
-          floor, ΔL* 19.9), the same as the hover background, and gives the border one step more
-          brightness.
-        */}
-        {/*
-          Attachments stand as real objects above the body text — an image as a thumbnail
-          (click to zoom), a file as a named chip. This used to render "📎 name" mixed into the
-          text, which was a list, not a picture, and it even caused the side effect (#75) of the
-          sent text differing from the rendered text.
-        */}
+        {/* break-words: a long URL or path
+            would widen the conversation */}
+        {/* The person's own on surface-hover: surface-raised and line are too close to the floor
+            in a dark theme to tell what I said (design-system §7) */}
+        {/* Above the text as objects, not "📎 name" in it,
+            which would differ from what was sent (#75) */}
         {item.attachments && item.attachments.length > 0 && (
           <div className="flex max-w-[75%] flex-wrap justify-end gap-1.5 pb-0.5">
             {item.attachments.map((a, i) => (
@@ -117,13 +80,9 @@ export const ChatRow = memo(function ChatRow({
             ))}
           </div>
         )}
-        {/*
-          A message that came from another session, an app or a script (relayed) is drawn as the agent's
-          answer bubble is: surface-raised and the line edge, solid (bubbleLook.ts). It was the person's
-          bubble with a dashed edge, but a dashed edge means failed or unknown everywhere else in the app
-          (#1629). The source line above it stays. No hue: the fill alone tells it from my own.
-        */}
-        {/* No empty bubble is rendered for a message that only sent an image */}
+        {/* A relayed message is drawn as the agent's bubble, solid: dashed
+            means failed or unknown (#1629) */}
+        {/* No empty bubble for a message that only sent an image */}
         {(item.text || !item.attachments?.length) && (
           <div
             {...mineBubbleAttrs(relayed)}
@@ -145,11 +104,8 @@ export const ChatRow = memo(function ChatRow({
   }
   if (item.kind === 'reasoning') {
     /*
-     * A reasoning summary (#58). It is the path to the body, not the body itself, so it is
-     * dimmed one step to ink-muted — following the ink rule exactly, where brightness signals
-     * importance. Codex's summary arrives as **bold heading** markdown, so this is still
-     * rendered through Markdown, just left quiet with no background color. The tone is Markdown's
-     * own: its root sets the ink of the body, so a colour put on this wrapper never reached it.
+     * A reasoning summary (#58), ink-muted as the path to the body (docs/themes.md "The urgency order"). Markdown,
+     * as Codex sends bold headings; the tone is Markdown's, whose root sets the ink, not this wrapper's.
      */
     return (
       <div className="min-w-0" data-testid="msg-reasoning">
@@ -159,8 +115,7 @@ export const ChatRow = memo(function ChatRow({
     )
   }
   if (item.kind === 'approval') {
-    // A pending approval is already shown by the card right below it, so this row only appears
-    // once a decision has been made
+    // Until decided, the approval card below shows it
     if (!item.decision) return null
     return (
       <p className="readout text-xs text-ink-faint" data-testid="msg-approval-log">
@@ -169,24 +124,9 @@ export const ChatRow = memo(function ChatRow({
     )
   }
   if (item.kind === 'mark') {
-    /*
-     * The label **shrinks and wraps.**
-     *
-     * This row was built for **short divider labels** like "conversation compacted here", so
-     * `shrink-0` was the right value at the time. But once a failed turn started being shown on
-     * screen (#107), error sentences ended up in the same spot — a single line like "Your
-     * access token could not be refreshed because your refresh token was revoked…" pushed the
-     * row wide and **put a horizontal scrollbar on the whole conversation** (found in
-     * dogfooding). A sentence the person needs to read being pushed off screen defeats the
-     * point of showing it at all.
-     *
-     * The lines on either side are `flex-1`, so they only ever draw whatever space the label
-     * leaves over — center alignment holds even when the label wraps to several lines, and a
-     * short label still looks exactly as it did before.
-     */
-    // A tool's notice the host made readable (#342): who, what kind, whose to act on, the tool's words on demand
+    // A tool's notice (#342) or a line in a capsule, a failure in a dashed box (docs/design-system.md §7); a failed
+    // turn's long sentence (#107) wraps in MarkLine rather than widening the conversation
     if (item.notice) return <NoticeMark notice={item.notice} />
-    // Every other line is its sentence in a capsule with its kind's icon; a failure is a dashed box (#2338 option 1)
     return (
       <MarkLine
         icon={<MarkIcon kind={item.mark} />}
@@ -194,7 +134,7 @@ export const ChatRow = memo(function ChatRow({
         data-mark={item.mark}
         after={
           item.pickModel && (
-            // The provider refused this session's model (#1369): the model menu below the composer, one click away
+            // The provider refused the model (#1369)
             <Button
               size="xs"
               className="shrink-0"
@@ -211,22 +151,17 @@ export const ChatRow = memo(function ChatRow({
     )
   }
   if (item.kind === 'image') {
-    /*
-     * An image produced by the agent (#40). The host keeps a copy (a file under the attachments, its path in the row), so a
-     * reload brings it back unless the size cap swept it. When there is no `data`, this states the reason instead of a
-     * silent blank (failures stay visible — an app-wide rule).
-     */
+    // The agent's image (#40): the host's copy can be swept by the size cap, and then the note says why
     if (!item.data) return <ImageNote path={item.path} name={item.name} note={item.note} />
     return <ImageMessage mime={item.mime} data={item.data} path={item.path} name={item.name} />
   }
-  // A manager's worktree proposal (#69) — a line pointing at the door rather than a tool card, and the value
-  // (branch name) is pre-filled into the window
+  // A worktree proposal (#69): a line with the branch filled into the window, not a tool card
   if (/propose_worktree_session$/.test(item.tool)) return <WorktreeProposalRow item={item} />
   return (
     <>
       <ToolCard item={item} sessionId={sessionId} projectRoot={projectRoot} projectId={projectId} />
-      {/* The app view this call opened (M4 B-1) — its own view is looked up by the card's id.
-      Nothing is rendered if there is none */}
+      {/* The app view this call opened (M4 B-1),
+          if any */}
       {item.callId && !nested && (
         <InlineViewSlot sessionId={sessionId} callId={item.callId} leaving={leaving} />
       )}
@@ -234,14 +169,7 @@ export const ChatRow = memo(function ChatRow({
   )
 })
 
-/**
- * An image inside the conversation (#40, extended to zoom in #62).
- *
- * In the body it is clipped at max-h-80, so text in a screenshot cannot be read — clicking it
- * opens a larger view in a modal. Why the Modal component is reused as-is: being a portal, it
- * is never trapped by a grid cell's overflow (the pitfall called out in #62), and closing via
- * Esc or an outside click does not have to be rebuilt.
- */
+/** Zoomable (#62), as max-h-80 leaves a screenshot's text unreadable */
 function ImageMessage({ mime, data, path, name }: { mime?: string; data: string; path?: string; name?: string }) {
   // Bytes the window cannot decode draw as an empty framed box (WebKit paints not even the alt text, #1464): say so instead
   const [undrawable, setUndrawable] = useState(false)
@@ -251,7 +179,6 @@ function ImageMessage({ mime, data, path, name }: { mime?: string; data: string;
       <ZoomableImage
         src={`data:${mime};base64,${data}`}
         alt={path ?? 'agent image'}
-        /* Clipped so it never covers the whole screen vertically — the original aspect ratio is kept */
         thumbClassName="max-h-80 max-w-full rounded-lg border border-line"
         onError={() => setUndrawable(true)}
         onLoad={(img) => {
@@ -262,12 +189,7 @@ function ImageMessage({ mime, data, path, name }: { mime?: string; data: string;
   )
 }
 
-/**
- * In place of an image the host did not send or the window could not draw: one line that says what it was and why it is
- * not here, in the muted style of the other notes (#1464). The file's name stands in the line and its whole path in the
- * tooltip. It fades in over 160ms (opacity only under reduced motion, `cc-fade`) as the image it replaces can have been
- * on screen a moment before the window found it undrawable.
- */
+/** An image not sent or not drawable (#1464); fades in, as the image may have shown a moment before */
 function ImageNote({ path, name: viewed, note }: { path?: string; name?: string; note?: string }) {
   // A stored row's `path` is the host's own copy of the file; `name` is the path it was viewed under
   const file = viewed ?? path
@@ -284,26 +206,12 @@ function ImageNote({ path, name: viewed, note }: { path?: string; name?: string;
   )
 }
 
-/**
- * The number of lines shown as a preview while collapsed — just enough to recognize what
- * command produced what
- */
+/** A running tool's output tail, in lines */
 const PREVIEW_LINES = 3
 
 /**
- * The preview's **height cap** (reported by a user on 2026-09-12).
- *
- * `PREVIEW_LINES` counts lines split by `\n`. But there is no guarantee one logical line renders
- * as one visual line: something like a resource-upload response, one blob of JSON with no
- * newlines, is logically one line, so the preview truncation cuts nothing at all, and on screen
- * it wraps into dozens of lines, with the card covering the entire conversation. That is what
- * "collapsed, but everything is showing" meant.
- *
- * So one more cap is added — a height counted in **visible lines**. `lh` is one line-height unit
- * of that element, so `3lh` is always exactly three lines regardless of font size or leading
- * changes (writing it in px would mean hand-rounding a value like
- * leading-body × 11px = 17.875px, and that rounding would show one pixel of a fourth line's
- * top edge).
+ * The same in visible lines: one JSON blob with no newline wrapped into dozens. `3lh`, not px, which
+ * would round leading-body × 11px = 17.875px and show a pixel of a fourth line.
  */
 const PREVIEW_CLAMP = 'max-h-[3lh] overflow-hidden'
 
@@ -317,23 +225,8 @@ function unmarkedAskProject(item: Extract<ChatItem, { kind: 'tool' }>): NonNulla
 }
 
 /**
- * The tool card.
- *
- * **No scrolling inside it.** A small scroll area inside the conversation intercepts the wheel,
- * so trying to scroll the conversation instead scrolls inside the card while the conversation
- * stays put (called out as "annoying" in dogfooding). Scrolling belongs to exactly one thing,
- * the conversation itself — collapsed shows a preview, expanded shows everything. Length is
- * decided by the person.
- *
- * **Collapsed by default.**
- *
- * This used to collapse only read-only tools and expand changes (Bash, Edit, MCP). The thinking
- * was that changes need to be seen, but in practice, using a tool even a few times buried the
- * conversation in output, making the actual answer unreadable (found in dogfooding). What was
- * done is already said by the title row — whether that is a command or a path.
- *
- * Two things are never lost even while collapsed: a failure stays visible as 'Failed' in the
- * title row, and a few lines of output preview are shown as-is.
+ * One title row until opened (docs/design-system.md §7). No scrolling inside it: a scroll area in the
+ * conversation takes the wheel from it. A failure shows on the title row while closed.
  */
 export function ToolCard({
   item,
@@ -351,7 +244,7 @@ export function ToolCard({
   const read = useMemo(() => centraluCallOf(item) ?? unmarkedAskProject(item), [item])
   /*
    * A record with no mark (an older host's) is read by its Claude name; `app-<x>` there is an app's only for an app this
-   * window knows, since a repository's own server may carry that name (#730 review)
+   * window knows, since a repository's own server may carry that name (#730)
    */
   const knownApp = useStore(
     (s) => !read?.app || !!item.centralu || s.externalApps.some((a) => a.appId === read.app),
@@ -359,37 +252,24 @@ export function ToolCard({
   const call = knownApp ? read : null
   // ask_project (#371 part B) keeps the testids its e2e reads the card, its toggle and its answer by
   const ask = call?.tool === 'ask_project'
-  // The files the title names that the viewer can open are links (the audit of 2026-10, item 6)
   const pieces = useMemo(
     () => titlePieces(item.title, item.paths, projectRoot),
     [item.title, item.paths, projectRoot],
   )
   const linked = pieces.some((p) => p.ref)
   const lines = item.result ? item.result.replace(/\s+$/, '').split('\n') : []
-  /*
-   * The tail of output while the tool is still running (#58, Codex's outputDelta). Only shown
-   * until `result` arrives — unlike the preview, this shows **the end**: for a command still
-   * running, what matters is now, not the start.
-   * (The sum of chunks is not the whole thing — the first chunk has been observed missing in
-   * practice. The full output is what `result` delivers.)
-   */
-  /** The whole input shows once the card is open, when it says more than the title row can (below) */
   const showInput =
     !call && open && item.title !== item.tool && (item.title.includes('\n') || item.title.length > 60)
-  /** Still running: no answer yet and no failure */
   const running = item.result === undefined && item.ok === undefined
+  // The end of a running tool's output (#58, Codex's outputDelta) until `result`, which is whole: the chunks
+  // have been seen to miss the first
   const liveTail =
     open && item.result === undefined && item.live
       ? item.live.replace(/\s+$/, '').split('\n').slice(-PREVIEW_LINES)
       : []
 
   return (
-    /*
-      A Centralu call's card (#730; owner, 2026-10-18: it should stand out from the other tool calls and read as what
-      happened): a rounder card on its own tint with a stronger hairline, a sentence instead of a tool name, and the
-      session it reached as a chip. Emphasis by shape and weight, never the signal's white, which is kept for what waits
-      on the person. A failed call is dashed, as an error is on the inbox's capsule.
-    */
+    // A Centralu call's card (#730, docs/design-system.md §7); a failed call is dashed
     <div
       className={
         call
@@ -408,11 +288,7 @@ export function ToolCard({
           onToggle={() => setOpen((o) => !o)}
         />
       ) : linked ? (
-        /*
-         * A title with a file the viewer can open (the audit of 2026-10, item 6). A link cannot sit inside the
-         * toggle button (a button holds no button), so the toggle is the chevron and the tool's name, the
-         * title follows with its path as a link, and the empty rest of the row still toggles for the pointer.
-         */
+        // A link cannot sit in the toggle button, so the toggle is the chevron and name; the row's rest still toggles
         <div className="flex w-full items-center">
           <button
             className="flex min-w-0 shrink items-center py-2 pl-3 pr-2.5 text-left"
@@ -460,7 +336,7 @@ export function ToolCard({
           data-testid="tool-card-toggle"
           title={item.title}
         >
-          {/* The tool on a quiet tile, then what it was given, in the code face (owner, 2026-10-18) */}
+          {/* The tool on a quiet tile, then its input in the code face (owner, 2026-10-18) */}
           <span className="readout max-w-48 min-w-0 truncate rounded-md bg-surface-hover/50 px-1.5 py-0.5 text-2xs text-ink-muted" title={item.tool}>
             {item.tool}
           </span>
@@ -469,17 +345,15 @@ export function ToolCard({
           </span>
           {running && <span className="size-1.5 shrink-0 rounded-full bg-ink-muted" aria-label="running" />}
           {item.ok === false && <span className="shrink-0 text-2xs text-ink-muted">failed</span>}
-          {/* There must be one expand indicator across the whole app — the same chevron as the file tree */}
+          {/* The file tree's chevron: one expand mark across the app */}
           <span className="shrink-0 text-ink-faint">
             <ChevronIcon open={open} />
           </span>
         </button>
       )}
 
-      {/*
-        What the tool was given, whole, once the card is open (owner, 2026-10-18: a long command was cut to one line in
-        the title and could not be read anywhere). Only when it says more than the title row could.
-      */}
+      {/* The whole input once open, where the title cuts a long command
+          to one line (owner, 2026-10-18) */}
       {showInput && (
         <div className="border-t border-line px-3 py-2" data-testid="tool-card-input">
           <Badge readout className="mb-1 block tracking-wide">
@@ -503,17 +377,15 @@ export function ToolCard({
         </div>
       )}
 
-      {/* A Centralu call folds to its sentence: the answer shows only when the card is opened (owner, 2026-10-18) */}
+      {/* A Centralu call's answer, only when opened (owner, 2026-10-18) */}
       {call && open && item.result && item.result.trim() && (
         <div className="border-t border-line px-3 py-2" data-testid={ask ? 'ask-project-result' : 'tool-card-output'}>
           <CentraluCallBody result={item.result} open={open} onOpen={() => setOpen(true)} />
         </div>
       )}
 
-      {/*
-        The output only once the card is open (owner, 2026-10-18: the preview lines were rarely read and made every
-        call a block). Closed, a card is its one title row; the tail of a running command shows when it is opened.
-      */}
+      {/* Output only when opened: preview lines were rarely read and made every call
+          a block (owner, 2026-10-18) */}
       {!call && open && lines.length > 0 && (
         <div className="border-t border-line px-2.5 py-1.5">
           {/* Named only beside a shown input, where the two would otherwise read as one block */}
@@ -544,16 +416,8 @@ export function ToolCard({
 }
 
 /**
- * What the subagent a launch card started did (#222), collapsed under the card.
- *
- * The conversation never shows these steps: a subagent's calls landing among the parent's was
- * the confusion #98 removed. They are read from the host only when the person opens this, and
- * drawn with the conversation's own rows (`messagesToChat`, `ChatRow`) — its text, its reasoning,
- * its tool cards — so a step reads the same here as the parent's does above. An agent the
- * subagent launched is a launch card too, with its own steps inside.
- *
- * Whether it is open and what it read live in the store, keyed by the card: the virtual list
- * detaches a row that scrolls away, and a card drawn again must come back as it was left.
+ * A launch card's subagent steps (#222, docs/state-management.md §4), kept out of the conversation, where
+ * they read as the parent's (#98), and drawn with the conversation's own rows.
  */
 export function SubagentSteps({
   sessionId,
@@ -613,10 +477,8 @@ export function SubagentSteps({
               </button>
             </p>
           )}
-          {/*
-            Steps archived without the session (#418) are said to be there, with the way back: read as "none
-            were recorded", a card the person emptied looked like one that never kept anything
-          */}
+          {/* Archived steps (#418) are said to be there,
+              or an emptied card reads as one that kept none */}
           {steps && !steps.loading && !steps.error && !!steps.trashed && (
             <p className="text-xs text-ink-faint" data-testid="subagent-steps-trashed">
               {trashedLine(steps.trashed, items.length > 0)}
@@ -644,21 +506,14 @@ export function SubagentSteps({
   )
 }
 
-/**
- * Where a card's archived steps went (#418), in the number they are: "The step was moved… restores it" for one,
- * "…restores them" for more, and "N earlier steps" when a running subagent wrote more under the card since
- */
+/** `more`: a running subagent wrote steps under the card since, so the archived ones are "N earlier steps" (#418) */
 export function trashedLine(trashed: number, more: boolean): string {
   const one = trashed === 1
   const what = more ? `${formatCount(trashed)} earlier ${one ? 'step was' : 'steps were'}` : one ? 'The step was' : 'The steps were'
   return `${what} archived. Settings → Archive restores ${one ? 'it' : 'them'}.`
 }
 
-/**
- * When a message was said, under its bubble (owner, 2026-10-18): quiet, small, in the faintest ink. The 4px between the
- * bubble and the time (owner, 2026-10-19) is its own, so the person's row and the answer's share one value; a caller
- * gives only the side padding that lines the time up with the bubble's corner.
- */
+/** design-system §7 "Times". The 4px above is its own, so both sides share it; a caller gives only the side padding */
 export function SaidAt({ at, className = '' }: { at: number; className?: string }) {
   return (
     <div className={`pt-1 text-2xs text-ink-faint ${className}`} data-testid="said-at">

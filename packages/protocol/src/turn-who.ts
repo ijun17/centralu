@@ -1,32 +1,24 @@
 import { z } from 'zod'
 
 /**
- * Whose a turn was, said on the event that ends it (#1377): `person` when the person's own message started it, `work`
- * otherwise (the caller's message, an app's, Centralu's, or the tool starting it when the work's background tasks end);
- * `wrote`: the person wrote into a turn of the work and the tool took it in. A host before #1948 may also say `added` (the
- * composer's "Add to the task"), which no reader takes any more.
- * Said by the host that ran the turn, so a hub that follows a linked machine reads it rather than guessing from the
- * order of the messages. Absent from a host that does not say.
- * `compaction`: Centralu started this turn to compact the conversation (#1451); a window raises no "done" for it.
- * `since` (#1812): the row the turn began after, when the host kept it (a session a hub gives messages); a hub asks for
- * this turn's words by it (`host.lastAnswer`), since the next turn may have begun or ended by the time it reads them.
+ * Whose a turn was, on the event that ends it, said by the host that ran it so a hub need not guess from message order.
+ * `by: 'person'` only when the person's own message started it; `wrote`: the person wrote into a turn of the work.
  */
 export const TurnWho = z.object({
   by: z.enum(['person', 'work']),
   wrote: z.literal(true).optional(),
-  /** An update of Centralu cut this turn and Centralu continued it (#1966): the report of its end says so */
+  /** An update cut this turn and Centralu continued it (#1966) */
   cut: z.literal(true).optional(),
+  /** Centralu started it to compact (#1451); a window raises no "done" for it */
   compaction: z.literal(true).optional(),
+  /** The row the turn began after: a hub asks `host.lastAnswer` by it, as the next turn may have begun by then */
   since: z.number().int().optional(),
 })
 export type TurnWho = z.infer<typeof TurnWho>
 
 /**
- * What a turn that began with no message of its own ran for (#1604), said on the `state_change` that opens it: the tool
- * had been sent a message while another turn ran and did not read it there, so it ran it as a turn of its own once that
- * ended. `seq` is that message's row in the conversation (the `user_message` the hub saw) and `from` who sent it, so a
- * hub that followed the sender reads whose the turn is instead of guessing from the time between. Absent from a turn
- * that began otherwise (a message at rest, the tool's own) and from a host that does not say.
+ * On the `state_change` opening a turn the tool ran for a message it was sent during another turn (#1604): `seq` is
+ * that message's row and `from` its sender, so a hub reads whose the turn is instead of guessing from timing
  */
 export const TurnOrigin = z.object({
   seq: z.number().int(),
@@ -35,10 +27,8 @@ export const TurnOrigin = z.object({
 export type TurnOrigin = z.infer<typeof TurnOrigin>
 
 /**
- * What a turn that began with no message of anyone's goes on with, said on the `state_change` that opens it (#2164): `compaction`, it
- * is the next step a compaction Centralu ran was asked to go on with (`compact_self`'s `then`), so it goes on with the work of the turn
- * that asked. A hub that gave that turn takes this one for the caller's too: its end is owed, and a note goes into it. Absent from a
- * turn that began otherwise and from a host that does not say.
+ * On the `state_change` opening the turn that runs `compact_self`'s `then` (#2164): it continues the turn that asked,
+ * so a hub that gave that turn owes the caller this one's end too
  */
 export const TurnContinues = z.literal('compaction')
 export type TurnContinues = z.infer<typeof TurnContinues>

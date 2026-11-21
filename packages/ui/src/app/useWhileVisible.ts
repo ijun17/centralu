@@ -4,10 +4,8 @@ import { useEffect, useRef, type DependencyList } from 'react'
 export type OnReturn = 'late' | 'always'
 
 /**
- * The rules of `useWhileVisible` without a window, so they are tested on their own. `run` is what the caller wants done.
- * - A tick asks only while the window is in view: a hidden window shows nothing, and asking can start a process for nobody.
- * - Coming back asks at once, so what is shown is not stale until the next tick: always, or only when a whole period passed
- *   since the last ask (a tick was skipped, or the window was hidden long enough to have missed one).
+ * The rules of `useWhileVisible` without a window. A tick asks only while in view (asking can start a process for
+ * nobody); coming back asks at once, under `late` only when a whole period passed since the last ask.
  */
 export function createVisibleTicker(env: { hidden: () => boolean; now: () => number }, everyMs: number, onReturn: OnReturn, run: () => void) {
   let last = env.now()
@@ -16,7 +14,6 @@ export function createVisibleTicker(env: { hidden: () => boolean; now: () => num
     run()
   }
   return {
-    /** Asks now, whether or not the window is in view (the first read) */
     ask,
     tick: () => {
       if (!env.hidden()) ask()
@@ -29,15 +26,9 @@ export function createVisibleTicker(env: { hidden: () => boolean; now: () => num
 }
 
 /**
- * Asks `fn` every `everyMs` while the window is in view, and again at once when it comes back (#1143). One place for the
- * pause-while-hidden rule that the usage meter, the update check and a linked machine's install watch each wrote.
- *
- * `fn` is the latest one passed; it is told whether this run of the effect is still the current one (`live`), for an answer
- * that arrives after `restartOn` changed or the component left. `restartOn` restarts the clock, as an effect's list does.
- * - `immediate`: asks once when it starts, in view or not.
- * - `onReturn`: see `OnReturn`; `late` by default.
- * - `onFocus`: the window gaining focus counts as coming back.
- * - `enabled`: false stops it altogether.
+ * Asks `fn` every `everyMs` while the window is in view, and at once when it comes back (#1143). `live` says whether
+ * this run is still current (`restartOn` changed or the component left). `immediate` asks once at start, in view or
+ * not; with `onFocus`, focus counts as coming back.
  */
 export function useWhileVisible(
   fn: (live: () => boolean) => void,

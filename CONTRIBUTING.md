@@ -248,6 +248,25 @@ one HTML report per engine (`e2e-report/<engine>/`), with traces of the failed t
 leaves it out (`tooling/e2e-webkit-twins.test.ts` checks this): a scenario that only means
 something in WebKit goes in the shared fixture and skips itself in other engines.
 
+`CI=1 pnpm e2e --affected` runs the specs a branch changed under one lock (#2373), in the engines the config says a run
+is in (its `metadata.e2eBrowser`): for `pnpm e2e` the one `E2E_BROWSER` names, else Chromium alone on Windows (WebKit
+there fails the scenarios that drag, #2022, above), else Chromium and then WebKit; for `pnpm ux --affected` its one
+engine. Each engine keeps its results in `test-results/<engine>` beside the config. A spec is picked when it, or a file
+it imports through the repository's own files at any depth (its fixture, a helper, a package's source), differs from where
+the branch left main, uncommitted and untracked files included. Not followed: a file read without an import (a JSON
+fixture), an imported asset (a `.png`), a module loaded through `createRequire`, and an `import()` of a path built at run
+time. Each engine runs the picked specs Playwright lists for it, so a `-webkit.spec.ts` twin is left out as in any
+one-engine run. A change that reaches the config or a file it imports or names (its setup and teardown, its reporters, the
+web server script its commands name; read from the config itself) runs every spec. A file the config names other than
+by a path starting `./` or `../` (one it builds with `join`, or one quoted inside a command) is not followed. Only a few specs import the window's or
+the host's code (the theme, for one), so most changes to the UI pick no spec; the run then says so and, when the change
+reaches the screen by CI's definition (`screenFiles`), asks for the specs near it by name (`CI=1 pnpm e2e <filter>`).
+`--affected` takes no filter of its own: one given with it widens the run. Any local run with failures also says which
+of them the known intermittent failures issue lists (#368, the board's project.json `ci.knownFailuresIssue`), read and
+matched by the board as `ci_status` reads and matches it (its body and comments), each with the quote it matched, and
+whether the issue is closed; they are still failures. When the issue cannot be read the run says "known-failures list
+unavailable", with why, and sets nothing apart.
+
 Inside Codex's macOS seatbelt sandbox, run local `pnpm e2e`, `pnpm ux` and `pnpm perf` with
 `E2E_BROWSER=chromium` only and leave WebKit to CI. Unset `STYLE_SNAPSHOT_BROWSER=webkit`
 if present: that override selects WebKit even in a Chromium run. The perf specs respect
@@ -600,7 +619,11 @@ running, possibly the very session doing the work.
   stays: legal headers, rules of an external platform or dependency, a lint or formatter
   suppression with its reason, public API docs, issue or RFC links, and the non-obvious why; a
   number learned by measuring stays beside it. A long justification without one of these means the
-  code should change instead.
+  code should change instead. In the folders already swept (`COMMENTS_SWEPT`), `guard/comments`
+  (tooling/eslint-guards.js) reports "used to", a sentence opening with "Previously", a file header
+  over 3 lines of text, a comment block over 10, and a source file over 35% comment lines; a file
+  over that share when its folder was swept may not go above its line in `COMMENT_SHARE_HELD`
+  (tooling/guard-exceptions.js).
 - Tests are titled with the behaviour they describe. When one breaks, the title alone
   should tell you what fell over.
 - New comments and documents are written in English — see [Language](#language).

@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-/// Windows never had a keeper to leave behind (`unix.rs`, #1895 step 4 PR 7).
+/// No build ran a keeper on Windows, so none is left behind (`unix.rs`, #1895 step 4 PR 7).
 pub fn stop_earlier_keeper(_dev: bool) -> Option<String> {
     None
 }

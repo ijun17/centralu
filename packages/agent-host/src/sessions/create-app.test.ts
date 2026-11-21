@@ -50,7 +50,7 @@ beforeEach(async () => {
   store = new Store()
   const adapters = new Map<ToolName, AgentAdapter>([['claude', new FakeAdapter('claude')]])
   events = []
-  mgr = new SessionManager(store, adapters, (e) => events.push(e), () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
+  mgr = new SessionManager(store, adapters, (e) => events.push(e), () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), { worktreeRoot: join(root, 'worktrees') })
   home = join(root, 'Centralu')
   mgr.projectCreation.useProjectsHome(() => home)
   mgr.prLookup = async () => null

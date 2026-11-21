@@ -1,11 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { APP_ID_MAX_LENGTH, newAppIdProblem, serverNameProblem } from './app-id.js'
 
-/**
- * The rule for app ids (#93, M4 C-1) — the host and the "new app" window use the same judgment.
- * This file covers the judgment itself: the host-side wording (Korean reasons) is covered by
- * apps/contract.ts's tests, and the window's wording by ui's newAppId.test.ts.
- */
+// The app id rule the host and the "new app" window share. The host's wording is tested in apps/contract.test.ts,
+// the window's in ui's newAppId.test.ts.
 describe('serverNameProblem', () => {
   it('character rule: lowercase, digits, hyphens, not starting with a hyphen, up to 32 characters', () => {
     for (const ok of ['notes', 'a', '0', 'resource-search', 'a-b-c', 'x'.repeat(APP_ID_MAX_LENGTH)]) {

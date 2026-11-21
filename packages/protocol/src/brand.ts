@@ -1,72 +1,36 @@
-/**
- * Values that identify the app.
- *
- * **Only "machine-read values" live here.** User-facing copy stays as a literal —
- * `Centralu is …` reads better than `${APP_NAME} is …`, and once localization is needed the
- * copy has to move to a string catalog anyway, not stay a constant reference.
- *
- * There is one bar for pulling something out into a constant here: **it is duplicated, and a
- * build still passes even if the copies drift apart.** Places TypeScript cannot reach
- * (index.html, tauri.conf.json, Cargo.toml, Rust) cannot be bound to a constant, so a contract
- * test guards them instead (`tooling/brand.test.ts`).
- */
+// Machine-read values that identify the app; user-facing copy stays literal. A value is here when its copies could
+// drift with the build still passing; where TypeScript cannot reach (index.html, tauri.conf.json, Cargo.toml, Rust),
+// `tooling/brand.test.ts` checks them.
 
 import { APP_VERSION } from './version.generated.js'
 
-/** The human-facing name. A contract test checks that the static files match this value. */
 export const APP_NAME = 'Centralu'
 
-/** The bundle identifier — must match `identifier` in `tauri.conf.json`. */
+/** Must match `identifier` in `tauri.conf.json` */
 export const APP_ID = 'app.centralu'
 
-/**
- * The app's version: never written in git (#1501). `version.generated.ts` holds the placeholder
- * `0.0.0-dev`, which development builds and tests run with; a packaging build stamps the version
- * it resolves (`scripts/app-version.mjs`: `CENTRALU_VERSION`, else the release tag) into that file
- * and the other carriers (`scripts/stamp-version.mjs`), and `tooling/brand.test.ts` fails on a
- * stamped carrier committed by accident.
- *
- * The version says beta up front. "0.1.0" reads like a finished first release, while
- * "0.1.0-beta.1" lowers expectations on its own — the reader knows even without reading the docs.
- */
+/** `0.0.0-dev` unless a packaging build stamped it; never committed stamped (#1501, `tooling/brand.test.ts`) */
 export { APP_VERSION }
 
-/** The machine-read name — unlike the display name, it stays lowercase and hyphenated. */
 export const APP_SLUG = 'centralu'
 
-/**
- * The bundle passed when introducing the app to an external CLI (codex `clientInfo`).
- * Five places were building the same object, and touching only the version would silently
- * put them out of sync.
- */
+/** Introduces the app to an external CLI (`clientInfo`) */
 export const CLIENT_INFO = { name: APP_SLUG, title: APP_NAME, version: APP_VERSION } as const
 
-/**
- * The name of the data folder.
- *
- * There are two places the user sees this path — when attaching `host.log` to a bug report,
- * and when looking at a worktree path. If it does not match the app name, that moment turns
- * into "what is this?".
- */
+/** Matches the app's name: the person sees it in a bug report's `host.log` path and in worktree paths */
 export const DATA_DIR = '.centralu'
 
 /**
- * The folder in the home where a new project is made when no other location is given (#515): `~/Centralu`, or
- * `%USERPROFILE%\Centralu` on Windows. Read by the host that makes it and by the mock that shows where it would go.
- *
- * Visible on purpose, unlike the data folder: it holds the person's own work, found in Finder or Explorer, and an
- * uninstall that removes the data folder must not take it along.
+ * Where a new project is made by default (`~/Centralu`): visible, unlike the data folder, since it holds the person's
+ * work and an uninstall that removes the data folder must not take it along
  */
 export const PROJECTS_DIR = APP_NAME
 
-/** The data folder for a host started in dev mode — kept separate so it does not mix with the packaged app. */
+/** Kept apart so a dev host does not mix with the packaged app */
 export const DATA_DIR_DEV = '.centralu-dev'
 
 /**
- * The folder name from before the rename.
- *
- * **Cannot be deleted.** It holds the user's conversation history, and if the new folder does
- * not exist yet, this is the only copy. The host migrates it once, before opening the database
- * (`packages/agent-host/src/main.ts`).
+ * Cannot be deleted: the host migrates it once before opening the database (`agent-host/src/main.ts`), and until then
+ * it is the only copy of the person's history
  */
 export const DATA_DIR_LEGACY = { prod: '.control-center', dev: '.control-center-dev' } as const // legacy-name

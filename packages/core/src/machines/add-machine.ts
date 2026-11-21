@@ -2,29 +2,25 @@ import type { MachineProbe, RemoteShell, SshHost } from '@cc/protocol/client'
 import { machineProblem, type MachineProblem } from './machines.js'
 
 /**
- * The Add machine dialog's choices (#514): the hosts of the person's ssh config, and, once one is
- * picked and probed, the ready rows it offers ("Windows", "WSL (Ubuntu)", "Linux or macOS") in place
- * of a shell to choose and a distro to type. Pure, so the rules are tested without a host or React.
+ * The Add machine dialog's choices (#514): a probed ssh host offers ready rows ("Windows", "WSL (Ubuntu)", "Linux or
+ * macOS") in place of a shell to choose and a distro to type.
  */
 
-/** What `ssh -G` resolved for an alias, as one short line: `me@box.lan:2222` (port 22 left out) */
+/** What `ssh -G` resolved, as `me@box.lan:2222` (port 22 left out) */
 export function sshHostDetail(h: Pick<SshHost, 'alias' | 'hostName' | 'user' | 'port'>): string | null {
   if (!h.hostName && !h.user) return null
   const host = h.hostName ?? h.alias
   return `${h.user ? `${h.user}@` : ''}${host}${h.port && h.port !== 22 ? `:${h.port}` : ''}`
 }
 
-/** One way to link a probed host: the shell and distro `machines.add` takes, and the name it suggests */
 export type MachineChoice = {
   key: string
   label: string
-  /** A second line: which shell answers ssh there, the default distro */
   detail: string | null
   shell: RemoteShell
   wslDistro: string | null
-  /** The machine name it suggests; the person can change it */
   name: string
-  /** The name of the machine already linked this way, when there is one: the row is not offered again */
+  /** The machine already linked this way: the row is not offered again */
   linkedAs: string | null
 }
 
@@ -35,11 +31,7 @@ const WINDOWS_SHELL: Record<NonNullable<MachineProbe['windowsShell']>, string> =
   other: 'Its own default shell answers ssh',
 }
 
-/**
- * The rows a probe offers for an alias, in the order shown: Windows, then each WSL distro (the default
- * first, as the probe lists them); or the one POSIX row. None when nothing was told (the person
- * chooses by hand). A row already linked through this alias is marked with that machine's name
- */
+/** None when the probe told nothing: the person chooses by hand */
 export function probeChoices(alias: string, probe: MachineProbe, linked: SshHost['linked']): MachineChoice[] {
   const linkedAs = (shell: RemoteShell, distro: string | null) =>
     linked.find((l) => l.shell === shell && (shell !== 'wsl' || (l.wslDistro ?? '').toLowerCase() === (distro ?? '').toLowerCase()))?.name ?? null
@@ -69,20 +61,14 @@ export function probeChoices(alias: string, probe: MachineProbe, linked: SshHost
   ]
 }
 
-/** The row picked for the person when a probe answers: the first one not linked yet */
 export function firstChoice(choices: readonly MachineChoice[]): MachineChoice | null {
   return choices.find((c) => !c.linkedAs) ?? null
 }
 
-/**
- * What to say when a probe told nothing, in one sentence and a step (the link's own words for ssh's
- * failures, `machineProblem`); null when it told what runs there
- */
 export function probeProblem(probe: MachineProbe): MachineProblem | null {
   if (!probe.reachable) {
-    // An unreachable machine always has a problem to name; the fallback is the line it would read as with no error
     const p = machineProblem({ status: 'unreachable', error: probe.error, name: probe.sshTarget, sshTarget: probe.sshTarget }) ?? { title: `${probe.sshTarget} is away`, fix: null }
-    // Said of a link that retries on its own; here nothing retries until the person picks the host again
+    // Nothing retries here until the person picks the host again
     const fix = p.fix?.replace(/reconnect$/, 'pick it again').replace(/\.? ?Centralu keeps trying$/, '') || null
     return { title: p.title, fix }
   }

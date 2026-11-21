@@ -117,9 +117,8 @@ fn discard_removes_a_read_only_copy_a_file_or_a_symlink_and_nothing_is_no_error(
     assert!(t.join("src/host/main.mjs").exists());
 }
 
-/// The shell and the keeper word a refusal from its fault. They used to tell a read of the content
-/// from a write of the copy by the words of the error's context, which a rewording here would have
-/// silently turned into the other refusal.
+/// The shell and the keeper word a refusal from its fault, not from the words of the error's
+/// context, which a rewording here would silently turn into the other refusal.
 #[test]
 fn a_file_missing_from_the_content_is_its_fault_and_a_folder_that_cannot_be_written_is_the_copys() {
     let key = new_key();

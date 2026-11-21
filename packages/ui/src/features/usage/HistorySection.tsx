@@ -18,11 +18,8 @@ const GROUPS: { by: Extract<UsageHistoryBy, 'session' | 'project'>; label: strin
 ]
 
 /**
- * The last seven days, in the usage dropdown (docs/agent-host/usage.md "Usage over time"): the weekly window's percent over time, from the
- * readings the host stored, and the sessions or projects that used the most tokens with their cache hit rate.
- *
- * Asked once when the dropdown opens, and again when the list is regrouped. A host that predates the question (or a
- * failed one) says so in a line (`LoadFailedFold`); the limits above it are not affected.
+ * The last seven days in the usage dropdown (docs/agent-host/usage.md "Usage over time"). Asked on open and on regroup;
+ * an older host or a failed read says so in a line (`LoadFailedFold`).
  */
 export function HistorySection({
   tool,
@@ -148,11 +145,7 @@ export function HistoryView({
   )
 }
 
-/**
- * The weekly window's percent against time, a step per reading: a reading holds until the next one, and the last one
- * to the right edge. Brightness, not hue (the screen's rule); the figure beside it is the latest reading, so the line
- * needs no axis to be read.
- */
+/** The weekly percent as steps, each reading held until the next; no axis, as the figure beside it is the latest */
 function WeeklyLine({ series, from, to }: { series: NonNullable<ReturnType<typeof weeklySeries>>; from: number; to: number }) {
   const W = 200
   const H = 36

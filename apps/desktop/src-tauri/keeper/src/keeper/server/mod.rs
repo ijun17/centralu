@@ -6,7 +6,7 @@
 //! | request | answer |
 //! |---|---|
 //! | `{"op":"status"}` | `{"ok":true,"view":KeeperView}` — host state, the front door's port and a credential (the token for a Centralu window, the limited credential for any other process, #1405, `view.rights`), build source |
-//! | `{"op":"attach","protocol":1,"build":BuildSource?}` | `{"ok":true,"view":..,"sameBuild":bool?,"keeperSameBuild":bool?}`, then one `{"event":"status","view":..}` line per change for as long as the connection stays open. (`relaunched`, for the window an announced relaunch started, went with `relaunching` in #1895 step 4 PR 3: an earlier window reads its absence as false) |
+//! | `{"op":"attach","protocol":1,"build":BuildSource?}` | `{"ok":true,"view":..,"sameBuild":bool?,"keeperSameBuild":bool?}`, then one `{"event":"status","view":..}` line per change for as long as the connection stays open. (No `relaunched`, #1895 step 4 PR 3: an earlier window reads its absence as false) |
 //! | `{"op":"stop"}` | `{"ok":true}`, then the host is stopped and the keeper exits |
 //! | `{"op":"stop","forUpdate":true}` | the host is stopped for an update (it lists what it ends for the next host), then `{"ok":true}`, and the keeper exits (#1895 step 3). A window's only: anyone else gets `{"ok":false,"error":"window_only: …"}` |
 //! | `{"op":"switch"}`, `{"op":"upgrade"}` | `{"ok":false,"error":"gone: …"}` (#1895 step 4, PR 4): a keeper runs one build for its life. An earlier window that asks shows the refusal, which says to quit Centralu completely and open it again: such a window offers "Restart completely" only when the host already runs its build |
@@ -162,8 +162,8 @@ pub(super) struct Window {
 
 impl Window {
     /**
-     * Starts the writer for the window `id` on `stream`. A write that fails closes the window, as
-     * before (#840 item 5): it is taken off the push list and given `REATTACH_GRACE` to come back,
+     * Starts the writer for the window `id` on `stream`. A write that fails closes the window
+     * (#840 item 5): it is taken off the push list and given `REATTACH_GRACE` to come back,
      * since it may only be stalled, before its connection is shut down, so its detach (which
      * `watch_window` sees as the connection ends) finds the grace already set. None, and the
      * connection shut down, when no thread could be started for it: the window attaches again.
@@ -430,7 +430,7 @@ impl Keeper {
 }
 
 /// The refusal of a stop for an update to a process that is not a Centralu window attached to this keeper, in words true
-/// for whoever asks (#2119 review): any other process (an agent's shell) gets it, and so does the person's own window
+/// for whoever asks (#2119): any other process (an agent's shell) gets it, and so does the person's own window
 /// when this keeper does not know it (one started after the install, or a window whose attach could not be taken again);
 /// for that window, quitting and reopening runs the installed build, which is the update
 pub(super) const NOT_A_WINDOW: &str = "window_only: only a Centralu window attached to this keeper can stop it for an update; if this is Centralu's window and an update was installed while it ran, quit Centralu and open it again to finish the update";
@@ -523,7 +523,7 @@ fn handle(k: Arc<Keeper>, mut stream: UnixStream) {
             reply(&mut stream, &json!({ "ok": true, "view": view }));
         }
         "attach" => attach(k, stream, reader, &req),
-        // What the keeper holds (#538): nothing since #1895 step 4, said so to the tools and hosts that still ask
+        // What the keeper holds (#538): nothing (#1895 step 4), said so to the tools and hosts of earlier builds that ask
         "children" => reply(&mut stream, &json!({ "ok": true, "children": [] })),
         "stop" if req.get("forUpdate").and_then(Value::as_bool) == Some(true) => {
             let window = k.judge_window_for_update(&stream);
@@ -551,7 +551,7 @@ fn handle(k: Arc<Keeper>, mut stream: UnixStream) {
                 Err(e) => reply(&mut stream, &json!({ "ok": false, "error": format!("the host was not told: {e}") })),
             }
         }
-        // The swap and the move to another build's keeper went in #1895 step 4, PR 4: an earlier window that asks shows this and
+        // No swap and no move to another build's keeper (#1895 step 4, PR 4): an earlier window that asks shows this and
         // offers "Restart completely"
         "switch" | "upgrade" => reply(&mut stream, &json!({ "ok": false, "error": GONE })),
         "restart" => {

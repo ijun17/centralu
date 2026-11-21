@@ -4,15 +4,9 @@ import { appCanLines, usesLines } from '../../store/app-catalog.js'
 import { Badge } from '../../components/Badge.jsx'
 
 /**
- * What the person sees before enabling something (M4 E-3) — what the app being imported (or the
- * already-imported app that needs re-confirmation) **runs**, **what it can do**, what secrets
- * it wants, and which files are coming in. The import dialog and the pinned-view confirmation
- * share this one component.
- *
- * The order is the priority. The command stands at the top: an app server is code that runs on
- * this machine with the person's own permissions (the sandbox only applies to the screen), so
- * enabling it means agreeing to run this command. If this is a re-confirmation, what changed
- * stands even before that — that is the whole reason it is asking again.
+ * The review before enabling, shared by the import dialog and the pinned-view confirmation. Order is priority: what changed
+ * (on a re-confirmation), then the command, since an app server runs with the person's own permissions (the sandbox covers
+ * only the screen), then what it can do, its secrets and files.
  */
 export function AppReviewDetails({ review }: { review: AppReview }) {
   const uses = usesLines(review.uses)
@@ -139,7 +133,7 @@ function Section({ title, testId, tone, children }: { title: string; testId: str
   )
 }
 
-/** The command and its arguments on one line — each argument shown in its own span (so an argument containing a space is not read as two arguments) */
+/** Each argument in its own span, so one containing a space is not read as two */
 function Command({ server, testId = 'review-command' }: { server: AppReview['server']; testId?: string }) {
   return (
     <code className="block break-all rounded-md border border-line bg-surface-floor px-2 py-1 font-mono text-xs text-ink" data-testid={testId}>

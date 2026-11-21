@@ -39,21 +39,15 @@ import { UpdatesMock } from './updates.js'
 import { UsageMock } from './usage.js'
 import { type MemoryFsState } from './memory-fs.js'
 
-/**
- * The in-memory implementation (docs/platform-abstraction.md §6).
- * Tests and Playwright use this — the ports are not mocked ad hoc with a mocking library
- * (that would split the contract apart).
- */
+/** The in-memory implementation every test uses instead of ad hoc port mocks (docs/platform-abstraction.md §6) */
 
 export type MockOptions = {
-  /** A deterministic clock — for testing elapsed waiting time */
   now?: () => number
 }
 
 export class MockPlatform implements Platform {
   private readonly clock = new MockClock(() => Date.now())
   private readonly bus = new EventBus()
-  /** The `emit` the modules are given, so they can broadcast without importing this class */
   private readonly forward: Emit = (event) => this.emit(event)
   private readonly store = new SessionStore(this.clock)
   private readonly toolsMock = new ToolsMock(this.forward)
@@ -112,7 +106,6 @@ export class MockPlatform implements Platform {
   readonly projects = this.projectsMock.projects
   readonly machines = this.machinesMock.machines
   readonly mail = this.mailMock.mail
-  /** The mailbox's mock, for a test to seed and read (`seedMail` seeds a thread) */
   readonly mockMail = this.mailMock
   readonly trash = this.trashMock.trash
   readonly fs = this.filesMock.fs
@@ -125,7 +118,6 @@ export class MockPlatform implements Platform {
   readonly themes = this.themesMock.themes
   readonly updates = this.updatesMock.updates
   readonly requests = this.hostRequestsMock.requests
-  /** For tests: the crashes this window reported to the host, in order */
   readonly crashReports: { message: string; stack: string; componentStack: string; version?: string }[] = []
   readonly diagnostics: DiagnosticsPort = { reportCrash: async (r) => void this.crashReports.push(r) }
   readonly relaunch = this.keeperMock.relaunch
@@ -146,20 +138,12 @@ export class MockPlatform implements Platform {
     }
   }
 
-  /*
-   * The defaults, with the window edge where E2E measures the header from. The file manager settles on the Mac name:
-   * guessing the machine e2e runs on would make what gets written on screen vary from test to test. E2E drives this
-   * mock in Chromium and in WebKit, and the engine running it is the real one.
-   */
+  // The Mac name, so on-screen text does not vary with the machine e2e runs on (Chromium and WebKit)
   readonly capabilities = defaultCapabilities({ fileManagerName: 'Finder' })
 
-  /**
-   * The channel through which tests inject events. `id` is the host's name for the event, which every window of one
-   * host shares (`agents.subscribe`): a test of two windows gives each page's mock the same one. The mock's own events
-   * carry none
-   */
+  /** `id`: the host's name for the event, shared by every window (`agents.subscribe`); the mock's own events carry none */
   emit(event: NormalizedEvent, id?: string): void {
-    // The event families are recorded by the modules that own what they touch; this only runs them in the host's order
+    // Each module records its own families; this runs them in the host's order
     if (event.type === 'subagent_event') {
       const stepSeq = this.store.recordSubagentStep(event)
       // A step the host keeps no row for is not sent on either (a chunk with no text)
@@ -180,7 +164,6 @@ export class MockPlatform implements Platform {
     this.bus.broadcast(out, id)
   }
 
-  /** The fake file tree tests manipulate — the state lives in the MemoryFs behind the `fs` port */
   get fsState(): MemoryFsState {
     return this.filesMock.memoryFs.state
   }
@@ -531,7 +514,6 @@ export class MockPlatform implements Platform {
   recordAppError(...args: Parameters<AppRegistry['recordAppError']>): ReturnType<AppRegistry['recordAppError']> { return this.registry.recordAppError(...args) }
   machineRow(...args: Parameters<MachinesMock['machineRow']>): ReturnType<MachinesMock['machineRow']> { return this.machinesMock.machineRow(...args) }
 
-  /** Lays one file down in the mock and builds the whole path up to it (#104) — see `MemoryFs.place` */
   placeFile(path: string, text: string): void {
     this.filesMock.memoryFs.place(path, text)
   }

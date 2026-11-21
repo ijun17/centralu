@@ -18,24 +18,13 @@ import { AppPanel } from '../pinned-app/AppPanel.jsx'
 import { dragVerdict, droppedArrangement, droppedPanelId } from './drop.js'
 
 /**
- * The project screen (#203) — what clicking a project's name opens.
+ * The project screen (#203), opened from a project's name. Like the grid (which keeps its own list), it starts empty
+ * and keeps only the panels the person adds, in order; a new session adds none, an archived one leaves, and removing a
+ * panel leaves the session or app alone. This project's sidebar rows drop here (drop.ts); others are refused.
  *
- * Like the global grid, it starts empty and remembers only panels the person adds, in order.
- * Creating a session does not add a panel; a session in the session archive is unavailable and leaves
- * the screen. Removing a panel leaves the session or app itself untouched.
- *
- * This project's sidebar session and app rows can be dropped here: an absent panel is added
- * where it lands, a visible one moves there (drop.ts). Other projects and the Assistant
- * are refused during the drag. The global grid keeps its own list across projects.
- *
- * Unlike the grid, the evidence panel stays beside it. The grid dropped it because its sessions
- * belong to different projects, so there is no one repository for it to show; here there is, and
- * "was that actually so" is one glance to the right (product-spec §5.4, objection 1). The panels
- * are measured in the width that is left, so none of them goes below the minimum width either way.
- *
- * An app's panel shows the app's pinned view — the same instance, in the same frame, as opening the
- * app from the sidebar. It cannot be drawn inside the panel (an iframe that moves loses its document),
- * so the panel holds a slot and the pinned view is laid over it (`pinned-app/slots.ts`).
+ * Unlike the grid, the evidence panel stays beside it: one project has one repository to show (product-spec §5.4,
+ * objection 1), and panels are measured in the width left. An app's panel is a slot its pinned view is laid over, the
+ * same instance as from the sidebar: an iframe that moves loses its document (`pinned-app/slots.ts`).
  */
 export function ProjectView({ projectId }: { projectId: string }) {
   const project = useStore((s) => s.projects[projectId])
@@ -65,11 +54,8 @@ export function ProjectView({ projectId }: { projectId: string }) {
   // resize observer reports, and the app view laid over it has to move with it
   useLayoutEffect(() => placeSlots())
 
-  /*
-   * Every app panel shows the app's pinned view, so every app on the screen has one. Opening it is
-   * the pinned view's own business (it calls `home` when the app can run), so an untrusted or
-   * unconfirmed app stands here with its reason and its button, exactly as it does in the app view.
-   */
+  // Every app on the screen has its pinned view, which opens itself (`home` when the app can run), so an untrusted or
+  // unconfirmed app shows its reason and button here as in the app view
   const appKeys = visible.flatMap((id) => {
     const p = parsePanelId(id)
     return p?.kind === 'app' ? [p.id] : []
@@ -103,9 +89,8 @@ export function ProjectView({ projectId }: { projectId: string }) {
   }
 
   /**
-   * Is this drag one the screen takes? Its own panel while it is being dragged, or one of the
-   * project's sidebar rows — for which the drop cursor is said here, since the window's floor
-   * (App.tsx) has already said yes to every drag.
+   * Whether the screen takes this drag: its own panel being dragged, or this project's sidebar row, whose drop cursor
+   * is set here since the window's floor (App.tsx) says yes to every drag.
    */
   const takes = (e: DragEvent<HTMLElement>): boolean => {
     const verdict = dragVerdict(e.dataTransfer.types, projectId)
@@ -130,11 +115,8 @@ export function ProjectView({ projectId }: { projectId: string }) {
       className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface-floor"
       data-testid="project-view"
       onDragOver={(e) => {
-        /*
-          Another project's session or app, or the Assistant: no drop cursor anywhere on this
-          screen. The window's floor (App.tsx) has already said yes to every drag, so saying
-          nothing here would still show one. A drag the page answers 'none' is not dropped at all.
-        */
+        // Another project's session or app, or the Assistant: no drop cursor anywhere here, as the floor (App.tsx) says
+        // yes to every drag. A drag answered 'none' is not dropped at all.
         if (dragVerdict(e.dataTransfer.types, projectId) === 'refuse') e.dataTransfer.dropEffect = 'none'
       }}
     >
@@ -225,12 +207,9 @@ export function ProjectView({ projectId }: { projectId: string }) {
                     e.preventDefault()
                     e.stopPropagation()
                     snapshotScroll()
-                    /*
-                      Commit exactly what the preview shows — the drop must not change the screen (#53).
-                      With no preview yet it lands on the half it is let go over, as on the grid (GridView):
-                      React renders a dragover's update in a later task, so a quick release can come before
-                      the preview of its last dragover is on the screen, and that drop used to be lost (#509).
-                    */
+                    // Commit what the preview shows: the drop must not change the screen (#53). With no preview yet it
+                    // lands on the half let go over (GridView): React renders a dragover's update in a later task, so a
+                    // quick release can beat its preview, and the drop would be lost (#509).
                     const r = e.currentTarget.getBoundingClientRect()
                     const before = dropsLeft(r, e.clientX)
                     const next = preview ?? (dragging === id ? null : reorderIds(visible, dragging, id, before))

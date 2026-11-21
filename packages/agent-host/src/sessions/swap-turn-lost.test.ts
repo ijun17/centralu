@@ -76,7 +76,7 @@ beforeEach(() => {
 function host(updateResume: UpdateResumeFolder, failSend = false) {
   const adapter = new Adapter(failSend)
   const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
-  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, tmpdir(), { updateResume })
+  const mgr = new SessionManager(store, adapters, (e) => events.push(e), undefined, { worktreeRoot: tmpdir(), updateResume })
   const session = (id: string) => mgr.listSessions().find((s) => s.id === id)!
   return { mgr, adapter, session, rpc: createRpcHandler(mgr, adapters) }
 }

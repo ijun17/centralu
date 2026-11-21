@@ -174,12 +174,13 @@ describe('more work for a child on a linked machine (#1948 step 6)', { timeout: 
     const { r, local } = await start('please approve my command')
     const task = copyOf('h1', r.sessionId)!
     await eventually(() => machine.mgr.listSessions().find((s) => s.id === local)?.state === 'waiting_approval')
-    // A message that is not marked as a question is told it holds nothing; the question is not
+    // A message to the parent that gave the task, not marked as a question, needs no reply there (#2357), and the send says how to ask; the question does
     const plain = await machine.mail!.tool.call(local, { action: 'send', to: 'parent', text: 'Started on it.' })
-    expect(plain.text).toContain('It is not marked as a question, so your task is still reported when your turn ends')
+    expect(plain.text).toContain('It needs no reply. When you ask whoever gave you your task something')
+    expect(hub.store.mailbox.message(/^Sent (\S+) /.exec(plain.text)?.[1] ?? '')).toMatchObject({ needsReply: false })
     const asked = await machine.mail!.tool.call(local, { action: 'send', to: 'parent', text: 'Design: A or B?', kind: 'question' })
     expect(asked.isError).toBeFalsy()
-    expect(asked.text).not.toContain('It is not marked as a question')
+    expect(asked.text).not.toContain('When you ask whoever')
     const question = /^Sent (\S+) /.exec(asked.text)?.[1] ?? ''
     // The machine keeps its copy of the question, marked as one, to the hub session that gave the task, by the address the task names it
     expect(machine.store.mailbox.message(question)?.facts.question).toBe(true)

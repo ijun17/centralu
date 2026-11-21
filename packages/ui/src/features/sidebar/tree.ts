@@ -2,19 +2,14 @@ import { needsAnswer, type SessionSummary } from '@cc/core'
 import { treeParentOf } from '../../store/sidebarTree.js'
 
 export type ProjectAppSessions = {
-  /** Sessions that still belong in the project's ordinary tree. */
   project: SessionSummary[]
   /** Listed app id → the sessions that row owns, in the host's order. */
   byApp: Map<string, SessionSummary[]>
 }
 
 /**
- * Separates the sessions owned by apps that are still listed in a project from its ordinary
- * sessions. A removed app deliberately does not claim its old sessions: they return to the
- * project list instead of disappearing with the app row.
- *
- * This happens before `orderAsTree`, so a regular session and the agents or worktrees it started
- * retain the tree layout they had before app rows were introduced.
+ * Splits off the sessions of a project's listed apps. A removed app's sessions return to the project list instead of
+ * vanishing with its row. Runs before `orderAsTree`, so the tree layout does not depend on the app rows.
  */
 export function groupProjectAppSessions(
   sessions: SessionSummary[],
@@ -36,23 +31,10 @@ export function appSessionsNeedAttention(sessions: SessionSummary[]): boolean {
 }
 
 /**
- * Lays out the session list in tree order: a session immediately followed by the sessions it started (owner decision
- * 2026-10-12 on #561), and each of those by theirs. A child is grouped by who started it, `askedBy` for a start_agent
- * child, whether it runs in its parent's folder or in a new worktree; `parentSessionId` still places a worktree session
- * under the session that held it (#69, a former worktree manager's children). A fork (#677, `forkedFrom`) hangs under
- * the session it was copied from, ahead of the session that asked for it. `askedBy` of an ask_project session names a
- * session of another project, which is not in this list, so that session stays at the top level with its "Asked by"
- * mark.
- *
- * Hierarchy lives only in the sidebar — the grid, the inbox and the palette all stay flat lists
- * (design decision: "The hierarchy lives in the sidebar; the grid stays a flat set of panels").
- *
- * If the parent is not in this list (archived, etc.), the child is drawn at the top level —
- * indentation is only a sign of a relationship, and drawing it indented while the parent is
- * invisible would make it look like it is hanging under nothing. A child of a child hangs one step further in (#862):
- * start_agent is depth one, but an `auto` session may cross that boundary, and drawing its children at the top level
- * made them read as their grandparent's siblings. A loop in the links (which the host never makes) is cut where it
- * closes, so every session is drawn exactly once.
+ * The session list in tree order (#561): each session followed by those it started (`treeParentOf`: a fork under its
+ * source, #677; a worktree session under the one that held it, #69), and theirs one step further in (#862). Only the
+ * sidebar nests; the grid, inbox and palette stay flat. A child whose parent is not listed (archived, or another
+ * project's asker) stands at the top level. A loop, which the host never makes, is cut where it closes.
  */
 export function orderAsTree(sessions: SessionSummary[]): { s: SessionSummary; nested: boolean; depth: number }[] {
   const here = new Set(sessions.map((x) => x.id))
@@ -79,19 +61,15 @@ export function orderAsTree(sessions: SessionSummary[]): { s: SessionSummary; ne
 export type TreeRow = {
   s: SessionSummary
   nested: boolean
-  /** How many steps in it hangs under the list's top level: 0 for a top-level session, 1 for its child, and so on */
   depth: number
   /** The sessions this row started and has in the list: what its chevron folds (#666) */
   children: SessionSummary[]
-  /** Its children are folded away: they are in `children` but not among the rows, nor is anything under them */
+  /** Its children stay in `children` but neither they nor anything under them are rows */
   folded: boolean
 }
 
-/**
- * `orderAsTree` as the rows to draw, with each row's children and whether they are folded (#666). A folded row keeps
- * its place and its `children`, so the row can say how many it hides and whether one of them is waiting; everything
- * under it is left out of the rows, its children's own children too.
- */
+/** `orderAsTree` as the rows to draw (#666); a folded row keeps its `children` so it can say what it hides */
+
 export function treeRows(sessions: SessionSummary[], isFolded: (parentId: string) => boolean): TreeRow[] {
   const ordered = orderAsTree(sessions)
   const rows: TreeRow[] = ordered.map(({ s, nested, depth }) => ({ s, nested, depth, children: [], folded: false }))

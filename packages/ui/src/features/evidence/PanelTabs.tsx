@@ -17,12 +17,12 @@ import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 import { TabBody } from './TabBody.jsx'
 import { dropsLeft } from '../sidebar/reorder.js'
 
-/** The gap between tabs (gap-0.5) and the `…` button's width (an IconButton: 14px icon, p-1) — the two numbers the collapse calculation uses */
+/** For fitTabs: the gap between tabs (gap-0.5) and the `…` button's width (14px icon, p-1) */
 const TAB_GAP = 2
 const MORE_W = 22
 
 const TAB_LABELS: Record<PanelTab, string> = {
-  // The tab is named for what it shows, the working tree's changes (owner, 2026-10-19); its id stays `git`
+  // Named for what it shows, the working tree's changes; its id stays `git`
   git: 'Changes',
   history: 'History',
   files: 'Files',
@@ -30,12 +30,8 @@ const TAB_LABELS: Record<PanelTab, string> = {
 }
 
 /**
- * The tab groups, stacked vertically (#20). One group is the everyday panel. Dragging
- * a tab to the bottom half of the body splits a second group off; dragging the bottom
- * group's last tab back to a strip dissolves it. Every arrangement change goes through
- * the pure functions in store/panelLayout.ts and lands in the store, which persists it
- * globally — the panel is a way of looking, so there is one arrangement for the whole
- * app and it survives a relaunch (the #20 decision).
+ * The tab groups, stacked (#20): a tab dragged onto the body's lower half splits off a second group, and the bottom group's
+ * last tab dragged back dissolves it. One arrangement for the whole app, kept across relaunches (store/panelLayout.ts).
  */
 export function PanelGroups({
   projectId,
@@ -89,27 +85,19 @@ function TabGroup({
   const panelSplit = useStore((s) => s.panelSplit)
   const setPanelSplit = useStore((s) => s.setPanelSplit)
   const [splitHint, setSplitHint] = useState(false)
-  /** The bottom group's tab strip — the boundary between the two groups is this strip's top edge, so the resize handle lives here */
+  /** The bottom group's strip: its top edge is the boundary, so the resize handle lives here */
   const stripRef = useRef<HTMLElement>(null)
-  /** Where this group's control buttons are drawn (tabActions.tsx) — the body renders here through a portal */
+  /** This group's control buttons (tabActions.tsx), portalled from the body */
   const [actionSlot, setActionSlot] = useState<HTMLElement | null>(null)
 
-  /*
-   * How many tabs fit. What is measured is **the space the tabs are allowed to use** (fitRef), not
-   * the whole strip — the control buttons on the right never collapse, so that space was never the
-   * tabs' to claim, and this space's own width does not change whether the `…` button appears or
-   * disappears, so the calculation does not get shaken by its own result.
-   *
-   * Widths are measured entirely in layout pixels (offsetWidth, clientWidth). `rect` is a screen
-   * pixel already multiplied by zoom (--text-zoom), and mixing the two would throw things off while
-   * zoomed (the same rule as this file's boundary resize handle).
-   */
+  // Measures the space the tabs may use (fitRef), not the strip: the buttons never collapse, and its width does not move
+  // with `…`, so the count is not shaken by its own result. Layout pixels only: `rect` is already multiplied by --text-zoom.
   const fitRef = useRef<HTMLDivElement>(null)
   const [avail, setAvail] = useState(0)
   const [widths, setWidths] = useState<Partial<Record<PanelTab, number>>>({})
   const measure = useCallback((id: PanelTab, w: number) => {
     if (w <= 0) return
-    // Returns the same object for the same value — otherwise it loops measure → render → measure
+    // The same object for the same value, or measure and render loop
     setWidths((prev) => (Math.abs((prev[id] ?? -1) - w) < 0.5 ? prev : { ...prev, [id]: w }))
   }, [])
 
@@ -144,9 +132,7 @@ function TabGroup({
           e.dataTransfer.dropEffect = 'move'
         }}
         onDrop={(e) => {
-          // Dropped on the strip but not on a tab: the tab joins this group's end.
-          // This is also the unsplit gesture — the bottom group's last tab dragged up
-          // here empties that group, and an empty group stops existing.
+          // Off any tab: the tab joins this group's end. The bottom group's last tab dragged here unsplits.
           const dragged = e.dataTransfer.getData(PANEL_TAB_MIME) as PanelTab
           if (!dragged) return
           e.preventDefault()
@@ -154,15 +140,7 @@ function TabGroup({
         }}
       >
         {/*
-          The boundary resize handle (moved here after a second dogfooding finding). It originally
-          sat on the top edge of the bottom body, but that was **below the tab strip**, not the "the
-          boundary between the two panels" — the space between the top body and the bottom tab strip
-          — that a person actually grabs for. The boundary is this strip's top edge.
-
-          Why the calculation runs entirely on ratios: `rect` is a screen pixel multiplied by zoom
-          (--text-zoom), while offsetHeight is a layout pixel, and mixing them throws things off
-          while zoomed — measuring everything with `rect` and taking only the ratio cancels the unit
-          out.
+          On this strip's top edge, the boundary a person grabs. Ratios of `rect` only: `rect` is zoomed, offsetHeight is not.
         */}
         {gi === 1 && (
           <ResizeHandle
@@ -186,10 +164,7 @@ function TabGroup({
           />
         )}
         {/*
-          The left side is where to go (tabs), the right side is what to do from where the person
-          already is (control buttons). When space runs short, the tabs are always what gives way — the
-          control buttons are actions on what is being looked at and must stay within reach, and a
-          pushed-out tab can still be picked by name behind `…`.
+          Tabs on the left give way to the buttons on the right (fitTabs).
         */}
         <div ref={fitRef} className="flex min-w-0 flex-1 items-center gap-0.5">
           <div className="flex min-w-0 items-center gap-0.5 overflow-hidden">
@@ -198,8 +173,7 @@ function TabGroup({
                 key={id}
                 id={id}
                 active={group.active === id}
-                // Repo questions have no answer without a repo (#21) — and a disabled button
-                // also fires no drag events, so these tabs are arranged from repo projects
+                // No repo, no answer (#21); a disabled button fires no drag events, so these are arranged from repo projects
                 disabled={(id === 'git' || id === 'history') && !isRepo}
                 groups={groups}
                 onLayout={onLayout}
@@ -214,25 +188,14 @@ function TabGroup({
         <div
           ref={setActionSlot}
           className="flex shrink-0 items-center gap-1 pl-1"
-          /* Does not use 'evidence-tab-' in its name — there is a place that scans the tab list by that prefix */
+          /* Not 'evidence-tab-…': something scans the tab list by that prefix */
           data-testid={gi === 0 ? 'evidence-actions' : `evidence-actions-${gi}`}
         />
       </nav>
       <div
-        /*
-          overflow-hidden is the wall that protects the neighboring group. Without it, content from
-          the group above overflowing its body **got drawn on top of the tab strip of the group
-          below** (this actually happened with the git tab's fixed-height History strip — a
-          dogfooding finding). The rule that a tab, whatever it draws, cannot escape its own body is
-          enforced by the container, not by the content.
-        */
+        /* overflow-hidden: the container, not each tab, keeps overflow off the next group's strip */
         className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
-        /*
-          Each split body's share (dogfooding: a fixed 50/50 split could not express "the terminal
-          can stay narrow but a diff needs to be wide"). The tab strip has a fixed height, so flexGrow
-          only divides space between the bodies — basis stays at flex-1's 0, so the grow ratio is
-          exactly the height ratio.
-        */
+        /* Each body's share: strips are fixed height and basis is 0, so the grow ratio is the height ratio */
         style={groups.length === 2 ? { flexGrow: gi === 0 ? panelSplit : 1 - panelSplit } : undefined}
         data-testid={`evidence-body-${gi}`}
         onDragOver={(e) => {
@@ -265,11 +228,7 @@ function TabGroup({
         </TabActionSlot>
         {splitHint && (
           <div
-            /*
-              The boundary is the meaning ("this half becomes the split"), so it wears
-              the same focus-coloured landing line as every other drop indicator — border-line was
-              measured too faint against the tinted half to read as a boundary at all.
-            */
+            /* The focus-coloured landing line of every drop indicator: border-line was too faint on the tinted half */
             className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-surface-hover/30 ${
               groups.length === 1 ? 'top-1/2 shadow-[inset_0_2px_0_0_var(--color-focus)]' : 'top-0'
             }`}
@@ -281,13 +240,7 @@ function TabGroup({
   )
 }
 
-/**
- * The collapsed tabs (`…`).
- *
- * They only collapsed for lack of room; they have not disappeared — this is where they can be
- * picked by name. The list drops down below the strip, not inside it: the strip collapsed them
- * because it ran out of width, so expanding a list inside it would just recreate the same problem.
- */
+/** The collapsed tabs, picked by name from a list below the strip, which has no width to spare */
 function MoreTabs({ gi, hidden, onPick }: { gi: number; hidden: PanelTab[]; onPick: (t: PanelTab) => void }) {
   const [open, setOpen] = useState(false)
   // The wrapper holds the trigger and the list: a press inside either is not an outside press
@@ -355,17 +308,11 @@ function TabButton({
   onLayout: (groups: PanelGroup[]) => void
   onPick: (tab: PanelTab) => void
   projectId: string
-  /** Reports its own width to the strip — the strip uses these numbers to count how many fit */
   onMeasure?: (id: PanelTab, width: number) => void
 }) {
-  // Each button keeps its own drop edge so the line is drawn on that button only —
-  // the same call as the sidebar rows, for the same reason.
+  // Each button keeps its own drop edge, so the line draws on that button only (as the sidebar rows)
   const [edge, setEdge] = useState<'left' | 'right' | null>(null)
-  /*
-   * The terminal tab's running badge (a carryover from #60) — even with a dev server left running
-   * while looking at another tab, the fact that "it is running" has to stay visible on the tab. This
-   * gap (nothing shown once the terminal window was closed) was the reason for the carryover.
-   */
+  // The running badge (#60) stays on the tab while another tab shows or the terminal is closed
   const running = useStore((s) =>
     id === 'terminal' ? Object.values(s.commandRuns[projectId] ?? {}).some((r) => r.running) : false,
   )
@@ -373,7 +320,7 @@ function TabButton({
   return (
     <button
       ref={(el) => {
-        // Width changes when the text size (--text-zoom) changes — it is watched continuously instead of measured just once
+        // Watched, not measured once: --text-zoom changes it
         if (!el || !onMeasure) return
         onMeasure(id, el.offsetWidth)
         const ro = new ResizeObserver(() => onMeasure(id, el.offsetWidth))
@@ -423,11 +370,7 @@ function TabButton({
   )
 }
 
-/**
- * The drop position, as an inset shadow on the target's edge — a border would grow the
- * button 2px and nudge the whole strip while dragging (the sidebar learned this the
- * hard way; see its dropLine).
- */
+/** An inset shadow, not a border: a border grows the button 2px and nudges the strip mid-drag (as the sidebar's dropLine) */
 function dropLine(edge: 'left' | 'right' | null): string {
   if (!edge) return ''
   return edge === 'left'

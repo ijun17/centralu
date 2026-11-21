@@ -6,7 +6,7 @@ import { AskedByRow } from './chat-rows/delegation.jsx'
 
 /**
  * The header's ⋯ menu (owner, 2026-11-12, #2213): what a session's header has to offer that is not worth a badge on every
- * session. Today the way back to the session that asked for this one (#371), which was a badge beside the name. Drawn only
+ * session. Today the way back to the session that asked for this one (#371). Drawn only
  * when it has a row, so a session nobody asked has no empty menu.
  *
  * A plain button, not an IconButton, as the project's own ⋯ is: pressing it opens a named menu right there, so a hover tooltip

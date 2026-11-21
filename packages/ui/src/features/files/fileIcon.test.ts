@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_FILE_ICON, iconForFile } from './fileIcon.js'
 
-/**
- * This table is a hardcoded list — which is why **what happens when it falls behind** matters most
- * of all. An unknown extension turning into a blank would break the list, but falling back to the
- * default icon keeps it looking fine.
- */
+// The table is hardcoded, so what matters most is falling behind: an unknown extension gets the default icon, never a blank
 describe('iconForFile', () => {
   it('uses its own icon for a known extension', () => {
     expect(iconForFile('App.tsx')).not.toBe(DEFAULT_FILE_ICON)

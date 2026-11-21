@@ -540,7 +540,8 @@ describe('UpdateService', () => {
     it('reads the macOS bundle with the launcher\'s own command, and the version file on Windows', () => {
       const bundle = '/Applications/Centralu.app'
       const launcher = bundleVersionCommand(bundle) as { command: string; args: string[] }
-      expect(installedCopyVersionSource(bundle, 'darwin')).toEqual({ kind: 'command', file: launcher.command, args: launcher.args })
+      expect(launcher.command).toBe('/usr/bin/plutil')
+      expect(installedCopyVersionSource(bundle, 'darwin')).toEqual({ kind: 'plutil', args: launcher.args })
       expect(installedCopyVersionSource(bundle, 'win32')).toEqual({ kind: 'file', name: 'centralu-version.txt' })
       expect(installedCopyVersionSource(bundle, 'linux')).toEqual({ kind: 'menu-entry' })
       const dir = mkdtempSync(join(tmpdir(), 'cc-installed-copy-'))

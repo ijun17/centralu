@@ -43,7 +43,7 @@ beforeEach(async () => {
   git(repo, ['commit', '-qm', 'init'])
 
   const adapters = new Map<ToolName, AgentAdapter>([['claude', world.adapter]])
-  const mgr = new SessionManager(world.store, adapters, (e) => world.events.push(e), undefined, join(root, 'worktrees'))
+  const mgr = new SessionManager(world.store, adapters, (e) => world.events.push(e), undefined, { worktreeRoot: join(root, 'worktrees') })
   mgr.prLookup = async () => null
   rpc = createRpcHandler(mgr, adapters)
   projectId = ((await rpc('projects.add', { path: repo })) as { id: string }).id

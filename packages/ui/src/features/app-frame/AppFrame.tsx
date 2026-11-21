@@ -10,42 +10,16 @@ import { viewReconnect } from '../../store/viewReconnect.js'
 import { DragRelay } from './dragRelay.js'
 import { activeTheme, readHostStyles } from './hostStyles.js'
 
-/**
- * A single app view (M4 B-3c, spike S-1 `harness/src/host.ts`).
- *
- * This renders the sandboxed proxy address the host gave it in an iframe, and talks to the view
- * through the official ext-apps 2.x `AppBridge`. The view (the app's HTML) runs inside an
- * opaque-origin frame nested inside the proxy. This component only knows about one outer frame.
- * It accepts messages only from that frame's `contentWindow` (event.source).
- *
- * **Which app this view belongs to is decided by props.** Whatever the view's own messages
- * claim, tool calls and resource reads always go out under this component's `appId` (the same
- * principle as the plan's "the view's app id is decided by which iframe sent the message", #93
- * and #94).
- *
- * Order: connect the bridge **first**, then load the address. An iframe's `contentWindow` stays
- * the same object across navigation, so the view's first `ui/initialize` reaches a bridge that
- * is already listening. That is why there is no readiness handshake with the proxy (host
- * views/proxy-page.ts).
- *
- * **Another host behind the connection** (a restart, or an update's next host, which opens the
- * views the last one handed over, #280, #1895): the view asks for its address again. The same address means the new host serves
- * this instance where the old one did, so the frame and the bridge are left alone and the view
- * keeps its state. Another address is loaded the way the first one was; a failure goes the same
- * way as a first load's failure.
- */
+// One app view (docs/apps/views.md "How a view is hosted"): the host's proxy address in an iframe, spoken to through
+// ext-apps' `AppBridge` and heard only from that frame's `contentWindow`. Calls and reads go out under the `appId` prop,
+// whatever the view's messages claim (#93, #94).
 
 export type AppFrameTeardown = 'answered' | 'timeout' | 'failed' | 'not-connected'
 
 export type AppFrameHandle = {
   /**
-   * Sends the spec's `ui/resource-teardown` and waits briefly for a reply. The parent calls
-   * this **before** taking the view down. Once it gets a reply, it closes the bridge and clears
-   * the frame.
-   *
-   * Unmounting alone cannot guarantee this. The moment React detaches the iframe from the DOM,
-   * that window's browsing context is gone, taking with it any message sent before then and the
-   * reply that was being waited on.
+   * Sends `ui/resource-teardown`, waits briefly for a reply, then closes the bridge and clears the frame. The parent calls
+   * it before taking the view down: once React detaches the iframe, its browsing context goes, with any pending message or reply.
    */
   teardown(): Promise<AppFrameTeardown>
 }
@@ -54,76 +28,48 @@ export type AppFrameMessage = { role: 'user'; content: unknown[] }
 
 export type AppFrameProps = {
   appId: AppId
-  /** An app is identified by (project, id). null means a user-folder app */
+  /** null: a user-folder app */
   projectId?: string | null
-  /** The linked machine of a user-folder app (#82); a drag out of the view carries it, so the session knows which app it came from */
+  /** A user-folder app's linked machine (#82); a drag out of the view carries it, so the session knows which app it came from */
   machine?: string | null
-  /** The view instance created by one tool call (issued by the host) */
+  /** Issued by the host for the tool call that created the view */
   instanceId: string
-  /** The arguments of the tool call that created the view. Sent once, per spec, once it is known */
+  /** The creating call's arguments; sent once, when known */
   toolInput?: Record<string, unknown>
-  /** The result of that call. Sent once, per spec, when it finishes (after tool-input) */
+  /** Sent once, after tool-input */
   toolResult?: AppToolResult
-  /**
-   * The call ended without a result — cancelled, rejected, or the app failed to open (M4 B-1).
-   * Instead of a result, the spec's tool-cancelled is sent once with this reason (after
-   * tool-input). Whichever of result or cancellation arrives first is the one that is sent.
-   */
+  /** No result (cancelled, rejected, the app failed to open): sent once as tool-cancelled, if it comes before a result */
   toolCancelled?: string
   /**
-   * "This app's state changed" (B-3d). Every time the value changes, sends the view our
-   * extension notification `centralu/notifications/changed`.
-   *
-   * If not supplied, uses the store's counter for that app (`externalAppChanges`). The host
-   * reports `external_app_state_changed` every time a call that reached the app finishes, and
-   * the store counts it per (project, app) (the plan's "how open views see the same value").
-   * That way, whichever parent mounts this view, it gets updates with no wiring of its own. A
-   * change caused by this view itself is not reported (`externalAppChangedBy`). A parent that
-   * supplies the value decides for itself when to signal it — in that case the owner is
-   * unknown, so it reports on every change.
+   * Each change sends `centralu/notifications/changed` (docs/apps/views.md "Keeping open views current"). Defaults to the
+   * store's per-app counter (`externalAppChanges`), so any parent gets updates unwired and the view's own changes are skipped
+   * (`externalAppChangedBy`). A supplied value has no known owner, so every change is reported.
    */
   changeSignal?: number
   /**
-   * A message the view sends to the conversation (`ui/message`). Answered with rejection if
-   * this is not supplied. Where it goes is decided by the parent. Returning `false` also
-   * answers with rejection — a pinned view asks the person which session to send to, and if the
-   * person cancels, the view has to be told "it was not sent" (B-4). Answering with silent
-   * success would leave the view believing it was sent.
+   * The view's `ui/message`; the parent decides where it goes. Missing, or returning `false`, answers with rejection: a pinned
+   * view's person may cancel the session pick, and the view must not believe it was sent.
    */
   onMessage?: (message: AppFrameMessage) => void | boolean | Promise<void | boolean>
   /**
-   * Pinned view (B-2): fills the slot the view is placed in. Height is decided by the slot, not
-   * by the view (`size-changed`), and the view is told that size as a fixed size
-   * (`containerDimensions: { height, width }`). Overflowing content scrolls inside the view. A
-   * view inside the conversation grows to fit its content, but if a view occupying the main area
-   * set its own height, a short app would leave a band at the top of the area and a tall app
-   * would spill outside it.
+   * Pinned view: fills its slot and is told that fixed size (`containerDimensions`); content scrolls inside. A main-area view
+   * that set its own height would leave a band (short app) or spill out (tall app).
    */
   fill?: boolean
   /**
-   * The view could not be opened (failed to get an address — the instance was already closed,
-   * or the host restarted). If supplied, the parent decides what goes in its place: a view
-   * inside the conversation (B-1) collapses to a placeholder instead of a broken frame. If not
-   * supplied, this component draws the reason itself.
+   * No address could be got (instance closed, host restarted). Supplied: the parent fills the place (an inline view collapses
+   * to a placeholder); otherwise this component shows the reason.
    */
   onFailed?: (message: string) => void
-  /**
-   * What to show instead of the default one-line message ("Loading app view…") while the view
-   * is loading — the pinned view's skeleton (B-6). Covers the frame from above. The frame keeps
-   * loading underneath it and this is lifted the moment the view initializes.
-   */
+  /** Laid over the loading frame instead of "Loading app view…" (the pinned skeleton); lifted when the view initializes */
   loading?: ReactNode
   className?: string
 }
 
-/** Our extension notification. Being outside the standard, a view that is not our template ignores it */
+/** Outside the standard: a view not built from our template ignores it */
 export const CHANGED_NOTIFICATION = 'centralu/notifications/changed'
 
-/**
- * How long to wait for a teardown reply. The spec only says it "SHOULD" wait for a response.
- * The view uses this time to save or clean up. A view inside the conversation spends this time
- * every time it scrolls out of the virtualized list, so it is kept short.
- */
+/** The spec only says SHOULD wait. Short: an inline view spends it each time it scrolls out of the virtualized list */
 export const TEARDOWN_WAIT_MS = 1000
 
 const MIN_HEIGHT = 24
@@ -131,38 +77,23 @@ const MAX_HEIGHT = 2000
 const INITIAL_HEIGHT = 160
 
 /**
- * Sandbox for the outer (proxy) frame. The inner frame cannot have broader permissions than
- * this (nested sandboxes intersect). The inner frame, in its per-app-origin scheme, needs
- * `allow-same-origin`, so it is included here too. The proxy is on a different origin from our
- * own view (the host's port), so this combination still cannot touch our window. Popups and
- * top-level navigation are absent from every layer.
+ * Nested sandboxes intersect, so this carries the inner frame's `allow-same-origin` (per-app origin). The proxy is on the
+ * host's origin, not ours, so it still cannot touch our window. No layer gets popups or top-level navigation.
  */
 const PROXY_SANDBOX = 'allow-scripts allow-same-origin allow-forms'
 
-/** Links only open for these three schemes. Everything else (`javascript:`, `file:`, custom schemes) is rejected without even asking */
+/** Any other scheme (`javascript:`, `file:`, custom) is refused without asking */
 const OPENABLE = /^(https?:|mailto:)/i
 
 /**
- * The interval for progress notifications sent to the view while a tool it called is running
- * (the plan's "slow calls": the host keeps a call alive during the wait by sending progress
- * notifications to the view).
- *
- * The view's SDK drops a request after 60 seconds (the MCP TS SDK's default limit). ext-apps'
- * `callServerTool` is set to reset that clock whenever a progress notification arrives
- * (`resetTimeoutOnProgress`). But the host keeps calls running well past that 60 seconds — while
- * waiting for approval (capability approval can take minutes), while a slow tool is running.
- * Without notifications, the view drops the call and shows a failure, yet the app finishes the
- * work anyway and the result has nowhere to go. Three times within 60 seconds is an interval at
- * which even one late notification does not let the clock run out.
+ * docs/apps/attaching.md "Long calls and cancellation". Three beats per the SDK's 60 s, so one late beat cannot let the
+ * clock run out and leave the app's result with nowhere to go.
  */
 const CALL_HEARTBEAT_MS = 20_000
 
 /**
- * Keeps one running call alive — returns a function that stops it. If the view did not attach a
- * progress token, there is nothing to keep alive: that view's SDK never opened a slot to receive
- * progress notifications (a token is only attached to a request that registered `onprogress`),
- * and a notification it does not receive cannot reset its clock. The notification's `progress`
- * value only ever increases (per spec: the progress value must grow with every notification).
+ * Keeps one running call alive; returns its stop. No progress token means the view's SDK registered no `onprogress` and
+ * would not hear a beat. `progress` must grow with each notification (spec).
  */
 function keepAlive(bridge: AppBridge, token: string | number | undefined, beats: Set<ReturnType<typeof setInterval>>): () => void {
   if (token === undefined) return () => {}
@@ -179,16 +110,9 @@ function keepAlive(bridge: AppBridge, token: string | number | undefined, beats:
 }
 
 /**
- * Our environment as told to the view: the side of the theme that shows (`theme`), every MCP Apps
- * style variable mapped from our tokens, and Centralu's own variables (the signal colour and the
- * scrollbar) in the `centralu` extension (hostStyles.ts, #312 step 6). A theme switch sends it
- * again (the effect below), and the bridge sends only the fields that changed.
- *
- * The text size is **only announced** through `centralu.fontScale`. The app-wide text size
- * comes from CSS zoom on the root, and zoom renders even the content inside an iframe at the
- * same scale (measured in Chromium and WebKit: at zoom 2, a 100px box becomes 200 device
- * pixels, with an internal devicePixelRatio of 2). So scaling up the spec's font-size variables
- * by the same factor and sending that would double the enlargement.
+ * docs/apps/view-theme-layout-drag.md "The theme in a view". The text size is only announced (`centralu.fontScale`): the
+ * root's CSS zoom already scales iframe content (measured in Chromium and WebKit: at zoom 2 a 100px box is 200 device
+ * pixels, devicePixelRatio 2), so scaling the font variables too would double it.
  */
 function hostContext(scale: number, el: Element | null, fill = false): McpUiHostContext {
   const { theme, variables, centralu } = readHostStyles(el)
@@ -205,20 +129,14 @@ function hostContext(scale: number, el: Element | null, fill = false): McpUiHost
   }
 }
 
-/**
- * The proxy page learns the side before the view says anything, from the address's fragment
- * (agent-host views/proxy-page.ts), so its colour scheme matches the frame's from the first paint.
- * The fragment never reaches the host, and the address kept for comparison stays the host's.
- */
+/** The proxy page reads the side here before its first paint; the fragment never reaches the host, and `loadedUrl` stays the host's */
 function withScheme(url: string, theme: McpUiTheme): string {
   return `${url.split('#')[0]}#color-scheme=${theme}`
 }
 
 /**
- * The size of a filling view. A slot with no size yet is 0 — announcing 0 would make the view
- * collapse itself. In that case, it says "unknown" instead (only `maxHeight`). A pinned view while
- * something else is looked at keeps a size: it is moved out of the window, never `display: none`
- * (PinnedApps' OUT_OF_SIGHT).
+ * A slot not sized yet reads 0, which would collapse the view, so it says unknown (`maxHeight` only). A hidden pinned view
+ * keeps its size: it is moved out of the window, never `display: none` (PinnedApps' OUT_OF_SIGHT).
  */
 function fillDimensions(el: Element | null): McpUiHostContext['containerDimensions'] {
   const h = el?.clientHeight ?? 0
@@ -246,11 +164,8 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
   const [error, setError] = useState<string | null>(null)
   const [height, setHeight] = useState(INITIAL_HEIGHT)
   const [linkAsk, setLinkAsk] = useState<LinkAsk | null>(null)
-  /*
-   * The side of the theme that shows, and a count of switches (app/theme.ts announces each one
-   * with `cc-themechange`). The tokens are read again from the slot on every switch, so an edit to
-   * a custom theme reaches the view the same way a preset switch does.
-   */
+  // The side that shows, and a count of `cc-themechange` switches (app/theme.ts). Tokens are re-read from the slot on each,
+  // so an edit to a custom theme reaches the view as a preset switch does.
   const [theme, setTheme] = useState<McpUiTheme>(activeTheme)
   const [themeRevision, setThemeRevision] = useState(0)
   useEffect(() => {
@@ -262,7 +177,7 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
     return () => window.removeEventListener('cc-themechange', follow)
   }, [])
 
-  // The bridge handlers are attached once and live long — changing values are read through refs
+  // The bridge handlers live long, so changing values are read through refs
   const onMessageRef = useRef(onMessage)
   onMessageRef.current = onMessage
   const onFailedRef = useRef(onFailed)
@@ -272,18 +187,18 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
   const fillRef = useRef(fill)
   fillRef.current = fill
   const sent = useRef({ input: false, result: false, change: undefined as number | undefined })
-  /** Progress-notification clock for each running call (`keepAlive`) — stops together when the view goes down (cleanup, teardown) */
+  /** Each running call's beat (`keepAlive`); all stop when the view goes down */
   const beats = useRef(new Set<ReturnType<typeof setInterval>>())
   const changeRef = useRef(signal)
   changeRef.current = signal
   const hostResyncs = useStore((s) => s.hostResyncs)
-  /** The address the frame was loaded with — null until it is, and again once the load is undone */
+  /** null until loaded, and again once the load is undone */
   const loadedUrl = useRef<string | null>(null)
-  /** An address already asked for that has to be loaded (another host gave a different one) — the load below takes it instead of asking again */
+  /** Another host's different address, already fetched: the load below takes it instead of asking again */
   const nextFrame = useRef<AppViewFrame | null>(null)
   const [reload, setReload] = useState(0)
 
-  /** A link opens only after the person confirms it. If an earlier question is still pending, it is closed as rejected */
+  /** A link opens only once the person confirms; a newer ask rejects a pending one */
   const linkAskRef = useRef<LinkAsk | null>(null)
   const settleLink = useCallback((open: boolean) => {
     const ask = linkAskRef.current
@@ -315,7 +230,7 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
 
     void (async () => {
       const [{ AppBridge, PostMessageTransport }, frame] = await Promise.all([
-        // The bridge is loaded only when a view first opens — someone who never opens an app view pays zero startup cost
+        // Loaded with the first view, so startup never pays for it
         import('@modelcontextprotocol/ext-apps/app-bridge'),
         known ?? viewReconnect(platform, () => platform.apps.viewFrame(appId, instanceId, { projectId, hostOrigin: window.location.origin }), () => { if (!cancelled) setPhase('reconnecting') }),
       ])
@@ -336,7 +251,6 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
       )
       const from = { projectId, instanceId }
       const live = bridge
-      // The app belongs to this component — whatever params carries, appId is decided here
       bridge.oncalltool = async (params) => {
         const stop = keepAlive(live, params._meta?.progressToken, beats.current)
         try {
@@ -349,8 +263,8 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
       bridge.onopenlink = async ({ url }) => {
         if (typeof url !== 'string' || !OPENABLE.test(url)) return { isError: true }
         if (!(await askToOpen(url))) return { isError: true }
-        // The same outward-opening path as terminal links (the platform port). Navigating inside the app would blow away the session.
-        // If it fails to open, the app also gets a failure answer — it used to be that success ({}) went back on desktop even when nothing opened (#159)
+        // Opened outside, as terminal links are: navigating in the app would lose the session. A failed open answers an
+        // error, never {} (#159).
         try {
           await platform.system.openUrl(url)
         } catch {
@@ -359,7 +273,6 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
         return {}
       }
       bridge.onsizechange = ({ height: h }) => {
-        // A filling view's height is decided by the slot — the slot is never resized by a height the view reports
         if (fillRef.current) return
         if (typeof h === 'number' && Number.isFinite(h)) setHeight(Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, Math.ceil(h))))
       }
@@ -369,20 +282,15 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
         const delivered = await deliver({ role: params.role, content: params.content })
         return delivered === false ? { isError: true } : {}
       }
-      // Until a transcript viewer (B-7) exists, the view's logs are only received, never shown
       bridge.onloggingmessage = () => {}
-      /*
-       * An item dragged out of the view (#308): the host's relay in the view posts the drag's link
-       * and where it ended, since the page never hears a drag from another origin (dragRelay.ts).
-       * Every other notification outside the standard is ignored, as before.
-       */
+      // A drag out of the view comes through the host's relay (dragRelay.ts); other non-standard notifications are ignored
       const relay = new DragRelay(() => iframe, () => ({ appId, projectId, machine }), platform.capabilities.frameDragEndInPage)
       bridge.fallbackNotificationHandler = async (n) => {
         if (n.method === APP_DRAG_NOTIFICATION) relay.take(n.params)
       }
       bridge.oninitialized = () => {
         if (cancelled || !bridge) return
-        // If the text size changed between connect and initialize, this catches it up here (only the changed field goes out)
+        // Catches up a text size changed between connect and initialize
         bridge.setHostContext(hostContext(scaleRef.current, boxRef.current, fillRef.current))
         sent.current.change = changeRef.current
         setPhase('ready')
@@ -393,7 +301,8 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
         return
       }
       bridgeRef.current = bridge
-      // Feature delegation is fixed before navigation — set it before loading the address
+      // Connected before the address loads: `contentWindow` survives navigation, so the view's first `ui/initialize` finds
+      // the bridge listening and the proxy needs no readiness handshake. `allow` is fixed at navigation, so it goes first.
       if (frame.allow) iframe.setAttribute('allow', frame.allow)
       else iframe.removeAttribute('allow')
       iframe.src = withScheme(frame.url, activeTheme())
@@ -418,10 +327,9 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
     }
   }, [platform, appId, projectId, machine, instanceId, askToOpen, settleLink, reload])
 
-  /*
-   * Another host lifetime: ask for the address again (see the header). A view still loading is
-   * skipped, since its own request already goes to the new host; so is one taken down.
-   */
+  // Another host behind the connection (a restart, an update's next host, #280, #1895): ask for the address again. The same
+  // address keeps the frame, bridge and view state; another loads like the first, and fails the same way. Skipped while
+  // loading (its own request reaches the new host) and after teardown.
   const refreshing = useRef<{ url: string; request: Promise<void> } | null>(null)
   const resyncsSeen = useRef(hostResyncs)
   useEffect(() => {
@@ -459,12 +367,8 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
     refreshing.current = { url: loaded, request }
   }, [hostResyncs, platform, appId, projectId, instanceId])
 
-  /*
-   * A last-ditch attempt for the case where the parent tears the view down without calling
-   * teardown. A layout effect's cleanup runs while the iframe is still attached, so the request
-   * is at least posted to the window. Delivery and a reply are not guaranteed. A parent that
-   * needs a guarantee calls `teardown()` above first.
-   */
+  // For a parent that unmounts without `teardown()`: a layout effect's cleanup runs while the iframe is attached, so the
+  // request is at least posted. Neither delivery nor a reply is guaranteed.
   useLayoutEffect(
     () => () => {
       const b = bridgeRef.current
@@ -473,7 +377,7 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
     [],
   )
 
-  // tool-input once, then tool-result (or tool-cancelled) once after it (per spec: input must always precede the result)
+  // tool-input once, then tool-result or tool-cancelled once (the spec puts input first)
   useEffect(() => {
     const b = bridgeRef.current
     if (phase !== 'ready' || !b) return
@@ -492,19 +396,13 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
     }
   }, [phase, toolInput, toolResult, toolCancelled])
 
-  // On a text-size or theme change, host-context-changed (setHostContext sends only the changed fields)
   useEffect(() => {
     const b = bridgeRef.current
     if (phase !== 'ready' || !b) return
     b.setHostContext(hostContext(scale, boxRef.current, fill))
   }, [phase, scale, fill, themeRevision])
 
-  /*
-   * A filling view is told whenever its slot's size changes (window size, sidebar width,
-   * opening and closing the transcript panel). This also fires when it is hidden and shown
-   * again: a hidden pinned view stands out of the window at the lane's size, and coming back
-   * into its panel or the main area is a size change like any other.
-   */
+  // Hiding and showing are slot resizes too: a hidden pinned view waits out of the window at the lane's size.
   useEffect(() => {
     const box = boxRef.current
     if (!fill || phase !== 'ready' || !box || typeof ResizeObserver === 'undefined') return
@@ -513,22 +411,15 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
     return () => ro.disconnect()
   }, [fill, phase])
 
-  // B-3d: the app's state changed — once per value change, after initialization
   useEffect(() => {
     const b = bridgeRef.current
     if (phase !== 'ready' || !b || signal === undefined) return
     const last = sent.current.change
     if (last === signal) return
     sent.current.change = signal
-    /*
-     * A change this view itself made is not reported — it already got that as the answer to its
-     * call. Reporting it would make the view read again, and if that read triggers another
-     * change, it becomes a loop. Measured (65acb43): one template view called `show` about 700
-     * times per second. Skipping only happens when the counter went up by **exactly one** and
-     * that one increment belongs to this instance. If it went up by two or more (piled up in a
-     * single render), someone else's change may have been mixed in during that time, so it
-     * reports — the safer error has to be "one extra read." It must never show a stale value.
-     */
+    // Not the view's own change: it has that as its call's answer, and re-reading could loop (measured: a template view
+    // called `show` ~700 times/s). Skipped only for a rise of exactly one by this instance; a bigger rise may hide another's
+    // change, and one extra read beats a stale value.
     if (by === instanceId && signal === (last ?? 0) + 1) return
     void b.notification({ method: CHANGED_NOTIFICATION, params: {} })
   }, [phase, signal, by, instanceId])
@@ -548,10 +439,10 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
         }
         bridgeRef.current = null
         void b.close()
-        // There is no reason to send progress notifications to a view that is gone — the outcome of a running call is kept in the execution record
+        // A gone view needs no beats; a running call's outcome stays in the run record
         for (const t of beats.current) clearInterval(t)
         beats.current.clear()
-        // Take the view down — so it says nothing more in the meantime even if the parent detaches it soon after
+        // Unloaded now, so the view says nothing more before the parent detaches it
         iframeRef.current?.removeAttribute('src')
         loadedUrl.current = null
         setPhase('closed')
@@ -591,12 +482,8 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
         style={{
           ...(fill ? {} : { height }),
           display: phase === 'ready' || phase === 'loading' || phase === 'reconnecting' ? 'block' : 'none',
-          /*
-           * The side of the theme, which the proxy page states too (agent-host views/proxy-page.ts:
-           * from the address's fragment first, then from every theme the bridge sends). Chromium and
-           * WebKit paint a framed document's canvas opaque when the frame element's scheme and the
-           * document's differ, so the view would sit on a solid rectangle instead of our background.
-           */
+          // The proxy page declares the same side: Chromium and WebKit paint a framed document opaque when the frame's
+          // scheme and its document's differ (docs/apps/view-theme-layout-drag.md "The theme in a view").
           colorScheme: theme,
         }}
       />

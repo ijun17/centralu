@@ -86,7 +86,7 @@ beforeEach(async () => {
     ['claude', claude],
     ['codex', codex],
   ])
-  mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
+  mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), { worktreeRoot: join(root, 'worktrees') })
   mgr.prLookup = async () => null
   // Where an app made without a project goes (#1141): this test's ~/Centralu
   mgr.projectCreation.useProjectsHome(() => join(root, 'Centralu'))

@@ -2,18 +2,8 @@ import { z } from 'zod'
 import { errorMessage } from './error-message.js'
 import { isRecord } from './tolerant.js'
 
-/**
- * Theme files (#312).
- *
- * A custom theme is a JSON file in the data folder's `themes/` directory, one file per theme,
- * named `<id>.json`. People and agents can write one by hand, so the format is small and
- * forgiving: a name, which side it belongs to, and the tokens it changes. Any token left out
- * keeps the value of the preset for that side. Unknown keys and values that cannot be used are
- * reported next to the theme in Settings and skipped; a file never stops the app.
- *
- * This module is shared by the host (which reads, watches and writes the folder) and the screen
- * (which applies the tokens), so both read a file the same way.
- */
+// Theme files (docs/themes.md "Theme files"), read the same way by the host that reads, watches and writes them and
+// the screen that applies them.
 
 export type ThemeTokenKind = 'color' | 'shadow' | 'length'
 export type ThemeTokenDef = {
@@ -24,10 +14,7 @@ export type ThemeTokenDef = {
   label: string
   group: string
   kind: ThemeTokenKind
-  /**
-   * The key of the token a theme file that leaves this one out follows, instead of the preset's value: the border tokens,
-   * so that a custom theme's borders are its own `line` or `line-strong` and never a colour the preset chose.
-   */
+  /** Left out of a file, the token takes this one's value, not the preset's: a custom theme's borders are its own lines */
   follows?: string
 }
 
@@ -41,11 +28,7 @@ const defs = (group: string, kind: ThemeTokenKind, list: [string, string, string
     ...(follows ? { follows } : {}),
   }))
 
-/**
- * Every token a theme can set, in the order Settings shows them. `packages/ui/src/styles/index.css`
- * holds the Dark values; a unit test checks the two lists agree, so a token added to the
- * stylesheet cannot be left out of themes by accident.
- */
+/** In Settings' order. A unit test keeps it equal to the tokens of `packages/ui/src/styles/index.css` */
 export const THEME_TOKENS: readonly ThemeTokenDef[] = [
   ...defs('Surfaces', 'color', [
     ['surface-floor', 'Floor'],
@@ -144,11 +127,8 @@ export const THEME_TOKEN_BY_KEY: ReadonlyMap<string, ThemeTokenDef> = new Map(
 )
 
 /**
- * Tokens a theme could set once and no longer can (#844). A file written before they left still names them, and the
- * person did nothing wrong, so the reader skips them without a problem line and the schema still accepts them (an
- * editor would otherwise mark a valid file red). A removed token is added here in the same change that removes it.
- *
- * - `activity-1` to `activity-5`: the working orbit's colours, gone with the orbit (#742)
+ * Skipped without a problem line and still accepted by the schema, so an editor does not mark a valid file red. A token
+ * is added here in the change that removes it (#844)
  */
 export const RETIRED_THEME_TOKENS: readonly string[] = [
   'activity-1',
@@ -159,20 +139,15 @@ export const RETIRED_THEME_TOKENS: readonly string[] = [
 ]
 const RETIRED_THEME_TOKEN_SET: ReadonlySet<string> = new Set(RETIRED_THEME_TOKENS)
 
-/** A theme file's id is its file name without `.json`: lowercase words and hyphens */
+/** The file name without `.json` */
 export const ThemeId = z.string().regex(/^[a-z0-9][a-z0-9-]{0,59}$/)
 
-/** A theme that ships with the app: its stylesheet block is `[data-theme='<id>']` (Dark is the `@theme` values themselves) */
+/** Its stylesheet block is `[data-theme='<id>']` (Dark is the `@theme` values themselves) */
 export type ThemePreset = { id: string; name: string; base: 'dark' | 'light' }
 
 /**
- * The presets the stylesheet defines (`packages/ui/src/styles/index.css`), here so the host can name them too: the
- * Assistant's `set_preferences` picks a theme by id or name (#1219), and the screen reads this same list
- * (`THEME_PRESETS` in app/theme.ts). The first preset of each base is that side's default.
- *
- * Graphite (`graphite`, #2208) left the list when Dark took its values (#2335). A choice saved under its id names nothing
- * now, so it resolves the way any such id does, to its side's default, Dark (app/theme.ts `resolveSide`), and the first
- * paint, given no floor for it, paints Dark's: nothing stored is rewritten.
+ * The stylesheet's presets, here so the host can name them too (`set_preferences`, #1219). The first of each base is
+ * that side's default, which a saved id that names nothing (`graphite`, #2335) resolves to.
  */
 export const THEME_PRESETS: readonly ThemePreset[] = [
   { id: 'dark', name: 'Dark', base: 'dark' },
@@ -181,7 +156,7 @@ export const THEME_PRESETS: readonly ThemePreset[] = [
   { id: 'hc-light', name: 'High contrast light', base: 'light' },
 ]
 
-/** The id a theme named `name` is filed under, before a number is added for a name already taken (`My theme` -> `my-theme`) */
+/** `My theme` -> `my-theme`, before `freeThemeId` adds a number */
 export function themeSlug(name: string): string {
   return (
     name
@@ -193,22 +168,18 @@ export function themeSlug(name: string): string {
   )
 }
 
-/** Whether `id` is a preset's. A theme file under it would shadow the preset (#2214), so a new one is never filed there */
 export function isPresetThemeId(id: string): boolean {
   return THEME_PRESETS.some((p) => p.id === id)
 }
 
-/** What refuses a theme file to be created under a preset's id (#2214); one already stored there (from before) is saved in place */
+/** For a new file only (#2214); one already stored under a preset's id is saved in place */
 export function presetIdRefusal(id: string): string {
   return `${id} is a preset's id, and a theme file under it would hide the preset. Leave the id out and the file is filed under another one.`
 }
 
 /**
- * The id a new theme file named `name` gets: its slug, with a number added while `isTaken` says the id is. The one rule for the
- * host's `themes.save` and import, the Assistant's `set_preferences` (which names the id before the file exists) and the mock.
- *
- * Never a preset's id (#2214): a theme file shadows a preset of the same id (the window looks for a file first), so a custom
- * theme named "Dark" or "Light" would have made the preset impossible to pick. It gets `dark-2` and keeps its name.
+ * The one rule for host, Assistant and mock. Never a preset's id (#2214): the window looks for a file first, so a theme
+ * named "Dark" would hide the preset; it gets `dark-2` and keeps its name.
  */
 export function freeThemeId(name: string, isTaken: (id: string) => boolean): string {
   const base = themeSlug(name)
@@ -218,7 +189,7 @@ export function freeThemeId(name: string, isTaken: (id: string) => boolean): str
   }
 }
 
-/** What the screen writes into a theme file (the host adds `$schema`) */
+/** The host adds `$schema` */
 export const ThemeFileContent = z.object({
   name: z.string().min(1).max(80),
   base: z.enum(['dark', 'light']),
@@ -226,27 +197,23 @@ export const ThemeFileContent = z.object({
 })
 export type ThemeFileContent = z.infer<typeof ThemeFileContent>
 
-/** One theme file as the host read it */
 export const ThemeFileEntry = z.object({
   id: ThemeId,
-  /** Where it is on disk, for "Open file" and "Show in Finder" */
   path: z.string(),
   name: z.string(),
   base: z.enum(['dark', 'light']),
-  /** The tokens that can be used, by key. Unknown keys and unusable values are not here. */
+  /** Only the usable ones */
   tokens: z.record(z.string(), z.string()),
-  /** What was wrong with the file, one sentence each. Empty when it read cleanly. */
+  /** One sentence each */
   problems: z.array(z.string()),
-  /** True when the file could not be read as a theme at all (not JSON, not an object) */
+  /** Not JSON, or not an object */
   broken: z.boolean(),
 })
 export type ThemeFileEntry = z.infer<typeof ThemeFileEntry>
 
 /**
- * What a theme list offers, the screen's picker and the Assistant's `set_preferences` alike: the presets, then the theme files that
- * read (a file that does not read is never applied, so it is not offered, and it hides no preset). A file stored under a preset's id
- * from before #2214 keeps that id and still shadows the preset (the window looks for a file first, and the stored choice is only an id),
- * so the preset is not offered beside it: that id is the file, once. A theme made since gets another id (`freeThemeId`), so both are here.
+ * For the picker and `set_preferences` alike. A broken file is never applied, so it is not offered and hides nothing; a
+ * file stored under a preset's id shadows that preset, so the id is offered once, as the file.
  */
 export function pickableThemes(files: readonly Pick<ThemeFileEntry, 'id' | 'name' | 'base' | 'broken'>[]): { id: string; name: string; base: 'dark' | 'light'; file: boolean }[] {
   const usable = files.filter((f) => !f.broken)
@@ -256,15 +223,10 @@ export function pickableThemes(files: readonly Pick<ThemeFileEntry, 'id' | 'name
   ]
 }
 
-/** The schema file written next to the themes, which `$schema` in each file points at */
 export const THEME_SCHEMA_FILE = 'theme.schema.json'
 export const THEME_SCHEMA_REF = `./${THEME_SCHEMA_FILE}`
 
-/**
- * Reads a theme file's text. **Never throws** — a file someone is halfway through editing is
- * the normal case, not an error; it comes back `broken` with the reason, and the screen keeps
- * showing the last version that read cleanly.
- */
+/** Never throws: a file halfway through an edit is normal, and comes back `broken` with the reason */
 export function parseThemeFile(id: string, path: string, text: string): ThemeFileEntry {
   const problems: string[] = []
   let raw: unknown
@@ -324,11 +286,7 @@ export function formatThemeFile(content: ThemeFileContent): string {
   return `${JSON.stringify({ $schema: THEME_SCHEMA_REF, name: content.name, base: content.base, tokens: content.tokens }, null, 2)}\n`
 }
 
-/**
- * JSON Schema (draft-07) for a theme file. The host writes it next to the themes; the same text
- * is kept in `docs/theme.schema.json` for anyone writing a theme outside the app (a test keeps
- * the two equal).
- */
+/** A test keeps `docs/theme.schema.json` equal to it */
 export function themeFileJsonSchema(): Record<string, unknown> {
   const kindText: Record<ThemeTokenKind, string> = {
     color: 'A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …',

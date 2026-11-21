@@ -3,29 +3,23 @@ import { errorMessage, busyWith, handoffOpening, handoffPrompt } from '@cc/proto
 import type { AppState, StoreGet, StoreSet } from '../state.js'
 import { EMPTY_DRAFT } from '../state.js'
 
-/**
- * Handing a session off to a fresh one (#78, #102, #142): the note asked of the agent or built from
- * the record, the successor's first message, and the grid slot it takes over.
- */
+// Handing a session off to a fresh one (#78, #102, #142).
 
-/** The prompt asking the agent for its note, now in the protocol (#694: the Assistant's handoff_session asks with it too) */
+/** The Assistant's handoff_session asks with it too (#694) */
 export { handoffPrompt }
 
-/** A handoff in progress — calling it twice on the same session births two new sessions (module state: purely a re-entry guard, nothing to draw from it) */
+/** A re-entry guard: a second call on the same session would birth two sessions */
 const handoffInFlight = new Set<string>()
 
 /**
- * The card that blocks asking the agent for a handoff note (#174) — `null` if there is none: the busy rule's card
- * (`busyWith`, #2158), so a state that says a card stands blocks it too, though the card is not carried. The store's
- * `handoffSession` and the sidebar's confirmation window use the same decision. A turn or background work does not
- * block it: the request waits for the turn's end below, and the confirmation window says what archiving stops.
+ * The card that blocks asking the agent for a note (#174): the busy rule's (`busyWith`, #2158), shared with the
+ * sidebar's confirmation. A turn does not block: the request waits for its end.
  */
 export function handoffBlockedBy(s: Pick<SessionSummary, 'state' | 'pendingQuestions' | 'pendingApproval'>): 'question' | 'approval' | null {
   const busy = busyWith(s)
   return busy === 'question' || busy === 'approval' ? busy : null
 }
 
-/** The store's action that hands a session off */
 type HandoffActions = Pick<
   AppState,
   | 'handoffSession'
@@ -38,21 +32,13 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
     const project = session?.projectId ? s.projects[session.projectId] : null
     if (!s.platform || !session || !project || handoffInFlight.has(sessionId)) return
     const { tool: heirTool, mode, deleteOld } = opts
-    // A worktree session cannot hand off yet. A session with worktree children can since #561: they outlive it (they
-    // used to pin a worktree manager, whose delete refused while one was unmerged)
+    // A worktree session cannot hand off yet. A session with worktree children can (#561): they outlive it
     if (session.worktree) {
       set({ toast: 'Worktree sessions cannot hand off yet — merge or delete them first' })
       return
     }
-    /*
-     * The path that asks the agent for a note **never starts while a card is up** (#174). The request
-     * travels as an ordinary message, so if exactly one question is open, that message becomes the
-     * question's answer (`send`), and the agent would receive the handoff request text as the answer
-     * to "Which DB?" — an answer that has already reached the agent cannot be taken back. With several
-     * questions open, or an approval pending, it becomes a new turn instead and the card is dropped.
-     * Record mode never asks the agent, so it proceeds regardless. The sidebar's confirmation window
-     * checks the same condition (`handoffBlockedBy`).
-     */
+    // Never while a card is up (#174): the request travels as a message, which would answer an open question (and
+    // cannot be taken back) or drop the card. Record mode never asks the agent.
     const blocked = mode === 'agent' ? handoffBlockedBy(session) : null
     if (blocked) {
       set({ toast: `Answer the open ${blocked} first, or hand off from the record` })
@@ -60,36 +46,18 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
     }
     handoffInFlight.add(sessionId)
     try {
-      /*
-       * The note's location is decided and written by the host (#142) — under the data folder, at
-       * `handoff/<project id>/<departing session id>.md`. This used to clear that spot inside the
-       * project first (#104: a file left by a past failure was then delivered as if it were the
-       * freshly written note). Now the file is only returned as a path **after** the host has
-       * overwritten it with this handoff's text, so there is no way to read a leftover file.
-       */
+      // The host places the note (#142) and returns its path only after writing this handoff's text, so a file a past
+      // failure left is never delivered (#104)
       let note = ''
       let notePath = ''
       if (mode === 'record') {
-        /*
-         * Record mode (#78): asks the agent **nothing at all** — the reason this mode exists is
-         * precisely that the agent cannot respond. The host builds the record from the store's own
-         * transcript (plus, for a codex rollout, its compaction summaries).
-         *
-         * The host writes this to **the same file** as agent mode (#102) — only the producer differs,
-         * and the first message the successor receives is identical between the two modes. The `text`
-         * returned here is only for the preview.
-         */
+        // Record mode (#78) asks the agent nothing: it exists for when the agent cannot answer. The host writes the
+        // record to the same file as agent mode (#102); `text` is only for the preview.
         const record = await s.platform.agents.exportHandoffRecord(sessionId, heirTool)
         note = record.text
         notePath = record.path
       } else {
-      /*
-       * If a turn is running, the request **waits for it to finish** first (measured in the Mea session: a
-       * handoff where the prompt merged into (steered) the turn already in progress, so the report of the
-       * work just done ended up glued to the top of the handoff note. Nothing was actually lost, but it read
-       * as "a note with its beginning cut off"). Sending only after the turn boundary makes sure the reply
-       * that follows is the handoff, whole.
-       */
+      // Sent after the turn ends: a prompt mid-turn steers it, and the note would start with the turn's report
       const quietBy = Date.now() + 10 * 60_000
       // A machine that is away shows its turn as not working (#1822): what it does there is not known, so it is waited for
       while (isInTurn(get().sessions[sessionId]?.state) || isAway(get().sessions[sessionId], get().machines)) {
@@ -99,33 +67,19 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
       if (!get().sessions[sessionId]) throw new Error('the session disappeared')
 
       const prompt = handoffPrompt()
-      /*
-       * The last recorded point right before sending the request — the host reads the first human
-       * message after this point as the request, and the reply after that as the note. Even if a
-       * past handoff failed and the same request and its reply are still sitting in the conversation,
-       * they are before this point. The point is asked of the host's own record: the screen's
-       * `lastSeq` does not count a sent message until its confirmation (`user_message`) arrives, so it
-       * can lag, and the first human message after a lagging point would not be this request.
-       */
+      // The host reads the first human message after this point as the request. From its record, not the screen's
+      // `lastSeq`, which lags until `user_message` confirms a send.
       const before = (await s.platform.agents.loadMessages(sessionId, 1)).at(-1)?.seq ?? 0
       await get().send(sessionId, prompt)
-      // A send failure flows through the composer-restore path and leaves the prompt in the draft — since this was never written by the person, it is cleared
+      // A failed send restores the prompt into the draft; the person never wrote it, so it is cleared
       if (!(get().chat[sessionId] ?? []).some((i) => i.kind === 'user' && i.text === prompt)) {
         if (get().drafts[sessionId]?.text.includes(prompt)) get().setDraft(sessionId, EMPTY_DRAFT)
         throw new Error('could not reach the session')
       }
 
       /*
-       * **Waits for the turn to finish, then receives the note from the host** (#142) — never
-       * scraped from the on-screen conversation (measured: leftover output from a turn still in
-       * progress mixed into the top of the text and read as "cut off"). The host reads the last reply
-       * after the request message from its own record and places it as a file. If the turn is still
-       * running or there is no reply yet, it returns `null` and this asks again. Nothing is cleared if
-       * no reply ever arrives.
-       *
-       * The received text is never sent whole to the successor (#102) — a preview is extracted, and
-       * the full text is embedded in the record instead, because this text cannot be recreated once
-       * the predecessor is gone.
+       * The note comes from the host's record (#142), never the screen, where a running turn's output would mix in. The
+       * successor gets a preview; the full text goes in its record (#102), as it cannot be made again.
        */
       const deadline = Date.now() + 10 * 60_000
       for (;;) {
@@ -137,11 +91,8 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
         if (Date.now() > deadline) throw new Error('timed out waiting for the handoff note')
         if (st.connection !== 'connected' || isAway(cur, st.machines)) continue // No decision is made while disconnected, here or there (#1822)
         if (isInTurn(cur.state)) continue
-        /*
-         * null is "no reply yet": asked again. A throw is not (#841 item 5): the host could not place the note (a
-         * full disk, a folder it cannot write), and reading it as "not yet" polled to the ten-minute timeout and blamed
-         * that. A throw because the connection dropped is asked again once it is back.
-         */
+        // null is "no reply yet". A throw is not (#841): the host could not place the note (a full disk), and polling
+        // would blame the timeout. A dropped connection is asked again once back.
         let got: Awaited<ReturnType<typeof s.platform.agents.exportHandoffNote>>
         try {
           got = await s.platform.agents.exportHandoffNote(sessionId, before)
@@ -157,13 +108,8 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
       }
       }
 
-      /*
-       * The new session inherits **every one** of the dying session's settings (the rule #37 taught:
-       * carrying over only one leaves the rest born fresh with defaults). Except **when the tool
-       * changes, nothing is carried over** — model, effort, verbosity and speed are all tool-specific
-       * values, and passing them across tools either kills session creation outright or leaves a
-       * setting silently wrong. The name is always inherited, regardless.
-       */
+      // Every setting carries over (#37), except tool-specific ones when the tool changes: they would fail creation or
+      // be silently wrong
       const sameTool = heirTool === session.tool
       const info = await get().createSession(session.projectId!, {
         tool: heirTool,
@@ -173,24 +119,14 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
         serviceTier: sameTool ? (session.serviceTier ?? undefined) : undefined,
         permissionPreset: session.permissionPreset,
         initialPrompt: handoffOpening(session.name, note, notePath),
-        // The note's full text goes into the record (#102), along with the id (#106) — that id is
-        // what tells the host's cleanup this note still has an owner; without it, deleting the
-        // predecessor is the same as deleting the note. Saying the predecessor goes next gives this session all of
-        // its children, settled ones too, and the note lists them (#738)
+        // The id tells the host's cleanup the note still has an owner (#106). A predecessor that goes next gives this
+        // session all its children, which the note lists (#738)
         handoff: { from: session.name, note, fromSessionId: sessionId, ...(deleteOld ? { removesOriginal: true } : {}) },
       })
       await get().rename(info.id, session.name)
 
-      /*
-       * Grid slot succession (a dogfooding request, 2026-09-04): if the dying session was on the grid,
-       * the successor takes its place at **the same index**. Emptying the slot with the delete and
-       * then reinserting it would make the panel flicker away and reappear, shifting the order along
-       * the way — so the swap happens before destruction. It swaps even with `deleteOld: false`: the
-       * grid is a place for "sessions working right now," and the one that continues that work is the
-       * successor — the surviving original is still reachable from the sidebar. `createSession` has
-       * already focused the successor, so this only fixes up the lane (making it visible inside the
-       * grid if it was on the grid).
-       */
+      // The successor takes the same grid index before the delete, so the panel does not flicker; even when the old one
+      // stays, as the grid holds the work running now
       const grid = get().gridPanels
       if (gridSessionIds(grid).includes(sessionId)) {
         await get().setGridPanels(
@@ -200,21 +136,9 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
       }
 
       /*
-       * **Nothing is cleaned up here** (#106).
-       *
-       * Cleanup has moved twice. The first time it was right here, right after `createSession` — the
-       * successor had not even opened the file yet. #102 moved it to **the instant the successor's
-       * first turn ends**, but that condition asks neither whether the turn succeeded nor whether the
-       * note was ever read: in an actual incident, the first turn died with a 400 in under a second,
-       * and the directory was empty within three minutes. What the successor received was a path to a
-       * file that no longer existed, and that text can never be recreated — the predecessor who wrote
-       * it had just been replaced.
-       *
-       * "Was it read" is not a fact we can observe. So the whole approach of hanging cleanup off a
-       * turn is abandoned, and the two moments that cannot race the reader (session deletion, and
-       * startup) are handed to the host instead (`manager.sweepOrphanHandoffNotes`). The cost of
-       * leaving one extra file behind is close to zero — the note lives in the data folder, not the
-       * user's repository (#142).
+       * Nothing is cleaned up here (#106): whether the note was read cannot be observed, and a first turn that dies at
+       * once would leave a path to a file gone for good. The host cleans up only at deletion and startup
+       * (`sweepOrphanHandoffNotes`).
        */
 
       if (deleteOld) {
@@ -223,7 +147,7 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
       }
       set({ toast: `Handed off: ${session.name}` })
     } catch (e) {
-      // The next card after a live failure is record mode — the app tells the person instead of switching silently on its own (#78)
+      // The app suggests record mode rather than switching on its own (#78)
       const hint = mode === 'agent' ? ' — if the agent cannot respond, retry with "From the record"' : ''
       set({ toast: `Handoff failed: ${errorMessage(e)}${hint}` })
     } finally {

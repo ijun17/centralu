@@ -7,7 +7,7 @@ import type { ToolsMock } from './tools.js'
 
 /** The Assistant seat: its tool (#63) and the session behind it */
 export class AssistantMock {
-  /** The Assistant tool chosen on the intro screen (#63) — the real thing writes it to app_settings */
+  /** Chosen on the intro screen (#63); the host keeps it in app_settings */
   private savedAssistantTool: ToolName | null = null
   get assistantTool(): ToolName {
     return this.savedAssistantTool ?? this.toolsMock.firstRegisteredTool()
@@ -17,12 +17,11 @@ export class AssistantMock {
   }
   readonly agents: Pick<AgentPort, 'assistant' | 'assistantPeek' | 'configureAssistant'> = {
     assistant: async () => {
-      // The same rule as the real thing: creates one on the spot if there is none. Does not belong to a project
+      // As the host: made on the spot if missing
       const found = [...this.store.sessions.values()].find((x) => x.projectId === null)
       if (found) return found
       const id = `orc-${this.clock.next()}`
       const info = mockSessionInfo({
-        // The same rule as the real thing: the tool follows the choice on the intro screen (#63)
         id,
         projectId: null,
         kind: 'orchestrator',
@@ -34,7 +33,7 @@ export class AssistantMock {
       this.store.sessions.set(id, info)
       return info
     },
-    // The same rule as the real thing (#63): opening the screen only asks — creating it is assistant()'s job, at the first question
+    // As the host (#63): opening the screen only asks; `assistant()` creates it at the first question
     assistantPeek: async () => [...this.store.sessions.values()].find((x) => x.projectId === null) ?? null,
     configureAssistant: async (tool: ToolName) => {
       this.assistantTool = tool
