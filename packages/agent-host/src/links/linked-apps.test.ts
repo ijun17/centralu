@@ -1,5 +1,8 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as kit from '../apps/external/test-helpers.js'
+import { sessionAddress } from '../mail/address.js'
+import { LINK_HOLD_MS } from '../mail/across-core.js'
+import { LinkedApps, type LinkedTool } from './linked-apps.js'
 import { runCleanups } from './links-world.test-helpers.js'
 import { hubHost, machineHost } from './reverse-link.test-helpers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
@@ -15,10 +18,10 @@ afterEach(runCleanups)
 const text = (r: { content: unknown[] }) => r.content.map((c) => (c as { text?: string }).text ?? '').join('\n')
 
 /** A machine with the fixture app `board` in its project, shared unless told otherwise, and a hub linked to it */
-async function world(o: { shared?: boolean; machineApps?: true | 'before' } = {}) {
+async function world(o: { shared?: boolean; machineApps?: true | 'before'; mail?: true } = {}) {
   const machine = await machineHost({ apps: o.machineApps ?? true })
   machine.apps!.plant(kit, 'p-remote', 'board', { shared: o.shared !== false })
-  const hub = await hubHost(machine.port, { apps: true })
+  const hub = await hubHost(machine.port, { apps: true, ...(o.mail ? { mail: o.mail } : {}) })
   await eventually(() => hub.machine().status === 'connected')
   await eventually(() => machine.hubs.appsOn !== undefined && !!hub.links.get('m1')?.answersApps === (o.machineApps !== 'before'))
   await hub.mgr.setProjectTrusted('p-hub', true)
@@ -115,6 +118,22 @@ describe("a hub's session uses a machine's project app (#1938)", () => {
     expect(text(r)).toMatch(/Remote box is not reachable.*nothing ran/)
   })
 
+  it('tells the session in its mail, once the machine is back, that its call while away did not run', async () => {
+    const { machine, hub, access, live } = await world({ mail: true })
+    await access.refreshLinked('h1')
+    const attaching = access.attach('h1', 'Remote box/remote-project/board')
+    await hub.answer('allow')
+    await attaching
+    await machine.bounce(undefined, async () => {
+      await eventually(() => hub.machine().status !== 'connected')
+      expect(text(await live.call('app-board', 'peek', {}))).toMatch(/Remote box is not reachable.*nothing ran/)
+    })
+    const mail = () => hub.store.mailbox.pendingFor(sessionAddress(hub.id, 'h1'), Number.MAX_SAFE_INTEGER).map((p) => p.message.body)
+    await eventually(() => mail().length > 0)
+    expect(mail()).toEqual(['[Centralu] Remote box is reachable again; board was not called while it was away. Call it again if it is still needed.'])
+    expect(machine.apps!.rt.runs({ projectId: 'p-remote', appId: 'board' })).toEqual([])
+  })
+
   it('withdraws a call there when the caller cancels it', async () => {
     const { machine, hub, access, live } = await world()
     await access.refreshLinked('h1')
@@ -160,5 +179,107 @@ describe("a hub's session uses a machine's project app (#1938)", () => {
     const { access } = await world({ machineApps: 'before' })
     expect(await access.refreshLinked('h1')).toEqual([{ name: 'Remote box', why: expect.stringContaining('update it there') }])
     expect(access.find('h1')).toEqual({ ok: true, apps: [] })
+  })
+})
+
+describe('a session whose app call was refused while its host was away hears once that the host is back', () => {
+  const app = (appId: string) => ({ projectId: 'p', project: 'proj', appId, name: appId, description: '', tools: [] })
+  /** A machine `m1` ("Box") that lists two apps, and a second one; `away` takes them down */
+  function rig() {
+    const told: [string, string][] = []
+    let up = true
+    let answers = true
+    let tools: LinkedTool[] | null = []
+    const peer = (id: string, name: string) => ({
+      id, name, gives: false,
+      get reachable() { return up },
+      get answers() { return answers },
+      call: async () => ({ apps: [{ ...app('board'), tools }, app('notes')] }),
+    })
+    const linked = new LinkedApps()
+    linked.usePeers({ machines: () => [peer('m1', 'Box'), peer('m2', 'Other box')], startedBy: () => null }, (id, body) => void told.push([id, body]))
+    const ref = (appId: string, host = 'm1') => ({ projectId: `${host}.p`, appId })
+    return { linked, told, ref, away: (v: boolean) => void (up = !v), older: (v: boolean) => void (answers = !v), unlisted: () => void (tools = null) }
+  }
+  afterEach(() => vi.restoreAllMocks())
+
+  it('names each app once, per session, only for calls within LINK_HOLD_MS, and only once', async () => {
+    const { linked, told, ref, away } = rig()
+    for (const s of ['s1', 's2', 's3', 's4']) await linked.refresh(s)
+    away(true)
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
+    await linked.call('s3', ref('board'), 'peek', {}, { name: 'board' })
+    now.mockReturnValue(1_000_001)
+    await linked.call('s4', ref('notes'), 'peek', {}, { name: 'notes' })
+    now.mockReturnValue(1_000_000 + LINK_HOLD_MS)
+    for (const appId of ['board', 'notes', 'board']) expect((await linked.call('s1', ref(appId), 'peek', {}, { name: appId })).error).toMatch(/Box is not reachable.*nothing ran/)
+    await linked.call('s2', ref('board', 'm2'), 'peek', {}, { name: 'board' })
+    now.mockReturnValue(1_000_001 + LINK_HOLD_MS)
+    away(false)
+    linked.back('m1')
+    // s3's call is one past the window, s4's exactly at it; s2's was on the other host
+    expect(told).toEqual([
+      ['s4', '[Centralu] Box is reachable again; notes was not called while it was away. Call it again if it is still needed.'],
+      ['s1', '[Centralu] Box is reachable again; board and notes were not called while it was away. Call them again if they are still needed.'],
+    ])
+    linked.back('m1')
+    expect(told).toHaveLength(2)
+    linked.back('m2')
+    expect(told.at(-1)).toEqual(['s2', '[Centralu] Other box is reachable again; board was not called while it was away. Call it again if it is still needed.'])
+  })
+
+  it('tells nothing while the host is still away or answers no app calls on this connection, and keeps the call for when it can', async () => {
+    const { linked, told, ref, away, older } = rig()
+    await linked.refresh('s1')
+    away(true)
+    await linked.call('s1', ref('board'), 'peek', {}, { name: 'board' })
+    linked.back('m1')
+    expect(told).toEqual([])
+    away(false)
+    older(true)
+    linked.back('m1')
+    expect(told).toEqual([])
+    older(false)
+    linked.back('m1')
+    expect(told.map(([id]) => id)).toEqual(['s1'])
+  })
+
+  it("tells nothing of a call of a tool not in the session's list, which would not run there either, but tells of one when it has no list yet", async () => {
+    const { linked, told, ref, away, unlisted } = rig()
+    await linked.refresh('s1')
+    away(true)
+    await linked.call('s1', ref('board'), 'peek', {}, { name: 'board', notListed: true })
+    away(false)
+    linked.back('m1')
+    expect(told).toEqual([])
+    unlisted()
+    await linked.refresh('s1')
+    away(true)
+    await linked.call('s1', ref('board'), 'peek', {}, { name: 'board', notListed: true })
+    away(false)
+    linked.back('m1')
+    expect(told.map(([id]) => id)).toEqual(['s1'])
+  })
+
+  it('tells nothing of an app the session called again once the host was back', async () => {
+    const { linked, told, ref, away } = rig()
+    await linked.refresh('s1')
+    away(true)
+    for (const appId of ['board', 'notes']) await linked.call('s1', ref(appId), 'peek', {}, { name: appId })
+    away(false)
+    await linked.call('s1', ref('board'), 'peek', {}, { name: 'board' })
+    linked.back('m1')
+    expect(told).toEqual([['s1', '[Centralu] Box is reachable again; notes was not called while it was away. Call it again if it is still needed.']])
+  })
+
+  it('tells nothing of a deleted session', async () => {
+    const { linked, told, ref, away } = rig()
+    await linked.refresh('s1')
+    away(true)
+    await linked.call('s1', ref('board'), 'peek', {}, { name: 'board' })
+    linked.forget('s1')
+    away(false)
+    linked.back('m1')
+    expect(told).toEqual([])
   })
 })

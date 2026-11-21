@@ -19,7 +19,10 @@ import type { MailReach } from './reach.js'
  */
 export type AcrossSent = { ok: true; messageId: string; to: string; address: string; computer: string; held?: true } | { ok: false; why: string; text: string }
 
-/** How long mail held for its link goes by itself once the link is back (docs/plans/linked-mail.md §12) */
+/**
+ * How long what a session did while a link was down still stands once it is back: held mail goes by itself
+ * (docs/plans/linked-mail.md §12), a refused app call is named to its session (docs/plans/remote-hub.md §13.6). Older, the session has moved on
+ */
 export const LINK_HOLD_MS = 10 * 60_000
 
 /** What a send held for its link says, in the mail tool's answer, a delegation's and the inbox alike */

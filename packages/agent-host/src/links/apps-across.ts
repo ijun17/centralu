@@ -1,8 +1,10 @@
 import type { LinkedAppNoticeParams } from '@cc/protocol'
 import type { ExternalApps } from '../apps/external/runtime.js'
+import { sessionAddress } from '../mail/address.js'
+import type { MessageService } from '../mail/messages.js'
 import { startingHub } from '../sessions/hub-preset.js'
 import { LinkedAppCalls } from './linked-app-calls.js'
-import type { AppsPeers } from './linked-apps.js'
+import type { AppsPeers, LinkedApps, TellSession } from './linked-apps.js'
 import type { LinkedHubs } from './linked-hubs.js'
 import { qualify, splitQualified } from './machine-ids.js'
 
@@ -80,4 +82,25 @@ export function linkedNotices(o: { machines?: Machines; hubs?: Pick<LinkedHubs, 
     if (hub) return hub.call('appNotice', params, 30_000).then(() => undefined)
     return null
   }
+}
+
+/**
+ * When a linked host that refused a session's app call may be back (`LinkedApps.back`): a hub that offers again, as one
+ * that offers apps offers mail too, and a machine that answers this hub's offer. The result is the links'
+ * `onOfferAnswered`, run after `answered`, the rest of what that answer does
+ */
+export function appsBackOn(
+  linked: Pick<LinkedApps, 'back'>,
+  o: { hubs?: Pick<LinkedHubs, 'onMailOffer'>; answered?: (machineId: string, lacks: readonly string[]) => void },
+): (machineId: string, lacks: readonly string[]) => void {
+  o.hubs?.onMailOffer((hubId) => linked.back(hubId))
+  return (machineId, lacks) => {
+    o.answered?.(machineId, lacks)
+    linked.back(machineId)
+  }
+}
+
+/** How a session here hears that a linked host which refused its app call is back (`LinkedApps.back`): Centralu's notice in its mail */
+export function appsBackNotice(service: Pick<MessageService, 'notice'>, hostId: string): TellSession {
+  return (sessionId, body, dedupeKey) => void service.notice(sessionAddress(hostId, sessionId), { body, facts: {}, dedupeKey })
 }
