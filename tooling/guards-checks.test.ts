@@ -902,7 +902,8 @@ describe('guard/comments (#2355)', () => {
       overrideConfig: [
         { files: ['**/*.ts'], languageOptions: { parser: tseslint.parser } },
         { linterOptions: { noInlineConfig: true } },
-        { files: ['**/*.ts'], plugins: { guard: guards }, rules: { 'guard/comments': 'error' } },
+        // The block that switches the rule on, as the guard pass has it, without the files it leaves
+        ...guardConfigs.filter((c) => 'guard/comments' in c.rules).map(({ ignores: _left, ...c }) => c),
       ],
     })
     const results = await bare.lintFiles(COMMENTS_LEFT.map((f) => join(ROOT, f)))
