@@ -843,6 +843,11 @@ describe('guard/comments (#2355)', () => {
     ['// a ring -\n// a beep -\n// a buzz', [2]],
     ['// One - a ring\n// two - a beep', [2]],
     ['// x - a - b\n//\n// y - c - d', [2, 4]],
+    // The first item starts the line, the rest run in
+    ['// 1. x 2. y', [2]],
+    ['// - `a`: one, - `b`: two', [2]],
+    ['/**\n * - `a`: one thing, - `b`: another\n * thing, and - `c`: the last.\n */', [3]],
+    ['// - a: one, - b: two\n// - c: three, - d: four', [2, 3]],
   ])('reports list items run into the text of %j', async (text, at) => {
     expect(await lines(file, 'f()' + NL + text, 'comments')).toEqual(at)
   })

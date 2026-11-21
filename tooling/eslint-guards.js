@@ -406,11 +406,14 @@ const HISTORY = [
 /**
  * An item marker after other text on its line: a `- `, or a `-` ending the line (a list re-wrapped as a paragraph puts its
  * markers anywhere), and `N. ` (`3-5` and the sum `n - 30` are none). Two spaced dashes of punctuation in one paragraph read
- * as a list too.
+ * as a list too. Both run on a line with its whitespace collapsed, where a one-character lookbehind is linear.
  */
-const INLINE_DASH = /(?<=\S\s+)-(?:\s+(?=[^\s\d])|$)/g
-const INLINE_NUMBER = /(?<=\S\s+)\d+\.\s+(?=[^\s\d])/g
-/** A line that is an item itself (`- `, `N. `, `@param`): its `- name - what` counts within the line alone */
+const INLINE_DASH = /(?<=\S\s)-(?:\s(?=[^\s\d])|$)/g
+const INLINE_NUMBER = /(?<=\S\s)\d+\.\s(?=[^\s\d])/g
+/**
+ * A line that is an item itself (`- `, `N. `, `@param`) counts within the line alone, where `- name - what` is one item: a
+ * further one is a `N. ` on a numbered line, a `- ` after `.`, `,`, `;` or `:`, or a second `- `.
+ */
 const ITEM_LINE = /^(?:-|\d+\.|@\w+)\s/
 
 /**
@@ -422,11 +425,15 @@ function listsRunIn(text) {
   let first = -1
   let n = 0
   for (const [i, line] of [...text.split('\n'), ''].entries()) {
-    const body = line.replace(/^[\s*/]+/, '').trimEnd()
+    const body = line.replace(/^[\s*/]+/, '').trimEnd().replace(/\s+/g, ' ')
+    const dashes = [...body.matchAll(INLINE_DASH)]
     const numbers = body.match(INLINE_NUMBER)?.length ?? 0
-    const items = (body.match(INLINE_DASH)?.length ?? 0) + (numbers >= 2 ? numbers : 0)
+    const items = dashes.length + (numbers >= 2 ? numbers : 0)
     if (ITEM_LINE.test(body)) {
-      if (items >= 2) found.push({ line: i, n: items })
+      const numbered = /^\d/.test(body)
+      const further = dashes.length + (numbered || numbers >= 2 ? numbers : 0)
+      const afterStop = dashes.filter((m) => '.,;:'.includes(body[m.index - 2])).length
+      if (further >= 2 || afterStop + (numbered ? numbers : 0) >= 1) found.push({ line: i, n: 1 + further })
     } else if (items > 0) {
       if (first < 0) first = i
       n += items
