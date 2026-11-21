@@ -836,12 +836,16 @@ describe('guard/comments (#2355)', () => {
     ["const a = 'it used to wait'"],
     ['// The pane keeps the claim (#842)'],
     ['// A change the owner chose (#842 reviewer)'],
+  ])('lets %j through', async (text) => {
+    await quiet(file, 'comments', 'f()' + NL + text, '// It used to wait.')
+  })
+  it.each([
     ['// It reviews the claim of #1072'],
     ['// A re-check of the host (#2142)'],
     ['// It re-checked the host (#2142 re-checked)'],
     ['// A reviewer of #842 chose it'],
-  ])('lets %j through', async (text) => {
-    await quiet(file, 'comments', 'f()' + NL + text, '// It used to wait.')
+  ])('lets the review words of %j through', async (text) => {
+    await quiet(file, 'comments', 'f()' + NL + text, '// Kept (review of #1072)')
   })
   it.each([
     ['// Two sounds: - a ring - a beep', [2]],
