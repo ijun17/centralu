@@ -9,6 +9,8 @@ import { SessionEvents, type SessionEventsHost } from './session-events.js'
 
 function world(handle: Partial<SessionHandle>) {
   const events: unknown[] = []
+  /** The sessions a counted wake left to settle at rest (`ChildReports.settleAtRest`) */
+  const settles: string[] = []
   const handles = new Map<string, SessionHandle>([['s1', { sessionId: 's1', ...handle } as SessionHandle]])
   const host = {
     restartPolicy: { deferredRestarts: new Map() },
@@ -21,10 +23,11 @@ function world(handle: Partial<SessionHandle>) {
     record: { closeStream: () => {} },
     cardRests: { turnAsked: () => {} },
     apps: { rootAppsNotice: () => null },
+    reports: { settleAtRest: (id: string, given?: boolean) => void (given && settles.push(id)) },
   }
   const sessionEvents = new SessionEvents(host as unknown as SessionEventsHost)
   Object.assign(sessionEvents, { onEvent: (e: unknown) => void events.push(e) })
-  return { sessionEvents, events }
+  return { sessionEvents, events, settles }
 }
 const input = { text: 'mail', quiet: false, line: '✉ 1 message' }
 const tick = () => new Promise((r) => setTimeout(r, 0))
@@ -51,6 +54,8 @@ describe('handing a wake to a tool that tracks its inputs', () => {
     await delivery
     expect(origin).toEqual({ kind: 'channel', server: 'centralu' })
     expect(w.events).toHaveLength(1)
+    // Taken: its turn's end answers, not a settle
+    expect(w.settles).toEqual([])
   })
 
   it('fails, writing no line, when the tool failed it before it took it: the mailbox keeps the mail and tries again', async () => {
@@ -95,6 +100,8 @@ describe('handing a wake to a tool that tracks its inputs', () => {
     await vi.advanceTimersByTimeAsync(2_000)
     await delivery
     expect(w.events).toHaveLength(1)
+    // No turn may run it, so the session settles at rest and answers its mail (#2318)
+    expect(w.settles).toEqual(['s1'])
   })
 
   it('a tool that fails it after the wait ran out is told to the mailbox, which puts the mail back; one that took it is not', async () => {

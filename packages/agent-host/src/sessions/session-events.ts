@@ -757,7 +757,9 @@ export class SessionEvents {
       this.host.record.closeStream(sessionId)
       // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
       this.host.cardRests.turnAsked(sessionId)
-      await takeInput(handle, this.withRootAppsNotice(sessionId, input.text).input, late, input.id)
+      // Counted at rest: a wake the tool never runs leaves no turn to end, so the session settles at rest and answers it (#2318). Behind a running turn
+      // that turn's end does it
+      if ((await takeInput(handle, this.withRootAppsNotice(sessionId, input.text).input, late, input.id)) === 'counted') this.host.reports.settleAtRest(sessionId, true)
     }
     /*
      * A Continue the tool took as a second update's stop began (#1626 review) is left to the host after it: that stop lists

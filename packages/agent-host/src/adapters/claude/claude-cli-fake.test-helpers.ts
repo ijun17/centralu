@@ -5,6 +5,8 @@ import type { AgentAdapter } from '../contract.js'
  * `vi.mock('@anthropic-ai/claude-agent-sdk', …)`, spread over the module's own exports (`importOriginal`). It imports
  * nothing of the SDK, so the mock can load it. What it does is what Claude Code 2.1.296 was measured to do (raw CLI, stream-json, haiku):
  *
+ *   - an input that asks for a turn is receipted first (`command_lifecycle` "queued" with its id, as the recordings of 2.1.296 have it), also
+ *     one the CLI then never runs, before a process says anything else
  *   - a process says its `init` only once it read its first input, so what the adapter tracks before it waits for that init
  *     (`tracksInputs`), and again at every turn it begins
  *   - a turn an input begins names it on its first frame (`user_message_uuid`) and in its result (`user_message_uuids`)
@@ -62,11 +64,7 @@ class FakeClaudeProcess {
       interrupt: async () => {
         if (this.long) this.end(this.long, null)
       },
-      close: () => {
-        this.closed = true
-        this.long = null
-        this.wake?.()
-      },
+      close: () => this.stop(),
       supportedCommands: async () => [],
       getContextUsage: async () => undefined,
     }
@@ -74,6 +72,13 @@ class FakeClaudeProcess {
 
   finish(words: string): void {
     if (this.long) this.end(this.long, words)
+  }
+
+  /** The stream ends with nothing more said: closed by the adapter, or the process died (`FakeClaudeCli.crash`) */
+  stop(): void {
+    this.closed = true
+    this.long = null
+    this.wake?.()
   }
 
   private say(...frames: Frame[]): void {
@@ -95,6 +100,7 @@ class FakeClaudeProcess {
   private input(uuid: string, text: string, quiet: boolean): void {
     setTimeout(() => {
       if (quiet) return this.say(result([uuid]))
+      this.say({ type: 'command_lifecycle', command_uuid: uuid, state: 'queued' })
       this.read.push({ uuid, text })
       this.next()
     }, 5)
@@ -126,7 +132,8 @@ class FakeClaudeProcess {
       this.long = [input]
       return
     }
-    this.end([input], `echo: ${input.text.trim()}`)
+    // The model's reply takes a moment: a turn's first frame and its result never come in one read
+    setTimeout(() => this.end([input], `echo: ${input.text.trim()}`), 20)
   }
 
   /** `words`: what the turn says last; null: it was stopped */
@@ -173,6 +180,11 @@ export class FakeClaudeCli {
   /** Whether a turn ran for an input holding `words` (a dropped one counts: the CLI read it) */
   ran(words: string): boolean {
     return this.processes.some((p) => p.ran.some((t) => t.includes(words)))
+  }
+
+  /** The newest process dies: its stream ends with nothing more said */
+  crash(): void {
+    this.processes.at(-1)?.stop()
   }
 
   /** Ends the one turn that waits for its end, saying `words` */

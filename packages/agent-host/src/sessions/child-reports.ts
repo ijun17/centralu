@@ -113,13 +113,14 @@ export class ChildReports {
   /**
    * The session's own background work changed, or this host started: once that work is over and no turn runs, the turn its end may start (Claude starts
    * one within a second) answers; if none starts within `OWN_WORK_SETTLE_MS`, its last response answers the tasks no stop released (#721), the
-   * person's own work's too, and a watch on it hears its turn ended (docs/plans/mailbox.md §18.3). Only for a session with something to answer or tell
+   * person's own work's too, and a watch on it hears its turn ended (docs/plans/mailbox.md §18.3). Only for a session with something to answer or tell.
+   * `given`: a wake was just counted as taken at rest (`takeInput`), and its mail is delivered as this returns, so it is owed whatever is open now
    */
-  settleAtRest(sessionId: string): void {
+  settleAtRest(sessionId: string, given = false): void {
     this.stopSettling(sessionId)
     const m = this.host.meta.get(sessionId)
     if (this.host.disposing || !m || inTurn(m.state) || this.ownTasksRunning(sessionId).length > 0) return
-    if (this.host.children.openTasks(sessionId, 'to').length === 0 && !this.host.mailWatchedAtRest(sessionId)) return
+    if (!given && this.host.children.openTasks(sessionId, 'to').length === 0 && !this.host.mailWatchedAtRest(sessionId)) return
     const timer = setTimeout(() => {
       this.settles.delete(sessionId)
       const now = this.host.meta.get(sessionId)
