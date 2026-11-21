@@ -8,7 +8,7 @@ import { execText } from '../os/exec.js'
  * new job with `KILL_ON_JOB_CLOSE` and no breakaway, holding the only handle (not inheritable): everything it starts is created
  * in it, libuv's job still ends what cannot leave it, and the job's own flag ends the rest (`work-job.test.ts` reads it back).
  * The host itself, not each child by pid: a child added after the spawn may already have started its own. No breakaway because
- * Git for Windows' sh asks for it: its fork leaves a hook's `sleep` with an exited parent that no tree kill or sweep finds. Not
+ * Git for Windows' sh (and anything under Git Bash, Claude Code's Bash tool on Windows) asks for it: its fork leaves a hook's `sleep` with an exited parent that no tree kill or sweep finds. Not
  * in it: terminals, started by a broker the host starts **before** it joins (`dev-services/broker-pty.ts`). Node has no Job
  * Object API: one PowerShell (0.3–0.8 s) does it while the store opens, and the host waits for it before it starts anything
  * (`START_ORDER` `work job`). More: docs/agent-host/host-process.md.
@@ -84,8 +84,8 @@ const REAL_OS: WorkJobOs = {
 
 /**
  * Puts process `pid` (this host) into a new job that ends its processes when the host ends. Never throws. Node has no Job
- * Object API, and a native addon is a build step per architecture for one call, and the window cannot create the job either:
- * `pnpm dev`, e2e and `serve` start the host without one. A host already in a job (a launcher's under `pnpm dev`, a CI
+ * Object API, and a native addon is a build step per architecture for one call; the window could, but
+ * `pnpm dev`, e2e and `serve` start the host without it. A host already in a job (a launcher's under `pnpm dev`, a CI
  * runner's) nests this one inside it (measured under a Node parent); where Windows refuses, it goes on and says so in its log.
  * The next host of a swap is started by the window, so it is in no job of this one's. A job per run would cost one PowerShell
  * (0.3–0.8 s) per program started, so a run is not put in one

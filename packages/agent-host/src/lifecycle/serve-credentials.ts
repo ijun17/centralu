@@ -182,7 +182,7 @@ export type ListedCredential = { id: string; label: string; created: number; rep
 
 /**
  * The full credentials a socket said hello with on this host, kept while it runs, so one withdrawn before a hub's next
- * `host.credentials` read is still listed there as `gone` (a `--pair`, a hello and a `--revoke` within 135 ms (measured) must
+ * `host.credentials` read is still listed there as `gone` (a `--pair`, a hello and a `--revoke` however close together must
  * still leave a trace). Not every credential that goes is news: the window pairs again at each start and a hub at each link, so
  * a credential is left out when the next one of its label (the next used here, or the file's now) was paired the same way (not
  * `replaced`): that is its pairer again. One whose label nothing holds since, or whose successor was asked for another way, is

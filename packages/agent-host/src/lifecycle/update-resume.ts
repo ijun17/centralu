@@ -6,7 +6,7 @@ import { readStopped, type Stopped } from './update-stopped.js'
 
 /**
  * The turns an update of this machine cut (docs/agent-host/lifecycle/continue-after-update.md "Continuing the turns an update
- * cut"). A linked hub that stops this host for an update says so (`CENTRALU_STOP_FOR=update`); the stopping host writes the
+ * cut"). A linked hub that stops this host for an update, a rollback or the previous version says so (`CENTRALU_STOP_FOR=update`); the stopping host writes the
  * turns it ends (`cutTurns`) into a list of its own in the data folder, on its own clock: no link can drop between the reading
  * and the stop. **Each turn is the one that stop cut, by a mark:** with each session goes the last row of its conversation
  * (`seq`), and the next host continues a listed session only when its conversation still ends there. The mark is safe because
