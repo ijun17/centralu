@@ -177,6 +177,17 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
     expect(hub.store.mailbox.recipient(id, at(hub, 'm1.w1'))?.deliveredAt).not.toBeNull()
   })
 
+  it('send with the id of held mail sends it as written, refusing new words; with any other id it is a send missing its recipient; handled drops it', async () => {
+    const { hub } = await rig()
+    await hub.router.handle('machines.disconnect', { machineId: 'm1' })
+    await eventually(() => !hub.links.get('m1')!.reachable)
+    const id = /^Held (\S+) /.exec((await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'ping' })).text)?.[1] ?? ''
+    expect(await tool(hub, 'h1', { action: 'send', thread: id, text: 'pong' })).toMatchObject({ isError: true, text: expect.stringContaining(`Refused (field_not_allowed): ${id} goes with the words it was written with`) })
+    expect(await tool(hub, 'h1', { action: 'send', thread: `${id}x`, text: 'hi' })).toMatchObject({ isError: true, text: expect.stringContaining('to is needed') })
+    expect((await tool(hub, 'h1', { action: 'handled', thread: id })).text).toBe(`Dropped: ${id} was held for its link and is not sent.`)
+    expect(hub.store.mailbox.message(id)).toBeUndefined()
+  })
+
   it('a parent that goes without answering is told to the child on its machine, as the notice it would read at home', async () => {
     const { machine, hub } = await rig()
     const id = idOf(await tool(machine, 'c1', { action: 'send', to: 'parent', text: 'shall I merge?' }))

@@ -3,7 +3,7 @@ import { CENTRALU, PERSON, PERSON_ID, isPerson, parseAddress, sessionAddress } f
 import { FIND_LIMIT, findAnswer, named, ranked, type FoundEntry } from './find.js'
 import type { TaskAcross } from './messages.js'
 import { durationText, withTimeout } from '../timing.js'
-import { bodyLimit, refusalReason, tooLongText } from './rules.js'
+import { bodyLimit, refusalReason, refuse, tooLongText } from './rules.js'
 import { answerKept, reportWords } from './last-response.js'
 import { mailCalls } from './frame.js'
 import { LINK_HOLD_MS, older, sendOrDrop, unreachable, type AcrossMachine, type AcrossPeer, type AcrossSent, type Answer, type Kept, type Work } from './across-core.js'
@@ -67,11 +67,8 @@ export class MailAcross extends AcrossReceipts {
   private readonly sending = new Set<string>()
   /** On a machine: tasks it told a hub never arrived (`lacking`), by hub, so one hub's many cannot push another's out under `LACKED_MAX` */
   private readonly lacked = new Map<string, Set<string>>()
-
-  constructor(...args: ConstructorParameters<typeof AcrossReceipts>) {
-    super(...args)
-    this.d.service.goesAcross((id) => this.sending.has(id))
-  }
+  /** Mail held for its link whose resend lost its answer: it may be written there, so it goes again whatever its age and is never dropped */
+  private readonly mayHaveGone = new Set<string>()
 
   // ── Sending from here ──
 
@@ -310,7 +307,7 @@ export class MailAcross extends AcrossReceipts {
     if (writtenLate(this.now(), this.selfName(), copy.text).length > bodyLimit('session')) return { ok: false, why: 'too_long', text: `${tooLongText('session')}, with the line held mail goes with` }
     const { subject: _s, choices: _c, task, ...fields } = copy
     const id = this.idFor(sender, to, fields, peer.name, task && workOf(task))
-    if (this.d.records.message(id)) return unreachable(peer)
+    if (this.d.records.message(id)) return { ok: false, why: 'link_down', text: `${peer.name} is not reachable right now. Your earlier send of this may have arrived there; it is followed up when the link is back, so nothing more was sent.` }
     // Kept, so not unsure: a send again of the same words is another message, held or sent on its own
     this.unsure.delete(id)
     try {
@@ -332,7 +329,8 @@ export class MailAcross extends AcrossReceipts {
     for (const p of this.d.records.heldForLink()) {
       const side = this.sending.has(p.message.id) ? 'down' : this.side(p.row.recipient)
       if (side === 'down') continue
-      if (side === 'gone' || this.now() - p.message.createdAt < LINK_HOLD_MS) go.push(p)
+      // A sender in the trash or deleted can decide nothing: its mail goes, as its mail not held is delivered
+      if (side === 'gone' || this.mayHaveGone.has(p.message.id) || this.now() - p.message.createdAt < LINK_HOLD_MS || this.d.reach.gone(p.message.sender)) go.push(p)
       else if (p.row.toldAt === null) late.set(p.message.sender, [...(late.get(p.message.sender) ?? []), p])
     }
     for (const p of go) this.sending.add(p.message.id)
@@ -353,9 +351,28 @@ export class MailAcross extends AcrossReceipts {
     }
   }
 
+  /** Whether `id` is the sender's mail held for its link: what `mail send` with it and no recipient sends (`sendHeld`) */
+  holds(sender: string, id: string): boolean {
+    return this.heldOf(sender, id).length > 0
+  }
+
+  private heldOf(sender: string, id: string): PendingRow[] {
+    return this.d.records.heldForLink(sender).filter((h) => h.message.id === id)
+  }
+
+  /** `handled` on the sender's mail held for its link: deleted here, since nothing went, and nothing is told across. False when `id` is none of it */
+  dropHeld(sender: string, id: string): boolean {
+    const held = this.heldOf(sender, id)
+    if (held.length === 0) return false
+    if (this.sending.has(id)) throw refuse('busy', `${id} is being sent now, so it can no longer be dropped.`)
+    if (this.mayHaveGone.has(id)) throw refuse('busy', `${id} may have arrived there already, so it can no longer be dropped: it is sent again under its id when the link is back, which never writes it twice.`)
+    this.d.records.deleteRows(held.map((h) => ({ messageId: id, recipient: h.row.recipient })))
+    return true
+  }
+
   /** `mail send` with the id of the sender's mail held for its link (`heldTooLong`): it goes now, whatever its age */
   async sendHeld(sender: string, id: string): Promise<AcrossSent> {
-    const p = this.d.records.heldForLink(sender).find((h) => h.message.id === id)
+    const p = this.heldOf(sender, id)[0]
     if (!p) return { ok: false, why: 'unknown_message', text: `${oneLineText(id, 200)} is no message of yours held for its link.` }
     if (this.sending.has(id)) return { ok: false, why: 'busy', text: `${id} is being sent now.` }
     if (this.side(p.row.recipient) === 'down') return { ok: false, why: 'link_down', text: `the computer of ${oneLineText(this.foreignName(p.row.recipient)?.name ?? p.row.recipient, 200)} is still not reachable, so ${id} stays held.` }
@@ -400,7 +417,12 @@ export class MailAcross extends AcrossReceipts {
       r = way.older(await this.ask(peer, way.method, way.params(m.id, text)))
     }
     this.settle(m.id, r)
-    if (!r.ok) return r.maybe ? { ok: false, why: r.why, text: r.text } : this.refusedHeld(m, to, r)
+    if (!r.ok && r.maybe) {
+      this.mayHaveGone.add(m.id)
+      return { ok: false, why: r.why, text: r.text }
+    }
+    if (!r.ok) return this.refusedHeld(m, to, r)
+    this.mayHaveGone.delete(m.id)
     this.d.service.heldWent(m, to)
     this.names.set(to, `${r.to} on ${peer.name}`)
     return { ok: true, messageId: m.id, to: r.to, address: to, computer: peer.name }
@@ -408,6 +430,7 @@ export class MailAcross extends AcrossReceipts {
 
   /** Held mail the other side refused, or that can no longer go there: deleted here, as nothing was written there, and its sender told why */
   private refusedHeld(m: MailRow, to: string, r: { why: string; text: string }): AcrossSent {
+    this.mayHaveGone.delete(m.id)
     this.d.records.deleteRows([{ messageId: m.id, recipient: to }])
     const name = oneLineText(this.foreignName(to)?.name ?? to, 200)
     this.d.service.notice(m.sender, { body: `[Centralu] ${m.id} to ${name}, held while the link was down, was not sent: ${r.text}`, facts: {}, dedupeKey: `held-refused:${m.id}` })

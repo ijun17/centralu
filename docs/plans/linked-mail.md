@@ -504,22 +504,27 @@ outbox it already has for Centralu's own notices and reports (§6).
   the hub names, so there is no recipient to hold a copy for (§3).
 - **Who acts on it.** The sender, never the person: the person's held list (`heldRows`) leaves `link` out, and a task
   held so is not in a machine's offer (`openTasksToward`), which would read it as lost there (§10). The sender's `inbox`
-  lists it as held; `handled` on it deletes it here (nothing went, so nothing is told across), and is refused `busy`
-  while it is going, as it may be written there already; to replace it, the sender drops it and sends again. A task
-  dropped or refused stands as ended (`LinkedTasks.standing`).
+  lists it as held; `handled` on it deletes it here (nothing went, so nothing is told across, `MailAcross.dropHeld`), and
+  is refused `busy` while it is going or once a send of it lost its answer, as it may be written there already; to
+  replace it, the sender drops it and sends again (`mail send` with its id takes no new words). A task dropped or
+  refused stands as ended (`LinkedTasks.standing`).
 - **When it goes.** At a connect or any change (`retryOwed`, the one loop that passes what is owed to the other side), a
   held row whose side can take it now (reachable, and a machine past this connection's offer, before which it takes no
   mail) goes by itself if it was written less than `LINK_HOLD_MS` (10 minutes) ago, under its own id, one after another
   in the order written. Its words go led by when and on which computer they were written (`writtenLate`), so a reader
   knows it is late; this is in the text, so a build from before this shows it too. The other side writes it as any send (a second send of
   an id it has is taken as the one it has), and the row here is then delivered and no longer held. A refusal there, or a
-  computer no longer linked, deletes the copy and tells the sender why; an answer lost keeps it held, and it goes again
-  under its id.
+  computer no longer linked, deletes the copy and tells the sender why. An answer lost keeps it held, and it goes again
+  under its id at the next connect whatever its age, since it may be written there already (`mayHaveGone`; kept in
+  memory, so a restart judges it by its age again).
 - **Older than `LINK_HOLD_MS`.** It does not go by itself: what was news when written may be out of date, and only the
   sender knows. The sender gets one Centralu notice for all it holds then (id, to whom, first line), with what to do per
   message: `mail send` with `thread` = its id sends it now, `handled` drops it. The rows are marked told (`told_at`:
   the sender was told what became of the row), so no row is named twice. Ten minutes covers a link that drops and comes
   back by itself, which is most of them; a computer off for the night is the case where asking first is right.
+- **A sender gone to the trash** follows the rule for its mail not held (`partyGone`): a watched one, a question or a
+  task, is deleted, as one not held is withdrawn and never delivered; any other goes when the link is back whatever its
+  age, as one not held is delivered, since no one is left to decide. Nothing stays held for it.
 - **A restart.** Held rows are in the store, so they outlive this host and the other one. After a restart they go at the
   first connect, under the same age rule, measured from when each was written; a send is never made twice by this host
   at once (`sending`), and the other side takes a repeated id as the message it has.

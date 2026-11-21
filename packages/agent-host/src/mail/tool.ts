@@ -77,7 +77,7 @@ export type MailToolHost = {
    * Mail across linked machines (#2067 items 2 and 3, `MailAcross`): a send to a session on another computer, which that
    * computer writes or refuses with nothing written; whether an address is one; and the directory across machines
    */
-  across?: Pick<MailAcross, 'send' | 'sendHeld' | 'foreign' | 'find' | 'named' | 'personTarget' | 'parentHost'>
+  across?: Pick<MailAcross, 'send' | 'sendHeld' | 'holds' | 'dropHeld' | 'foreign' | 'find' | 'named' | 'personTarget' | 'parentHost'>
   /** A send that is work for a session the caller started (`AgentSessionActions.sendWork`, #1948), or null for plain mail */
   work?(callerId: string, target: string, text: string, ifBusy: IfBusy | undefined, signal?: AbortSignal): Promise<MailToolResult | null>
   /** The watches the caller keeps (docs/plans/mailbox.md §18.2): `watch` sets one, `close` with its id cancels it, `inbox` lists them */
@@ -135,9 +135,11 @@ export class MailTool {
         if (!across) return { text: 'Finding sessions is not available here.', isError: true }
         return { text: await across.find((args.to ?? args.text ?? '').trim(), me.address) }
       }
-      // The caller's mail held for its link, sent now whatever its age: `send` with its id and no recipient
-      if (args.action === 'send' && across && args.thread?.trim() && !args.to?.trim()) {
-        const r = await across.sendHeld(me.address, args.thread.trim())
+      // The caller's mail held for its link, sent now whatever its age: `send` with its id and no recipient; any other id is a send missing its `to`
+      const held = args.action === 'send' && !args.to?.trim() ? args.thread?.trim() : undefined
+      if (held && across?.holds(me.address, held)) {
+        if (args.text?.trim()) return { text: `Refused (field_not_allowed): ${held} goes with the words it was written with. Leave out text, or drop it and send the new words as a new message.`, isError: true }
+        const r = await across.sendHeld(me.address, held)
         return r.ok ? { text: `Sent ${r.messageId} to ${JSON.stringify(r.to)} on ${r.computer}.` } : { text: `Refused (${r.why}): ${r.text}`, isError: true }
       }
       // Work first: a start request's handle or a linked child's id is no name to look for on other computers, one of which may be away
@@ -394,10 +396,10 @@ export class MailTool {
 
   /** `handled` (S8, in the old words where they apply) */
   private handled(me: string, id: string): string {
+    if (this.host.across?.dropHeld(me, id)) return `Dropped: ${id} was held for its link and is not sent.`
     const r = this.service.done(me, id)
     if (r.how === 'done') return '1 message marked handled.'
     if (r.how === 'withdrawn') return `Withdrawn: ${id} no longer waits for an answer from ${r.settled} recipient${r.settled === 1 ? '' : 's'}.`
-    if (r.how === 'dropped') return `Dropped: ${id} was held for its link and is not sent.`
     return 'Nothing was waiting to be marked handled.'
   }
 

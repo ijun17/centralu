@@ -3,7 +3,7 @@
  * `MessageService.stops` holds it; it writes through the service's transaction and its Centralu notices
  */
 import { SHUTDOWN_WORDS } from '@cc/protocol'
-import { isRoleVia, type MailFacts, type MailKind, type MailRow, type MailboxRecords, type RecipientRow, type ReleaseWhy } from '../dev-services/store/mailbox.js'
+import { LINK_HOLD, isRoleVia, type MailFacts, type MailKind, type MailRow, type MailboxRecords, type RecipientRow, type ReleaseWhy } from '../dev-services/store/mailbox.js'
 import { parseAddress, senderKind, sessionAddress } from './address.js'
 import { quoted } from './frame.js'
 import { PREVIEW_CHARS, clipped } from './last-response.js'
@@ -58,7 +58,11 @@ export class StopNotices {
     this.releaseAndTell((now, senders) => {
       for (const { row, message } of this.owedBy(address, 'gone', null)) if (this.d.records.markReleased(row.messageId, address, now, 'gone')) senders.add(message.sender)
       for (const row of this.d.records.watchedTo(address)) if (!isRoleVia(row.via)) this.d.records.settle(row.messageId, address, 'gone', now)
-      for (const row of this.d.records.watchedFrom(address)) this.d.records.settle(row.messageId, row.recipient, 'withdrawn', now)
+      // Held for its link, it never went: deleted, as its row not held is withdrawn and never delivered
+      for (const row of this.d.records.watchedFrom(address)) {
+        if (row.held === LINK_HOLD) this.d.records.deleteRows([{ messageId: row.messageId, recipient: row.recipient }])
+        else this.d.records.settle(row.messageId, row.recipient, 'withdrawn', now)
+      }
     })
   }
 

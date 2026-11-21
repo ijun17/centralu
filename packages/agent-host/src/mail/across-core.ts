@@ -75,7 +75,7 @@ export type MailAcrossDeps = {
   hostId: string
   service: MessageService
   records: MailboxRecords
-  reach: Pick<MailReach, 'labelOf' | 'projectOf' | 'untrusted' | 'projectLabel' | 'mayWrite' | 'isAssistant'>
+  reach: Pick<MailReach, 'labelOf' | 'projectOf' | 'untrusted' | 'projectLabel' | 'mayWrite' | 'isAssistant' | 'gone'>
   /** This host's own sessions as the directory lists them */
   ownEntries(): FoundEntry[]
   now?: () => number

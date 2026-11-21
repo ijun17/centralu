@@ -209,8 +209,6 @@ export class MessageService {
   /** Tasks across a link a handoff re-pointed, for `takeMoves` */
   private readonly queuedMoves: { from: string; to: string; ids: string[] }[] = []
   private running = false
-  /** Which held mail `MailAcross` is sending now: a drop of it is refused, as it may be written there already */
-  private goingAcross: (id: string) => boolean = () => false
   /** Who hears that a session stopped or went (mailbox.md §10.6.1) */
   readonly stops: StopNotices
 
@@ -413,11 +411,6 @@ export class MessageService {
     if (target && replyAnswers(target, m) && this.records.recipient(target.id, sender)) this.records.settle(target.id, sender, 'answered', this.now(), m.id)
   }
 
-  /** `MailAcross` says which of the mail held for its link it is sending now */
-  goesAcross(check: (id: string) => boolean): void {
-    this.goingAcross = check
-  }
-
   /**
    * The person's word a request cites, checked in code (docs/plans/cited-requests.md §3): the newest message the person typed in the sender's own
    * conversation, at most `CITE_MS` old and not later than now, not cited before by this sender. Or, when none passes, why not, in words for the sender
@@ -542,15 +535,11 @@ export class MessageService {
   }
 
   /** `mail done` (D8): as a recipient, no answer is needed; as the sender, the message is withdrawn for every unsettled recipient */
-  done(by: string, id: string): { settled: number; how: 'done' | 'withdrawn' | 'dropped' | 'none' | 'unwatched' } {
+  done(by: string, id: string): { settled: number; how: 'done' | 'withdrawn' | 'none' | 'unwatched' } {
     return this.run(() => {
       const m = this.records.message(id)
       if (!m) throw refuse('unknown_message', REFUSAL_TEXT.unknown_message(id))
       const mine = m.sender === by
-      // Mail across held for its link never went: dropped, it is deleted here and nothing is told across
-      const held = mine ? this.records.recipients(id).filter((r) => r.held === LINK_HOLD && r.settled === null) : []
-      if (held.length > 0 && this.goingAcross(id)) throw refuse('busy', `${id} is being sent now, so it can no longer be dropped.`)
-      if (held.length > 0) return { settled: this.records.deleteRows(held.map((r) => ({ messageId: id, recipient: r.recipient }))), how: 'dropped' }
       const row = mine ? undefined : this.records.recipient(id, by)
       if (!mine && !row) throw refuse('not_yours', REFUSAL_TEXT.not_yours(id))
       // A request is marked done in the turn it is in, where its words are shown (§7.6)
