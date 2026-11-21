@@ -391,8 +391,9 @@ export class AskProjectFlow {
       signal,
     )
     if (!r.ok) return { ok: false, error: r.error }
-    const base = { project, sessionId: `${prefix}${r.sessionId}`, sessionName: r.sessionName }
     const there = sessionAddress(target.hubId, r.sessionId)
+    // A host with no mailbox has no printer: the form it prints is the one its ids read back as above
+    const base = { project, sessionId: this.host.linkedTasks?.shown(there) ?? `${prefix}${r.sessionId}`, sessionName: r.sessionName }
     if (r.state === 'working') {
       if (r.taskId && opts.task) this.host.linkedTasks?.keep(callerId, there, r.taskId, opts.task)
       return { ok: true, state: 'working', ...base, ...(r.notice ? { notice: r.notice } : {}) }

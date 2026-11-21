@@ -187,6 +187,23 @@ describe("a machine session's ask_project of a hub's project (#1948 step 6)", { 
     expect(ask).not.toHaveBeenCalled()
   })
 
+  it('waits on a kept ask only for the hub and the session it went to, when two hubs share a label', async () => {
+    const machine = await machineHost({ mail: 'delivered' })
+    const [a, b] = ['hub-0000000b', 'hub-0000000c']
+    const of = (hubId: string, name: string) => ({ id: `studio.p-${name}`, projectId: `p-${name}`, name, hub: hubId, hubId, label: 'studio' })
+    const ask = vi.fn(async (hubId: string, p: { task?: string }): Promise<HubAskResult> =>
+      p.task ? { ok: true, state: 'working', project: 'web', sessionId: 'h1', sessionName: 'Helper', taskId: `${a}.m_01J0000000000000000000000001` } : { ok: false, error: `asked ${hubId}` })
+    machine.mgr.useLinkedHubs({ projects: async () => ({ projects: [of(a, 'web'), of(b, 'api')], away: [] }), ask })
+    expect(await machine.ask({ project: 'web', task: 'review it' })).toMatchObject({ ok: true, state: 'working' })
+    // Hub B's project, or another session of hub A's, is asked there: the ask kept on hub A's h1 is not its answer
+    expect(await machine.ask({ project: 'api' })).toEqual({ ok: false, error: `asked ${b}` })
+    expect(await machine.ask({ project: 'web', session: 'studio.h2' })).toEqual({ ok: false, error: `asked ${a}` })
+    expect(ask).toHaveBeenCalledTimes(3)
+    // Its own session is waited on here, not asked again (a call already cancelled, so the wait ends at once)
+    expect(await machine.ask({ project: 'web', session: 'studio.h1' }, AbortSignal.abort())).toEqual({ ok: false, error: expect.stringMatching(/^The call was cancelled; studio\/web's session ".+" was left running\.$/) })
+    expect(ask).toHaveBeenCalledTimes(3)
+  })
+
   it('of a hub that says no task id (an older build), keeps nothing, and asks that hub again for the answer', async () => {
     const machine = await machineHost({ mail: 'delivered' })
     const answers: HubAskResult[] = [
