@@ -249,6 +249,8 @@ describe('the hubs that offered mail, kept for the next start (`MAIL_HUBS_KEY`)'
     expect(hubs(s).mailHubs().map((x) => [x.id, x.label])).toEqual([['hub-a', 'desk-2'], ['hub-b', 'studio-mac']])
     // Kept by a build from before labels
     expect(hubs(settings(JSON.stringify([{ id: 'hub-c', name: 'Old box', you: 'm1', at: Date.now() }]))).mailHubs().map((x) => x.label)).toEqual(['old-box'])
+    // Named like this machine's id there: m1.<id> stays this machine's own session
+    expect(hubs(settings(JSON.stringify([{ id: 'hub-d', name: 'M1', you: 'm1', at: Date.now() }]))).mailHubs().map((x) => x.label)).toEqual(['m1-2'])
   })
 
   it('30 days count from when the link was last up, not the offer, and a hub down that long is forgotten while running too', () => {

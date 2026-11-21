@@ -40,7 +40,7 @@ export type StopNoticeOptions = {
 /** What the stop notice writes with: the service's records, reach, clock, transaction and Centralu notices */
 type StopNoticeDeps = StopNoticeOptions & {
   records: MailboxRecords
-  reach: Pick<MailReach, 'labelOf'>
+  reach: Pick<MailReach, 'labelOf' | 'shownId'>
   now: () => number
   run: <T>(fn: () => T) => T
   notice: (recipient: string, m: { kind: MailKind; body: string; facts: MailFacts; dedupeKey: string }) => { id: string; duplicate: boolean }
@@ -275,7 +275,7 @@ export class StopNotices {
     const words = new Map(stopped.flatMap((r) => { const w = this.quoteFor(r, sender, cutTurn(r)); return w ? [[r, w] as const] : [] }))
     const written = this.d.notice(sender, {
       kind: 'notice',
-      body: unansweredText(unanswered.map((u) => ({ ...u, name: this.d.reach.labelOf(u.recipient) })), kind === 'person', words),
+      body: unansweredText(unanswered.map((u) => ({ ...u, name: this.d.reach.labelOf(u.recipient), shown: this.d.reach.shownId(u.recipient) })), kind === 'person', words),
       facts: { unanswered, ...(kind === 'session' && !this.wakes(sender, true) ? { quiet: true } : {}) },
       dedupeKey: `unanswered:${sender}:${hash16(rows.map((r) => `${r.messageId}/${r.recipient}`).sort())}`,
     })
@@ -393,8 +393,8 @@ const STARTER_WORDS: Record<StopWhy, string> = {
 }
 const isStop = (why: ReleaseWhy | null): why is StopWhy => why !== null && Object.hasOwn(STOP_WORDS, why)
 
-/** S3: the notice to a sender whose messages are no longer watched, gathered. `name` is what the sender calls the receiver */
-function unansweredText(all: readonly { id: string; recipient: string; why: ReleaseWhy | null; name: string }[], person = false, words: ReadonlyMap<string, string> = new Map()): string {
+/** S3: the notice to a sender whose messages are no longer watched, gathered. `name` is what the sender calls the receiver, `shown` its id */
+function unansweredText(all: readonly { id: string; recipient: string; why: ReleaseWhy | null; name: string; shown: string }[], person = false, words: ReadonlyMap<string, string> = new Map()): string {
   const rows = all.filter((r) => !isStop(r.why))
   // A session's stop is one sentence per session and cause, naming the messages it left unanswered
   const sentences = new Map<string, { why: StopWhy; name: string; recipient: string; ids: string[] }>()
@@ -416,7 +416,7 @@ function unansweredText(all: readonly { id: string; recipient: string; why: Rele
 ${lastWordsText(s.name, said)}`
   })
   if (rows.length === 0) return stopLines.join('\n')
-  const lines = rows.map((r) => `- ${person ? r.name : `${r.id} to ${r.name} (${r.recipient})`}: ${r.why ? WHY_WORDS[r.why] : WHY_WORDS.gone}.`)
+  const lines = rows.map((r) => `- ${person ? r.name : `${r.id} to ${r.name}${r.name === r.shown ? '' : ` (${r.shown})`}`}: ${r.why ? WHY_WORDS[r.why] : WHY_WORDS.gone}.`)
   const later = rows.some((r) => r.why === 'working' || r.why === 'waiting')
   // The person is not told what an agent is: no advice to go on without answers, and no reminders to speak of
   if (person) return [`${rows.length} of your messages went unanswered:`, ...lines, ...stopLines].join('\n')

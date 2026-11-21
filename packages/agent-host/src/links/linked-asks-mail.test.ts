@@ -59,16 +59,16 @@ describe("a hub session's ask_project of a machine's project (#1948 step 6)", { 
     expect(hub.store.mailbox.recipient(report!.id, at.hub('h1'))).toMatchObject({ readAt: expect.any(Number) })
   })
 
-  // #2357 and #2349: the one condition for a message to one's task's giver holds across too, for an asker named by its address
-  it('the session asked, mailing its asker by address while on the task, sends a message that needs no reply there, and is told how to ask', async () => {
+  // #2357 and #2349: the one condition for a message to one's task's giver holds across too, for an asker named by its id
+  it('the session asked, mailing its asker by its id while on the task, sends a message that needs no reply there, and is told how to ask', async () => {
     const { machine, hub, at, project } = await asksRig()
     const call = hub.mgr.askProject('h1', { project, task: 'please approve my command' })
     await hub.answer('allow')
     await eventually(() => machine.mgr.listSessions().find((s) => s.id === 'w1')?.state === 'waiting_approval')
-    const plain = await machine.mail!.tool.call('w1', { action: 'send', to: at.hub('h1'), text: 'Found the cause.' })
+    const plain = await machine.mail!.tool.call('w1', { action: 'send', to: 'hub-mac.h1', text: 'Found the cause.' })
     expect(plain.text).toContain('It needs no reply. When you ask whoever gave you your task something')
     expect(hub.store.mailbox.message(/^Sent (\S+) /.exec(plain.text)?.[1] ?? '')).toMatchObject({ needsReply: false })
-    const asked = await machine.mail!.tool.call('w1', { action: 'send', to: at.hub('h1'), text: 'Which branch?', kind: 'question' })
+    const asked = await machine.mail!.tool.call('w1', { action: 'send', to: 'hub-mac.h1', text: 'Which branch?', kind: 'question' })
     expect(hub.store.mailbox.message(/^Sent (\S+) /.exec(asked.text)?.[1] ?? '')).toMatchObject({ needsReply: true })
     const card = machine.mgr.listSessions().find((s) => s.id === 'w1')!.pendingApproval!
     machine.mgr.inputs.respondApproval('w1', card.requestId, 'allow')
@@ -240,6 +240,7 @@ describe('a report on an ask across, owed to the side that asked (#1948 step 6)'
     const across = new MailAcross({ hostId: HOST, service: w.mail, records: w.records, reach: w.reach, ownEntries: () => [], soon: (fn) => fn() })
     across.usePeers({ selfName: () => 'Remote box', hubs: () => [] })
     const hub = { id: 'hub-0000000b', name: 'Hub box' }
+    w.hubs.push({ ...hub, label: 'hub-box', you: 'm1' })
     const id = 'hub-0000000b.m_01JX000000000000000000000T'
     across.keepAsk(W, sessionAddress(hub.id, 'h1'), id, 'review the branch')
     expect(w.records.message(id)).toMatchObject({ kind: 'task', origin: 'ask_project', sender: W })
@@ -248,7 +249,7 @@ describe('a report on an ask across, owed to the side that asked (#1948 step 6)'
     expect(w.records.reportsOn(id)).toEqual([])
     expect(across.fromHub(hub, params)).toMatchObject({ ok: true })
     // Worded here from its facts, naming the hub's session as this machine reads it: the hub's text is never this host's Centralu's words
-    expect(w.records.reportsOn(id)).toMatchObject([{ body: reportWords('hub-0000000b.h1', { outcome: 'finished', answer: 'whole' }), facts: { answer: 'reviewed' } }])
+    expect(w.records.reportsOn(id)).toMatchObject([{ body: reportWords('hub-box.h1', { outcome: 'finished', answer: 'whole' }), facts: { answer: 'reviewed' } }])
     expect(w.records.recipient(id, sessionAddress(hub.id, 'h1'))?.settled).toBe('reported')
   })
 })

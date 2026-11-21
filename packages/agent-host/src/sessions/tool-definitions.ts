@@ -58,7 +58,7 @@ export const CENTRALU_TOOLS = [
     description:
       "Reads a session's recent conversation. Use it to check on something already finished — for waiting on the result of work you just assigned, send_to_session's reportBack is the right tool.",
     schema: z.object({
-      sessionId: z.string().describe('The session id from list_sessions.'),
+      sessionId: z.string().describe('The session id from list_sessions, or its name.'),
       limit: z.number().optional().describe('How many lines to read (40 by default, most recent first).'),
       around: z
         .number()

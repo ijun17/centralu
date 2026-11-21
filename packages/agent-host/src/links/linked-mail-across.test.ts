@@ -53,7 +53,7 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
     expect(hub.store.mailbox.message(id)).toMatchObject({ needsReply: true, sender: at(hub, 'm1.c1') })
     // The parent answers with an ordinary reply, refused `elsewhere` before
     const a = await tool(hub, 'h1', { action: 'reply', thread: id, text: 'base it on main' })
-    expect(a.text).toMatch(/^Sent \S+ to "c1" \(session:hub-[0-9a-f]+\/m1\.c1\) on Remote box\. It answers \S+\.$/)
+    expect(a.text).toMatch(/^Sent \S+ to "c1" \(m1\.c1\) on Remote box\. It answers \S+\.$/)
     const answer = idOf(a)
     // Written on the machine, to the child, as an answer to its own question (the same id on both sides)
     expect(machine.store.mailbox.message(answer)).toMatchObject({ sender: at(hub, 'h1'), replyTo: id, body: 'base it on main' })
@@ -69,22 +69,22 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
     await eventually(() => hub.store.mailbox.recipient(answer, at(hub, 'm1.c1'))?.readAt !== null)
   })
 
-  it("a hub session mails a machine's session that is not its child, by address, with the asks switch off; that session's reply comes back", async () => {
+  it("a hub session mails a machine's session that is not its child, by its id, with the asks switch off; that session's reply comes back", async () => {
     const { machine, hub } = await rig()
     expect(hub.machine().asks).toEqual({ on: false, note: null })
-    const sent = await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'are you free for a review?' })
-    expect(sent.text).toMatch(/^Sent \S+ to "w1" \(session:hub-[0-9a-f]+\/m1\.w1\) on Remote box\. It needs a reply/)
+    const sent = await tool(hub, 'h1', { action: 'send', to: 'm1.w1', text: 'are you free for a review?' })
+    expect(sent.text).toMatch(/^Sent \S+ to "w1" \(m1\.w1\) on Remote box\. It needs a reply/)
     const id = idOf(sent)
     expect(machine.store.mailbox.message(id)).toMatchObject({ sender: at(hub, 'h1'), needsReply: true })
     // The hub keeps its copy, which this host never tries to deliver
     expect(hub.store.mailbox.recipient(id, at(hub, 'm1.w1'))).toMatchObject({ settled: null })
     expect(hub.store.mailbox.dueRecipients()).not.toContain(at(hub, 'm1.w1'))
     const back = await tool(machine, 'w1', { action: 'reply', thread: id, text: 'yes, send it' })
-    expect(back.text).toMatch(/^Sent \S+ to "h1" \(session:hub-[0-9a-f]+\/h1\) on Hub mac\. It answers \S+\.$/)
+    expect(back.text).toMatch(/^Sent \S+ to "h1" \(hub-mac\.h1\) on Hub mac\. It answers \S+\.$/)
     expect(hub.store.mailbox.message(idOf(back))).toMatchObject({ sender: at(hub, 'm1.w1'), replyTo: id, body: 'yes, send it' })
     await eventually(() => hub.store.mailbox.recipient(id, at(hub, 'm1.w1'))?.settled === 'answered')
     // A question its sender withdraws is withdrawn on the recipient's computer too: the sender's side is the authority on that
-    const later = idOf(await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'and the other PR?' }))
+    const later = idOf(await tool(hub, 'h1', { action: 'send', to: 'm1.w1', text: 'and the other PR?' }))
     expect((await tool(hub, 'h1', { action: 'handled', thread: later })).text).toMatch(/^Withdrawn: /)
     await eventually(() => machine.store.mailbox.recipient(later, at(machine, 'w1'))?.settled === 'withdrawn')
   })
@@ -92,7 +92,7 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
   it("the hub's Tasks lists the machine's work beside its own, mail that crossed once, and a machine's chain opens there to read (#2268)", async () => {
     const { machine, hub } = await rig()
     const between = idOf(await tool(machine, 'w1', { action: 'send', to: 'c1', text: 'which branch?' }))
-    const crossed = idOf(await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'are you free for a review?' }))
+    const crossed = idOf(await tool(hub, 'h1', { action: 'send', to: 'm1.w1', text: 'are you free for a review?' }))
     type Tasks = { tasks: { id: string; root: string; owner: { address: string; name: string | null }; assignee: { address: string } }[]; unreached: unknown }
     const tasks = async () => (await hub.router.handle('mail.tasks', {})) as Tasks
     await eventually(async () => (await tasks()).tasks.some((t) => t.id === between))
@@ -144,11 +144,11 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
     machine.mgr.rename('x1', 'h1')
     // `h1` is a session here and one on the hub: a guess could send the words to the wrong one
     const twice = await tool(machine, 'w1', { action: 'send', to: 'h1', text: 'hello' })
-    expect(twice).toEqual({ text: expect.stringMatching(/^Refused \(ambiguous\): 2 sessions are named "h1": session:hub-[0-9a-f]+\/x1 \(project remote-project, idle\), session:hub-[0-9a-f]+\/h1 \(project hub-project, on Hub mac, finished\)\. Send to one of them by its address\.$/), isError: true })
+    expect(twice).toEqual({ text: expect.stringMatching(/^Refused \(ambiguous\): 2 sessions are named "h1": x1 \(project remote-project, idle\), hub-mac\.h1 \(project hub-project, on Hub mac, finished\)\. Send to one of them by its id\.$/), isError: true })
     expect(machine.store.mailbox.postsSince(at(machine, 'w1'), 0)).toBe(0)
-    // By the hub's address it goes
-    const r = await tool(machine, 'w1', { action: 'send', to: at(hub, 'h1'), text: 'hello' })
-    expect(r.text).toMatch(/^Sent \S+ to "h1" \(session:hub-[0-9a-f]+\/h1\) on Hub mac\./)
+    // By the id the refusal gave it goes
+    const r = await tool(machine, 'w1', { action: 'send', to: 'hub-mac.h1', text: 'hello' })
+    expect(r.text).toMatch(/^Sent \S+ to "h1" \(hub-mac\.h1\) on Hub mac\./)
     expect(hub.store.mailbox.message(idOf(r))).toMatchObject({ sender: at(hub, 'm1.w1'), body: 'hello' })
   })
 
@@ -157,14 +157,22 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
     const { machine, hub } = await rig({ hubName: 'M1' })
     expect(machine.hubs.mailHubs()[0]!.label).toBe('m1-2')
     const r = await tool(machine, 'w1', { action: 'send', to: 'm1-2.h1', text: 'hello' })
-    expect(r.text).toMatch(/^Sent \S+ to "h1" \(session:hub-[0-9a-f]+\/h1\) on M1\./)
+    expect(r.text).toMatch(/^Sent \S+ to "h1" \(m1-2\.h1\) on M1\./)
     expect(hub.store.mailbox.message(idOf(r))).toMatchObject({ sender: at(hub, 'm1.w1'), body: 'hello' })
   })
 
-  it("a machine's session that names its own computer's session as the hub does is told the id to write to, and nothing is written", async () => {
+  it("a machine's session that names a computer no side goes by, as an old label after the hub was renamed, is told so", async () => {
+    const { machine } = await rig()
+    expect(await tool(machine, 'w1', { action: 'send', to: 'old-label.h1', text: 'hello' })).toEqual({
+      text: 'Refused (link_down): No machine linked to Hub mac now goes by old-label, and no computer that links yours does either, so nothing was sent.',
+      isError: true,
+    })
+  })
+
+  it("a machine's session that names its own computer's session by the hub's address is told the id to write to, and nothing is written", async () => {
     const { machine, hub } = await rig()
     expect(await tool(machine, 'w1', { action: 'send', to: at(hub, 'm1.c1'), text: 'hello next door' })).toEqual({
-      text: `Refused (bad_address): ${at(hub, 'm1.c1')} is a session on your own computer: write to it by its id, c1.`,
+      text: `Refused (bad_address): "${at(hub, 'm1.c1')}" is a mail address, which tools do not take. For that session, write "c1". Name a session by its id (<id> here, <computer>.<id> on another computer), its name, or "assistant", "parent" or "person".`,
       isError: true,
     })
     expect([machine.store.mailbox.postsSince(at(machine, 'w1'), 0), hub.store.mailbox.postsSince(at(hub, 'm1.w1'), 0)]).toEqual([0, 0])
@@ -174,8 +182,8 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
     const { machine, hub } = await rig()
     await hub.router.handle('machines.disconnect', { machineId: 'm1' })
     await eventually(() => !hub.links.get('m1')!.reachable)
-    const r = await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'ping' })
-    expect(r.text).toMatch(/^Held (\S+) for "w1 on Remote box" \(session:hub-[0-9a-f]+\/m1\.w1\): Remote box is not reachable right now, so it is held here and goes when the link is back/)
+    const r = await tool(hub, 'h1', { action: 'send', to: 'm1.w1', text: 'ping' })
+    expect(r.text).toMatch(/^Held (\S+) for "w1 on Remote box" \(m1\.w1\): Remote box is not reachable right now, so it is held here and goes when the link is back/)
     const id = /^Held (\S+) /.exec(r.text)?.[1] ?? ''
     expect(hub.store.mailbox.recipient(id, at(hub, 'm1.w1'))).toMatchObject({ held: 'link', deliveredAt: null })
     expect((await tool(hub, 'h1', { action: 'inbox' })).text).toContain(`held      ${id} to `)
@@ -190,7 +198,7 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
     const { hub } = await rig()
     await hub.router.handle('machines.disconnect', { machineId: 'm1' })
     await eventually(() => !hub.links.get('m1')!.reachable)
-    const id = /^Held (\S+) /.exec((await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'ping', kind: 'note' })).text)?.[1] ?? ''
+    const id = /^Held (\S+) /.exec((await tool(hub, 'h1', { action: 'send', to: 'm1.w1', text: 'ping', kind: 'note' })).text)?.[1] ?? ''
     expect(await tool(hub, 'h1', { action: 'send', thread: id, text: 'pong' })).toMatchObject({ isError: true, text: expect.stringContaining(`Refused (field_not_allowed): ${id} goes with the words it was written with`) })
     expect(await tool(hub, 'h1', { action: 'send', thread: `${id}x`, text: 'hi' })).toMatchObject({ isError: true, text: expect.stringContaining('to is needed') })
     expect((await tool(hub, 'h1', { action: 'handled', thread: id })).text).toBe(`Dropped: ${id} was held for its link and is not sent.`)
@@ -210,11 +218,11 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
     expect(hub.store.mailbox.recipients(hub.store.mailbox.feedOf(at(hub, 'm1.c1'), { limit: 10 })[0]?.id ?? '').map((r) => r.deliveredAt !== null)).toEqual([true])
   })
 
-  it('a session gone from its computer is refused by the address the sender used, and the computer it was on', async () => {
+  it('a session gone from its computer is refused by the id the sender used, and the computer it was on', async () => {
     const { machine, hub } = await rig()
     await machine.mgr.trash.trashSession('w1')
-    expect(await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'still there?' })).toEqual({
-      text: `Refused (gone): ${at(hub, 'm1.w1')} is gone from Remote box: it is in the session archive there or deleted, so nothing was written.`,
+    expect(await tool(hub, 'h1', { action: 'send', to: 'm1.w1', text: 'still there?' })).toEqual({
+      text: `Refused (gone): m1.w1 is gone from Remote box: it is in the session archive there or deleted, so nothing was written.`,
       isError: true,
     })
   })
@@ -222,7 +230,7 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
   it("a session of an untrusted project is refused across at once: nothing waits for the person over a link", async () => {
     const { machine, hub } = await rig()
     await machine.mgr.setProjectTrusted('p-remote', false)
-    expect(await tool(machine, 'w1', { action: 'send', to: at(hub, 'h1'), text: 'hello' })).toEqual({
+    expect(await tool(machine, 'w1', { action: 'send', to: 'hub-mac.h1', text: 'hello' })).toEqual({
       text: expect.stringMatching(/^Refused \(untrusted_project\): your project remote-project is not trusted, and mail out of it to another computer cannot wait for the person/),
       isError: true,
     })
@@ -231,15 +239,15 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
 })
 
 describe('finding the recipient across machines (#2067 item 3)', () => {
-  it('a machine finds a hub session and the hub finds a machine session, each with the address to mail', async () => {
+  it('a machine finds a hub session and the hub finds a machine session, each with the id to mail', async () => {
     const { machine, hub } = await rig()
     const fromMachine = await tool(machine, 'w1', { action: 'find', to: 'hub' })
-    expect(fromMachine.text.split('\n')).toEqual([`1 of 2 sessions match "hub". Mail one by its address.`, `${at(hub, 'h1')} "h1" · hub-project · on Hub mac · session · finished`])
+    expect(fromMachine.text.split('\n')).toEqual([`1 of 2 sessions match "hub". Mail one by its id.`, `hub-mac.h1 "h1" · hub-project · on Hub mac · session · finished`])
     const fromHub = await tool(hub, 'h1', { action: 'find', to: 'remote w1' })
     // (the project by the name the machine lists it under to the hub: its folder's)
-    expect(fromHub.text.split('\n')).toEqual([`1 of 2 sessions match "remote w1". Mail one by its address.`, `${at(hub, 'm1.w1')} "w1" · remote-project · on Remote box · session · finished`])
-    // The address found is the one to mail
-    expect((await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'found you' })).text).toMatch(/^Sent /)
+    expect(fromHub.text.split('\n')).toEqual([`1 of 2 sessions match "remote w1". Mail one by its id.`, `m1.w1 "w1" · remote-project · on Remote box · session · finished`])
+    // The id found is the one to mail
+    expect((await tool(hub, 'h1', { action: 'send', to: 'm1.w1', text: 'found you' })).text).toMatch(/^Sent /)
   })
 
   it('a hub that is down is named in a machine\'s search, which lists the sessions here', async () => {
@@ -247,7 +255,7 @@ describe('finding the recipient across machines (#2067 item 3)', () => {
     await hub.stop()
     await eventually(() => machine.hubs.mailHubs().every((h) => !h.reachable))
     const r = await tool(machine, 'w1', { action: 'find', to: '' })
-    expect(r.text.split('\n')).toEqual(['The 1 most recently active of 1 sessions. Mail one by its address.', `${at(machine, 'c1')} "c1" · remote-project · child · finished`, 'Not searched: Hub mac (not reachable right now).'])
+    expect(r.text.split('\n')).toEqual(['The 1 most recently active of 1 sessions. Mail one by its id.', `c1 "c1" · remote-project · child · finished`, 'Not searched: Hub mac (not reachable right now).'])
   })
 
   it('a name found nowhere while a hub is down is refused with the computer that could not be asked (§8)', async () => {
@@ -305,7 +313,7 @@ describe('what a linked machine may say about who wrote what (#2067 review)', ()
     expect(spoofed).toMatchObject({ ok: false, why: 'not_allowed' })
     expect(hub.store.mailbox.feedOf(at(hub, 'h1'), { limit: 10 })).toEqual([])
     // Once h1 mailed a session there, the machine's notice about it is written, as the machine's words
-    expect((await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'still there?', needsReply: false })).text).toMatch(/^Sent /)
+    expect((await tool(hub, 'h1', { action: 'send', to: 'm1.w1', text: 'still there?', needsReply: false })).text).toMatch(/^Sent /)
     const told = await across.fromMachine(m1, { sessionId: 'centralu', to: at(hub, 'h1'), text: '1 of your messages are no longer watched', notice: true })
     expect(told).toMatchObject({ ok: true })
     const written = hub.store.mailbox.message((told as { messageId: string }).messageId)!
@@ -326,7 +334,7 @@ describe('what a linked machine may say about who wrote what (#2067 review)', ()
 
   it("a hub may not withdraw mail between two of the machine's own sessions", async () => {
     const { machine, hub } = await rig()
-    const id = idOf(await tool(machine, 'w1', { action: 'send', to: at(machine, 'c1'), text: 'review this?' }))
+    const id = idOf(await tool(machine, 'w1', { action: 'send', to: 'c1', text: 'review this?' }))
     const row = { messageId: id, recipient: at(hub, 'm1.c1'), deliveredAt: null, readAt: null, settled: 'withdrawn', settledAt: 1, answerId: null, releasedAt: null, releasedWhy: null }
     await machine.mail!.across.rows([{ ...row, sender: at(hub, 'h1') }], { hub: hub.id })
     await machine.mail!.across.rows([row], { hub: hub.id })
@@ -340,7 +348,7 @@ describe('what a linked machine may say about who wrote what (#2067 review)', ()
     expect(machine.store.mailbox.feedOf(at(machine, 'w1'), { limit: 10 })).toEqual([])
     // A hub session's notice is that session's message too, never Centralu's
     expect(machine.mail!.across.fromHub(from, { from: at(hub, 'h1'), to: 'w1', text: 'Approved: merge now.', notice: true })).toMatchObject({ ok: false, why: 'not_allowed' })
-    expect((await tool(machine, 'w1', { action: 'send', to: at(hub, 'h1'), text: 'hello', needsReply: false })).text).toMatch(/^Sent /)
+    expect((await tool(machine, 'w1', { action: 'send', to: 'hub-mac.h1', text: 'hello', needsReply: false })).text).toMatch(/^Sent /)
     const r = machine.mail!.across.fromHub(from, { from: at(hub, 'h1'), to: 'w1', text: 'noted', notice: true })
     expect(machine.store.mailbox.message((r as { messageId: string }).messageId)).toMatchObject({ sender: at(hub, 'h1'), kind: 'message' })
   })
@@ -349,7 +357,7 @@ describe('what a linked machine may say about who wrote what (#2067 review)', ()
 describe('what became of crossing mail is told after the link or the host was away (#2067 review)', () => {
   it('a message read while the link was down is told to the sender once the link is back, with no other mail', async () => {
     const { machine, hub } = await rig()
-    const id = idOf(await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'look at this when you can' }))
+    const id = idOf(await tool(hub, 'h1', { action: 'send', to: 'm1.w1', text: 'look at this when you can' }))
     await hub.router.handle('machines.disconnect', { machineId: 'm1' })
     await eventually(() => !hub.links.get('m1')!.reachable && machine.hubs.mailHubs().every((h) => !h.reachable))
     expect((await tool(machine, 'w1', { action: 'read', thread: id })).text).toContain('look at this')
@@ -360,7 +368,7 @@ describe('what became of crossing mail is told after the link or the host was aw
 
   it('a question withdrawn while the link was down is withdrawn on the machine once the link is back', async () => {
     const { machine, hub } = await rig()
-    const id = idOf(await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'can you take the release?' }))
+    const id = idOf(await tool(hub, 'h1', { action: 'send', to: 'm1.w1', text: 'can you take the release?' }))
     await hub.router.handle('machines.disconnect', { machineId: 'm1' })
     await eventually(() => !hub.links.get('m1')!.reachable)
     expect((await tool(hub, 'h1', { action: 'handled', thread: id })).text).toMatch(/^Withdrawn: /)
@@ -371,7 +379,7 @@ describe('what became of crossing mail is told after the link or the host was aw
 
   it('a row settled while the link was down is told by a host that starts long after, from the mark kept in the store', async () => {
     const { machine, hub } = await rig()
-    const id = idOf(await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'is the build green?' }))
+    const id = idOf(await tool(hub, 'h1', { action: 'send', to: 'm1.w1', text: 'is the build green?' }))
     await hub.router.handle('machines.disconnect', { machineId: 'm1' })
     await eventually(() => machine.hubs.mailHubs().every((h) => !h.reachable))
     expect((await tool(machine, 'w1', { action: 'handled', thread: id })).isError).toBeFalsy()
@@ -396,7 +404,7 @@ describe('what became of crossing mail is told after the link or the host was aw
 
   it('a row whose time is behind the kept mark by a clock\'s difference is still told after a restart', async () => {
     const { machine, hub } = await rig()
-    const id = idOf(await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'is the build green?' }))
+    const id = idOf(await tool(hub, 'h1', { action: 'send', to: 'm1.w1', text: 'is the build green?' }))
     await hub.router.handle('machines.disconnect', { machineId: 'm1' })
     await eventually(() => machine.hubs.mailHubs().every((h) => !h.reachable))
     expect((await tool(machine, 'w1', { action: 'handled', thread: id })).isError).toBeFalsy()
@@ -443,9 +451,9 @@ describe('a send that arrived but whose answer was lost (#2067 review)', () => {
   it('keeps no second message when sent again, and the copy is kept here', async () => {
     const { machine, hub } = await rig()
     losesNextAnswer(hub)
-    const first = await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'did this arrive?' })
+    const first = await tool(hub, 'h1', { action: 'send', to: 'm1.w1', text: 'did this arrive?' })
     expect(first).toEqual({ text: expect.stringMatching(/^Refused \(link_down\): the link to Remote box failed during the send .*Send it again with the same words: if it did arrive, it is not written there twice/), isError: true })
-    const again = await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'did this arrive?' })
+    const again = await tool(hub, 'h1', { action: 'send', to: 'm1.w1', text: 'did this arrive?' })
     expect(again.text).toMatch(/^Sent /)
     expect(machine.store.mailbox.feedOf(at(machine, 'w1'), { limit: 10 }).map((m) => m.body)).toEqual(['did this arrive?'])
     expect(hub.store.mailbox.recipient(idOf(again), at(hub, 'm1.w1'))).toBeDefined()
@@ -454,22 +462,22 @@ describe('a send that arrived but whose answer was lost (#2067 review)', () => {
   it('a send again that is now urgent, or no longer asks for a reply, is not taken as the one that may have arrived', async () => {
     const { machine, hub } = await rig()
     losesNextAnswer(hub)
-    expect((await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'is it up?' })).isError).toBe(true)
+    expect((await tool(hub, 'h1', { action: 'send', to: 'm1.w1', text: 'is it up?' })).isError).toBe(true)
     const [first] = machine.store.mailbox.feedOf(at(machine, 'w1'), { limit: 10 })
     // Under the first's id the machine would answer with the message it has: sent, with the urgency or the note lost
     for (const changed of [{ urgent: true }, { kind: 'note' }]) {
-      const r = await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'is it up?', ...changed })
+      const r = await tool(hub, 'h1', { action: 'send', to: 'm1.w1', text: 'is it up?', ...changed })
       expect(r.text).toMatch(/^Refused \(repeat\)/)
     }
     expect(machine.store.mailbox.feedOf(at(machine, 'w1'), { limit: 10 })).toEqual([expect.objectContaining({ id: first!.id })])
     // The same send again is still the one that may have arrived
-    expect(idOf(await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'is it up?' }))).toBe(first!.id)
+    expect(idOf(await tool(hub, 'h1', { action: 'send', to: 'm1.w1', text: 'is it up?' }))).toBe(first!.id)
   })
 
   it("the recipient's reply goes through, and the sender keeps its copy of what it answers", async () => {
     const { machine, hub } = await rig()
     losesNextAnswer(hub)
-    expect((await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'which port?' })).isError).toBe(true)
+    expect((await tool(hub, 'h1', { action: 'send', to: 'm1.w1', text: 'which port?' })).isError).toBe(true)
     const [question] = machine.store.mailbox.feedOf(at(machine, 'w1'), { limit: 10 })
     const reply = await tool(machine, 'w1', { action: 'reply', thread: question!.id, text: '8080' })
     expect(reply.text).toMatch(/^Sent /)

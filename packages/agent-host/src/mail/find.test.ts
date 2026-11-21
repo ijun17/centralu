@@ -29,7 +29,7 @@ function directory(n: number): FoundEntry[] {
 const answerFor = (n: number) => {
   const all = directory(n)
   const found = ranked(all, '')
-  return findAnswer({ query: '', found, matched: found.length, total: all.length, away: [] })
+  return findAnswer({ query: '', found, matched: found.length, total: all.length, away: [], shown: (a) => a })
 }
 
 /** The repository's token estimate (characters ÷ 4, docs/tool-cost.md) */
@@ -77,9 +77,9 @@ describe('finding the recipient (#2067 item 3)', () => {
     const all = directory(30)
     const found = ranked(all, 'session')
     expect(found.length).toBeGreaterThan(FIND_LIMIT)
-    const text = findAnswer({ query: 'session', found, matched: found.length, total: 30, away: [{ name: 'Build box', why: 'not reachable right now' }] })
+    const text = findAnswer({ query: 'session', found, matched: found.length, total: 30, away: [{ name: 'Build box', why: 'not reachable right now' }], shown: (a) => a })
     const lines = text.split('\n')
-    expect(lines[0]).toBe(`${found.length} of 30 sessions match "session". Mail one by its address.`)
+    expect(lines[0]).toBe(`${found.length} of 30 sessions match "session". Mail one by its id.`)
     expect(lines.filter((l) => l.startsWith('session:'))).toHaveLength(Math.min(FIND_LIMIT, found.length))
     expect(lines.at(-2)).toBe(`${found.length - FIND_LIMIT} more: add a word (a project, a machine or a role) to narrow it.`)
     expect(lines.at(-1)).toBe('Not searched: Build box (not reachable right now).')
@@ -99,7 +99,7 @@ describe('finding the recipient (#2067 item 3)', () => {
     const all = directory(200).map((e, i) => ({ ...e, name: long(`${e.name} with a long name`, 120), project: long(`project ${i}`, 80), machine: e.machine === null ? null : long(`machine ${e.machine}`, 80) }))
     const away = Array.from({ length: 30 }, (_, i) => ({ name: long(`Computer ${i}`, 80), why: long('it runs an older Centralu; update it there', 160) }))
     const found = ranked(all, '')
-    const text = findAnswer({ query: long('a query', 200), found, matched: found.length, total: all.length, away })
+    const text = findAnswer({ query: long('a query', 200), found, matched: found.length, total: all.length, away, shown: (a) => a })
     const lines = text.split('\n')
     expect(lines.filter((l) => l.startsWith('Not searched'))).toHaveLength(4)
     expect(lines.at(-1)).toBe('Not searched either: 27 more computers.')

@@ -14,7 +14,7 @@ import { REMOTE_AGENTS_KEY } from './remote-agents.js'
 
 const CHILD = { sessionId: 'm1.c1', callerId: 'h1', machineId: 'm1', machine: 'Box', name: 'Child', tool: 'claude', project: 'api', startedAt: 1, sent: 'TASK' }
 const REFUSED = 'Refused (link_down): That computer is no longer linked to this one, so nothing was sent.'
-const ELSEWHERE = `${addr(CHILD.sessionId)} is on another computer, and only a session's mail tool sends mail there: nothing was written.`
+const ELSEWHERE = `${CHILD.sessionId} is on another computer, and only a session's mail tool sends mail there: nothing was written.`
 
 let store: Store
 let mgr: SessionManager
@@ -41,11 +41,9 @@ afterEach(async () => {
 
 describe('mail to a child on a linked machine (#2067)', () => {
   // #1948: mail to a child of the caller's is more work, here or on a linked machine, as agent_session's send was; to any other session there it is mail
-  it('by its id or address is more work through the link, and with no link to it is refused at once, written nowhere', async () => {
-    for (const to of [CHILD.sessionId, addr(CHILD.sessionId)]) {
-      const sent = await m.hooks.tool!('h1', { action: 'send', to, text: 'one more thing' })
-      expect(sent).toMatchObject({ isError: true, text: expect.stringContaining('m1.c1 is on Box, and no machine is linked to this computer now.') })
-    }
+  it('by its id is more work through the link, and with no link to it is refused at once, written nowhere', async () => {
+    const sent = await m.hooks.tool!('h1', { action: 'send', to: CHILD.sessionId, text: 'one more thing' })
+    expect(sent).toMatchObject({ isError: true, text: expect.stringContaining('m1.c1 is on Box, and no machine is linked to this computer now.') })
     expect(store.mailbox.postsSince(addr('h1'), 0)).toBe(0)
   })
 

@@ -149,6 +149,16 @@ describe('a call that returned the answer (§9.6)', () => {
     expect(w.rowOf(task.id, W).settled).toBe('reported')
   })
 
+  it("names a hub's session it asked by the id a tool prints for it, never by its address", () => {
+    const w = world()
+    w.hubs.push({ id: 'hub-0000000b', label: 'studio', name: 'Studio', you: 'm1' })
+    const child = 'session:hub-0000000b/h1'
+    const id = 'hub-0000000b.m_01JX000000000000000000000T'
+    w.mail.sentAcross(A, { id, to: child, text: 'review it', needsReply: false, task: { origin: 'ask_project' } })
+    answerRecorder(w.mail, w.store.mailbox)('a', child, { ok: true, text: 'done' }, id)
+    expect(w.store.mailbox.reportsOn(id).at(-1)?.body).toContain('id: studio.h1\n')
+  })
+
   it('a failure says its kind; an answer is kept whole up to a message’s length, and past it cut, as its words say (#2358); a read of where it stands only marks the reports read', () => {
     const w = turnWorld()
     const task = w.mail.task(A, W, { text: 'job', origin: 'start_agent', delivered: true })

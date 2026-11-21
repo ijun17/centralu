@@ -1,5 +1,5 @@
 import { frameField, type MailDelivered } from '@cc/protocol'
-import { parseAddress } from './address.js'
+import { isSessionId, parseAddress } from './address.js'
 import { parseMailId } from './ids.js'
 import { MAIL_KINDS, type MailKind } from '../dev-services/store/mailbox.js'
 
@@ -7,8 +7,8 @@ import { MAIL_KINDS, type MailKind } from '../dev-services/store/mailbox.js'
  * The text that wakes a session with mail (docs/plans/mailbox.md §7.3), built in one place and **at drain time**: from the
  * receipts as they are when the host hands the mail over, not as they were when it was posted (§7.5).
  *
- * **Host fields only.** Every attribute is an id of the id shape, a kind from the fixed list, a count, an address that
- * parses or an outcome word Centralu wrote. There is no name, subject or body that another session, an app or GitHub
+ * **Host fields only.** Every attribute is an id of the id shape, a kind from the fixed list, a count, a party's shown id
+ * (an id, or an app's address that parses) or an outcome word Centralu wrote. There is no name, subject or body that another session, an app or GitHub
  * wrote (#1186: the receiver's model reads only what Centralu wrote). The relation word ("the session you gave this
  * work to") is Centralu's, and a value that does not have the shape of its field is left out, not escaped.
  *
@@ -49,7 +49,7 @@ function attr(name: string, value: string | number | undefined, ok: (v: string) 
 }
 
 const isMessageId = (v: string) => parseMailId(v)?.kind === 'message'
-const isAddress = (v: string) => parseAddress(v) !== null
+const isParty = (v: string) => isSessionId(v) || parseAddress(v) !== null
 const isMailKind = (v: string) => (MAIL_KINDS as readonly string[]).includes(v)
 const isOutcome = (v: string) => OUTCOME_RE.test(v)
 const isCount = (v: string) => /^[0-9]{1,6}$/.test(v)
@@ -111,7 +111,7 @@ function fitFrame<T extends { messageId: string; inline?: string }>(
 export type MessageFrameItem = {
   messageId: string
   kind: MailKind
-  /** The sender's address */
+  /** The sender as tools print it (`MailReach.shownId`) */
   from: string
   /** Centralu's word for the sender's relation to the receiver */
   relation: string
@@ -121,6 +121,7 @@ export type MessageFrameItem = {
   answers?: string
   /** The task this message is a clarification about (`facts.clarifies`) */
   clarifies?: string
+  /** The session a Centralu notice is about, as tools print it */
   about?: string
   outcome?: string
   error?: string
@@ -185,12 +186,12 @@ function messageLine(i: MessageFrameItem): string {
   return (
     `id="${isMessageId(i.messageId) ? i.messageId : 'unknown'}"` +
     attr('kind', i.kind, isMailKind) +
-    attr('from', i.from, isAddress) +
+    attr('from', i.from, isParty) +
     attr('sender', frameField(i.relation), isWords) +
     (i.kind === 'message' ? ` needsReply="${i.needsReply === true ? 1 : 0}"` : '') +
     attr('answers', i.answers, isMessageId) +
     attr('clarifies', i.clarifies, isMessageId) +
-    attr('about', i.about, isAddress) +
+    attr('about', i.about, isParty) +
     attr('outcome', i.outcome, isOutcome) +
     attr('error', i.error, isOutcome) +
     attr('reason', i.reason, isOutcome) +

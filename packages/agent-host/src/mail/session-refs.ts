@@ -1,12 +1,15 @@
 import { MACHINE_ID_RE, errorMessage, oneLineText } from '@cc/protocol'
-import { ROLE_WORDS, isSessionId, parseAddress, sessionAddress, type RoleWord } from './address.js'
+import { PERSON, ROLE_WORDS, isPerson, isSessionId, parseAddress, sessionAddress, type RoleWord } from './address.js'
 import type { FoundEntry } from './find.js'
 import { refuse } from './rules.js'
 
 /** A session of this host, as a name or id finds it */
 export type HereSession = { id: string; name: string; project: string | null; state: string }
 
-/** What a tool's session argument names: a role, an address, or a word with the sessions here it names (none, one, or several of one name) */
+/**
+ * What a tool's session argument names: a role, an address (an app's or Centralu's as given, a session's as `<computer>.<id>` names it), or a word with
+ * the sessions here it names (none, one, or several of one name)
+ */
 export type SessionRef = { role: RoleWord } | { address: string } | { word: string; here: HereSession[] }
 
 /** The computers a `<computer>.<id>` can name, read at each call: a hub's machines, or the hubs that link a machine */
@@ -35,29 +38,30 @@ const NO_ROLE: Record<RoleWord, string> = {
 
 /**
  * How every tool that takes a session reads it (mail's `to`, read_session, agent_session): one set of forms, so what one tool
- * prints another takes (remote-hub.md §3.3). A text shaped as an address that is not one is refused, never looked up as a name
+ * prints another takes (remote-hub.md §3.3). A session's address, whole or cut short, is refused with the id to write, never looked up as a name
  */
 export class SessionRefs {
   constructor(private readonly d: SessionRefsDeps) {}
 
   /**
-   * What `text` names for `callerId`. A session here by its id or name comes before `<computer>.<id>`, so a name with a dot
-   * still finds its session. A word that names nothing here is left for mail to look up by name on other computers
+   * What `text` names for `callerId`. A session here by its id or name comes before any other reading, so a name with a dot
+   * or a colon still finds its session. A word that names nothing here is left for mail to look up by name on other computers
    */
   ref(callerId: string, text: string): SessionRef {
     const t = text.trim()
     const role = ROLE_WORDS.find((r) => r === t.toLowerCase())
     if (role) return { role }
+    const word = this.word(callerId, t)
+    if (word.here.length > 0) return word
     const p = parseAddress(t)
-    if (p?.kind === 'session' && p.host === this.d.hostId && !p.sessionId.includes('.')) return this.word(callerId, p.sessionId)
+    if (p?.kind === 'session') throw refuse('bad_address', `${JSON.stringify(oneLineText(t, 80))} is a mail address, which tools do not take. For that session, write ${JSON.stringify(this.shown(t))}. ${FORMS}`)
     if (p) return { address: t }
     if (/^(session|app):/i.test(t)) {
-      const rest = t.slice(Math.max(t.indexOf(':'), t.lastIndexOf('/')) + 1)
+      const rest = t.slice(Math.max(t.indexOf(':'), t.lastIndexOf('/')) + 1).trim()
       const meant = this.word(callerId, rest).here.length === 1 ? ` For that session, write ${JSON.stringify(rest)}.` : ''
       throw refuse('bad_address', `${JSON.stringify(oneLineText(t, 80))} is not a session's address.${meant} ${FORMS}`)
     }
-    const word = this.word(callerId, t)
-    return word.here.length > 0 ? word : (this.qualified(callerId, t) ?? word)
+    return this.qualified(callerId, t) ?? word
   }
 
   /**
@@ -77,7 +81,7 @@ export class SessionRefs {
       const exact = ref.here.length === 1 && ref.here[0]?.id === ref.word
       const found: { id?: string; address?: string; line: string }[] = [
         ...ref.here.map((s) => ({ id: s.id, line: `${s.id} (${s.state})` })),
-        ...(exact ? [] : this.d.computers().mirrored(ref.word)).map((e) => ({ address: e.address, line: `${e.address} (${e.machine ?? 'another computer'}, ${e.state})` })),
+        ...(exact ? [] : this.d.computers().mirrored(ref.word)).map((e) => ({ address: e.address, line: `${this.shown(e.address)} (${e.machine ?? 'another computer'}, ${e.state})` })),
       ]
       const [only] = found
       if (!only) return { ok: true, id: ref.word }
@@ -93,7 +97,24 @@ export class SessionRefs {
     const p = parseAddress(address)
     if (p?.kind === 'session' && p.host === this.d.hostId) return { ok: true, id: p.sessionId }
     const hub = p?.kind === 'session' ? this.d.computers().hubs().find((h) => h.id === p.host) : undefined
-    return { ok: false, error: `${JSON.stringify(oneLineText(address, 120))} is ${hub ? `a session on ${hub.name}` : 'not a session'}, which this tool does not reach from this computer. Mail reaches a session on another computer.` }
+    const where = !hub ? 'not a session' : p?.kind === 'session' && p.sessionId.includes('.') ? `a session on a machine ${hub.name} links` : `a session on ${hub.name}`
+    return { ok: false, error: `${JSON.stringify(oneLineText(this.shown(address), 120))} is ${where}, which this tool does not reach from this computer. Mail reaches a session on another computer.` }
+  }
+
+  /**
+   * How a tool prints `address`, in the form `ref` reads back: a session here by its id, one on another computer as `<computer>.<id>`
+   * (a hub by its label), the person as `person`. A hub this computer no longer links has no label left: its id stands in. An app's
+   * address stays as it is
+   */
+  shown(address: string): string {
+    if (isPerson(address)) return PERSON
+    const p = parseAddress(address)
+    if (p?.kind !== 'session') return address
+    if (p.host === this.d.hostId) return p.sessionId
+    const hub = this.d.computers().hubs().find((h) => h.id === p.host)
+    const dot = p.sessionId.indexOf('.')
+    if (dot > 0) return hub?.you === p.sessionId.slice(0, dot) ? p.sessionId.slice(dot + 1) : p.sessionId
+    return `${hub?.label ?? p.host}.${p.sessionId}`
   }
 
   /** The sessions here a word names: the one with that id, else those of that name but the caller (an heir has the name of the session it replaced) */

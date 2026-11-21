@@ -5,6 +5,7 @@ import { parseAddress, sessionAddress } from './address.js'
 import { MessageService, type SendInput, type SendResult, type TurnNow } from './messages.js'
 import { mailReach, type ReachHost } from './reach.js'
 import { refusalReason } from './rules.js'
+import { SessionRefs } from './session-refs.js'
 
 export const HOST = 'hub-aaaaaaaa'
 export const NOW = 1_800_000_000_000
@@ -53,7 +54,11 @@ export function world() {
     project: (id) => projects.get(id),
     // The sessions of one project, and of the Assistant's none, are one group
     askGroupMembers: (a) => [...sessions].filter(([, s]) => s.projectId !== null && s.projectId === sessions.get(idOf(a))?.projectId).map(([id]) => addr(id)),
+    shown: (a) => refs.shown(a),
   }
+  // The hubs that link this host, as a test adds them: the ids a tool prints for their sessions go by their labels
+  const hubs: { id: string; label: string; name: string; you: string | null }[] = []
+  const refs = new SessionRefs({ hostId: HOST, sessions: () => [], assistantId: () => 'orc', computers: () => ({ machine: () => false, hubs: () => hubs, mirrored: () => [] }) })
   const clock = { t: NOW }
   const turns = new Map<string, TurnNow>()
   const reach = mailReach(host)
@@ -84,7 +89,7 @@ export function world() {
     if (!r) throw new Error(`no row ${id} for ${recipient}`)
     return r
   }
-  return { store, db, mail, reach, records: store.mailbox, clock, sessions, projects, turns, startTurn, send, message, rowOf }
+  return { store, db, mail, reach, records: store.mailbox, clock, sessions, projects, turns, startTurn, send, message, rowOf, hubs }
 }
 
 /** What a refused call said it was refused for; 'NOT REFUSED' when it was not */

@@ -478,7 +478,7 @@ describe('reading a report shows the last response it kept (#2348 review)', () =
     expect(refused).toContain(report!.id)
     expect(refused).not.toContain('All done: 3 files changed.')
     // The report's words say reading it shows the response: a reader it is not shown to is told why (#2358)
-    expect(refused).toContain(`Its last response is not shown: you may not read ${addr(child)}.`)
+    expect(refused).toContain(`Its last response is not shown: you may not read ${child}.`)
     // A session of a project nobody trusted is marked as read_session marks it
     asked.mockReturnValue({ untrusted: true })
     expect((await m.tool.call(parent, { action: 'read', thread: report!.id })).text).toContain(UNTRUSTED_LINES)

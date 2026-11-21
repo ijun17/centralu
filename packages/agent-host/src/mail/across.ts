@@ -155,7 +155,7 @@ export class MailAcross extends AcrossReceipts {
       const row = m?.kind === 'task' ? this.d.records.recipients(id)[0] : undefined
       const r = row && this.route(row.recipient)
       if (!m || !row || r?.kind !== 'machine' || r.machineId !== machineId || row.settled !== null || row.releasedAt !== null) continue
-      const name = this.foreignName(row.recipient)?.name ?? row.recipient
+      const name = this.nameOf(row.recipient)
       this.d.records.deleteRows([{ messageId: id, recipient: row.recipient }])
       this.unsure.delete(id)
       lost.set(m.sender, [...(lost.get(m.sender) ?? []), { id, name: oneLineText(name, 200) }])
@@ -241,7 +241,7 @@ export class MailAcross extends AcrossReceipts {
   async sendFrom(sender: string, input: SendInput): Promise<AcrossSent> {
     if (input.text.length > bodyLimit('session')) return { ok: false, why: 'too_long', text: tooLongText('session') }
     if (!input.text.trim()) return { ok: false, why: 'empty', text: 'a post says something' }
-    if (input.to !== 'parent' && !mayReachAcross(sender, input.to)) return { ok: false, why: 'not_allowed', text: `this session may not mail ${input.to}.` }
+    if (input.to !== 'parent' && !mayReachAcross(sender, input.to)) return { ok: false, why: 'not_allowed', text: `this session may not mail ${this.nameOf(input.to)}.` }
     // Mail out of an untrusted project waits for the person here (§7.4); across a link nothing waits, so it is not sent
     const project = this.d.reach.projectOf(sender)
     if (project !== null && this.d.reach.untrusted(project)) {
@@ -269,7 +269,7 @@ export class MailAcross extends AcrossReceipts {
    */
   private way(sender: string, to: string, fields: Fields, extra: Extra): Way | { why: string; text: string } {
     const route = this.route(to)
-    if (!route || route.kind === 'here') return { why: 'bad_address', text: `${to} is not a session on another computer.` }
+    if (!route || route.kind === 'here') return { why: 'bad_address', text: `${this.d.reach.shownId(to)} is not a session on another computer.` }
     if (route.kind === 'machine') {
       const m = this.peers?.machine?.(route.machineId)
       if (!m) return { why: 'link_down', text: 'That computer is no longer linked to this one, so nothing was sent.' }
@@ -283,9 +283,9 @@ export class MailAcross extends AcrossReceipts {
       }
     }
     const sessionId = sessionIdOf(sender)
-    if (!sessionId) return { why: 'not_allowed', text: `only a session here writes to ${to}.` }
+    if (!sessionId) return { why: 'not_allowed', text: `only a session here writes to ${this.d.reach.shownId(to)}.` }
     const h = this.peers?.hub?.(route.hubId)
-    if (!h) return { why: 'link_down', text: `the computer ${route.hubId} is not linked to this one right now (or runs a Centralu from before mail crossed computers), so nothing was sent.` }
+    if (!h) return { why: 'link_down', text: `${this.computers.get(route.hubId) ?? 'the computer of that session'} is not linked to this one right now (or runs a Centralu from before mail crossed computers), so nothing was sent.` }
     if (!h.you) return { why: 'older', text: `${h.name} runs an older Centralu, which takes mail only for the session that started one of its children here. Update it there.` }
     const toPerson = to === sessionAddress(route.hubId, PERSON_ID)
     return {
@@ -315,7 +315,7 @@ export class MailAcross extends AcrossReceipts {
     } catch (e) {
       return { ok: false, why: 'failed', text: `${peer.name} is not reachable right now, and this computer could not keep the message to send it later, so nothing was sent: ${oneLineText(errorMessage(e), 500)}` }
     }
-    return { ok: true, messageId: id, to: this.foreignName(to)?.name ?? to, address: to, computer: peer.name, held: true }
+    return { ok: true, messageId: id, to: this.nameOf(to), address: to, computer: peer.name, held: true }
   }
 
   /**
@@ -346,7 +346,7 @@ export class MailAcross extends AcrossReceipts {
       }
     })()
     for (const [sender, rows] of late) {
-      this.d.service.notice(sender, heldTooLong(rows.map((p) => ({ id: p.message.id, to: this.foreignName(p.row.recipient)?.name ?? p.row.recipient, body: p.message.body }))))
+      this.d.service.notice(sender, heldTooLong(rows.map((p) => ({ id: p.message.id, to: this.nameOf(p.row.recipient), body: p.message.body }))))
       this.d.records.markTold(rows.map((p) => p.row), this.now())
     }
   }
@@ -378,7 +378,7 @@ export class MailAcross extends AcrossReceipts {
     const p = this.heldOf(sender, id)[0]
     if (!p) return { ok: false, why: 'unknown_message', text: `${oneLineText(id, 200)} is no message of yours held for its link.` }
     if (this.sending.has(id)) return { ok: false, why: 'busy', text: `${id} is being sent now.` }
-    if (this.side(p.row.recipient) === 'down') return { ok: false, why: 'link_down', text: `the computer of ${oneLineText(this.foreignName(p.row.recipient)?.name ?? p.row.recipient, 200)} is still not reachable, so ${id} stays held.` }
+    if (this.side(p.row.recipient) === 'down') return { ok: false, why: 'link_down', text: `the computer of ${oneLineText(this.nameOf(p.row.recipient), 200)} is still not reachable, so ${id} stays held.` }
     this.sending.add(id)
     try {
       return await this.resend(p)
@@ -435,7 +435,7 @@ export class MailAcross extends AcrossReceipts {
   private refusedHeld(m: MailRow, to: string, r: { why: string; text: string }): AcrossSent {
     const fate = this.mayHaveGone.delete(m.id) ? 'may have arrived there, from a send whose answer was lost, and is not sent again' : 'was not sent'
     this.d.records.deleteRows([{ messageId: m.id, recipient: to }])
-    const name = oneLineText(this.foreignName(to)?.name ?? to, 200)
+    const name = oneLineText(this.nameOf(to), 200)
     this.d.service.notice(m.sender, { body: `[Centralu] ${m.id} to ${name}, held while the link was down, ${fate}: ${r.text}`, facts: {}, dedupeKey: `held-refused:${m.id}` })
     return { ok: false, why: r.why, text: r.text }
   }
@@ -516,11 +516,11 @@ export class MailAcross extends AcrossReceipts {
     if (to === PERSON) return this.write(sender, PERSON, p)
     const route = this.route(to)
     if (!route) return { ok: false, why: 'bad_address', text: `Not a mail address: ${JSON.stringify(oneLineText(to, 200))}` }
-    if (route.kind === 'hub') return { ok: false, why: 'elsewhere', text: `${oneLineText(to, 200)} is not on ${this.selfName()} or a machine it links.` }
+    if (route.kind === 'hub') return { ok: false, why: 'elsewhere', text: `That session is not on ${this.selfName()} or a machine it links.` }
     if (route.kind === 'machine') {
-      if (route.machineId === machine.id) return { ok: false, why: 'bad_address', text: `${oneLineText(to, 200)} is a session on your own computer: write to it by its id, ${route.sessionId}.` }
+      if (route.machineId === machine.id) return { ok: false, why: 'bad_address', text: `That is a session on your own computer: write to it by its id, ${route.sessionId}.` }
       const m = this.peers?.machine?.(route.machineId)
-      if (!m) return { ok: false, why: 'link_down', text: `That computer is no longer linked to ${this.selfName()}, so nothing was sent.` }
+      if (!m) return { ok: false, why: 'link_down', text: `No machine linked to ${this.selfName()} now goes by ${route.machineId}, and no computer that links yours does either, so nothing was sent.` }
       const r = await this.ask(m, 'host.mail', { from: sender, name: this.names.get(sender) ?? p.name, to: route.sessionId, text: p.text, ...pick(p) } satisfies HostMailParams)
       return r.ok ? { ok: true, messageId: r.messageId, to: `${r.to} on ${m.name}`, address: to } : r
     }
@@ -541,7 +541,7 @@ export class MailAcross extends AcrossReceipts {
     if (from !== CENTRALU) this.names.set(from, p.name ? oneLineText(p.name, 200) : `a session on ${hub.name}`)
     const to = this.d.service.sessionAddress(p.to)
     if (p.task) return this.taskFrom(hub, from, to, { ...p, task: p.task })
-    return this.write(from, to, p, this.asHubNames(hub.id, to))
+    return this.write(from, to, p, sessionIdOf(this.asHubNames(hub.id, to)) ?? undefined)
   }
 
   /**
@@ -559,7 +559,7 @@ export class MailAcross extends AcrossReceipts {
     const had = this.d.records.message(p.id)
     if (had) return had.sender === from && this.d.records.recipient(p.id, to) ? { ok: true, messageId: p.id, to: this.label(to), address: to } : { ok: false, why: 'bad_value', text: `${oneLineText(p.id, 200)} is the id of another message on ${this.selfName()}.` }
     // A session gone from here has no name left here: the sender knows which it gave the work to
-    if (this.d.reach.mayWrite(from, to) === 'gone') return { ok: false, why: 'gone', text: `${this.label(to) === to ? 'That session' : this.label(to)} is gone from ${this.selfName()}: it is in the session archive there or deleted, so nothing was written.` }
+    if (this.d.reach.mayWrite(from, to) === 'gone') return { ok: false, why: 'gone', text: `${this.label(to) === this.d.reach.shownId(to) ? 'That session' : this.label(to)} is gone from ${this.selfName()}: it is in the session archive there or deleted, so nothing was written.` }
     try {
       const m = this.d.service.task(from, to, { text: p.text, origin: p.task.origin, delivered: false, ...(p.task.note ? { note: true as const } : {}), across: { id: p.id, ...(p.task.forPerson ? { forPerson: true as const } : {}) }, ...(p.task.depth ? { depth: p.task.depth } : {}) })
       return { ok: true, messageId: m.id, to: this.label(to), address: to }
@@ -583,9 +583,8 @@ export class MailAcross extends AcrossReceipts {
     }
     try {
       // Centralu's words are this host's own, from the report's facts: the other side's text is never written as Centralu's (#120). The session it is
-      // about by the id the task's sender reads it under: on a hub `<machine id>.<id>`, as its address here names it; on a machine `<hub id>.<id>`
-      const party = row ? parseAddress(row.recipient) : null
-      const childId = party?.kind !== 'session' ? task.id : party.host === this.d.hostId ? party.sessionId : `${party.host}.${party.sessionId}`
+      // about by the id the task's sender reads it under (`MailReach.shownId`)
+      const childId = row && parseAddress(row.recipient)?.kind === 'session' ? this.d.reach.shownId(row.recipient) : task.id
       const body = reportWords(childId, { outcome: report.outcome, answer: answerKept(report.answer, TASK_REPORT_ANSWER_MAX), ...(report.personSince ? { personSince: true } : {}), ...(report.after ? { after: true } : {}) })
       const written = this.d.service.report(task.id, { ...report, body })
       return { ok: true, messageId: 'message' in written ? written.message.id : task.id, to: this.label(task.sender) }
@@ -599,13 +598,13 @@ export class MailAcross extends AcrossReceipts {
    * Centralu, which `fromHub` alone passes (a hub writes its own notices on the machines it links), is written as a notice
    * of Centralu's. A notice from the other side's session or machine is that side's message, never Centralu's, and is
    * taken only for a session here that mailed that side: the "no longer watched" notice it passes on is about such mail.
-   * `seen`: `to` as the sender's side names it, which a refusal names
+   * `seen`: the id the sender's side shows for `to`, which a refusal names; without it, "that session"
    */
   private write(
     from: string,
     to: string,
     p: { text: string; needsReply?: boolean | undefined; urgent?: boolean | undefined; replyTo?: string | undefined; notice?: boolean | undefined; id?: string | undefined; subject?: string | undefined; choices?: string[] | undefined },
-    seen = to,
+    seen?: string,
   ): HubMailResult & { address?: string } {
     if (p.id !== undefined) {
       if (!FOREIGN_ID.test(p.id) || p.id.startsWith(`${this.d.hostId}.`)) return { ok: false, why: 'bad_value', text: `${oneLineText(p.id, 200)} is not an id another computer may give a message.` }
@@ -625,7 +624,7 @@ export class MailAcross extends AcrossReceipts {
         return { ok: true, messageId: m?.id ?? 'notice', to: this.d.reach.labelOf(to), address: to }
       }
       if (p.notice && !this.d.records.sentToward(to, sideOf(from))) {
-        return { ok: false, why: 'not_allowed', text: `${oneLineText(this.foreignName(from)?.name ?? from, 200)} may send a notice only to a session that mailed it, and ${oneLineText(to, 200)} did not, so nothing was written.` }
+        return { ok: false, why: 'not_allowed', text: `${oneLineText(this.nameOf(from), 200)} may send a notice only to a session that mailed it, and ${this.label(to)} did not, so nothing was written.` }
       }
       const sent = this.d.service.send(from, { to: [to], text: p.text, needsReply: p.notice ? false : (p.needsReply ?? true), ...(p.urgent && !p.notice ? { urgent: true } : {}), ...(p.replyTo && !p.notice ? { replyTo: p.replyTo } : {}), ...(p.id ? { id: p.id } : {}), ...(p.subject ? { subject: p.subject } : {}), ...(p.choices ? { choices: p.choices } : {}) })
       return { ok: true, messageId: sent.message.id, to: this.label(to), address: to }
@@ -637,7 +636,7 @@ export class MailAcross extends AcrossReceipts {
         ? // The service names the session by this host's address, which the sender never used; the person reads it by its name
           isPerson(from)
           ? `${this.label(to)} on ${this.selfName()} is in the session archive there or was deleted, so your answer was not sent.`
-          : `${oneLineText(seen, 200)} is gone from ${this.selfName()}: it is in the session archive there or deleted, so nothing was written.`
+          : `${seen ? oneLineText(seen, 200) : 'That session'} is gone from ${this.selfName()}: it is in the session archive there or deleted, so nothing was written.`
         : lost
         ? `${this.selfName()} has no record of ${oneLineText(p.replyTo ?? '', 200)}: it most likely reached you while the link failed during its sending, so ${this.selfName()} never kept its copy, and nothing was written. Send your answer again as a new message (without replying to that one), saying what it answers.`
         : why
@@ -651,7 +650,7 @@ export class MailAcross extends AcrossReceipts {
   private nameOf(address: string): string {
     const r = this.route(address)
     if (!r) return JSON.stringify(oneLineText(address, 200))
-    return r.kind === 'here' ? this.label(address) : (this.foreignName(address)?.name ?? address)
+    return r.kind === 'here' ? this.label(address) : (this.foreignName(address)?.name ?? this.d.reach.shownId(address))
   }
 
   // ── Finding ──
@@ -663,7 +662,7 @@ export class MailAcross extends AcrossReceipts {
   async find(query: string, self: string): Promise<string> {
     const { entries, away, total } = await this.directory(query, false)
     const found = ranked(entries.filter((e) => e.address !== self), query)
-    return findAnswer({ query, found, matched: found.length, total: total - (entries.some((e) => e.address === self) ? 1 : 0), away })
+    return findAnswer({ query, found, matched: found.length, total: total - (entries.some((e) => e.address === self) ? 1 : 0), away, shown: (a) => this.d.reach.shownId(a) })
   }
 
   /**

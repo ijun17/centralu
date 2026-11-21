@@ -74,12 +74,15 @@ machine it runs on.
    approval rule integers, pids) need the prefix too.
    - **Agents take the same ids** (owner, 2026-11-21). Every tool that takes a session (mail,
      read_session, agent_session) reads one set of forms (`SessionRefs`): an id here,
-     `<computer>.<id>`, a name, or `assistant`, `parent`, `person`. A text shaped as a mail address
-     that is not one is refused, never looked up as a name.
+     `<computer>.<id>`, a name, or `assistant`, `parent`, `person`, and prints a session in the
+     first two forms (`SessionRefs.shown`). A session's mail address is internal: a tool refuses
+     it, whole or cut short, with the id to write, and never looks it up as a name.
    - **A hub's label.** On a machine, a hub's own sessions go under the label the hub sends in
      `host.hubOffer` (`hubLabel`): made from its name, never one of its machines' ids or a role
-     word. An older hub sends none, and the machine makes one from the name. Two hubs with one
-     label are refused as ambiguous.
+     word. An older hub sends none, and the machine makes one from the name, never its own id
+     there; it cannot see that hub's other machines, so the label may be one of theirs, and that
+     machine's sessions are then read as the hub's own and refused (ids are random: never
+     delivered to the wrong session). Two hubs with one label are refused as ambiguous.
    - **Labels are for display only.** Mail stores and sends addresses (`session:<host>/<id>`), so a
      renamed hub breaks no stored reference, only the ids an agent was shown before.
 4. **One orchestrator, apps from every machine.** A remote host's orchestrator and coordinators are
