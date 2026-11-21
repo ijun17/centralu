@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 // @ts-expect-error — a plain .mjs script, so pre-pr and the board can run it with Node alone
-import { classify, globToRegExp, parseArgs, parseRules, RULES_FILE, subjectsOf, tierLine, tierOfChange, tierOfLabels } from '../scripts/tier.mjs'
+import { classify, globNames, globToRegExp, parseArgs, parseRules, RULES_FILE, subjectsOf, tierLine, tierOfChange, tierOfLabels } from '../scripts/tier.mjs'
 
 /**
  * Risk tiers by path (#1259 step 2): the repository's own .centralu/tiers.json on representative
@@ -21,16 +21,6 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const RULES: Rules = parseRules(readFileSync(join(ROOT, RULES_FILE), 'utf8'))
 const without = (id: string): Rules => ({ ...RULES, rules: RULES.rules.filter((r) => r.id !== id) })
 const tierOf = (paths: string[], rules = RULES): Result => classify(paths, rules)
-
-/** A glob with each {a,b} list of names spelled out, one glob per name. A list in a name with a wildcard (`*.{md,txt}`) is a set of kinds, not of files, and stays */
-function alternatives(glob: string): string[] {
-  for (const m of glob.matchAll(/\{([^}]*)\}/g)) {
-    const end = glob.indexOf('/', m.index)
-    if (/[*?]/.test(glob.slice(glob.lastIndexOf('/', m.index) + 1, end < 0 ? undefined : end))) continue
-    return m[1]!.split(',').flatMap((name) => alternatives(glob.slice(0, m.index) + name + glob.slice(m.index + m[0].length)))
-  }
-  return [glob]
-}
 
 /** `rule`: the rule the case stands on; null when it is light because no rule matches */
 const CASES: { name: string; paths: string[]; tier: string; rule: string | null; because?: string[] }[] = [
@@ -208,7 +198,7 @@ describe('the repository\'s tier rules', () => {
     const raw = JSON.parse(readFileSync(join(ROOT, RULES_FILE), 'utf8')) as { rules: { id: string; paths: string[]; except?: string[] }[] }
     const dead = raw.rules.flatMap((r) =>
       [...r.paths, ...(r.except ?? [])]
-        .flatMap(alternatives)
+        .flatMap((g): string[] => globNames(g))
         .filter((g) => !files.some((f) => globToRegExp(g).test(f)))
         .map((g) => `${r.id}: ${g}`),
     )
@@ -230,6 +220,13 @@ describe('the rules file and its globs', () => {
     expect(re('**/{fixtures,tests}/**').test('x/tests/y.rs')).toBe(true)
     expect(re('tauri*.conf.json').test('tauriXconf.json')).toBe(false)
     expect(() => globToRegExp('a**b')).toThrow('** stands only for whole folders')
+  })
+
+  it('spells out each {a,b} list of names as globs of its own, and keeps a list of kinds after a wildcard', () => {
+    expect(globNames('a/{b,c}/{d,e}.ts')).toEqual(['a/b/d.ts', 'a/b/e.ts', 'a/c/d.ts', 'a/c/e.ts'])
+    expect(globNames('docs/**/*.{md,txt}')).toEqual(['docs/**/*.{md,txt}'])
+    expect(globNames('scripts/{a,b}-*.{mts,mjs}')).toEqual(['scripts/{a,b}-*.{mts,mjs}'])
+    expect(globNames('a/{b,c}/*.{md,txt}')).toEqual(['a/b/*.{md,txt}', 'a/c/*.{md,txt}'])
   })
 
   it('takes a rule\'s exceptions out of it', () => {
