@@ -51,8 +51,8 @@ const MAX_SIZED_ENTRIES = 1_000_000
 /**
  * The bytes in regular files under `path` (or `path` itself, a file), null when there is nothing at `path`, past
  * `deadline` or past `maxEntries` entries. The files of one folder are measured SIZE_BATCH at a time, with the
- * deadline checked between batches: one folder of a million files used to queue a million lstat calls at once (#849
- * review). A link counts as nothing and is not asked about, `path` itself included: `lstat` follows one whose target
+ * deadline checked between batches, so one folder of a million files never queues a million lstat calls at once. A
+ * link counts as nothing and is not asked about, `path` itself included: `lstat` follows one whose target
  * libuv cannot read, and following it could reach anywhere. An entry that cannot be read, or is gone by the time it
  * is, counts as nothing too.
  *

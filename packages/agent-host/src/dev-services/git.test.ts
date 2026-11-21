@@ -109,7 +109,7 @@ describe('gitStatusFiles — porcelain v2', () => {
     expect(files).toEqual([{ path: 'new name.txt', staged: true, status: 'R' }])
     // The original name (old.txt) must not leak out as a separate entry (under -z it arrives as the next NUL token)
     expect(files.some((f) => f.path.includes('old.txt'))).toBe(false)
-    // Staging only succeeds if the parsed path is a real file — this is the exact spot that used to fail silently
+    // Staging only succeeds if the parsed path is a real file: a wrong parse fails silently here
     await expect(gitStage(d, files.map((f) => f.path))).resolves.toBeUndefined()
   })
 
@@ -148,7 +148,7 @@ describe('the change summary on a large or slow tree (#850 review of item 10)', 
   it.skipIf(!posix)('counts an endless list of untracked files up to its cap, still a repository', async () => {
     const { d, git } = repo()
     git('commit', '-q', '--allow-empty', '-m', 'init')
-    // More than the 32 MB a buffered read holds: it used to overflow and read as "not a repository"
+    // More than the 32 MB a buffered read holds, which would overflow and read as "not a repository"
     const restore = fakeStatus(
       `printf '# branch.oid 0\\0# branch.head main\\0'; i=0; while :; do printf '? new/%s-%0200d\\0' $i 0; i=$((i+1)); done`,
     )

@@ -6,20 +6,16 @@ import { PtySlot, isPtyModule, type PtyStreamSink } from './pty-slot.js'
 /**
  * The runner for frequently used commands (#60).
  *
- * **Separate from a terminal tab.** This used to type a saved command into the first terminal's
- * PTY, which meant a one-shot build and a long-running dev server both ended up parked in a
- * terminal tab. Here, every command launches its own process and gets its own log for output —
- * there is no need to tell one-shot apart from long-running: if it does not end, output keeps
- * streaming, and once it ends, a log with an exit code is what is left.
+ * **Separate from a terminal tab:** every command gets its own process and log, so a one-shot build and a dev server
+ * need no telling apart: output streams until it ends, then a log with an exit code is left.
  *
  * The owner's decisions (2026-08-26):
  *   - the log only lasts while the host is alive (one, the most recent run per command)
  *   - running the same command again kills the old one and starts fresh
  *   - different commands are allowed to run at the same time (one process per command)
  *
- * Output rides the **same frame lane** as a terminal (pushTerminal — runId takes terminalId's
- * place). The reason this does not also go through the event log (the seq ring buffer) is the
- * same as for a terminal: the volume of output is a different order of magnitude.
+ * Output rides the terminal's frame lane (pushTerminal, runId in terminalId's place), not the event log's seq ring:
+ * its volume is a different order of magnitude.
  */
 
 const require = createRequire(import.meta.url)

@@ -153,23 +153,14 @@ describe('baseName — a path cannot pass itself off as a name', () => {
 
 describe('listDir — a project that is not a repository', () => {
   /**
-   * A project does not have to be a git repository — the first-run screen says so in as many
-   * words.
+   * A project need not be a git repository. Then `git check-ignore` dies at once and the list we write lands on a
+   * closed pipe (EPIPE); if nobody listens for that EPIPE, **the whole host process dies** with every session in it.
    *
-   * When it is not one, `git check-ignore` reads nothing and dies immediately, and the list we
-   * were writing lands on a closed pipe (EPIPE). The answer itself has no problem (nothing is
-   * ignored). The problem is that if nobody is listening for that EPIPE, **the whole host process
-   * dies** — taking every session inside it down with it.
+   * It only reproduces reliably once the list exceeds the pipe buffer (measured at 65,536 bytes); below that the write
+   * finishes before git is gone. Two Linux CI runners hit it at a much smaller size, on timing alone.
    *
-   * This only reproduces reliably once the list exceeds the pipe buffer (measured at 65,536
-   * bytes). Below that, our write finishes before git is gone and just goes through, which is how
-   * this bug survived for weeks. Two Linux runners in CI hit it at a much smaller size, on timing
-   * alone.
-   *
-   * The list is handed to the same call `listDir` makes rather than made of files (#368): 400
-   * files with 200-character names were enough, but creating them took seconds on a loaded
-   * Windows runner and the test passed its 15s limit there. A list of a megabyte, with no files,
-   * overflows any pipe buffer.
+   * The list is handed to the same call `listDir` makes rather than made of files (#368): creating enough files took
+   * seconds on a loaded Windows runner, past the 15s limit. A megabyte list overflows any pipe buffer.
    */
   it('the host survives even if git dies before reading a list longer than the pipe holds', async () => {
     const input = Array.from({ length: 5_000 }, (_, i) => `${String(i).padStart(4, '0')}-${'n'.repeat(200)}.txt`).join('\0')
@@ -232,7 +223,7 @@ describe('copyTree — the ordinary copy after a clone stops partway (#167)', ()
   })
 
   // A whole link into the project leads to the same place in the worktree, on Windows (copyTreeWindows) and on POSIX
-  // (the `Os`'s copy with `links`), by one rule; kept as written it led into the project (#1650 review)
+  // (the `Os`'s copy with `links`), by one rule; kept as written it would lead into the project
   it('a junction or whole link into the project leads into the copy', async () => {
     const project = join(root, 'project')
     mkdirSync(join(project, 'packages', 'a'), { recursive: true })

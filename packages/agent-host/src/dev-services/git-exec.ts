@@ -12,38 +12,11 @@ import { rpcError } from '../rpc-error.js'
  * The one place the host starts git (#407). Every git call goes through `runGit` (or `streamGit`, for an answer read
  * as it arrives); a test fails if a source file under `src/` starts git any other way (`git-exec.test.ts`).
  *
- * **Before a project is trusted, git may not run anything the repository chose.** A folder
- * copied from somewhere (a zip, a shared drive) carries its own `.git/config` and `.git/hooks`,
- * and a plain read runs several of them: `status` runs `core.fsmonitor`, the clean filter of every
- * file whose stat data changed, and the `post-index-change` hook when it writes the refreshed
- * index; `check-ignore` and `ls-files` run `core.fsmonitor`; `diff` and `show` run textconv
- * drivers and smudge and clean filters; `log` and `show` run `gpg.program` on a signed commit
- * when `log.showSignature` is set; `worktree add` runs `post-checkout`, `reference-transaction`
- * and smudge filters. Each was reproduced against git 2.54 on a copied repository.
- *
- * So unless the caller says the repository's programs may run (`allowRepoPrograms`, which a
- * read passes only for a trusted project), a call gets:
- *   - `--no-optional-locks`: the index is not rewritten, so `post-index-change` has no reason to
- *     fire, and a read leaves the folder as it found it;
- *   - `core.hooksPath` pointing at the null device: no hook can be found under it;
- *   - `core.fsmonitor=` (empty, which every git reads as off; `false` is only a boolean from git
- *     2.36 on);
- *   - `log.showSignature=false`: no signature is verified, so `gpg.program` is never started;
- *   - every filter driver configured anywhere git would look (`filter.<name>.*`, read with the
- *     same flags, so `include.path` and `includeIf` are followed exactly as the real call will)
- *     overridden to no command and not required;
- *   - and, after the subcommand, `--no-textconv --no-ext-diff` for `diff`, `show` and `log`, and
- *     `--ignore-submodules=all` for `status` and `diff`: a submodule has its own config, whose
- *     filter drivers were not listed here.
- *
- * Command-line configuration outranks every file, and git hands it to the git processes it
- * starts itself (`GIT_CONFIG_PARAMETERS`), so an included file or a nested call cannot undo it.
- *
- * What none of this touches: `safe.directory` (git honours it only from the user's own and the
- * system configuration, and nothing here sets it), `core.pager` (never started: stdout is a pipe),
- * `core.editor` (no read opens one), and the network settings (`core.sshCommand`,
- * `credential.helper`), which only a push reads. Writes the person asks for (stage, commit,
- * switch, push) run as plain git does — docs/security-boundaries/project-trust.md says what that leaves open.
+ * **Before a project is trusted, git may not run anything the repository chose** (unless `allowRepoPrograms`, which
+ * a read passes only for a trusted project): which reads run which programs, and the flags `LOCKED`,
+ * `LOCKED_SUBCOMMAND` and `filterOverrides` add against each, are in
+ * docs/security-boundaries/project-trust.md "Git before trust (#407)".
+ * Writes the person asks for (stage, commit, switch, push) run as plain git does.
  */
 
 /**
@@ -79,20 +52,12 @@ export type RunGitOptions = {
 }
 
 /**
- * **One listing of the filter drivers per folder for one operation** (#368).
+ * **One listing of the filter drivers per folder for one operation** (#368): without it every read before trust is
+ * two git processes, and on windows-2022 each costs 100 ms or more.
  *
- * Without it, every read before trust is two git processes: the listing, then the read. Saving a worktree's work
- * before its deletion (#608) makes about fifteen reads in one folder, so thirty processes, and on windows-2022 each
- * one costs 100 ms or more: a test that deleted two worktrees ran past 15 s there. An operation that makes several
- * calls in a row creates one of these and passes it to each call; the first call in a folder lists the drivers, and
- * the rest reuse what it found.
- *
- * What this gives up: the listing and the read were already two processes, so a configuration written between them
- * was never kept out, and sharing the listing widens that window from one call to the calls that share it. A planted
- * repository's configuration is on disk before the operation starts and is turned off as before. The project's other
- * sessions keep running meanwhile, though, and can write a driver into the configuration a worktree shares. So only
- * calls that run no filter share a listing (refs, history, trees, the index); a call that reads the working tree
- * through the filters (`add`, a working-tree `diff`, a checkout) takes a listing made right before it. A listing that
+ * Sharing widens the window between listing and read to the calls that share it, so only calls that run no filter
+ * share one; a call that reads the working tree through the filters (`add`, a working-tree `diff`, a checkout) takes a
+ * listing made right before it (docs/security-boundaries/project-trust.md "Git before trust (#407)"). A listing that
  * fails is not kept: the next call lists again.
  */
 export type GitFilterListings = Map<string, Promise<string[]>>
@@ -116,18 +81,15 @@ function listedFilterOverrides(cwd: string, listings: GitFilterListings): Promis
 const DEFAULTS = { timeout: 10_000, maxBuffer: 32 * 1024 * 1024 }
 
 /**
- * Every call is given `core.quotePath=false` (#176). With the default (on), git wraps any path
- * containing a byte at or above 0x80 in quotes with octal escapes, like `"\355\225\234…"` — a
- * Korean file name came out that way in diff headers and `--name-only`, breaking the label on
- * screen and losing the path a click needed to follow it to the file. Turning it off leaves the
- * original name intact (only quotes, backslashes and control characters are still escaped).
+ * `core.quotePath=false` (#176): by default git quotes any path with a byte at or above 0x80 as octal escapes
+ * (`"\355\225\234…"`), breaking a Korean name on screen and the path a click follows. Only quotes, backslashes and
+ * control characters are still escaped.
  */
 const BASE = ['-c', 'core.quotePath=false']
 
 /**
- * `os.devNull` is `/dev/null` off Windows and `\\.\nul` on it. A hook is looked up as
- * `<hooksPath>/<name>`, which cannot exist under either. An empty folder would do the same while
- * it lasts, but a temporary one can be cleaned away and recreated by someone else.
+ * A hook is looked up as `<hooksPath>/<name>`, which cannot exist under the null device. Not an empty temporary
+ * folder: it can be cleaned away and recreated by someone else.
  */
 const LOCKED = [
   '--no-optional-locks',
@@ -209,12 +171,11 @@ const running = (child: OsChild) => child.exitCode === null && child.signalCode 
 /**
  * What every git call is run with (`os.processes.run`): git as the root of a tree this host can end (`start`'s
  * `contained`: on macOS and Linux in a process group of its own, on Windows hidden), the environment above, and a
- * stop that ends the whole tree. Off Windows git would otherwise share the host's group, which the tree kill never
- * fires at, so a hook's child outlived the call (#982).
+ * stop that ends the whole tree. In the host's group, which the tree kill never fires at, a hook's child would
+ * outlive the call (#982).
  *
- * Its own group also takes git out of what ends the host's group (the keeper's stop, a Ctrl+C under `pnpm host` or
- * `centralu serve`). **No git outlives the host that started it**, so every one is kept in `live` until it exits, and
- * the shutdown ends what is left (`stopGitChildren`, lifecycle/shutdown.ts).
+ * Its own group also takes git out of what ends the host's group (the keeper's stop, a Ctrl+C), so every git is kept
+ * in `live` until it exits and the shutdown ends what is left (`stopGitChildren`): **no git outlives its host**.
  */
 function runOptions(cwd: string, env: Record<string, string> | undefined, timeoutMs: number, signal?: AbortSignal): RunOptions {
   return {
@@ -235,22 +196,19 @@ function runOptions(cwd: string, env: Record<string, string> | undefined, timeou
 export const GIT_STOP_GRACE_MS = RUN_STOP_GRACE_MS
 
 /**
- * Ends every git still running, as a timeout would (`runChild`'s stop: SIGTERM so git takes its `index.lock` away,
- * SIGKILL after the grace, the whole tree; Windows has no SIGTERM: the ordered stop of `os/kill-tree.ts` at once), and settles once each has
- * exited and what it left has been swept, or the grace has passed with a margin. For the host's shutdown, in both of
- * its modes: the keeper does not hold git, so a git left running would outlive the host with the repository's locks.
+ * Ends every git still running, as a timeout would (SIGTERM so git takes its `index.lock` away, SIGKILL after the
+ * grace, the whole tree; on Windows the ordered stop of `os/kill-tree.ts` at once), and settles once each has exited
+ * and been swept, or the grace has passed with a margin. The keeper does not hold git, so a git left running would
+ * outlive the host with the repository's locks.
  *
- * On Windows git itself is ended first, at once, and then what it started, parents first (#2141, #2142: the shared
- * stop's order, `processes.stop`). A hook's program ended before git reports success to its shell (MSYS's `sh` sees
- * status 0 from a program taskkill ended): the hook then exits 0, and a git still running made the commit the stop was
- * meant to prevent. What git started is ended from the process table read before git was, and what it started after
- * that by the sweep after its exit, which finds it by parent links. Both are waited for: the host is leaving, and the processes Windows started for git are not ended with it (measured: a hook's
- * `sh` stayed after its host had exited).
+ * On Windows git is ended first, then what it started, parents first (#2141, #2142): MSYS's `sh` sees status 0 from
+ * a hook program taskkill ended, so a git still running would make the commit the stop was meant to prevent. Both
+ * are waited for: what Windows started for git is not ended with the host (measured: a hook's `sh` stayed).
  */
 export async function stopGitChildren(graceMs = GIT_STOP_GRACE_MS): Promise<void> {
   const children = [...live].filter(running)
   if (children.length === 0) return
-  // All at once: on Windows one reading of the process table and one sweep for every git, not two per git (#2142 re-check)
+  // All at once: on Windows one reading of the process table and one sweep for every git, not two per git (#2142)
   await raceTimeout(realOs().processes.stopAll(children, graceMs).catch(() => {}), graceMs + 1000, undefined)
 }
 
@@ -305,23 +263,17 @@ export type StreamGitEnd = 'done' | 'stopped'
 
 
 /**
- * Runs git and hands its stdout over as it arrives, holding none of it (#850 review of item 10). `onEntry` receives
- * each NUL-terminated entry as bytes, split on 0x00 before any decoding, so a character cut between two chunks of
- * the pipe stays whole; it returns true to stop: git is ended and the read settles as `'stopped'`. For an answer of
- * unknown size read once in `-z` form, such as a status count, where a buffered read (`runGit`) would overflow its
- * `maxBuffer` on a large tree. A last entry without its NUL is handed over at the end.
+ * Runs git and hands its stdout over as it arrives, holding none of it: for an answer of unknown size in `-z` form (a
+ * status count) that would overflow `runGit`'s `maxBuffer`. `onEntry` gets each NUL-terminated entry as bytes, split
+ * before decoding so a character cut between chunks stays whole; true stops git (`'stopped'`). A last entry without
+ * its NUL is handed over at the end.
  *
- * - **In English, without optional locks.** The environment of every call (`gitEnv`), so git's own messages, which
- *   the caller reads to tell "not a repository" from a failure, are not translated; and `GIT_OPTIONAL_LOCKS=0`, the environment form of `--no-optional-locks`, so a read after every turn does not hold
- *   `index.lock` against the agent's own `git add`. (The flag itself would stand before the subcommand, where
- *   `gitArgv` reads the subcommand.)
- * - **It ends when git ends.** A stop or a timeout ends git's whole tree (a hook or filter git started
- *   holds the same stdout, and on Windows `kill()` reaches git.exe alone). After git exits, the read waits at most
- *   `CLOSE_AFTER_EXIT_MS` for its output to close, then lets go of the pipes: a process git started can keep them
- *   open for as long as it runs.
+ * - `GIT_OPTIONAL_LOCKS=0`, the environment form of `--no-optional-locks` (the flag would stand where `gitArgv` reads
+ *   the subcommand), so a read after every turn does not hold `index.lock` against the agent's own `git add`.
+ * - **It ends when git ends**, as `runGit` does: a hook or filter git started holds the same stdout, and on Windows `kill()` reaches
+ *   git.exe alone, so the whole tree is ended.
  *
- * Rejects with git's stderr (bounded, decoded once at the end) and exit code when git fails, and with
- * `{ timedOut: true }` when it does not answer within `timeout`.
+ * Rejects with git's stderr (bounded) and exit code, or `{ timedOut: true }` past `timeout`.
  */
 export async function streamGit(
   cwd: string,

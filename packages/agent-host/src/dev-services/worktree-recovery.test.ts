@@ -91,10 +91,9 @@ describe('worktree recovery follow-ups (#608)', () => {
   }
 
   /*
-   * Every read before trust used to list the folder's filter drivers in a git process of its own first, so a save was
-   * about thirty git processes for one repository. On windows-2022 at 100 ms or more each, a test that deleted two
-   * worktrees ran past 15 s (#368). The save's reads share one listing per repository, and the `add -A` that runs
-   * clean filters takes its own right before it; every driver is still turned off.
+   * The save's reads share one listing of the filter drivers per repository, and the `add -A` that runs clean filters
+   * takes its own right before it; every driver is still turned off. A listing per read is about thirty git processes
+   * per save: on windows-2022 at 100 ms or more each, a test that deleted two worktrees ran past 15 s (#368).
    */
   const plantFilter = (name: string, ran: string) => {
     git(repo, ['config', `filter.${name}.clean`, `sh -c 'echo clean >> "${gitPath(ran)}"; cat'`])

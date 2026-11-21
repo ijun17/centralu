@@ -4,15 +4,15 @@ import { asObj, isObj } from '../../json-value.js'
 import { parseJson, readJsonList } from './json.js'
 import { z } from 'zod'
 
-/** The projects table: what a project remembers (its commands, worktree setup, tool defaults, trust) and where it sits in the sidebar */
-/** Where a project's instructions for started agents are kept (#1161 item 2) */
+/** Where a project's instructions for started agents are kept (#1161) */
 export const agentInstructionsKey = (projectId: string): string => `agent_instructions:${projectId}`
 
+/** The projects table: what a project remembers (its commands, worktree setup, tool defaults, trust) and where it sits in the sidebar */
 export class ProjectRecords {
   constructor(private readonly db: Database.Database) {}
 
   /**
-   * `trusted` is the trust a NEW row starts with (#655); absent means untrusted, as before. It is an insert-only
+   * `trusted` is the trust a NEW row starts with (#655); absent means untrusted. It is an insert-only
    * value: registering a path that already has a row renames it and leaves its trust alone, so neither an earlier
    * "no" nor a later "yes" is overwritten by a second registration.
    */
@@ -26,12 +26,8 @@ export class ProjectRecords {
   }
 
   /**
-   * `commands` is deliberately not in here (issue #44) — `projectCommands` answers that one.
-   *
-   * The column holds JSON, so it needs decoding, and every caller of this method wants a
-   * path or a name. Leaving it out of the row type means the omission is stated rather than
-   * silently cast away, which is how `Omit<ProjectInfo, 'git'>` would have become a lie the
-   * moment the field was added.
+   * `commands` is left out (issue #44), `projectCommands` reads it: the column holds JSON and every caller here wants a
+   * path or a name. The row type states the omission, so a field added to `ProjectInfo` is not silently cast away.
    */
   listProjects(): Omit<ProjectInfo, 'git' | 'commands' | 'defaultModels'>[] {
     const rows = this.db
@@ -44,11 +40,8 @@ export class ProjectRecords {
   }
 
   /**
-   * The shell commands saved on a project (issue #44).
-   *
-   * Unreadable JSON reads as "none". A row that somehow got corrupted must not take the
-   * project list — and with it the sidebar — down with it; the worst it can cost is a menu
-   * you have to fill in again.
+   * The shell commands saved on a project (issue #44). Unreadable JSON reads as "none": a corrupt row must not take the
+   * project list, and with it the sidebar, down; the worst it costs is a menu filled in again.
    */
   projectCommands(projectId: string): SavedCommand[] {
     const row = this.db.prepare<unknown[], { commands: string }>(`SELECT commands FROM projects WHERE id = ?`).get(projectId)
@@ -90,7 +83,7 @@ export class ProjectRecords {
   }
 
   /**
-   * The person's instructions for agents started in this project (#1161 item 2), '' when none. Kept as an app setting
+   * The person's instructions for agents started in this project (#1161), '' when none. Kept as an app setting
    * of the project (`agent_instructions:<projectId>`), not a column: no store step, and an older build serving the same
    * store during a swap leaves it alone. Goes with the project (`TrashStore.deleteProject`).
    */
@@ -107,12 +100,8 @@ export class ProjectRecords {
   }
 
   /**
-   * This project's worktree manager slot and trunk (#76).
-   *
-   * **This does not check whether the session it points at actually still exists** — that is
-   * the job of the side that knows sessions (SessionManager); the store just hands back what
-   * it was told to write down. Putting the "is this link broken" judgment (session deleted or
-   * archived) in two places would let the two places disagree.
+   * This project's worktree manager slot and trunk (#76). **Whether the session it names still exists is not checked
+   * here**: SessionManager owns that judgment, and a second copy of it could disagree.
    */
   worktreeManager(projectId: string): { sessionId: string; baseBranch: string } | null {
     const row = this.db.prepare<unknown[], { worktree_manager: string | null }>(`SELECT worktree_manager FROM projects WHERE id = ?`).get(projectId)
@@ -125,8 +114,8 @@ export class ProjectRecords {
   }
 
   /**
-   * The project's worktree trunk (#76), from the same row as the former manager slot (#561 part 3): read whatever the
-   * slot's session, since the trunk is the project's and no longer a manager's. Empty or unreadable: none.
+   * The project's worktree trunk (#76), kept in the manager slot's row (#561): read whatever the slot's session, since
+   * the trunk is the project's, not a manager's. Empty or unreadable: none.
    */
   worktreeTrunk(projectId: string): string | null {
     const row = this.db.prepare<unknown[], { worktree_manager: string | null }>(`SELECT worktree_manager FROM projects WHERE id = ?`).get(projectId)
@@ -149,23 +138,16 @@ export class ProjectRecords {
   }
 
   /**
-   * The tool a new session in this project starts on.
-   *
-   * Written when a session is created with an explicit tool, not from a settings screen:
-   * the column was set to 'claude' at project creation and never updated again, so a Codex
-   * user re-picked the pill on every single new session, forever.
+   * The tool a new session in this project starts on. Written when a session is created with an explicit tool, so a
+   * Codex user does not re-pick the pill on every new session over the 'claude' set at project creation.
    */
   setProjectDefaultTool(projectId: string, tool: string): void {
     this.db.prepare(`UPDATE projects SET default_tool = ? WHERE id = ?`).run(tool, projectId)
   }
 
   /**
-   * The last model and effort chosen becomes the default (#69 finding 5) — but **per tool**
-   * (#107).
-   *
-   * Read whole and written whole, the same rule as projectCommands. Unparsable JSON reads as
-   * "none": the cost of losing one remembered value is a click, while throwing here would take
-   * the project list — and with it the sidebar — down with it.
+   * The last model and effort chosen becomes the default (#69), **per tool** (#107). Unparsable JSON reads as "none",
+   * for the reason `projectCommands` gives: losing one remembered value costs a click.
    */
   projectToolDefaults(projectId: string): Record<string, ToolDefaults> {
     const row = this.db.prepare<unknown[], { default_models: string | null }>(`SELECT default_models FROM projects WHERE id = ?`).get(projectId)
@@ -200,11 +182,8 @@ export class ProjectRecords {
   }
 
   /**
-   * The projects the app runtime sees — root path and trust (M4 A-2).
-   *
-   * Worktrees are not here. A worktree is a copy of a project, not a project, and if an app
-   * instance stood up per copy, the same app would end up running multiple times over a single
-   * data folder — the app only reads from a registered root (plan A-2).
+   * The projects the app runtime sees — root path and trust (M4 A-2). Not worktrees: an app instance per copy would run
+   * the same app several times over one data folder; an app reads only from a registered root.
    */
   projectRoots(): { id: string; path: string; trusted: boolean }[] {
     const rows = this.db
@@ -223,12 +202,8 @@ export class ProjectRecords {
   }
 
   /**
-   * Saves the sidebar order.
-   *
-   * **The whole order is taken and renumbered from scratch.** Touching only the neighboring
-   * items in a "move this after that" way would eventually need a reshuffle once the values
-   * get packed too tight, and would drift if the list changed in between. The list is short
-   * (it is a sidebar a person looks at), so rewriting all of it is simple and safe.
+   * Saves the sidebar order, **renumbering the whole list**: moving only neighbors needs a reshuffle once values pack
+   * too tight and drifts if the list changed in between, and a sidebar is short.
    */
   setProjectOrder(orderedIds: readonly string[]): void {
     const stmt = this.db.prepare(`UPDATE projects SET sidebar_order = ? WHERE id = ?`)

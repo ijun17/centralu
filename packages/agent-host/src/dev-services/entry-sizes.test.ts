@@ -17,8 +17,8 @@ afterEach(() => {
 
 
 /*
- * #849 review: one folder of a million files queued a million lstat calls at once. The walk measures in batches,
- * checks its deadline between them, and gives up past a number of entries, leaving that entry without a size.
+ * One folder of a million files must not queue a million lstat calls at once: the walk measures in batches, checks
+ * its deadline between them, and gives up past a number of entries, leaving that entry without a size.
  */
 describe('the file system walk that sizes an ignored entry', () => {
   it('adds up the bytes, and has no size past its entry cap or its deadline', async () => {

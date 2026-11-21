@@ -65,9 +65,9 @@ describe('mentions', () => {
 })
 
 /*
- * #849 review: which link targets the Windows walk follows by hand. Only a target on a drive letter, or one relative to
+ * Which link targets the Windows walk follows by hand (#849). Only a target on a drive letter, or one relative to
  * the link's folder, says where it leads in a way the walk can check; anything else may be a path into the NT
- * namespace (a share through `\Device\Mup`, a device), which `win32.resolve` would have read as a harmless folder on C:.
+ * namespace (a share through `\Device\Mup`, a device), which `win32.resolve` reads as a harmless folder on C:.
  * A symlink with such a target needs a privilege Developer Mode does not give, so this is checked on the strings.
  */
 describe('localLinkTarget', () => {
@@ -237,8 +237,8 @@ describe('readMessageImage', () => {
   })
 
   /*
-   * Fail closed (#849 review): a link the walk cannot read, and a chain too long to finish, used to end the walk with
-   * "nothing found", and realpath then followed what the walk had not judged. A junction to a volume path is a link
+   * Fail closed (#849): a link the walk cannot read, and a chain too long to finish, are refused, not "nothing found",
+   * or realpath would follow what the walk had not judged. A junction to a volume path is a link
    * readlink cannot read (lstat follows it and calls it a folder); the image behind it is real and local, which is
    * why only the refusal shows that it was not followed unjudged.
    */

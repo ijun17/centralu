@@ -14,19 +14,9 @@ export class StepsV28ToV40 extends MigrationRange {
         breaksOlderReaders: true,
         run: () => {
           /*
-           * Retiring the archive (2026-09-02 dogfooding).
-           *
-           * `d` in the inbox was the only entry point, and it read "Dismiss" on screen, but
-           * there was **no way back at all** — neither the palette nor the sidebar did more
-           * than filter on `!archived`. So a key pressed to mean "I am not answering this"
-           * erased a session from view forever. FR-20 had designed a way out too (a per-project
-           * Archive list, the palette, resuming in place), but only half of that had shipped.
-           *
-           * Every session that was hidden **becomes visible again** — once the column is gone
-           * there is nothing left to filter on. That is the point of this migration: no
-           * session in the app is invisible.
-           *
-           * Why the index is dropped first: SQLite cannot DROP a column an index refers to.
+           * Retires the archive: the inbox's `d` hid a session with no way back. Every hidden session becomes
+           * visible again, since nothing is left to filter on. The index goes first: SQLite cannot DROP a column
+           * an index refers to.
            */
           const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all()
           if (!cols.some((c) => c.name === 'archived')) return
@@ -41,18 +31,10 @@ export class StepsV28ToV40 extends MigrationRange {
         breaksOlderReaders: false,
         run: () => {
           /*
-           * Restoring the timestamps the v21 merge trampled (real incident, 2026-09-03).
-           *
-           * The merge step stamped `Date.now()` onto an assistant row's ts instead of keeping
-           * the original — even on rows that had nothing to merge. When beta.4 rewound
-           * user_version and that step replayed, the timestamps of an entire night's worth of
-           * conversation were overwritten with the time the step happened to run (13:44). The
-           * original timestamps are gone, so they cannot be recovered — instead the fix
-           * **narrows them using what the neighbors still know**: seq is trustworthy, so if a
-           * row's ts is greater than the ts of a later row (larger seq), that row's timestamp
-           * is known to be false. Walking back to front and clamping to the running minimum
-           * gives every trampled row an upper bound — "no later than the next genuine row's
-           * time" — not exact, but close enough to not disturb the ordering.
+           * Repairs the assistant-row timestamps the v21 merge step overwrote with `Date.now()` when beta.4 rewound
+           * user_version and replayed it. The originals are lost, but seq is trustworthy: a row whose ts exceeds a
+           * later row's is false. Walking back to front and clamping to the running minimum gives each such row an
+           * upper bound (the next genuine row's time), not exact but order-preserving.
            */
           const rows = this.db
             .prepare<unknown[], { rowid: number; session_id: string; ts: number }>(`SELECT rowid, session_id, ts FROM messages ORDER BY session_id, seq DESC`)
@@ -103,10 +85,8 @@ export class StepsV28ToV40 extends MigrationRange {
         to: 31,
         breaksOlderReaders: false,
         /**
-         * The app that owns a session (#81, user request 2026-09-09). A running app shows its
-         * own sessions, and the sidebar carries only projects — this one column is what that
-         * decision is made from. Old rows are null, which reads as "no owner" and falls back
-         * to the sidebar (so no session becomes unreachable).
+         * The app that owns a session (#81): a running app shows its own sessions, the sidebar only projects. Old
+         * rows are null, read as "no owner", and fall back to the sidebar, so no session becomes unreachable.
          */
         run: () => {
           const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all()
@@ -120,25 +100,12 @@ export class StepsV28ToV40 extends MigrationRange {
         // Drops `projects.default_model` and `default_effort`: the v31 build selects and updates them
         breaksOlderReaders: true,
         /**
-         * The default model and effort get a tool of their own (#107).
+         * The default model and effort get a tool of their own (#107): a model name is one tool's vocabulary, and a
+         * project with `default_tool=codex` and `default_model=opus[1m]` killed every codex session on its first turn.
          *
-         * `default_model` and `default_effort` were one value per project, sitting next to
-         * `default_tool` — but a model name is a tool's own vocabulary, so a model default with
-         * no tool attached cannot say which tool it is for. Real incident: a project with
-         * `default_tool=codex` was holding `default_model=opus[1m]`, and every codex session
-         * born from it died on its first turn with `400 invalid_request_error`. Nothing showed
-         * on screen.
-         *
-         * **The old value is dropped, not migrated.** Attaching it to the current
-         * `default_tool` looks like the most plausible guess, but that exact guess is what
-         * caused this bug — the scalar never recorded which tool it was chosen for. The cost of
-         * a lost default is one click in the next session; the cost of a wrong one is a dead
-         * session.
-         *
-         * Why the columns are dropped outright: this is not conversation history, only **the
-         * last choice made**, so there is nothing worth keeping, and keeping it would leave two
-         * more columns for the next person to wonder "does anything still read this" (following
-         * v28's precedent).
+         * The old value is dropped, not attached to the current `default_tool`: the scalar never recorded which tool
+         * it was chosen for, and that guess is the bug. A lost default costs one click; a wrong one, a dead session.
+         * The columns hold only the last choice made, so nothing worth keeping goes with them.
          */
         run: () => {
           const cols = () => this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(projects)`).all()
@@ -156,24 +123,10 @@ export class StepsV28ToV40 extends MigrationRange {
         to: 33,
         breaksOlderReaders: false,
         /**
-         * Project trust (M4 A-2, plan decision 3) — "is it fine to run this repository's code on
-         * this machine".
-         *
-         * Project apps are committed to the repository and shared with the team. If simply
-         * opening a repository someone handed you lets the `server.command` inside it run with
-         * your own permissions, opening the repository has become the same act as running
-         * someone else's code. So an app only launches in a trusted project (discovery and
-         * listing do not care about trust).
-         *
-         * **An existing project's default is "not trusted."** Every project registered so far
-         * was registered before apps existed — that registration never answered this question.
-         * Filling in the missing answer with "yes" would be a silent grant of permission. The
-         * cost of "no" is one click the first time the app is launched.
-         *
-         * One column settles both apps and #92 (respecting project settings) at once — decision
-         * 3 tied the two together as a single question.
-         *
-         * (This call for existing rows is reversed by v35. New projects still default to "no.")
+         * Project trust (M4 A-2, plan decision 3): "is it fine to run this repository's code on this machine". Opening
+         * a repository someone handed you must not run its apps' `server.command` with your permissions, so an app
+         * launches only in a trusted project (discovery and listing ignore trust). The same column answers #92
+         * (respecting project settings). Every project, existing rows included, starts at "no" (a "yes" would be a silent grant); v35 trusts the rows that exist before it.
          */
         run: () => {
           const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(projects)`).all()
@@ -186,25 +139,15 @@ export class StepsV28ToV40 extends MigrationRange {
         to: 34,
         breaksOlderReaders: false,
         /**
-         * A run log for external apps (M4 A-6) — the local half of "record who ran what".
+         * A run log for external apps (M4 A-6): the broker, which every call passes through, writes one row per call,
+         * so a call from the UI or app-to-app is recorded, not only an agent's (which its conversation holds).
          *
-         * A call made by an agent is left in that session's conversation, but a call made from
-         * the UI, or app-to-app, landed nowhere at all (the plan's "what is blocking this now").
-         * The one place every call passes through (the broker) writes one row here per call.
+         *   project_id    an app id is unique only within its scope (project or user folder); null is a user-folder app
+         *   args_summary  arguments are kept only as a summary and a hash; a hash alone gives a person nothing to read
+         *   error         the reason for a rejection or failure, which the history screen (B-7) shows
          *
-         * Three columns were added beyond the plan's:
-         *   project_id    an app id is unique only within its scope (project, or the user's own
-         *                 folder) — two projects can each have a `notes` app that are different
-         *                 apps. null means a user-folder app
-         *   args_summary  arguments are kept only as a summary and a hash — a hash alone gives a
-         *                 person nothing to read
-         *   error         the reason for a rejection or failure. This is where the history
-         *                 screen (B-7) shows "why"
-         *
-         * The raw arguments are not kept here. A side table keeps the raw text (secrets
-         * redacted) for **only the most recent handful of failures** — an agent debugging an app
-         * needs to see the input that failed, but there is no reason to pile up the raw text of
-         * every call.
+         * `app_run_failures` keeps the raw arguments (secrets redacted) for only the most recent few failures: an
+         * agent debugging an app needs the input that failed, not every call's.
          */
         run: () => {
           this.db.exec(`
@@ -240,25 +183,12 @@ export class StepsV28ToV40 extends MigrationRange {
         // One-way, but `trusted` already exists in the build before it
         breaksOlderReaders: false,
         /**
-         * Projects already registered are trusted (M4, reversing v33's default, but only for
-         * existing rows).
+         * Projects registered before this step are trusted (M4): they are folders a person chose by hand, and trust
+         * also decides #92 (respecting project settings), so leaving them at v33's "no" would silently start ignoring
+         * their `.claude/` settings. Projects registered later still start at "no" and are asked once, at registration.
          *
-         * v33 left old rows untrusted, reasoning that "registration never answered this
-         * question." What that missed is that the question **had just come into existence**.
-         * These rows are folders a person chose by hand, and they have been running agents in
-         * them for weeks. Trust decides not just apps but also #92 (respecting project
-         * settings) (decision 3). So leaving old rows at "no" means a single update starts
-         * silently ignoring these projects' `.claude/` settings — the person only sees the
-         * result of a choice they never made.
-         *
-         * Projects registered from here on still start at "no" and are asked once, at
-         * registration time (UI). v33's reasoning — that a freshly handed-over repository's code
-         * must not run just from opening it — still holds.
-         *
-         * **This runs only once.** If this step ran every time, the next startup would silently
-         * re-enable trust a person had turned off. The runner does not replay a step that has
-         * already run (user_version), and on a new database this step runs against zero
-         * projects, so it does nothing.
+         * It must run only once, or a start would re-enable trust a person turned off: the runner never replays a
+         * step that ran (user_version), and on a new database it touches no rows.
          */
         run: () => {
           this.db.exec(`UPDATE projects SET trusted = 1`)
@@ -268,20 +198,14 @@ export class StepsV28ToV40 extends MigrationRange {
         to: 36,
         breaksOlderReaders: false,
         /**
-         * The person's answer to an app's capability request (M4 D-4) — the memory of "ask once
-         * on first use."
+         * The person's answer to an app's capability request (M4 D-4): the memory of "ask once on first use".
          *
-         * An app is unique per (project, id), so `app_key` (`<project id | _user>/<app id>`) is
-         * used as the key. project_id is kept out of the key because a user-folder app's
-         * project_id is null, and SQLite's PRIMARY KEY treats NULLs as distinct from one
-         * another, which would let the same app's same capability end up as two rows.
-         * project_id is kept as its own column so it can be cleaned up together when a project
-         * is deleted.
+         * The key is `app_key` (`<project id | _user>/<app id>`), not project_id: a user-folder app's project_id is
+         * null, and SQLite's PRIMARY KEY treats NULLs as distinct, which would allow two rows for one capability.
+         * project_id stays a column so the rows go with a deleted project.
          *
-         * `uses_stamp` is a fingerprint of the manifest's declared `uses` at the moment the
-         * answer was given — if the fingerprint changes, the stored answer is no longer used and
-         * the question is asked again. `text` is what was shown to the person when asked. The
-         * list of remembered answers (the history screen) shows that same text back.
+         * `uses_stamp` fingerprints the manifest's `uses` when answered; once it changes, the question is asked again.
+         * `text` is what the person was shown, and the history screen shows it back.
          */
         run: () => {
           this.db.exec(`
@@ -302,17 +226,14 @@ export class StepsV28ToV40 extends MigrationRange {
         to: 37,
         breaksOlderReaders: false,
         /**
-         * The run log becomes a chain (M4 D-6) — what an app asked the broker for over fd 3 also
-         * gets a row, nested under the run that caused it.
+         * The run log becomes a chain (M4 D-6): what an app asks the broker for over fd 3 gets a row under the run
+         * that caused it.
          *
-         *   kind        `tool` is a call to the app's tool, `broker` is a request the app made to
-         *               the broker. Every old row was a tool call
-         *   session_id  the agent session run_agent set up — where the history screen jumps into
-         *               that session
+         *   kind        `tool` is a call to the app's tool (every old row), `broker` a request the app made to the broker
+         *   session_id  the agent session run_agent set up, where the history screen jumps to
          *
-         * An index is added on the parent column (`parent_run_id`): the history screen reads
-         * **downward**, walking the chain from one app's row (a recursive query). Without the
-         * index, every step scans the whole table.
+         * `parent_run_id` is indexed: the history screen walks the chain downward with a recursive query, and without
+         * the index every step scans the whole table.
          */
         run: () => {
           const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(app_runs)`).all()
@@ -348,19 +269,13 @@ export class StepsV28ToV40 extends MigrationRange {
          * The session archive (#204; called the trash until #1404, which is why the column below is `trash`): archiving a
          * session stops destroying it.
          *
-         *   deleted_at  when the person moved it to the trash; NULL is a live session. Every query that lists
-         *               sessions filters on this one column, so "is it in the trash" is answered in one place
-         *   trash       JSON (`TrashRecord`): where it came from (project id, name and path) and what the person
-         *               chose to remove with it when it is deleted for good (the tool's conversation file, the
-         *               worktree). NULL on a live session
+         *   deleted_at  when the person moved it to the trash; NULL is a live session. Every listing query filters on it
+         *   trash       JSON (`TrashRecord`): where it came from (project id, name and path) and what the person chose to
+         *               remove with it when it is deleted for good (conversation file, worktree). NULL on a live session
          *
-         * A column rather than a side table: a side table makes every listing query a `NOT EXISTS` join, and the
-         * easiest query to write would be the one that forgets it. A column that says NULL for every row written
-         * before this step means nothing old is in the trash, which is true.
-         *
-         * No backfill and no index: the step only adds two empty columns, and the sessions table holds tens of rows.
-         * Rows that later steps add for a session (see `purgeSession`) have to consider that the session may be in
-         * the trash — its rows still exist and still point at it.
+         * A column, not a side table whose `NOT EXISTS` join every listing would have to remember; NULL on older rows is
+         * true. No index: the table holds tens of rows. Rows later steps add for a session (see `purgeSession`) must
+         * allow for it being in the trash, still pointing at it.
          */
         run: () => {
           const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(sessions)`).all()
@@ -387,27 +302,17 @@ export class StepsV28ToV40 extends MigrationRange {
   }
 
   /**
-   * v40: rebuilds the search index over `INDEXED_KINDS` alone, then vacuums the file (#221).
+   * v40: rebuilds the search index over `INDEXED_KINDS` alone, then vacuums the file (#221). Rebuilt rather than deleted
+   * from: the rows to go are two thirds of the index, and FTS5 keeps deleted rows' segments until a merge. The rebuild
+   * skips sessions in the trash (#204) and keys each row by its message's rowid, as `appendMessages` does (v11).
+   * Nothing is rebuilt when every index row belongs to an indexed message (a new store, or a rerun after the commit).
+   * The vacuum, decided by the file's free share, runs after the step commits; a start killed mid-vacuum (SQLite rolls
+   * it back whole) leaves it owed for the next open (#396, `vacuumAfterStep`). A failed vacuum (no room for its copy) is
+   * reported and passed over: freed pages get reused, and a store that cannot shrink must not keep the host from starting.
    *
-   * Rebuilt rather than deleted from: the rows to go are two thirds of the index, and deleting from FTS5 leaves the
-   * old segments in place until they are merged. Rebuilding writes only what stays — the text and reasoning rows —
-   * and leaves out the sessions in the trash, whose index rows are dropped while they are there (#204). Each row is
-   * keyed by its message's rowid, as `appendMessages` writes it (v11).
-   *
-   * Nothing to rebuild when every index row already belongs to an indexed message: a new store, or a rerun after the
-   * rebuild committed. The vacuum is decided separately, by how much of the file is free. It runs after the step has
-   * committed, so v40 does not run again for it: a start that was killed during the vacuum (which SQLite rolls back
-   * whole) leaves it recorded as owed, and the next open vacuums (#396, `vacuumAfterStep`).
-   *
-   * A vacuum that fails — no room for its temporary copy, say — is reported and passed over: the index is already
-   * rebuilt, the freed pages stay in the file and later writes reuse them, and a store that cannot shrink must not
-   * keep the host from starting.
-   *
-   * Measured on a copy of the real store (2026-09-30, 137,722 messages): 55,131 index rows dropped and 26,685 kept;
-   * the rebuild took 1.25s and the vacuum 0.52–0.58s, so the start is held for about 1.9s, once. The file went from
-   * 236.2MiB to 145.4MiB, the index from 124.5MiB to 36.6MiB. The vacuum needs room for what it keeps twice over — its
-   * temporary copy and the WAL it writes the result through (146.2MiB at its peak; the volume's free space dipped by at
-   * most 306.5MiB) — which is the reason a failure is survivable rather than fatal.
+   * Measured on a copy of the real store (2026-09-30, 137,722 messages): 55,131 index rows dropped, 26,685 kept; rebuild
+   * 1.25s, vacuum 0.52–0.58s (start held about 1.9s, once); file 236.2MiB -> 145.4MiB, index 124.5MiB -> 36.6MiB. The
+   * vacuum needs room for its temporary copy and its WAL (146.2MiB peak; free space dipped by at most 306.5MiB).
    */
   private rebuildIndexWithoutToolCalls(): void {
     const kinds = `(${[...INDEXED_KINDS].map((k) => `'${k}'`).join(', ')})`

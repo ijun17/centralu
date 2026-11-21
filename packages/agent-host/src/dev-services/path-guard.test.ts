@@ -9,7 +9,7 @@ import { assertCreatePath, assertExistingPath, assertExistingPathSync, isInside,
 /**
  * The segments the guard walks, under Windows path rules (#14), checked with `path.win32` so it
  * runs on any OS. On Windows `relative()` returns an absolute path for another drive or a UNC
- * share; split into segments, that used to be walked inside the project.
+ * share, which split into segments would be walked inside the project.
  */
 describe('path segments under Windows rules', () => {
   const root = 'C:\\Users\\me\\proj'

@@ -107,16 +107,14 @@ export class TrashRecords {
    * Moves a live session into the trash. `record` carries where it came from and what the person chose to remove
    * with it once it is deleted for good. Returns false when there was no live session to move.
    *
-   * The session leaves every listing in the first transaction: `deleted_at` is set before anything slow runs. It
-   * also leaves its project: `project_id` becomes NULL and the project is kept in `record`. That is what lets a
-   * project be deleted while its sessions sit in the trash — `sessions.project_id` cascades a project delete (FK), so
-   * a session still pointing at the project would be destroyed with it. The grid panel goes too: it is layout, not a
-   * record, and a restored session is opened from the sidebar.
+   * The first transaction, before anything slow, sets `deleted_at` (it leaves every listing), clears `project_id` (kept
+   * in `record`: the FK cascades a project delete, which would destroy a trashed session still pointing at it) and drops
+   * its grid panel (layout, not a record; a restored session is opened from the sidebar).
    *
    * The index rows are then dropped in chunks, letting the event loop go between them (#179: the biggest session in
    * a copy of the real store held 32,323 index rows, and dropping them in one transaction froze the host for 2.9s).
-   * If the host stops halfway, the session is in the trash with part of its index left; searches still skip it
-   * (`searchMessages` filters the trash), and restoring or purging finishes the job.
+   * Stopped halfway, the session is in the trash with part of its index, which `searchMessages` skips; restoring or
+   * purging finishes the job.
    */
   async trashSession(sessionId: string, record: TrashRecord, chunk = DELETE_CHUNK): Promise<boolean> {
     const move = this.db.transaction((): boolean => {
@@ -165,20 +163,14 @@ export class TrashRecords {
    * Deletes a session in the trash for good. It is the only way a session's rows leave the store, and it takes only
    * a session already in the trash: a live one has to be moved there first, so nothing skips the way back.
    *
-   * Everything that points at the session goes with it: its messages and whatever is left of their index, the steps
-   * of the subagents it launched (`subagent_messages`, #222), its approval rules, its commit links (`commit_sessions` — #96 found 57 of 304 links pointing at sessions that no
-   * longer existed, because deleting used to leave them behind). The app runs it started or ran in stay in their app's
-   * run log with the link cleared (`app_runs.session_id` / `caller_session_id`, #378): until then purging an app-agent
-   * session erased its run, and purging a session that called an app erased those calls, from the app's history.
+   * Everything that points at the session goes with it (#96 found 57 of 304 commit links pointing at gone sessions);
+   * its settings by their shape (`SESSION_SETTING_OF`), not by name, so a key added later is not left behind. The app
+   * runs it started or ran in stay in their app's run log with the link cleared (#378), so the app's history keeps them.
    *
    * Chunked like `trashSession` (#179: on the same copy of the real store the longest pause went from 2.9s to 84ms;
-   * the whole took 4.1s, with the event loop turning 231 times). The rows that are not messages, and the session row, go in the same
-   * transaction as the last chunk, so a purge cut short leaves the session in the trash with fewer messages, to be
+   * the whole took 4.1s, with the event loop turning 231 times). The rows that are not messages, and the session row,
+   * go in the last chunk's transaction, so a purge cut short leaves the session in the trash with fewer messages, to be
    * purged again, and never messages without a session.
-   *
-   * The settings kept per session go too, all of them by their shape (`SESSION_SETTING_OF`) rather than by name: the
-   * purge used to name two of them, and every key added since stayed behind for good (a process's tool prefix and launch
-   * settings, its fresh-start mark, its last import, a paused report).
    */
   async purgeSession(sessionId: string, chunk = DELETE_CHUNK): Promise<boolean> {
     if (!this.isTrashed(sessionId)) return false
@@ -248,7 +240,7 @@ export class TrashRecords {
   }
 
   /**
-   * A trashed session keeps the tool's conversation file when deleted for good (#378 review). A delete the person asked
+   * A trashed session keeps the tool's conversation file when deleted for good (#378). A delete the person asked
    * for while the host's own was under way ends in the trash, with the person's choice: the host's had chosen to
    * delete the file, which only the person may.
    */
@@ -345,18 +337,14 @@ export class TrashRecords {
   /**
    * Deletes a project. Its sessions go to the trash (#204), not with it.
    *
-   * The manager moves each session to the trash first (`SessionManager.deleteProject`), which also stops its
-   * process. This step catches any live row that did not get there, in the same transaction as the project row, so
-   * deleting a project cannot destroy a conversation. Such a row is marked to keep the tool's conversation file and
-   * the worktree: nobody was asked about them.
+   * The manager moves each session to the trash first (`SessionManager.deleteProject`), which also stops its process.
+   * This step catches any live row that did not get there, in the project row's transaction, so deleting a project
+   * cannot destroy a conversation; such a row keeps the tool's conversation file and the worktree (nobody was asked).
+   * Its index rows are dropped by hand: `messages_fts` is a virtual table with no foreign key, so no CASCADE reaches it.
    *
-   * **This does not rely on an FK's CASCADE.** `messages_fts` is a virtual table with no foreign key at all, so the index rows
-   * of a session caught here are dropped by hand — a session in the trash must not turn up in a search.
-   *
-   * The rows that belong to the project go with it as before: project-scope rules, the answers given to its apps, and
-   * the app runs and commit links that point at no session still here. Rows that point at a session in the trash stay with that session until it is
-   * deleted for good: its own rules, its commit links, the app runs it started or ran in. A restore that registers
-   * the folder again under the same id finds them where they were.
+   * The project's own rows go with it: project-scope rules, the answers given to its apps, and the app runs and commit
+   * links that point at no session still here. Rows that point at a trashed session (its rules, commit links, app runs)
+   * stay with it until it is deleted for good, so a restore under the same id finds them where they were.
    */
   deleteProject(projectId: string): void {
     const tx = this.db.transaction(() => {

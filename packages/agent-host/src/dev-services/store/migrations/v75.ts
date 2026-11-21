@@ -12,29 +12,15 @@ export class StepsV75 extends MigrationRange {
         minReader: 74,
         /**
          * The last move of thread mail (#2258 item 1, docs/plans/mailbox.md §6.3, M7): what a build of v61 to v64 left pending in its thread
-         * tables (`mail_threads`, `mail_messages`, `mail_receipts`) becomes mail once, here. Until this step the host moved it at every start
-         * and read the old tables for the lines before a moved message. From this build on only a migration step names those tables, the two
-         * beside them (`mail_participants`, `mail_blockers`), `report_marks`, `delegated_turns`, `queued_requests` or `sessions.mail_args`.
-         *
-         * Pending is a receipt not handled, not dismissed by the person, of a message sent in the last 180 days (retention would not have kept
-         * an older one waiting), that is not delivered, not read, or a `question` (read and not answered). Each message is copied once under its
-         * own id, its rows settled `legacy` (never awaited), and each old receipt is marked handled, delivered and read. A row to the Assistant in
-         * a session's request (the old thread's assignee, the Assistant or a trashed one) is sent to the role (`via`), so the next Assistant
-         * takes it; a task to a trashed session is settled `gone`. A row the person released is never held again (`releasedTo`). A hold an
-         * earlier build set stays only if today's gate would hold the mail now, as step 72 judged the rows moved before it (`endOldHolds`).
-         * A `policy` hold is judged on the rows this step writes only, since a row moved at an earlier start may be held by the delivery's own
-         * judgement; a `budget` hold, which no delivery sets, ends on whatever row carries it.
-         *
-         * **A frozen copy of the move the host ran (`movePendingThreadMail`) and of what it called, on purpose**: a step runs once on every
-         * store and must not call code that may change. Only the address shape is imported (mail/address.ts), as the stored shape it is. One
-         * thing is read differently: a sender's project comes from its `sessions` row by the session id alone, where the host asked only for a
-         * session of its own (as step 72 reads a recipient's).
-         *
-         * **Breaks the builds of v70 to v73 (beta.58 to beta.69): the floor goes to 74.** Those builds leave a report mark for every session in
-         * a turn as they go, and make a task of each mark at their next start. This build deleted the marks at every start, so that one left
-         * during a rollback never became a task for work settled since; it no longer names `report_marks`, so those builds are refused instead
-         * (`StoreTooNewError`). The build of v74 (beta.70 to beta.72) writes no mark, and its own move at every start finds each receipt handled:
-         * it opens the store and serves it as before. The tables stay for it, unread by this build, and go in the next step.
+         * tables becomes mail once, here; from this build on only a migration step names the thread tables, `report_marks`, `delegated_turns`,
+         * `queued_requests` or `sessions.mail_args`. Pending: a receipt not handled or dismissed, of a message from the last 180 days, not
+         * delivered, not read, or a `question` (read and not answered). Each is copied once under its own id, its rows settled `legacy`, and the
+         * old receipt marked handled, delivered and read. A row to the thread's assignee that is the Assistant (not the thread's owner) goes to the role (`via`), so the next
+         * Assistant takes it; a task to a trashed session is settled `gone`; a released row is never held again; old holds go to `endOldHolds`.
+         * A frozen copy of `movePendingThreadMail` and what it called, on purpose (a step must not call code that may change), except that a
+         * sender's project comes from its `sessions` row by id alone. Breaks v70 to v73 (beta.58 to beta.69), floor 74: they leave a report mark
+         * per session in a turn and make a task of each at their next start, and this build does not name `report_marks` to clear one a rollback
+         * left, so they are refused (`StoreTooNewError`). v74 (beta.70 to beta.72) writes no mark and opens the store; the tables stay for it.
          */
         run: () => this.moveThreadMail(),
       },
@@ -43,21 +29,15 @@ export class StepsV75 extends MigrationRange {
         breaksOlderReaders: true,
         minReader: 75,
         /**
-         * What nothing reads any more goes (#2258, docs/plans/mailbox.md M7): the thread tables of v61 (`mail_threads`, `mail_participants`,
-         * `mail_blockers`, `mail_messages`, `mail_receipts`), the index that found a thread's open turn (`mail_turns_open`), the three tables
-         * of owed work from before mail (`report_marks`, `delegated_turns`, `queued_requests`) and `sessions.mail_args`. Step 74 made tasks of
-         * the owed work and step 75 moved the pending thread mail, so what is deleted here is history: thread messages that were handled, or
-         * were older than step 75's 180 days, are kept only in the copy of the store the open that runs this step makes, for its 14 days,
-         * and nowhere when that copy could not be made (rule 5 above `migrationSteps`; the copy is named after that open's first breaking
-         * step, so `store.before-75.db` from version 74). No vacuum, so the step is not `heavy`: later writes reuse the pages the tables held.
-         *
-         * One release after step 75, whose build was the first to name none of these (rule 2 above `migrationSteps`). `schema.sql` creates
-         * none of them, so a new store and a migrated one end with the same tables.
-         *
-         * **Breaks the build of v74 (beta.70 to beta.72): the floor goes to 75.** That build reads the thread tables at every start and for the
-         * lines before a moved message, deletes from `report_marks` at every start and from two of the thread tables when a session is
-         * purged; it is refused (`StoreTooNewError`). The build of v75 opens the store as it is. No release read or wrote `sessions.mail_args`:
-         * the second version of the mail tool it was added for was not built (M3b).
+         * What nothing reads any more goes (#2258, docs/plans/mailbox.md M7): v61's thread tables, `mail_turns_open`, the three tables of owed
+         * work from before mail and `sessions.mail_args`. Step 74 made tasks of the owed work and step 75 moved the pending thread mail, so what
+         * is deleted is history: thread messages handled, or older than step 75's 180 days, are kept only in the copy of the store the open that
+         * runs this step makes, for its 14 days, and nowhere when that copy could not be made (rule 5 above `migrationSteps`; the copy is named
+         * after that open's first breaking step, so `store.before-75.db` from version 74). No vacuum, so not `heavy`: later writes reuse the pages.
+         * One release after step 75, the first build to name none of these (rule 2 above `migrationSteps`); `schema.sql` creates none of them.
+         * Breaks v74 (beta.70 to beta.72), floor 75: it reads the thread tables at every start, deletes from `report_marks` at every start and
+         * from two thread tables on purge; it is refused (`StoreTooNewError`). No release read or wrote `sessions.mail_args`: the mail tool's
+         * second version it was added for was not built (M3b).
          */
         run: () => {
           for (const table of ['mail_blockers', 'mail_participants', 'mail_receipts', 'mail_messages', 'mail_threads', 'report_marks', 'delegated_turns', 'queued_requests']) {

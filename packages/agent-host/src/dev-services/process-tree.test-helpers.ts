@@ -91,12 +91,11 @@ export async function settle<T>(read: () => T, ok: (v: T) => boolean, ms: number
  * refuses to remove a folder a running process works in. `test` is the hook's context (`afterEach`, `onTestFinished`).
  *
  * After a test that passed, nothing: every test that fills `pids` ends by seeing each of them gone, so a pid that is
- * there again belongs to whoever Windows gave the number to since. This used to `process.kill` every pid after every
- * test, and on Windows that is `TerminateProcess` with exit code 1 on that someone: most likely what ended commands of
- * install-windows.test.ts in another worker on CI with exit 1 and nothing printed, each time right as
- * commands.test.ts finished (#1244; not reproduced on a development machine), and on a developer's machine it could
- * be any of their programs. After a failed test the survivors are ended as before; a pid
- * of its tree that had already ended carries the same risk there, on a run that is red already.
+ * there again belongs to whoever Windows gave the number to since. On Windows `process.kill` is `TerminateProcess` with
+ * exit code 1 on that someone: most likely what ended commands of install-windows.test.ts in another worker on CI with
+ * exit 1 and nothing printed, each time right as commands.test.ts finished (#1244; not reproduced on a development
+ * machine), and on a developer's machine it could be any of their programs. After a failed test the survivors are
+ * ended; a pid of its tree that had already ended carries the same risk there, on a run that is red already.
  */
 export async function cleanUp(pids: readonly number[], test: TestContext): Promise<void> {
   if (test.task.result?.state !== 'fail') return

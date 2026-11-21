@@ -15,16 +15,11 @@ export class StepsV41ToV47 extends MigrationRange {
          *   role, kind, payload, ts   as in `messages`; payload is the step as the adapter sent it, tool `input` and
          *                   `output` included (#221)
          *
-         * **A table of its own, not a column on `messages`.** Every reader of a session reads `messages`: a history
-         * page, unread (`MAX(seq)`), the handoff record, `read_session`, `recall`, the Assistant's memory, the
-         * preview, history sync. With a column, each of them would have to filter it, and the one that forgot would
-         * hand a subagent's tool output to another session's prompt (#73) or count it as unread. Here they skip it by
-         * reading what they read today, and the only way in is `loadSubagentMessages`, which names one launch card.
-         * The steps also stay out of the conversation's numbering, so a running subagent never moves `lastSeq`.
-         *
-         * Nothing is indexed: the parent's own report on what its subagent found is in the conversation, and is
-         * searchable. The rows belong to the session (FK, and `purgeSession` deletes them in chunks), so they follow
-         * it through the trash and back. Old subagent runs are not back-filled.
+         * A table, not a column on `messages`: every reader of `messages` (history, unread, handoff, `read_session`,
+         * `recall`, sync, ...) would have to filter it, and one that forgot would put a subagent's tool output in another
+         * session's prompt (#73) or count it as unread. Only `loadSubagentMessages` reads it, and a running subagent never
+         * moves `lastSeq`. Not search-indexed: the parent's report is. The rows follow the session through the trash (FK,
+         * `purgeSession` deletes them in chunks); old subagent runs are not back-filled.
          */
         run: () => {
           this.db.exec(`
@@ -45,29 +40,17 @@ export class StepsV41ToV47 extends MigrationRange {
         to: 42,
         breaksOlderReaders: false,
         /**
-         * The grid holds apps as well as sessions (#288) — in a table of its own, `grid_layout`.
+         * The grid holds apps as well as sessions (#288), in `grid_layout`.
          *
-         *   panel_key   the panel's identity as one string — `session:<id>` or `app:<project id | _user>/<app id>` —
-         *               and the primary key, so a panel is placed once. Not (kind, session_id, project_id, app_id):
-         *               SQLite's PRIMARY KEY treats NULLs as distinct (v36's note), and a user-folder app has no
-         *               project, so the same app could be placed twice
-         *   kind        'session' or 'app'
-         *   session_id  a session panel's session, NULL for an app. A foreign key with CASCADE, so a session deleted
-         *               for good takes its panel with it, as `grid_panels` does
+         *   panel_key   `session:<id>` or `app:<project id | _user>/<app id>`, the primary key so a panel is placed once.
+         *               Not (kind, session_id, project_id, app_id): SQLite's PRIMARY KEY treats NULLs as distinct (v36)
+         *   session_id  a session panel's session, NULL for an app; CASCADE, so a session deleted for good takes its panel
          *   project_id  an app's project, NULL for a user-folder app (and for a session)
-         *   app_id      an app's id
          *
-         * **Expand only (#292's rule).** `grid_panels` stays exactly as v9 made it, one row per session id, because a
-         * v41 host still reads and writes it: rebuilding it with this key made that host's `grid.set` fail (its insert
-         * names neither `panel_key` nor `kind`, both NOT NULL). So the session rows are copied here once, when this
-         * table is created, and from then on this build reads and writes only `grid_layout`. An older host keeps using
-         * `grid_panels`, so the two builds' grids can differ after either of them changes it — a layout, not a record,
-         * and each build's own list stays whole. Dropping `grid_panels` is a later step, one release on, marked
-         * breaking.
-         *
-         * Only rows whose session still exists are copied: one left behind by a build that wrote with the foreign key
-         * unenforced would fail this table's key, and listGridView never showed it anyway (it joins `sessions`).
-         * Idempotent: an existing `grid_layout` is left alone, so the copy runs once.
+         * Expand only (#292): `grid_panels` stays as v9 made it for a v41 host, whose insert names neither NOT NULL
+         * `panel_key` nor `kind`. Its rows whose session still exists (an orphan would fail the key; listGridView joins
+         * `sessions`) are copied once, when this table is created; after that the builds' grids may differ, a layout,
+         * not a record. Dropping `grid_panels` is a later, breaking step.
          */
         run: () => {
           const has = (name: string) =>
@@ -122,22 +105,16 @@ export class StepsV41ToV47 extends MigrationRange {
         to: 44,
         breaksOlderReaders: false,
         /**
-         * The person's consent for one project to reach another (#371) — `project_consents`, one row per
-         * (from, to, kind) the person allowed "always".
+         * The person's consent for one project to reach another (#371): one row per (from, to, kind) allowed "always".
          *
          *   from_project_id  the project whose session asks
          *   to_project_id    the project it reaches
-         *   kind             what it may do there: 'delegate' (ask_project starts a session in the target, part B) or
-         *                    'apps' (the target's apps attach to the caller's session, part A). One table for both, so
-         *                    Settings lists every cross-project consent in one place and revoking reads the same row
-         *   decided_at       when the person said "always"
+         *   kind             'delegate' (ask_project starts a session in the target, part B) or 'apps' (the target's apps
+         *                    attach to the caller's session, part A); one table, so Settings lists and revokes them in one place
          *
-         * Only "always" is stored: "once" lives for that call, and a denial is not remembered (the next call asks
-         * again, the same as a denied approval). Both project ids are foreign keys with CASCADE (better-sqlite3 turns
-         * the pragma on for every connection), so a project deleted takes its consents with it either way round, and a
-         * folder registered again is asked again.
-         *
-         * **Expand only (#292's rule).** A new table; an older host never reads it.
+         * Only "always" is stored: "once" lives for that call, and a denial is not remembered (the next call asks again).
+         * Both ids CASCADE (better-sqlite3 turns the foreign-key pragma on for every connection), so a deleted project
+         * takes its consents either way round and a folder registered again is asked again. Expand only (#292).
          */
         run: () => {
           this.db.exec(`
@@ -175,25 +152,18 @@ export class StepsV41ToV47 extends MigrationRange {
         to: 46,
         breaksOlderReaders: false,
         /**
-         * Linked machines (#82, docs/plans/remote-hub.md): the hub's links, what it last heard from each, and grid
-         * panels that hold another machine's session.
+         * Linked machines (#82, docs/plans/remote-hub.md): the hub's links, what it last heard from each, and grid panels
+         * of another machine's session. A link's token is not kept: it is asked from the remote over ssh at every start.
          *
-         *   linked_machines   one row per machine the person linked: its id (the `<machine>.` of every id it hands
-         *                     over), name, ssh target and remote shell, its `slot` for folding numeric ids
-         *                     (links/machine-ids.ts), and the version pair the person chose to connect anyway
-         *   machine_headers   the headers mirror: each machine's sessions and projects as it last listed them, as
-         *                     JSON, in the remote's own terms. Headers only, never a conversation: it answers
-         *                     `sessions.list` and `projects.list` for a machine that cannot be reached (§5)
-         *   grid_layout.remote_session_id
-         *                     a panel of another machine's session. `session_id` references this host's `sessions`
-         *                     table, which a remote session is not in; the panel lives as long as the mirror knows
-         *                     the session
+         *   linked_machines   per linked machine: its id (the `<machine>.` of every id it hands over), name, ssh target and
+         *                     shell, `slot` for folding numeric ids (links/machine-ids.ts), the version pair accepted anyway
+         *   machine_headers   each machine's sessions and projects as last listed, JSON in the remote's terms, never a
+         *                     conversation: it answers `sessions.list`/`projects.list` for an unreachable machine (§5)
+         *   grid_layout.remote_session_id  a remote session's panel (`session_id` references only this host's sessions);
+         *                     it lives as long as the mirror knows the session
          *
-         * The token a link uses is not kept: it is asked from the remote over ssh at every start.
-         *
-         * **Expand only (#292's rule).** Two new tables and a nullable column. An older host never reads the tables;
-         * it reads grid rows by `session_id` through a join that leaves a remote panel out, and its `setGridView`
-         * drops those rows when it rewrites the layout, which loses a panel, not the layout.
+         * Expand only (#292): an older host never reads the tables, its join leaves a remote panel out, and its
+         * `setGridView` drops those rows, losing a panel, not the layout.
          */
         run: () => {
           this.db.exec(`

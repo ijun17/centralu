@@ -1,22 +1,14 @@
 /**
- * **The terminal broker** (Windows, #1067; the host side is `broker-pty.ts`).
- *
- * The host starts this process before it joins the job object that ends its work with it (`lifecycle/work-job.ts`), so
- * it is in no job of the host's. The terminals it starts are therefore outside that job: what a person starts from a
- * Centralu terminal (`code .`, the browser `claude auth login` opens, a server started in the background) outlives the
- * host, as it does on macOS and Linux, while agents, Run commands, git and app servers end with it.
- *
- * A plain `.mjs`, started with `node <path>` in development and beside the bundled host alike (the Codex bridge's way,
- * `adapters/bridge-path.ts`). Its whole protocol is one JSON object per line: the host's requests on stdin,
- * what the terminals do on stdout.
- *
+ * **The terminal broker** (Windows, #1067; host side `broker-pty.ts`). The host starts it before it joins the job object that ends
+ * its work with it (`lifecycle/work-job.ts`), so its terminals are outside that job: what a person starts from one (`code .`, the
+ * browser `claude auth login` opens, a background server) outlives the host, as on macOS and Linux; agents, Run commands, git and
+ * app servers end with it. A plain `.mjs`, started with `node <path>` in development and beside the bundled host
+ * (`adapters/bridge-path.ts`). One JSON object per line:
  * - in: `{op:'spawn', id, file, args, cwd, env, cols, rows}` · `{op:'write', id, data}` · `{op:'resize', id, cols, rows}`
- *   · `{op:'kill', id}` · `{op:'open', url}` (an `https` address in the person's browser, review of #1685)
+ *   · `{op:'kill', id}` · `{op:'open', url}` (an `https` address in the person's browser)
  * - out: `{ev:'ready'}` once · `{ev:'spawned', id, pid}` · `{ev:'error', id, message}` · `{ev:'data', id, data}` ·
  *   `{ev:'exit', id, exitCode, signal}`
- *
- * Its stdin closing means the host is gone: it exits, which closes every pseudoconsole and so ends each shell as the
- * host's own would have. What a shell started outside its console stays.
+ * Its stdin closing means the host is gone: it exits, closing every pseudoconsole and so ending each shell in one; what a shell started outside its console stays.
  */
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'

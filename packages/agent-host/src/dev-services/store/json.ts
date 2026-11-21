@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { isObj, tryParseJson, type Obj } from '../../json-value.js'
 
 /**
- * Reading JSON the store (or a setting in it) holds (#850 item 5): **a value that cannot be read fails only itself.**
+ * Reading JSON the store (or a setting in it) holds (#850): **a value that cannot be read fails only itself.**
  *
  * A stored value can be unreadable for reasons this build cannot rule out: a write cut short, a newer build that wrote
  * another shape (the old and new host of a swap share the file), a hand edit. Each reader decides what such a value

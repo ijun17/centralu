@@ -12,29 +12,17 @@ export class StepsV65 extends MigrationRange {
         to: 65,
         breaksOlderReaders: false,
         /**
-         * Mail without threads (docs/plans/mailbox.md §6.1, #1684): messages addressed to parties, and each recipient's
-         * progress with one.
+         * Mail without threads (docs/plans/mailbox.md §6.1, #1684): messages addressed to parties, and each recipient's progress with one.
          *
-         *   mail             one message: its sender, kind, body, the message it answers (`reply_to`) and the first of
-         *                    that chain (`root_id`, computed once when stored), the message that started the sender's turn
-         *                    (`cause_id`) and how many hops led to it (`depth`), and `facts`, which only Centralu writes.
-         *                    `dedupe_key` is unique per sender: Centralu's "once per change" (§6.5). `legacy_thread` names
-         *                    the v61 thread a message was moved from (§6.3)
-         *   mail_recipients  one recipient's progress with one message: the delivery fields a v61 receipt had, the turn
-         *                    the delivery started or joined, whether and how it was settled (answered, done, withdrawn,
-         *                    reported, gone, legacy), its reminders, and when it was released and its sender told (§5.3)
+         *   mail             one message: `reply_to` the message it answers, `root_id` the first of that chain (computed once when stored),
+         *                    `cause_id` the message that started the sender's turn and `depth` the hops to it; `facts` only Centralu writes;
+         *                    `dedupe_key` is unique per sender, Centralu's "once per change" (§6.5); `legacy_thread` the v61 thread (§6.3)
+         *   mail_recipients  one recipient's progress: a v61 receipt's delivery fields, the turn it started or joined, how it was settled
+         *                    (answered, done, withdrawn, reported, gone, legacy), its reminders, when it was released and its sender told (§5.3)
          *
-         * `mail_turns` gains the turn's work message (`message_id`), the message that started it (`starter_id`, so a
-         * restart keeps a turn's cause) and how it ended (`ended_how`). `sessions.mail_args` is the mail tool schema a
-         * session's process was spawned with (NULL reads as 1).
-         *
-         * No foreign keys and no CHECK on a word, as v61 (`v58.ts`): addresses name parties on other hosts, and an older
-         * or newer build must be able to write a word the other does not know.
-         *
-         * **Expand only (#292's rule).** Two new tables, three nullable columns and indexes. An older build serving the
-         * same store during a swap never names the new tables: it keeps writing the v61 tables, and names its columns in
-         * every read and insert of `mail_turns` and `sessions`. Nothing reads the new tables in this build yet (slice M1).
-         * The columns are added only when missing (`PRAGMA table_info`), as `v62.ts` does.
+         * `mail_turns` gains `message_id`, `starter_id` (so a restart keeps a turn's cause) and `ended_how`; `sessions.mail_args`
+         * is the mail tool schema a session was spawned with (NULL reads as 1). No foreign keys and no CHECK on a word, as v61
+         * (`v58.ts`). Expand only (#292): an older build keeps writing the v61 tables, never names the new ones, and names its columns in every read and insert.
          */
         run: () => {
           this.db.exec(`
@@ -219,31 +207,14 @@ export class StepsV65 extends MigrationRange {
         breaksOlderReaders: false,
         /**
          * The holds of an earlier build, ended (#2243). The mail token guard (`budget`) went with D32 (#2014, beta.49) and the `auto` receiver's
-         * first-contact hold (`holdsInbound`) with D10, but the rows an earlier build held kept their hold when the v65 move carried them (settled
-         * `legacy`), so the Inbox's Waiting listed "Paused: this session has used its share of turns started by mail" and "Held: this session runs
-         * without asking" weeks after nothing could write such a hold.
+         * first-contact hold (`holdsInbound`) with D10, but the v65 move carried the rows they held (settled `legacy`), so the Inbox's Waiting
+         * listed holds nothing could write any more. A hold stays only if today's gate would hold the mail now (`endOldHolds` says how it is
+         * judged): the delivery also holds moved rows that way (`records.hold` writes `held` alone), so this step cannot tell the two apart.
+         * What goes becomes `dismissed`, the hold word the person's Dismiss sets (not held for the person, never delivered), not `gone` (a party
+         * is gone) or `withdrawn` (the sender stopped waiting), since neither is so. `settled` stays `legacy`.
          *
-         * **One meaning: a hold from an earlier build stays only if today's gate would hold the mail now.** `budget` is never set by today's code, so every
-         * such row goes. A `policy` row settled `legacy` stays while `reach.holdFor` (mail/reach.ts) would hold it: a `message` from an untrusted project (a
-         * missing project row is untrusted) to a session of another project, which is how a genuine untrusted asker's request is still held. The
-         * delivery also holds moved rows that way (it judges a `legacy` row like any other, and `records.hold` writes `held` alone), so the same row looks
-         * the same whoever held it, and this step cannot tell them apart; it asks the gate, as step 75 asks it for the rows it moves (`endOldHolds`). What the
-         * gate would not hold goes, and what goes is `dismissed`, the hold word the person's Dismiss sets (not held for the person, never delivered):
-         * `gone` says a sender or recipient is gone and `withdrawn` that the sender said it no longer waits, and neither is so. `settled` stays `legacy`.
-         *
-         * **This is a frozen copy of `holdFor`'s conditions, on purpose.** A step runs once on every store and must not call code that may change later;
-         * if `holdFor` changes, this step does not. It mirrors: `m.kind === 'message'`; `leaves(senderProject, recipientProject)` = the sender's project is
-         * not null and untrusted (`projects.trusted = 0`, or no such project) and is not the recipient session's project; the recipient is a session of this
-         * host that is kept (a `sessions` row with `deleted_at` NULL: the live session lookup skips a trashed one, so the gate holds nothing for it). The
-         * recipient's project is read from `sessions.project_id` and the sender's from `mail.sender_project`, as the move wrote it.
-         *
-         * **Not mirrored: a recipient on another machine** (a linked hub's session, a linked-machine child), which the live gate holds and this step
-         * dismisses, since it compares the session id with this host's `sessions` rows only. That is acceptable: no such row is on the owner's store (read
-         * only, 2026-11-13: all six held rows leave), and an old hold on another machine's session could not be released from this one in any case (Release
-         * sends through this host's delivery to a session it keeps). There is no cheap exact way: the far session's project is not stored here.
-         *
-         * **Rewrite data one way (#292's rule 1).** An older build reads `dismissed` as it reads the person's own Dismiss (it is in its `HELD` filter),
-         * and does not bring the holds back. Nothing is deleted: the message and its row stay. The sender is not told: the person did not dismiss it.
+         * Rewrite data one way (#292's rule 1): an older build reads `dismissed` as the person's own Dismiss (its `HELD` filter) and does not
+         * bring the holds back. Nothing is deleted. The sender is not told: the person did not dismiss it.
          */
         run: () => {
           // A store with no table, or no row held `budget` or `policy`, has nothing to judge (and a test's partial schema lacks the tables the judgement reads)
@@ -293,20 +264,14 @@ export class StepsV65 extends MigrationRange {
         minReader: 70,
         /**
          * One record of an owed answer (#2258 item 1, docs/plans/mailbox.md M7, M8): the task row. The builds before #1948 steps 2 to 4 (beta.57
-         * and before, whose newest step is 69) kept a second one: a request held for a busy session (`queued_requests`), a report owed
-         * (`report_marks`, which they also read to settle every task no mark owes), the turn another session gave (`delegated_turns`) and whose a
-         * turn is (`RETIRED_SESSION_KEYS`). The build of v70 (beta.58) is the first that writes none of them but the marks it leaves for those
-         * builds, so the floor goes to 70: those builds no longer open the store, and this build neither reads nor leaves them anything.
-         *
-         * What such a build left is turned into mail once, here, as the start of the builds from v70 to v73 did at every `ready`: a held request
-         * becomes a task from its requester, not delivered, which the delivery gives its session; a mark whose caller has no unsettled task to
-         * its session becomes one, delivered (the work was), `start_agent` when the caller started the session, else `send_to_session`. A row
-         * whose sessions are not both kept (`deleted_at` NULL) goes with no task. Then every row of the four goes.
-         *
-         * **A frozen copy of `MessageService.task`, its cut and the old adoption, on purpose**: a step runs once on every store and must not call
-         * code that may change. Only the id and address shapes are imported (mail/ids.ts, mail/address.ts), as the stored shapes they are.
-         *
-         * The tables stay: the builds from v70 to v73 read them at every start. They go in step 76, once step 75 has put the floor at 74.
+         * and before, newest step 69) kept a second one: `queued_requests`, `report_marks` (also read to settle every task no mark owes),
+         * `delegated_turns` and `RETIRED_SESSION_KEYS`. v70 (beta.58) is the first build to write none of them but the marks it leaves for those
+         * builds, so the floor goes to 70, and this build neither reads nor leaves them anything.
+         * What they left becomes mail once, as the builds from v70 to v73 did at every `ready`: a held request a task from its requester, not
+         * delivered; a mark whose caller has no unsettled task to its session one, delivered, `start_agent` when the caller started the session,
+         * else `send_to_session`. A row whose sessions are not both kept (`deleted_at` NULL) makes no task; then every row of the four goes.
+         * A frozen copy of `MessageService.task`, its cut and the old adoption, on purpose: a step must not call code that may change; only the
+         * id and address shapes are imported, as stored shapes. The tables stay for v70 to v73 until step 76, once step 75 puts the floor at 74.
          */
         run: () => this.oneRecordOfOwedWork(),
       },
@@ -404,13 +369,15 @@ class OldWorkTasks {
 }
 
 /**
- * Step 72's judgement of the holds an earlier build set (its comment says what is mirrored and what is not): every `budget` hold ends, and a
- * `policy` hold ends unless today's gate would hold the mail now.
- *
- * Which rows: a `policy` hold is judged by step 72 on the rows settled `legacy`, all of them moved by then, and by step 75 on the rows it moves
- * (`moved`, their rowids), whatever they are settled as: a row moved before step 75 is left to the delivery that may hold it. A `budget` hold
- * ends on every row at both steps: the delivery never sets the word (the token guard that did is gone), so a row that carries it, moved by
- * the step or before it, holds nothing the delivery judged
+ * Step 72's judgement of the holds an earlier build set: every `budget` hold ends on every row (no delivery sets the word), and a `policy`
+ * hold ends unless today's gate would hold the mail now. Step 72 judges `policy` on the rows settled `legacy`, all moved by then; step 75 on
+ * the rows it moves (`moved`, their rowids), whatever they are settled as, leaving a row moved before it to the delivery that may hold it.
+ * A frozen copy of `reach.holdFor` (mail/reach.ts), on purpose: a step runs once on every store and must not call code that may change.
+ * It mirrors: `kind = 'message'`; the sender's project (`mail.sender_project`) set, untrusted (`trusted = 0` or no such project) and not
+ * the recipient's (`sessions.project_id`); the recipient a kept session of this host (`deleted_at` NULL: the gate holds nothing for a
+ * trashed one). Not mirrored: a recipient on another machine, which the gate holds and this dismisses. Acceptable: none is on the owner's
+ * store (read only, 2026-11-13: all six held rows leave), Release could not reach such a session from here anyway, and there is no cheap
+ * exact way (the far session's project is not stored here)
  */
 export function endOldHolds(db: Database.Database, moved?: readonly number[]): void {
   db.prepare(

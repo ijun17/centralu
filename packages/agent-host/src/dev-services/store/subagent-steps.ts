@@ -133,7 +133,7 @@ export class SubagentStepRecords {
   }
 
   /**
-   * Deletes a live session's trashed steps for good, those moved to the trash at or before `upTo` (#418 review): the
+   * Deletes a live session's trashed steps for good, those moved to the trash at or before `upTo` (#418): the
    * `deletedAt` the window listed, so steps moved there after it read the trash are not deleted unseen. Its steps under
    * their cards and its conversation stay. False when it had none in the trash up to then. Cut short, the rest are
    * still in the trash, to be deleted again.

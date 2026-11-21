@@ -9,8 +9,8 @@ import { KILL_GRACE_MS, killTree, stopTree } from '../os/kill-tree.js'
  * (#428): the start, the output kept and sent, the exit, and the tree stopped.
  *
  * **A failure is said, never silent.** An empty black screen with no message leaves no way to know the cause: a start
- * that fails, node-pty not loading included, is written to the output, sent, and followed by an exit with no code. A
- * terminal whose node-pty did not load used to send nothing at all, and its screen waited for a shell that never came.
+ * that fails, node-pty not loading included, is written to the output, sent, and followed by an exit with no code, so a
+ * screen never waits for a shell that will not come.
  */
 
 /** Only the part of node-pty's surface we actually use (native types are never exported outward) */

@@ -163,10 +163,8 @@ export class TerminalService {
    * The app shuts down. **SIGKILL to the whole tree** — there is no process left to wait out a
    * grace period for.
    *
-   * This used to be `pty.kill()`: SIGHUP to one shell pid. A dev server launched from an
-   * interactive shell gets its own process group, and a server that handles HUP itself survived
-   * unchanged — the exact symptom of a port still held after the app was closed (measured
-   * 2026-09-07).
+   * Not `pty.kill()`, SIGHUP to one shell pid: a dev server launched from an interactive shell gets its own process
+   * group, and one that handles HUP itself survives it, holding its port after the app closed (measured 2026-09-07).
    */
   disposeAll(): void {
     for (const e of this.byId.values()) e.slot.kill()

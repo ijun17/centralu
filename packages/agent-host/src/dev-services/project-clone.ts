@@ -4,24 +4,12 @@ import { runGit } from './git-exec.js'
 import { rpcError } from '../rpc-error.js'
 
 /**
- * Cloning a repository into a new project's folder (#515). The folder is already made (empty) by
- * `makeProjectFolder`, and the address already passed `gitSourceError`; this runs the clone and says, in one sentence,
- * why it failed.
+ * Cloning a repository (#515) into a new project's folder `makeProjectFolder` made empty, from an address that passed
+ * `gitSourceError`.
  *
  * It runs on the machine the project lives on, with **that machine's git and its own saved sign-ins** (a credential
  * helper, an ssh key or agent), and never asks for one: there is nobody at a terminal to answer, and a dialog popping
- * up on a remote Windows desktop would hang the call. So:
- *
- *   GIT_TERMINAL_PROMPT=0         git does not ask for a user name or password on a terminal
- *   GIT_ASKPASS, SSH_ASKPASS ''   no helper program is asked either (git skips an empty one)
- *   SSH_ASKPASS_REQUIRE=never     nor does ssh
- *   GCM_INTERACTIVE=never         Git Credential Manager (Windows' default helper) uses what it has saved, no window
- *   GIT_SSH_COMMAND               `ssh -o BatchMode=yes`, unless the person set their own ssh command (`GIT_SSH_COMMAND`,
- *                                 `GIT_SSH` or `core.sshCommand`): then theirs, as they set it
- *
- * Submodules are not cloned (no `--recurse-submodules`): their addresses are the repository's to choose, past the one
- * the person approved. `ext::` and `file://` are refused for the same reason (by the address rule, and again here with
- * `protocol.<name>.allow=never`, which also covers a redirect).
+ * up on a remote Windows desktop would hang the call.
  *
  * The repository's own programs cannot run during a clone: it has no configuration or hooks yet, so this runs git as
  * plain git does (`allowRepoPrograms`), with the person's own configuration (an LFS filter, for one).
@@ -30,7 +18,16 @@ import { rpcError } from '../rpc-error.js'
 /** How long a clone may take before it is stopped and its folder removed */
 export const CLONE_TIMEOUT_MS = 10 * 60_000
 
-/** The settings that keep a clone from asking anyone anything — see above */
+/**
+ * The settings that keep a clone from asking anyone anything:
+ *
+ *   GIT_TERMINAL_PROMPT=0         git does not ask for a user name or password on a terminal
+ *   GIT_ASKPASS, SSH_ASKPASS ''   no helper program is asked either (git skips an empty one)
+ *   SSH_ASKPASS_REQUIRE=never     nor does ssh
+ *   GCM_INTERACTIVE=never         Git Credential Manager (Windows' default helper) uses what it has saved, no window
+ *   GIT_SSH_COMMAND               `ssh -o BatchMode=yes`, unless the person set their own ssh command (`GIT_SSH_COMMAND`,
+ *                                 `GIT_SSH` or `core.sshCommand`): then theirs, as they set it
+ */
 export function cloneEnv(env: NodeJS.ProcessEnv = process.env, ownSshCommand = false): Record<string, string> {
   const out: Record<string, string> = {
     GIT_TERMINAL_PROMPT: '0',
@@ -43,7 +40,10 @@ export function cloneEnv(env: NodeJS.ProcessEnv = process.env, ownSshCommand = f
   return out
 }
 
-/** The arguments of one clone: into `into`, which exists and is empty */
+/**
+ * No `--recurse-submodules`: their addresses are the repository's to choose, past the one the person approved. `ext::`
+ * and `file://` are refused for the same reason (by the address rule, and again here, which also covers a redirect).
+ */
 export function cloneArgs(url: string, into: string, branch?: string): string[] {
   return [
     '-c', 'protocol.ext.allow=never',

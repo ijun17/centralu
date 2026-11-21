@@ -16,13 +16,11 @@ import { isPtyModule, type Pty, type PtyModule } from './pty-slot.js'
  * host starts **before** it joins the job, which is in no job of the host's; Run commands, agents, git and app servers
  * are still started here, in the job.
  *
- * `brokerPtyModule` has the surface `terminal.ts` already takes from node-pty: `spawn(file, args, opts)`, and a
- * handle with `pid`, `onData`,
- * `onExit`, `write`, `resize`, `kill`. The pid arrives a moment after the spawn: a kill before it goes to the broker,
- * which ends the pty once it exists (kill-tree's Windows shot falls back to `kill()` when there is no pid).
+ * `brokerPtyModule` has node-pty's surface as `terminal.ts` takes it. The pid arrives a moment after the spawn: a kill
+ * before it goes to the broker, which ends the pty once it exists (kill-tree's Windows shot falls back to `kill()` when there is no pid).
  *
- * A broker that is gone (it could not start, or it ended) ends its terminals with the reason in their output, and the
- * terminals opened after it are started here, as before the broker, rather than not at all.
+ * A broker that is gone ends its terminals with the reason in their output; terminals opened after it start here, in
+ * the job, rather than not at all.
  */
 
 type BrokerEvent =
@@ -33,12 +31,8 @@ type BrokerEvent =
   | { ev: 'exit'; id: number; exitCode: number; signal: number | null }
 
 /**
- * Where the broker's script is: beside this file in the source tree, and beside `main.mjs` (which this file is bundled
- * into) in the bundle, where `scripts/bundle.mjs` copies it. The same relative name either way.
- */
-/**
- * One line of the broker's output as an event, or null for a line that is none: not JSON, not an object (`null` used to
- * throw out of the line handler), or an event whose fields are not what it names (a `data` event with no text).
+ * One line of the broker's output as an event, or null for a line that is none: not JSON, not an object (`null`
+ * included), or an event whose fields are not what it names (a `data` event with no text).
  */
 export function parseBrokerEvent(line: string): BrokerEvent | null {
   const v = tryParseJson(line)
@@ -56,6 +50,10 @@ export function parseBrokerEvent(line: string): BrokerEvent | null {
   return null
 }
 
+/**
+ * Beside this file in the source tree, and beside `main.mjs` (which this file is bundled into) in the bundle, where
+ * `scripts/bundle.mjs` copies it. The same relative name either way.
+ */
 export function brokerPath(): string {
   const path = fileURLToPath(new URL('./pty-broker.mjs', import.meta.url))
   if (!existsSync(path)) throw new Error(`terminal broker not found: ${path}`)
@@ -177,7 +175,7 @@ export class PtyBroker {
 
   /**
    * Opens an `https` address in the person's browser, started by the broker, so outside the host's work job: the browser
-   * outlives what asked for it and the host (review of #1685). False when the broker is gone (nothing is sent)
+   * outlives what asked for it and the host (#1685). False when the broker is gone (nothing is sent)
    */
   openUrl(url: string): boolean {
     if (this.gone || !/^https:\/\//i.test(url)) return false
@@ -229,7 +227,7 @@ export function openForPerson(broker: PtyBroker, url: string, inHost: (url: stri
 /**
  * What the adapters are given to open an address for the person (`createAdapters` in `main.ts`): through the broker
  * while there is one. Without it the sign-in falls back to the host's own opener, inside the job on Windows, which brought
- * back the browser that ended with a Stop (deep review of #1687, follow-up 3)
+ * back the browser that ended with a Stop (#1687)
  */
 export function personOpener(broker: PtyBroker | null): { openUrl?: (url: string) => void } {
   return broker ? { openUrl: (url) => openForPerson(broker, url) } : {}

@@ -6,20 +6,13 @@ import { safeJoin } from './fs.js'
 import { assertExistingPathSync, isMissingPathError } from './path-guard.js'
 
 /**
- * The eyes of the file tree (#34) — watches **only expanded directories.**
+ * The eyes of the file tree (#34): watches **only expanded directories**, not the repository recursively. The tree is
+ * lazy; a recursive watch would walk into node_modules too (Linux's inotify has no recursion: one watch per directory,
+ * exhausting max_user_watches, ENOSPC). The expanded set is the handful to a few dozen a screen shows, on every platform.
  *
- * The reason this does not recursively watch the whole repository is the whole point of this
- * design. The tree is lazy, so only a directory that has actually been opened is read — a
- * recursive watch would walk into node_modules too, undoing that laziness by hand (Linux's
- * inotify has no recursion, so it is one watch per directory — exhausting max_user_watches, the
- * famous ENOSPC). The expanded set is only the handful to a few dozen a screen actually shows, so
- * the numbers stay the same across all three platforms.
- *
- * Events are gathered per directory and emitted **once per interval.** Measured: writing 500
- * files took 36ms and fired 501 events — reading again on every event would be 500 listing
- * requests. A debounce that only ever defers would starve the screen for the whole length of a
- * burst like npm install, which can run tens of seconds. Flushing on an interval keeps up at up
- * to 3 to 4 times a second even during a burst.
+ * Events are gathered per directory and emitted **once per interval.** Measured: writing 500 files took 36ms and fired
+ * 501 events, so reading on every event would be 500 listing requests. A debounce that only ever defers would starve the
+ * screen for a whole burst like npm install (tens of seconds); an interval keeps up 3 to 4 times a second during one.
  */
 
 /**
@@ -48,9 +41,9 @@ export const LOCAL_HOLDER = 'local'
 export class DirWatchers {
   private byProject = new Map<string, ProjectWatch>()
   /**
-   * What each holder wants watched, per project (#842 item 6). The watchers are the union. A window's set used to be the
-   * project's whole set, so two windows on one project took turns overwriting each other's: a folder one had open went
-   * unwatched the moment the other folded or opened anything.
+   * What each holder wants watched, per project (#842). The watchers are the union, not one window's set: two windows on
+   * one project would overwrite each other's, and a folder one had open would go unwatched when the other folded or
+   * opened anything.
    */
   private wants = new Map<string, { root: string; by: Map<WatchHolder, readonly string[]> }>()
   private pending = new Map<string, Set<string>>()

@@ -200,8 +200,8 @@ ${shPath(process.execPath)} ${shPath(program)}
 })
 
 /*
- * #982 review: SIGKILL alone left `.git/index.lock` behind (git removes it on SIGTERM), so the next commit or stage
- * was refused. A commit with `-a` holds the lock while its pre-commit hook runs. Windows has no SIGTERM: `taskkill /F`
+ * SIGKILL alone leaves `.git/index.lock` behind (git removes it on SIGTERM), so the next commit or stage would be
+ * refused. A commit with `-a` holds the lock while its pre-commit hook runs. Windows has no SIGTERM: `taskkill /F`
  * leaves the lock as SIGKILL does, so the lock is checked off Windows only.
  */
 describe('a git that is stopped takes its lock away (#982)', () => {
@@ -280,7 +280,7 @@ describe('a git that is stopped takes its lock away (#982)', () => {
     endedFirst(await commitStopped(() => stopGitChildren()))
   })
 
-  // #2142 re-check: one git at a time read the process table twice each on Windows, a PowerShell per reading
+  // Stopping goes through one `stopAll`, not one stop per git: each stop read the process table twice on Windows, a PowerShell per reading (#2142)
   it('when the host stops: every git still running is stopped in one go, and each ends', { timeout: 60_000 * SLOW }, async () => {
     const stopAll = vi.spyOn(realOs().processes, 'stopAll')
     try {

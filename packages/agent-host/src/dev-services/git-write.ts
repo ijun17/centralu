@@ -26,15 +26,10 @@ export type GitWriteResult = { ok: boolean; message?: string; cancelled?: true }
  * Checks out a branch. A dirty state does **not block** this — the result is shown first
  * (product philosophy: show, do not block). With dryRun, this only reports what would conflict.
  *
- * `switch` is used rather than `checkout` (#175). `checkout origin/release` detaches HEAD with
- * no error, so a "switched" toast was followed by commits piling up on no branch at all, and
- * `checkout <name>` turns into a command that discards a file's changes if no branch of that
- * name exists but a file of the same name does. `switch` only accepts a branch, and never
- * detaches HEAD without `--detach`. Choosing a remote branch creates a local branch tracking it
- * and switches to that (`--track`) — if a local branch of the same name already exists, git
- * refuses, and that raw message is passed straight through to the person. The
- * `--end-of-options` before the name keeps something like `-f` from being read as an option and
- * discarding changes.
+ * `switch`, not `checkout` (#175): `checkout origin/release` detaches HEAD with no error, and `checkout <name>`
+ * discards a file's changes when a file, not a branch, has that name. A remote branch is switched to as a local
+ * branch tracking it (`--track`); if a local branch of that name exists, git's refusal reaches the person as is.
+ * `--end-of-options` keeps a name like `-f` from being read as an option.
  */
 export async function gitCheckout(
   cwd: string,
@@ -95,10 +90,8 @@ function failed(e: unknown): GitWriteResult {
 /**
  * Shows git's raw error message as-is — summarizing it leaves the user unable to decide what to do next.
  *
- * Falls back to stdout when stderr is empty (#160). `git commit` writes its reason
- * ("nothing to commit") to stdout when there is nothing to commit — so the toast used to show
- * only `Command failed: git commit -m …`. This happens exactly when an agent has already
- * committed with Bash and the person then clicks Commit in the panel.
+ * Falls back to stdout when stderr is empty (#160): `git commit` writes "nothing to commit" to stdout, which is the
+ * case when an agent has already committed with Bash and the person then clicks Commit in the panel.
  */
 function cleanGitError(e: unknown): string {
   const err = execFailure(e)

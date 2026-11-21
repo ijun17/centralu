@@ -128,8 +128,8 @@ describe.skipIf(process.platform !== 'win32')('a link leading to a share, on the
   /*
    * CI's Windows runner hands out its temp folder by an 8.3 short name (`C:\Users\RUNNER~1\…`), and a tool writes a
    * link's target in that spelling. The walk refused every name its folder does not list, so every such link was
-   * refused as "cannot be checked" (review of #1072). A short name is now matched to the entry it names; a short name
-   * of a link to a share is still that link, refused unread (the case above).
+   * refused as "cannot be checked". A short name is matched to the entry it names (#1072); a short name of a link to
+   * a share is still that link, refused unread (the case above).
    */
   itSymlink('follows links whose targets, and a project root, are spelled with short names', async () => {
     const long = join(top, 'a-long-folder-name-for-short-names')
@@ -156,8 +156,8 @@ describe.skipIf(process.platform !== 'win32')('a link leading to a share, on the
   /*
    * A project that is itself on a share (opened from one on purpose, a mapped drive whose real path is the share,
    * `\\wsl.localhost\…`): its links stay on that share and are followed as before, pnpm's junctions among them. Only a
-   * link leading to another host or another share is refused (review of #1072: every link there was refused, since the
-   * walk took drive paths only).
+   * link leading to another host or another share is refused; the walk must not refuse every link there because it
+   * took drive paths only (#1072).
    */
   itSymlink('on a project opened from a share, follows links that stay on it and refuses one to another host or share', async () => {
     const onShare = share(root)

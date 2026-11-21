@@ -25,23 +25,12 @@ import { canonicalKey, canonicalPath, isInside } from './path-guard.js'
 export type Worktree = { path: string; branch: string; base?: string }
 
 /**
- * Creates a new worktree and branch. The branch forks **from the current HEAD.**
+ * Creates one worktree and its branch, forked **from `from`** (#76), else from the root's HEAD, whose meaning changes
+ * the moment a person switches branches in the root.
  *
- * A failure here is never swallowed: if the worktree could not be created but the session went
- * on to run quietly in the original directory, the user believes it is isolated — the worst
- * possible outcome for this feature.
- */
-/**
- * Creates one worktree.
- *
- * Given `from`, it forks **from that trunk** (#76). Without it, it falls back to forking from
- * the root's HEAD as before, which is a baseline whose meaning silently changes the moment a
- * person switches branches in the root — with the manager holding the trunk, the answer to
- * "where does this fork from" is pinned to one value.
- *
- * Given a trunk that does not exist, git rejects it. Why this is not checked in advance and
- * quietly falls back to HEAD: a worktree that forked from somewhere other than its named trunk
- * comes back later as "why isn't this being detected as merged."
+ * A failure is never swallowed: a session that ran quietly in the original directory would be believed isolated. A
+ * trunk that does not exist is rejected by git rather than replaced by HEAD: a worktree forked from somewhere other
+ * than its named trunk is never detected as merged.
  */
 export async function gitWorktreeAdd(
   repoCwd: string,
@@ -52,15 +41,8 @@ export async function gitWorktreeAdd(
   /** The branch is there already (#1662): the worktree checks it out as it is, and `from` is not read */
   existing = false,
 ): Promise<Worktree> {
-  /*
-   * **Only in a trusted project (#407).** A checkout writes every tracked file through the
-   * repository's smudge filters and then fires `post-checkout` (and `reference-transaction` for
-   * the new branch). Turning those off is not a safe middle: the worktree would hold files the
-   * filters never converted (an LFS pointer, a git-crypt blob), which the session then edits and
-   * commits back. `--no-checkout` avoids the filters but leaves an empty folder the agent would
-   * have to fill by running git itself. Refusing leaves nothing half-made; the manager says why
-   * before it gets here.
-   */
+  // **Only in a trusted project:** why neither turning the filters off nor `--no-checkout` is a safe middle is in
+  // docs/security-boundaries/project-trust.md "Git before trust (#407)". The manager says why before it gets here.
   if (trust.trusted !== true) {
     throw rpcError('A worktree can only be created in a trusted project')
   }
@@ -94,21 +76,18 @@ async function configValue(cwd: string, key: string): Promise<string> {
 }
 
 /**
- * The commit a new worktree for new work forks from (#1484): **the trunk as the remote has it**, not whatever the checkout
- * has checked out. Forking from the checkout's HEAD gave a session a base 279 commits behind main whenever the checkout sat
- * on another branch, and the work built on it (a store migration number main had taken) was lost.
+ * The commit a new worktree for new work forks from (#1484): **the trunk as the remote has it**, not the checkout's
+ * HEAD, which on another branch gave a session a base 279 commits behind main, and work built on it (a store migration
+ * number main had taken) was lost.
  *
- * Order, for the trunk the project holds (`trunk`, null when none is set: then the remote's default branch, else a local
- * `main` or `master`):
+ * Order, for `trunk` (null: the remote's default branch, else a local `main` or `master`):
  *   1. fetch the trunk from its remote, bounded (`timeoutMs`), and fork from the remote-tracking ref it updated;
- *   2. when there is no remote, the fetch failed or timed out, or the project is not trusted (a fetch reads the repository's
- *      network settings, which name programs: `core.sshCommand`, a credential helper, `core.gitProxy`): the newer of the
- *      local trunk and the remote-tracking ref last fetched, and the note says why and how far behind it may be;
+ *   2. no remote, a failed fetch, or an untrusted project (a fetch runs the repository's network settings): the newer
+ *      of the local trunk and the remote-tracking ref last fetched, with a note saying why and how far behind;
  *   3. no trunk found at all: the checkout's HEAD, said as such. Nothing here throws for the fetch.
  *
- * It returns a commit, not a ref: `git worktree add -b <branch> <path> origin/main` would make the new branch track
- * `origin/main`, and the recorded base for merge detection (`baseSha`) is then exactly what the branch started from.
- * The fetch gives a prompt no one can answer nothing to wait on (`cloneEnv`), as a clone does.
+ * A commit, not a ref: `git worktree add -b <branch> <path> origin/main` would make the new branch track `origin/main`;
+ * and `baseSha` is then exactly what the branch started from.
  */
 export async function resolveForkBase(
   repoCwd: string,
@@ -251,26 +230,16 @@ export async function gitRemoteTips(repoCwd: string, remote: string, branch: str
  * Has this branch's work **entirely landed in the trunk** (#69)?
  *
  * The sum of two checks:
- *   1. Has the branch tip moved from its creation point (base)? If not, that is "no work done
- *      yet," not "merged." A freshly created branch is an ancestor of the trunk, so is-ancestor
- *      alone would read it as merged the instant it is created (base is recorded to avoid
- *      exactly this trap).
+ *   1. Has the branch tip moved from its base? If not, that is "no work done yet": a fresh branch is an ancestor of
+ *      the trunk, so is-ancestor alone would read it as merged the instant it is created.
  *   2. Is the branch an ancestor of the trunk (`merge-base --is-ancestor`)? This catches an
  *      ordinary merge and a fast-forward merge.
  *
- * **The caller says what the trunk is** (#76). This used to always be the root's HEAD, which
- * was a baseline whose meaning silently changed the instant a person switched branches in the
- * root: a merge into main would go undetected if the root happened to be on a different branch,
- * and conversely, if the root's HEAD happened to contain the branch, a branch that was never
- * merged would read as merged. With the manager holding the trunk (worktreeManager.baseBranch),
- * the answer to this question is pinned to one value. With no trunk recorded, this falls back to
- * HEAD — the case for worktrees that existed before a manager did.
+ * **The caller says what the trunk is** (#76, worktreeManager.baseBranch): the root's HEAD changes meaning when a
+ * person switches branches there. `HEAD` is the default only for worktrees recorded with no trunk.
  *
- * **What this cannot catch (measured, 2026-08-29):** a squash merge cannot be detected locally —
- * is-ancestor says no, `branch --merged` says no, even `git cherry` reported it as unmerged.
- * A rebase merge is missed too, once the sha changes. Such a branch is left with no automatic
- * marker, and a person can always delete it by hand (the delete conversation) — the cost of
- * missing it is one badge, not data.
+ * **Not caught (measured, 2026-08-29):** a squash merge (is-ancestor, `branch --merged` and `git cherry` all say
+ * unmerged), and a rebase merge once the sha changes. The cost is one badge, not data (`gitBranchPr` sees them).
  */
 export async function gitBranchMerged(
   projectCwd: string,
@@ -291,10 +260,8 @@ export async function gitBranchMerged(
 /**
  * Whether a name can be a branch (#69) — the judgment is left to git itself.
  *
- * If ref name rules (the lock suffix, consecutive dots, control characters, `@{`…) were
- * reimplemented here, they would go stale the moment git changed its own rules.
- * `check-ref-format --branch` is the source of truth for that judgment, and its exit code is
- * the answer. This command needs no repository, so cwd can be anywhere.
+ * Reimplemented ref name rules would go stale when git changes its own. `check-ref-format --branch` needs no
+ * repository, so cwd can be anywhere.
  */
 export async function gitValidBranchName(name: string): Promise<boolean> {
   try {
@@ -306,23 +273,18 @@ export async function gitValidBranchName(name: string): Promise<boolean> {
 }
 
 /**
- * Removes a worktree for good, uncommitted changes and all: its folder, then git's entry for it. The caller has saved
- * the work in it or has the person's decision to lose it. A locked worktree stays unless `unlocked` (git's second
- * `--force`).
+ * Removes a worktree for good, uncommitted changes and all: its folder, then git's entry for it. The caller has saved the
+ * work in it or has the person's decision to lose it. A locked worktree stays unless `unlocked` (git's second `--force`).
  *
- * **The host removes the folder, not git (#1655, #1560).** On Windows git deleted through a junction what the junction
- * led to (a pnpm-style link out of the worktree; one leading to the project took the project and its `.git`), and
- * stopped at a path past 260 characters once it had already dropped its entry and the worktree's `.git` file, leaving
- * a folder that nothing would clean (measured, git 2.47). `removeData` never follows a link and takes long paths. git
- * then drops its entry for the folder that is gone, named as git lists it (a Windows short name it does not match).
+ * **The host removes the folder, not git (#1655, #1560):** on Windows git deletes through a junction what it leads to
+ * (one to the project takes the project and its `.git`), and stops at a path past 260 characters after dropping its
+ * entry, leaving a folder nothing cleans (measured, git 2.47). git then drops its entry, named as git lists it (it does not match a Windows short name).
  *
- * Never a link (a symlink, a junction): git would take what it leads to, another worktree uncommitted work and all.
- * Never a folder that holds a checkout this repository lists (the project, another worktree). A folder git no longer
- * lists is what such a removal left part way only when it is a session's folder in `worktreeRoot`
- * (`<root>/<project>/<session>`, never a project's folder of them) and has no `.git` of its own; anything else
- * unlisted stays. A folder that cannot all be removed (a file held open) throws with what was left,
- * and git's entry stays so the removal can be tried again. `leftoverOnly` refuses a folder git lists: only what a removal
- * left part way is taken, by git's own list read here, so a list that cannot be read removes nothing.
+ * Never a link (git would take what it leads to), nor a folder holding a checkout this repository lists. An unlisted
+ * folder is taken as a removal's leftover only when it is a session's folder in `worktreeRoot`
+ * (`<root>/<project>/<session>`) with no `.git` of its own. A folder that cannot all be removed (a file held open)
+ * throws, and git's entry stays for a retry. `leftoverOnly` refuses a folder git lists, so a list that cannot be read
+ * removes nothing.
  */
 export async function gitWorktreeRemove(
   repoCwd: string,
@@ -386,14 +348,9 @@ export async function gitBranchDelete(repoCwd: string, branch: string, trust: Gi
 }
 
 /**
- * Whether uncommitted changes remain — used to ask whether removal is safe.
- *
- * This guards a forced removal, so work inside a submodule has to count. A trusted project's
- * status descends into submodules as plain git does. Before trust, status does not
- * (`--ignore-submodules=all`, `git-exec.ts`: a submodule's own config could name a filter that
- * was not turned off), so any submodule at all counts as a change: removal then asks first
- * rather than guessing. A worktree is only created in a trusted project, so this is the case of
- * trust taken away afterwards.
+ * Whether uncommitted changes remain: this guards a forced removal, so work inside a submodule counts. Before trust
+ * status skips submodules (`--ignore-submodules=all`, `git-exec.ts`), so any submodule at all counts as a change and
+ * removal asks first (the case of trust taken away after the worktree was made).
  */
 export async function gitWorktreeDirty(
   path: string,
@@ -401,7 +358,7 @@ export async function gitWorktreeDirty(
   limits: SummaryLimits = {},
 ): Promise<{ dirty: boolean; changedFiles: number; more?: true; unknown?: true }> {
   const summary = await gitSummary(path, trust, limits)
-  // Not known to be clean is not clean: removal asks first (#850 review). A folder the system denied is not known either
+  // Not known to be clean is not clean: removal asks first. A folder the system denied is not known either
   if (summary.unknown || summary.denied) return { dirty: true, changedFiles: 0, unknown: true }
   let changedFiles = summary.changedFiles
   if (trust.trusted !== true && summary.isRepo) {
@@ -416,8 +373,8 @@ export async function gitWorktreeDirty(
 export type WorktreeEntry = { path: string; branch: string | null; main: boolean; locked: boolean }
 
 /**
- * Every worktree git lists for this repository, detached ones too. Used to filter out one a person deleted from Finder
- * (git still lists it too — that state is what `prune` is for).
+ * Every worktree git lists for this repository, detached ones too. One a person deleted from Finder is still listed
+ * until `prune`, so callers filter it out.
  */
 export async function gitWorktreeList(repoCwd: string): Promise<WorktreeEntry[]> {
   if (!(await isRepo(repoCwd))) return []
