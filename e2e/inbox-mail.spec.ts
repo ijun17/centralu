@@ -932,6 +932,46 @@ test('A mail line in a conversation folds open to the messages it delivered, rea
   await expect(page.getByTestId('mail-message-1')).toContainText('The draft is ready.')
 })
 
+test('A button inside a fold that is opening stays where it ends when focus brings it into view, so a press there lands on it (#2407)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const sid = await newSession(page, 'alpha')
+  const thread = await seed(page, { subject: 'Release notes', from: { ...PARSER, name: 'Boss' }, body: 'The draft is ready.', kind: 'note' })
+  const message = await page.evaluate((t: string) => (window as any).__mock.mockMail.threads.get(t).messages[0].id as string, thread)
+  await page.evaluate(
+    ([s, t, m]) => (window as any).__mock.emit({ type: 'notice', sessionId: s, level: 'info', from: 'Centralu', label: 'mail', text: '1 message from a session of your project', mail: [{ threadId: t, messageId: m }] }),
+    [sid, thread, message] as const,
+  )
+  // Read once and folded again, so the next opening shows the messages from its first frame
+  const toggle = page.locator('[data-mark="mail"]').getByTestId('mark-toggle')
+  await toggle.click()
+  await expect(page.getByTestId('mark-folded')).toHaveAttribute('data-fold', 'open')
+  await toggle.click()
+  await expect(page.getByTestId('mark-folded')).toHaveCount(0)
+
+  /*
+   * Opened and brought into view before any frame is drawn (React commits a click in a microtask): by focus, as Chromium
+   * scrolls for it, and by scrolling, as a pointer's tool does (WebKit's focus does not). A box that scrolls moves it up.
+   */
+  const during = await toggle.evaluate(async (el) => {
+    ;(el as HTMLElement).click()
+    const find = () => document.querySelector<HTMLElement>('[data-testid="mail-line-inbox"]')
+    for (let i = 0; i < 10 && !find(); i++) await Promise.resolve()
+    const button = find()
+    if (!button) return null
+    button.focus()
+    button.scrollIntoView({ block: 'nearest' })
+    const r = button.getBoundingClientRect()
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2, fold: document.querySelector('[data-testid="mark-folded"]')?.getAttribute('data-fold') }
+  })
+  expect(during?.fold).toBe('opening')
+  if (!during) return
+  await expect(page.getByTestId('mark-folded')).toHaveAttribute('data-fold', 'open')
+  const after = await page.getByTestId('mail-line-inbox').evaluate((b) => b.getBoundingClientRect().y + b.getBoundingClientRect().height / 2)
+  expect(Math.abs(after - during.y)).toBeLessThan(1)
+  await page.mouse.click(during.x, during.y)
+  await expect(page.getByTestId('mail-thread')).toBeVisible()
+})
+
 test('A mail line cuts a long body at six lines inside the bubble: the seventh line does not show in the padding under the sixth', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   const sid = await newSession(page, 'alpha')
