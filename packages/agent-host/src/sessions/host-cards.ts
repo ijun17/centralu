@@ -60,7 +60,7 @@ export type HostCardsHost = {
 export class HostCards {
   constructor(private readonly host: HostCardsHost) {}
 
-  /** requestId -> question; raised once the adapter's card in the same slot closes (`raiseHostAsks`) */
+  /** requestId -> question; raised once the adapter's card in the same slot closes (`raiseHostAsks`), answered here and never by the adapter */
   readonly hostAsks = new Map<string, HostAsk>()
 
   /**

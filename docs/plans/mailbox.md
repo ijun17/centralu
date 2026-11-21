@@ -1068,7 +1068,7 @@ All of §7.1 to §7.4 is one module, `mail/reach.ts` (M2), so each rule has one 
 |---|---|
 | A session, the person or Centralu → a session here | allowed. Refused `gone` (in the trash or deleted), `no_mailbox` (`relations.ts:66-70`, moved unchanged), or by a guard |
 | A session → the person | allowed |
-| A session → the orchestrator | allowed. Refused `orchestrator_asks` while its tool cannot put a request turn's steps to the person (`relations.ts:84-87`, moved unchanged) |
+| A session → the orchestrator | allowed, on whatever tool the orchestrator runs (#2411) |
 | An app → a session that called it | as today (`appCalledBy`). Anything else from an app waits for the apps slice (§13) |
 | Anyone → an app | not yet, as today |
 | Anyone → `centralu` | refused |
@@ -1229,7 +1229,7 @@ Since D32 no row of this table holds, defers or refuses mail for how much of it 
   the same asker included, it shows the header and "its words are shown in the turn it starts". Marking it done there is
   refused.
 - **Requests are reminded only when they were sent with `needsReply`.** A reminder to the orchestrator names the
-  requests of one asker and carries `facts.asker`, so its turn is that asker's request turn, under the same cards.
+  requests of one asker and carries `facts.asker`, so its turn is that asker's request turn.
 - **A request turn's end** reports to the asker as today (`askedReportBody`, re-worded without "thread", S12), and
   settles `reported` every unsettled row of that asker's requests delivered in that turn (`turn_seq` = the turn). The
   orchestrator that acted and sent nothing is then not reminded, and the asker is not told "no answer" after S12

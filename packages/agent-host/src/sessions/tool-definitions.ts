@@ -509,7 +509,7 @@ export const CENTRALU_TOOLS = [
        */
       tool: ToolName.optional().describe("If omitted, the project's default tool."),
       name: z.string().optional().describe('Session name. If given, the automatic name does not override it.'),
-      preset: PermissionPreset.optional().describe("Omitted: auto if trusted, else normal; not above yours or the asker's. Untrusted: normal at most."),
+      preset: PermissionPreset.optional().describe("Omitted: auto if trusted, else normal; not above yours. Untrusted: normal at most."),
       firstMessage: z.string().optional().describe('The first instruction to send as soon as it is created.'),
       // #1233: work handed out is work whose end is heard, as start_agent's is; false opts out
       reportBack: z.boolean().optional().describe('With firstMessage: false if you do not need to hear when that first turn ends.'),

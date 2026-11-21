@@ -504,9 +504,13 @@ ${quoted(escapeFrameTags(answer))}`
     // Centralu's words on the person's word, from the check at send (docs/plans/cited-requests.md §3): never the session's
     const cites = i.message.facts.cites
     // The judgement on a line of its own: a request whose words are withheld shows the first line only
-    if (!cites || party?.kind !== 'session') return `${asked} It cites nothing the person wrote: these are the session's words only.\n${JUDGE_REQUEST}`
+    const judged = (citation: string, quote = '') => `${asked} ${citation}\n${JUDGE_REQUEST}${quote}`
+    if (!cites || party?.kind !== 'session') return judged("It cites nothing the person wrote: these are the session's words only.")
     const said = this.host.personMessage(party.sessionId, cites.seq)
-    return `${asked} It cites the person's message ${cites.seq} of that session, verified by Centralu: typed ${this.age(cites.at)} ago. Judge from it, and from around it (read_session(sessionId="${party.sessionId}", around=${cites.seq})), what the person wants.\n${JUDGE_REQUEST}${said === null ? '' : `\nThe person's message ${cites.seq}:\n${quoted(escapeFrameTags(said))}\nThe request:`}`
+    return judged(
+      `It cites the person's message ${cites.seq} of that session, verified by Centralu: typed ${this.age(cites.at)} ago. Judge from it, and from around it (read_session(sessionId="${party.sessionId}", around=${cites.seq})), what the person wants.`,
+      said === null ? '' : `\nThe person's message ${cites.seq}:\n${quoted(escapeFrameTags(said))}\nThe request:`,
+    )
   }
 
   /** Who sent a message, in Centralu's words: the relation and the name, once (Centralu and the person have no name to add) */

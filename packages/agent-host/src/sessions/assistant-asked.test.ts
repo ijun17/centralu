@@ -131,6 +131,7 @@ describe('a session’s request wakes the Assistant with host fields, and its wo
   })
 
   it('whatever tool the Assistant runs on: one that cannot hook each step of its CLI takes requests too (#2411)', async () => {
+    // A tool with no hook before each step of its CLI, as an older host reports Codex and the ACP tools
     w.adapter.capabilities.gatesSteps = false
     const asker = await sessionIn(await project('Acme', true))
     const r = await askAssistant(asker, 'please look at CI')

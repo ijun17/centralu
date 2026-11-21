@@ -1,6 +1,6 @@
 /**
  * Whose request the Assistant's open turn is, read from its request rows (docs/plans/turn-owned-by-no-one.md §4.2, C11), over the host's
- * wiring: where a request's words are shown and whom the turn's end reports to both rest on it.
+ * wiring (`MailTurns.current().asker`, from `MessageService.requestsIn`), and where a request's words are shown.
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { at, hostWorld } from './host-mail.test-helpers.js'

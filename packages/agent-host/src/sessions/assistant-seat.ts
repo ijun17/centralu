@@ -29,7 +29,7 @@ import { contextAt, labelOf, lastActiveOf, previewOf, timeOf } from './transcrip
  * the seat's own permissions (#838), and never above `normal` in an untrusted project, named or not. A default above
  * the cap is held to it; a preset named above it is refused (null).
  */
-export function createdPreset(seat: PermissionPreset, project: { trusted: boolean }, named?: PermissionPreset): PermissionPreset | null {
+function createdPreset(seat: PermissionPreset, project: { trusted: boolean }, named?: PermissionPreset): PermissionPreset | null {
   const cap = project.trusted ? seat : lowestPreset('normal', seat)
   if (named !== undefined) return presetWithin(named, cap) ? named : null
   return lowestPreset(defaultPresetFor(project), cap)

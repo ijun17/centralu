@@ -119,8 +119,7 @@ export function claudeQueryOptions({ sessionId, opts, executablePath, servers, p
     env: hostAccessEnv(opts.hostAccess),
     cwd: opts.cwd,
     model: opts.model,
-    // The person's installed `claude`, in dev too: bundling the host breaks the SDK's lookup of the native CLI it bundles
-    // ("Native CLI binary for darwin-arm64 not found" in the packaged app)
+    // The person's installed `claude`, in dev too: a bundled host breaks the SDK's lookup ("Native CLI binary … not found")
     pathToClaudeCodeExecutable: executablePath,
     /*
      * Under the keeper (#280 step 2) the CLI is spawned there, or a running one adopted. Measured (CLI 2.1.282, SDK
