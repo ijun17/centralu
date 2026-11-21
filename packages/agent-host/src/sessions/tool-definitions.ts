@@ -918,7 +918,7 @@ export type AppToolName = (typeof APP_TOOLS)[number]['name']
 
 /**
  * The ceiling for APP_TOOLS, counted like READER_BUDGET_CHARS; it rides in every profile (#2231), and each profile's ceiling
- * rises by it: the per-app tools it replaces rode outside every ceiling. Measured in docs/tool-cost.md §16
+ * rises by it: the per-app tools it replaces rode outside every ceiling. Measured in docs/tool-cost.md §16 and §17
  */
 export const APP_BUDGET_CHARS = 500
 
