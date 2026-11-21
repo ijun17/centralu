@@ -348,7 +348,7 @@ export class RemoteClient {
 
   /**
    * A call from the remote host (#550): answered only through the handler the link gave, on the socket it came in on.
-   * Without a handler it is dropped, as every build before the reverse direction did.
+   * Without a handler it is dropped.
    */
   private onCall(id: string, method: string, params: unknown): void {
     const handle = this.on.call
