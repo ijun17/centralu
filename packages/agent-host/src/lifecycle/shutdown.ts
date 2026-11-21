@@ -33,24 +33,16 @@ export type HostParts = {
 }
 
 /**
- * The shutdown, as data: the reverse of the start (store, server, services), with two departures
- * the lessons ask for, and the git calls still running ended (#982). Every ending stops what the
- * host started: agents, terminals and commands end with it, whichever way it leaves (#1895).
- *
- * - **Terminals and commands come first, synchronously** (HO8). A pty child runs in
- *   a session of its own, so a supervisor's group SIGKILL after its 3 s budget cannot reach it: if
- *   these did not run before the first await, a dev server was left orphaned. Up to this step they
- *   came after awaiting the ssh links and the sessions.
- * - **Every stop of a process tree ends before the host does.** The terminals and commands are let go of first, in the
- *   same tick, and their Windows stops (a table read, then the tree) are waited for here, with a bound, after the rest.
- * - **The server closes after every service** that may still tell a screen something (a session's
- *   last state), and only then the store, whose close folds its WAL.
- *
- * ssh links and app processes end with the host too (#280 decision 2): a next host opens its own
- * links and starts apps again on demand.
- *
- * A stop for an update writes down, for the host that starts next, the open app views and what it ends: first, before
- * anything below closes them. Both steps are always in the plan; the host's own parts write only when the stop is an update's.
+ * The shutdown, as data: the reverse of the start (store, server, services), with two departures the lessons ask for, and the
+ * git calls still running ended. Every ending stops what the host started: agents, terminals and commands end with it,
+ * whichever way it leaves. **Terminals and commands come first, synchronously** (HO8): a pty child runs in a session of its
+ * own, so a supervisor's group SIGKILL after its 3 s budget cannot reach it, and a dev server was left orphaned when these ran
+ * after an await. **Every stop of a process tree ends before the host does**: they are let go of in the same tick and their
+ * Windows stops (a table read, then the tree) are waited for here, with a bound, after the rest. **The server closes after
+ * every service** that may still tell a screen something, and only then the store, whose close folds its WAL. ssh links and app
+ * processes end with the host too; a next host opens its own links and starts apps on demand. A stop for an update writes down,
+ * for the next host, the open app views and what it ends, first, before anything below closes them: both steps are always in
+ * the plan and write only when the stop is an update's.
  */
 export function stopPlan(p: HostParts): Step[] {
   const steps: Step[] = []
@@ -73,10 +65,10 @@ export function stopPlan(p: HostParts): Step[] {
     { name: 'the activity report', run: () => p.stopActivity() },
   )
   /*
-   * Git runs in a process group of its own (git-exec.ts), so nothing
-   * else ends a commit or push still waiting on a hook or a sign-in, and it would keep the repository's locks for up
-   * to its bound. A stop that waited for the host to be idle waited for the RPCs that started them (drain.ts); what still
-   * runs then is ended here. Before the sessions: their cleanup runs git of its own, and awaits it.
+   * Git runs in a process group of its own (git-exec.ts), so nothing else ends a commit or push still waiting on a hook or a
+   * sign-in, and it would keep the repository's locks for up to its bound. A stop that waited for idle waited for the RPCs that
+   * started them (drain.ts); what still runs then is ended here, before the sessions: their cleanup runs git of its own and
+   * awaits it
    */
   steps.push({ name: 'the git calls still running', run: () => p.git.stopAll() })
   steps.push(
@@ -101,15 +93,12 @@ export function stopPlan(p: HostParts): Step[] {
 }
 
 /**
- * Leaving, once (HO8). Whatever asks first (a signal, a crash, the parent going away, `host.stop`,
- * the keeper's or the window's `stop` line) runs the ending; a later request runs no second one. The services stop at most once, and a
- * leave ends with its log line and exit 0, also when a step failed.
- *
- * **Bounded.** A step that never settles (a peer, a child that will not die) would hold the process
- * forever where nothing supervises it (`centralu serve`, `pnpm host`): after `boundMs` the host says
- * which ending ran out of time and exits 1. The bound is past the supervisor's own 3 s budget, so
- * under the keeper or the window their stop comes first and this never fires. `force` is the same
- * exit at once, for a person who asks again (a second Ctrl+C, `endings.ts`).
+ * Leaving, once (HO8). Whatever asks first (a signal, a crash, the parent going away, `host.stop`, the keeper's or the window's
+ * `stop` line) runs the ending; a later request runs no second one. The services stop at most once, and a leave ends with its
+ * log line and exit 0, also when a step failed. **Bounded:** a step that never settles (a peer, a child that will not die)
+ * would hold the process forever where nothing supervises it (`centralu serve`, `pnpm host`), so after `boundMs` the host says
+ * which ending ran out of time and exits 1. The bound is past the supervisor's own 3 s budget, so under the keeper or the
+ * window their stop comes first. `force` is the same exit at once, for a person who asks again (a second Ctrl+C, `endings.ts`).
  */
 export class Shutdown {
   private began = false
@@ -127,9 +116,9 @@ export class Shutdown {
       boundMs?: number
       setTimer?: (f: () => void, ms: number) => void
       /**
-       * Waited for before a leave stops anything, whichever way it began (a signal, the parent going, a stop asked for): the host
-       * asks the system whether it is ending, and writes the answer before its agents go (#1397, system-end.ts). It is the caller's
-       * to keep short; the bound below counts it. `undefined`: nothing to wait for, and the leave begins in this call (HO8)
+       * Waited for before a leave stops anything, whichever way it began: the host asks the system whether it is ending and
+       * writes the answer before its agents go (`system-end.ts`). It is the caller's to keep short; the bound below counts it.
+       * `undefined`: nothing to wait for, and the leave begins in this call (HO8)
        */
       beforeLeave?: () => Promise<void> | undefined
     },

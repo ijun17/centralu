@@ -1,11 +1,9 @@
 import { writeSync } from 'node:fs'
 
 /**
- * The host's start, as data (docs/plans/runtime-unification.md step 3).
- *
- * Every row is a step `main.ts` takes, in this order, and `StartSequence` refuses to let it take
- * them in any other: a step entered out of turn, or skipped, throws at once, so a change that
- * moves one breaks every test that starts a host instead of shipping. What each position guards:
+ * The host's start, as data (docs/plans/runtime-unification.md step 3): every row is a step `main.ts` takes, in this order, and
+ * `StartSequence` throws at once on a step entered out of turn or skipped, so a change that moves one breaks every test that
+ * starts a host instead of shipping. What each position guards:
  */
 export const START_ORDER = [
   // ST16: the launcher's variables leave the environment before anything can be spawned
@@ -72,14 +70,11 @@ const realIo: RefusalIo = {
 }
 
 /**
- * A final refusal (lessons HO2): the host cannot start, and trying again gets the same answer
- * (another host owns the folder, a store a newer Centralu wrote, ownership that cannot be read).
- *
- * Said on stderr (host.log) **and** on stdout, synchronously, then exit 1 with no ready line. The
- * supervisor reads only stdout: speaking on stderr alone left the sentence in host.log, and the
- * supervisor retried six times and showed "exited (code 1)" (#184). Synchronously, because stdout
- * to a pipe is asynchronous on macOS and the exit follows at once. The supervisor stops retrying on
- * "already using this data" and "written by a newer Centralu": those phrases are a contract.
+ * A final refusal (lessons HO2): the host cannot start and trying again gets the same answer (another host owns the folder, a
+ * store a newer Centralu wrote, ownership that cannot be read). Said on stderr (host.log) **and** on stdout, synchronously,
+ * then exit 1 with no ready line: the supervisor reads only stdout, and stdout to a pipe is asynchronous on macOS while the
+ * exit follows at once. The supervisor stops retrying on "already using this data" and "written by a newer Centralu": those
+ * phrases are a contract.
  */
 export function refuse(message: string, io: RefusalIo = realIo): void {
   io.stderr(message)

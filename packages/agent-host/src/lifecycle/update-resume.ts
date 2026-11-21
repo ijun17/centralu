@@ -5,40 +5,16 @@ import { ENDED_MAX_AGE_MS, readEnded, type Ended } from './update-ended.js'
 import { readStopped, type Stopped } from './update-stopped.js'
 
 /**
- * The turns an update of this machine cut (#1618, docs/agent-host/lifecycle/continue-after-update.md "Continuing the turns an update cut"). A linked
- * hub that stops this machine's host to update it, roll it back or put the previous version back says so in its stop
- * (`centralu serve --stop` with `CENTRALU_STOP_FOR=update`, `host.stop { forUpdate }`). The stopping host then writes, as it
- * lets its sessions go, the turns it ends (`cutTurns`, idle.ts) into a list of its own in the data folder: on its own
- * clock, with nothing between the reading and the stop, and no link that could drop between them.
- *
- * **Each turn is the one that stop cut, by a mark, not by its session alone** (#1626 review): with each session goes the
- * last row of its conversation as it stood when the stop was done (`seq`). The next host continues a listed session only
- * when its conversation still ends there. That is safe because the next start always writes a row for a listed session
- * (the Continue's line, or the stopped mark of a turn that is lost or no longer the listed one), and so does an older host's
- * start after a rollback: the conversation is past the mark before any later turn, whatever begins it. (Not because a
- * turn records its input first: one the CLI starts itself after a background task, and Centralu's own compaction, begin
- * with no row of their own.) So a list left behind (a file a virus scanner held when it was to be removed, a rollback to a
- * host from before this, which never reads it) names a turn long over and continues nothing: a later stop of the person's
- * that cuts a new turn there is told as a quit's, as it always was.
- *
- * **What else the stop ended** (#1902) rides in the same list: `stopped`, per session, the background tasks its process held and
- * the cards that waited for the person (`update-stopped.ts`), under the same mark. The next host tells the agent in a note,
- * and wakes a session at rest for it. An older host reads `turns` only and leaves the rest.
- *
- * **The terminals and Run commands the stop ended** (#1902 part B) are listed by the same host, in its first step and in a list of
- * its own (`recordUpdateEnded`): they are no session's, so no mark applies; the first start after it takes them whole
- * (`UpdateResumeLists.takeEnded`) and the list goes.
- *
- * **A list that cannot be read at the start** is tried again on Windows while it is held (`EBUSY`, a virus scanner that
- * opened the file just written), by the one policy for that (os/held.ts), each failure said. One still unreadable stays where it is for a later start,
- * which reads it whole: the host cannot tell which sessions it names, so a session this start finds cut is marked stopped
- * like any a quit cut, with its Continue, and the log says so.
- *
- * **Each stop writes its own list** under a name no other has (`add`), never replacing another's: no rename over a file
- * another process may hold, and no list one stop wrote that a second one could take away. The next host reads all of
- * them (`UpdateResumeLists`), and each entry leaves its list once it is dealt with (`done`: the list is written again without it under
- * its own name, through a temporary file renamed over it, and goes once it names nothing). A list a host killed mid-write left
- * is not JSON and goes at the next start; one of another format (a newer host's) is left to it. Nothing expires.
+ * The turns an update of this machine cut (docs/agent-host/lifecycle/continue-after-update.md "Continuing the turns an update
+ * cut"). A linked hub that stops this host for an update, a rollback or the previous version says so (`CENTRALU_STOP_FOR=update`); the stopping host writes the
+ * turns it ends (`cutTurns`) into a list of its own in the data folder, on its own clock: no link can drop between the reading
+ * and the stop. **Each turn is the one that stop cut, by a mark:** with each session goes the last row of its conversation
+ * (`seq`), and the next host continues a listed session only when its conversation still ends there. The mark is safe because
+ * every next start writes a row for a listed session (the Continue's line or the stopped mark, an older host's too), not
+ * because a turn records its input first (a CLI turn after a background task, and a compaction, begin with none), so a list
+ * left behind (held by a scanner, or a rollback's) names a turn long over: nothing continues; turn lists never expire by age.
+ * `stopped` rides under the same mark; an older host reads `turns` only. **Each stop writes its own list** under a name no
+ * other has (`add`), so no rename goes over a file another process may hold and no list can be taken away by a second stop.
  */
 export const UPDATE_RESUME_PREFIX = 'update-resume.'
 
@@ -47,8 +23,9 @@ const MAX_TURNS = 1000
 const ID = /^[0-9A-Za-z_.:-]{1,200}$/
 
 /**
- * A turn an update's stop cut: the session, and the last row of its conversation as it stood when the stop was done. `woken`: a turn an update's
- * start continued that had not answered yet, which may read at rest (`cutTurns`); an older build reads `id` and `seq` alone, and so does not continue it
+ * A turn an update's stop cut: the session, and the last row of its conversation when the stop was done. `woken`: a turn an
+ * update's start continued that had not answered yet, which may read at rest (`cutTurns`); an older build reads `id` and `seq`
+ * alone and does not continue it
  */
 export type CutTurn = { id: string; seq: number; woken?: true }
 
@@ -89,9 +66,9 @@ export function parseUpdateResume(text: string): UpdateStop | 'torn' | 'other' {
 }
 
 /**
- * Writes the turns this stop cut, as a list of its own (#1618). Never fatal: a stop goes on whatever the folder says. A
- * list that cannot be written is said in the log with the folder's own error, and those turns end as a stop's always did:
- * the next start marks them stopped, with their Continue, and tells whoever waits on them
+ * Writes the turns this stop cut, as a list of its own. Never fatal: a stop goes on whatever the folder says. One that cannot
+ * be written is said in the log with the folder's own error, and those turns end as a quit's do: the next start marks them
+ * stopped, with their Continue, and tells whoever waits on them
  */
 export function recordUpdateCut(folder: UpdateResumeFolder, cut: readonly CutTurn[], ended: readonly Stopped[] = []): void {
   const turns = cut.filter((t) => ID.test(t.id)).slice(0, MAX_TURNS)
@@ -108,8 +85,8 @@ export function recordUpdateCut(folder: UpdateResumeFolder, cut: readonly CutTur
 const listText = (turns: readonly CutTurn[], stopped: readonly Stopped[]): string => `${JSON.stringify({ v: 1, turns, stopped })}\n`
 
 /**
- * Writes the terminals and Run commands this stop ends, as a list of its own (#1902). Never fatal, as `recordUpdateCut` is: they
- * are then lost as they always were
+ * Writes the terminals and Run commands this stop ends, as a list of its own. Never fatal, as `recordUpdateCut` is: they are
+ * then simply lost
  */
 export function recordUpdateEnded(folder: UpdateResumeFolder, ended: Ended, now = Date.now()): void {
   if (!ended.terminals.length && !ended.runs.length) return
@@ -122,8 +99,8 @@ export function recordUpdateEnded(folder: UpdateResumeFolder, ended: Ended, now 
 }
 
 /**
- * The lists the stops before this start left, read once at the start (#1618), without taking them: each goes once every
- * turn it names was dealt with (`done`), so a host stopped before then leaves the rest for the next
+ * The lists the stops before this start left, read once at the start without taking them: each goes once every turn it names
+ * was dealt with (`done`), so a host stopped before then leaves the rest for the next
  */
 export class UpdateResumeLists {
   /** Each list's name and the turns it names, as read at the start */
@@ -131,8 +108,8 @@ export class UpdateResumeLists {
   private readonly dealt = new Set<string>()
 
   /**
-   * `wait` sleeps between the tries at a list a scanner holds on Windows (os/held.ts, `held`); the host's own start is one thread with nothing
-   * yet to serve, so it blocks. Tests pass their own
+   * `wait` sleeps between the tries at a list a scanner holds on Windows (`os/held.ts`); the host's own start is one thread
+   * with nothing yet to serve, so it blocks. Tests pass their own
    */
   constructor(
     private readonly folder: UpdateResumeFolder,
@@ -151,15 +128,16 @@ export class UpdateResumeLists {
         text = held(() => folder.read(name), wait, (err) => console.error(`[agent-host] ${name} is held by another process (${errorMessage(err)}); reading it again`))
       } catch (err) {
         /*
-         * Still held after the tries, or unreadable for another reason. The list stays where it is and is read by a later
-         * start, which continues nothing for it if its turns are over by then. The host cannot tell which sessions it names,
-         * so a session it finds cut now is marked stopped like any a quit cut, and its Continue is the person's button
+         * Still held after the tries, or unreadable otherwise: the list stays for a later start. The host cannot tell which
+         * sessions it names, so a session it finds cut now is marked stopped like any a quit cut, and its Continue is the
+         * person's button
          */
         console.error(`[agent-host] ${name} could not be read (${errorMessage(err)}); the list is kept for a later start, and the turns it names end as a quit's do`)
         continue
       }
       if (text === null) continue
       const turns = parseUpdateResume(text)
+      // Another format is a newer host's list: left for it
       if (turns === 'other') continue
       if (turns === 'torn') this.removeList(name, 'it is not read, and a later start removes it')
       // One written empty because it could not be removed (`done`) goes now
@@ -174,18 +152,19 @@ export class UpdateResumeLists {
   }
 
   /**
-   * Whether a stop listed this session's turn as the one it cut: its conversation still ends where it ended then. A session that reads at rest
-   * (`atRest`) only by a `woken` entry: any other was stopped by the person after that stop listed it (a Stop writes no row)
+   * Whether a stop listed this session's turn as the one it cut: its conversation still ends where it did then. A session at
+   * rest (`atRest`) counts only by a `woken` entry: any other was stopped by the person after that stop listed it (a Stop
+   * writes no row)
    */
   cut(id: string, lastSeq: number, atRest = false): boolean {
     return [...this.lists.values()].some((l) => l.turns.some((t) => t.id === id && t.seq === lastSeq && (!atRest || t.woken === true)))
   }
 
   /**
-   * The terminals and Run commands the stops listed, once. Each list is removed before anything in it is brought back, and one that
-   * cannot be removed is left alone: it would otherwise open them again at every start. A list older than `ENDED_MAX_AGE_MS` is
-   * removed and not used: a rollback to a host from before this never removes it, and a start days later must not open terminals
-   * and run commands nobody expects
+   * The terminals and Run commands the stops listed, once. Each list is removed before anything in it is brought back, and one
+   * that cannot be removed is left alone: it would reopen them at every start. A list older than `ENDED_MAX_AGE_MS` is removed
+   * unused: a rollback to an older host never removes it, and a start days later must not open terminals and run commands
+   * nobody expects
    */
   takeEnded(now = Date.now()): Ended {
     const taken: Ended = { terminals: [], runs: [] }
@@ -213,13 +192,13 @@ export class UpdateResumeLists {
   }
 
   /**
-   * One listed session dealt with: continued, reported as lost, dropped (the person's Stop, gone) or not found cut. It leaves every list that
-   * names it now, on disk too (#2264 re-check): a mark alone does not keep a dealt entry harmless, since the person's Stop writes no row and a
-   * `woken` entry would still match a session at rest. The list is written again without it in one step (`replace`), and one that names
-   * nothing more goes; if it cannot be removed it is written empty instead, which the next start removes. A host killed before that step is
-   * like a Stop still on its way when the host stops: not taken. A list that cannot be written again keeps its old text, said in the log,
-   * unless the entry is `strict` (it no longer stands: the person's Stop, the session gone): then the whole list goes, its other entries
-   * ending as a quit's do (their Continue stays the person's), since a Stop already taken must not be undone by the next start
+   * One listed session dealt with: continued, reported as lost, dropped (the person's Stop, gone) or not found cut. It leaves
+   * every list that names it, on disk too: a mark alone does not make a dealt entry harmless, since the person's Stop writes no
+   * row and a `woken` entry would still match a session at rest. The list is rewritten without it in one step (`replace`); a
+   * host killed before that step is like a Stop still on its way: not taken; one naming nothing more goes, or is written empty
+   * if it cannot be removed. A list that cannot be rewritten keeps its old text, said in the log, unless the entry is `strict`
+   * (it no longer stands): then the whole list goes, its other entries ending as a quit's do, since a Stop already taken must
+   * not be undone by the next start
    */
   done(id: string, strict = false): void {
     this.dealt.add(id)

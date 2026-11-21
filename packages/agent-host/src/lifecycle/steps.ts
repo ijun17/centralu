@@ -1,20 +1,7 @@
 /**
- * Running an ordered list of steps where every step runs (lessons HO8, #396).
- *
- * A host's shutdown is a list, not a function: the order is data a test can read, and running it
- * cannot skip a step because an earlier one threw. Before this, the services stopped in one
- * function and only the store and the keeper connection were closed "however the rest went": a
- * session cleanup that threw skipped the app views and the server, and the server's sockets held
- * the process until the supervisor's SIGKILL.
- *
- * - **In order, one at a time.** A step that returns a promise is awaited before the next one
- *   starts; a step that returns anything else is followed at once, in the same tick. So the steps
- *   at the head of a list that are synchronous have all run before the first await (HO8: ptys
- *   before anything that can take time, because a supervisor's SIGKILL does not reach a pty's own
- *   session).
- * - **Every step runs.** A step that throws or rejects does not stop the ones after it.
- * - **The first error wins.** It is the one thrown at the end; every later one is logged, so a
- *   close failing on the way out does not hide why the shutdown went wrong.
+ * Steps run in order and every one runs (lessons HO8): a step that threw cannot skip the rest. A promise is awaited before the
+ * next step; a synchronous one is followed in the same tick, so those at the head all run before the first await. The first
+ * error is thrown at the end and later ones logged, so a close failing on the way out hides nothing.
  */
 
 export type Step = {
@@ -56,9 +43,9 @@ export function runSteps(steps: readonly Step[], log: (line: string) => void): P
 }
 
 /**
- * Two things that go on at once, as one step: both run to their end whatever the other does, and
- * the first one's error is the step's. (App processes stop in parallel with sessions, HO8: their
- * grace period overlaps the sessions' cleanup instead of adding to it.)
+ * Two things that go on at once, as one step: both run to their end whatever the other does, and the first one's error is the
+ * step's (App processes stop in parallel with sessions, HO8: their grace overlaps the sessions' cleanup instead of adding to
+ * it)
  */
 export async function both(a: () => Promise<unknown>, b: () => Promise<unknown>): Promise<void> {
   const [ra, rb] = await Promise.allSettled([call(a), call(b)])

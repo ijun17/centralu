@@ -478,7 +478,7 @@ describe.each(['posix', 'windows'] as const)('the record of used full credential
     expect(f.os.files.readFileSync(f.file, 'utf8')).not.toContain('goneAt')
   })
   /*
-   * #1711 (decided with the #1717 review): a hub's key entry is a record of its own kind. Its secret is public, so the
+   * A hub's key entry is a record of its own kind. Its secret is public, so the
    * record holds the public key where a full credential's holds the verifier, and nothing in it is a verifier
    */
   it('records a key entry under its public key, writes the key and no verifier, and reports it as gone after a restart with the key and no check', () => {
@@ -510,7 +510,7 @@ describe.each(['posix', 'windows'] as const)('the record of used full credential
     expect(f.host().used.records().map((r) => r.publicKey ?? 'verifier')).toEqual([one, two, 'verifier'])
   })
 
-  // M1 of the #1717 review: whatever the file said of the entry, a full hello under it is recorded
+  // Whatever the file said of the entry, a full hello under it is recorded
   it('records a key entry that carries the via of the launcher one-call credential, which only a verifier entry is spared', () => {
     const f = folder()
     const h = f.host()

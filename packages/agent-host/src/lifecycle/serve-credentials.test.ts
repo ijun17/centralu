@@ -63,7 +63,7 @@ describe('reading the full credentials', () => {
     expect(held.unreadable?.code).toBe('EBUSY')
   })
 
-  // #1405 review: chmod 000 on serve.json kept a credential paired just before at full rights for 30 s, unlisted
+  // chmod 000 on serve.json must not keep a credential paired just before at full rights for 30 s, unlisted
   it('names no credential for a new hello while the file is refused, and says since when and why', () => {
     let t = 5_000
     const good = JSON.stringify({ v: 2, key: KEY, full: [entry('aaaaaaaa', HUB)] })
@@ -149,7 +149,7 @@ describe('the full credentials used here (#1405 review)', () => {
     expect(used.gone([]).map((g) => g.id)).toEqual(['22222222', '33333333'])
   })
 
-  // #1405 review: hub 1 paired again; hub 2's next read, before hub 1's new credential said hello, listed hub 1's last as gone
+  // Hub 1 paired again; hub 2's next read, before hub 1's new credential said hello, listed hub 1's last as gone
   it('leaves out one whose label the file names again, paired the same way, before that one said hello here', () => {
     const used = new UsedCredentials()
     used.saw(c('aaaaaaaa', 'hub:studio-0123abcd'))
@@ -158,7 +158,7 @@ describe('the full credentials used here (#1405 review)', () => {
     expect(used.gone([{ id: 'bbbbbbbb', label: 'hub:studio-0123abcd', replaced: true }]).map((g) => g.id)).toEqual(['aaaaaaaa'])
   })
 
-  // #1405 review: a hub's label taken while its link was down, used, withdrawn; the hub's next link left no trace
+  // A hub's label taken while its link was down, used, withdrawn; the hub's next link left no trace
   it('gives every credential used under a hub label, listed or gone, by first use, for that hub to check', () => {
     const used = new UsedCredentials()
     used.saw(c('aaaaaaaa', 'hub:mac-0123abcd'))
@@ -192,7 +192,7 @@ describe('the full credentials used here (#1405 review)', () => {
     expect(credentialsReport('report-denied', denied, used)).toMatchObject({ credentials: null, unreadable: 'EACCES' })
   })
 
-  // #1405 review: a hub tells its own credential from one that only reuses its id by a check of its nonce, never by a verifier
+  // A hub tells its own credential from one that only reuses its id by a check of its nonce, never by a verifier
   it('gives each entry a check of the hub’s nonce, keeps a reused id with another secret apart, and never gives a verifier', () => {
     const used = new UsedCredentials()
     used.saw({ ...c('cccccccc', 'hub:mac-0123abcd'), verifier: verifierOf(HUB) })

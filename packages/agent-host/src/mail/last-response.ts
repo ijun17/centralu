@@ -4,8 +4,9 @@ import { bodyLimit } from './rules.js'
 import type { TurnReport } from './turn-report.js'
 
 /**
- * The most of a session's last response a report keeps as its answer (#2358 item 3): as long as a message a session may send, so reading the report
- * shows the whole of almost any answer. Past it the answer ends in "…" and the report's words say so (`lastResponseLine`)
+ * The most of a session's last response a report keeps as its answer: as long as a message a session may send, so reading the
+ * report shows the whole of almost any answer. Past it the answer ends in "…" and the report's words say so
+ * (`lastResponseLine`)
  */
 export const ANSWER_KEPT_CHARS = bodyLimit('session')
 /** The most of a last response quoted where a preview is all there is room for: a stop notice's quote and the report relayed to a seat without mail */
@@ -35,8 +36,8 @@ export const OUTCOME_WORDS = {
 } as const satisfies Record<TurnReport['outcome'], string>
 
 /**
- * A session's last response, as the tasks it did not answer by a reply are answered with it (docs/plans/mailbox.md §10.6.3, #1948 target 4): Centralu's words
- * for each sender beside the session's own, and what decides which open tasks it answers
+ * A session's last response, as the tasks it did not answer by a reply are answered with it (docs/plans/mailbox.md §10.6.3):
+ * Centralu's words for each sender beside the session's own, and what decides which open tasks it answers
  */
 export type LastResponse = {
   /** Centralu's words for the sender (an address): how the session's turn ended and where its words are read, in that sender's form of the calls */
@@ -46,8 +47,9 @@ export type LastResponse = {
   /** When that response was stored: a task delivered after it is told so (`after`, docs/plans/turn-owned-by-no-one.md Q4) */
   writtenAt?: number
   /**
-   * Whether tasks a stop released are answered too. Only a turn that ended after the release answers them: the settle after the session's own background
-   * work ended and the host's start do not, since the turn before them may be the very one that stopped
+   * Whether tasks a stop released are answered too. Only a turn that ended after the release answers them: the settle after the
+   * session's own background work ended and the host's start do not, since the turn before them may be the very one that
+   * stopped
    */
   released: boolean
   /** Whose tasks a last response answers, by sender address */
@@ -57,8 +59,9 @@ export type LastResponse = {
 }
 
 /**
- * The tasks a session at rest answers with its last response, oldest first: open (delivered, not settled, not held), not queued in its tool for a turn
- * after, and with no task it handed on in that work still open (that work is not done; the turn that work's answer starts ends it)
+ * The tasks a session at rest answers with its last response, oldest first: open (delivered, not settled, not held), not queued
+ * in its tool for a turn after, and with no task it handed on in that work still open (that work is not done; the turn that
+ * work's answer starts ends it)
  */
 export function tasksAtRest(records: MailboxRecords, recipient: string, last: Pick<LastResponse, 'released' | 'answers' | 'queued'>): { row: RecipientRow; sender: string }[] {
   return records.watchedTo(recipient).flatMap((row) => {
@@ -70,14 +73,14 @@ export function tasksAtRest(records: MailboxRecords, recipient: string, last: Pi
 }
 
 /**
- * Answers the open tasks of a session at rest with its last response (§10.6.3): one report per giver at a turn's end (#2348, the owner's decision
- * of 2026-11-18, which replaced 2026-11-05's report per task). The report replies to that giver's newest open task, the one the turn ended on, and
- * covers the others (`facts.covers`), settling them all `reported`. `report` writes it (`MessageService.report`). Returns the tasks replied to.
- *
- * None goes to a giver the session asked a question (`facts.question`) that is still unanswered, asked after the giver's newest task came
- * (`MailboxRecords.unansweredTo` with `asked`): the question reached it already, and its tasks stay open. The question settling ends the hold:
- * an answer goes to the session and the turn it starts answers them (#2329); marked handled with no answer, the session answers at once
- * (`MessageService.questionSettled`). Only a session giver: the person's own work always gets its report (`asksAnswerTurnEnd`)
+ * Answers the open tasks of a session at rest with its last response (§10.6.3): one report per giver at a turn's end (the
+ * owner's decision of 2026-11-18). The report replies to that giver's newest open task, the one the turn ended on, and covers
+ * the others (`facts.covers`), settling them all `reported`. `report` writes it (`MessageService.report`). Returns the tasks
+ * replied to. None goes to a giver the session asked a question (`facts.question`) still unanswered, asked after the giver's
+ * newest task came (`MailboxRecords.unansweredTo` with `asked`): the question reached it already and its tasks stay open. The
+ * question settling ends the hold: an answer goes to the session and the turn it starts answers them; marked handled with no
+ * answer, the session answers at once (`MessageService.questionSettled`). Only a session giver: the person's own work always
+ * gets its report (`asksAnswerTurnEnd`).
  */
 export function answerAtRest(
   records: MailboxRecords,
@@ -112,27 +115,28 @@ export function answerAtRest(
 }
 
 /**
- * Whether a session's question to this giver holds the giver's report (#2348): a session giver's yes, it reads its mail and the question woke it. The
- * person's no: their Inbox thread reads In review from the report, and the wake this saves is a session's
+ * Whether a session's question to this giver holds the giver's report: a session giver's yes, it reads its mail and the
+ * question woke it. The person's no: their Inbox thread reads In review from the report, and the wake this saves is a session's
  */
 function asksAnswerTurnEnd(giver: string): boolean {
   return senderKind(giver) === 'session'
 }
 
 /**
- * The first line of a report on a turn that completed: all the host knows is that the turn ended. Whether the work is done is for the session's own
- * last response to say, or the outcome it recorded itself, so Centralu never says "finished" for it (#1902): a child that gave up says so in its
- * words, and the report must not contradict them
+ * The first line of a report on a turn that completed: all the host knows is that the turn ended. Whether the work is done is
+ * for the session's own last response to say, or the outcome it recorded itself, so Centralu never says "finished" for it: a
+ * child that gave up says so in its words and the report must not contradict them
  */
 export const TURN_ENDED = `[Centralu] The session ${OUTCOME_WORDS.finished}. Its last response says whether the work is done.`
 /** The same line for the person, on their own work: one line, with nothing to call (§10.6.3) */
 export const PERSON_TURN_ENDED = `[Centralu] The session you started ${OUTCOME_WORDS.finished}. Its last response says whether the work is done.`
 
 /**
- * Centralu's words on a report of work given the session read as `childId`, from how it ended alone: a call that returned that end (`answerRecorder`)
- * and a report another computer sends on work given there (`MailAcross.reportFrom`, #1948 step 6). Nothing the session, its tool or that computer
- * wrote goes in (#120): its answer, error and reason are the report's facts, never these words. `kind`: the kind of its tool's error, a word of this
- * host's (`errorKind`), which a report from another computer never brings
+ * Centralu's words on a report of work given the session read as `childId`, from how it ended alone: a call that returned that
+ * end (`answerRecorder`) and a report another computer sends on work given there (`MailAcross.reportFrom`). Nothing the
+ * session, its tool or that computer wrote goes in (#120): its answer, error and reason are the report's facts, never these
+ * words. `kind`: the kind of its tool's error, a word of this host's (`errorKind`), which a report from another computer never
+ * brings
  */
 export function reportWords(childId: string, r: { outcome: TurnReport['outcome']; kind?: string; personSince?: boolean; after?: boolean; answer?: AnswerKept }): string {
   const read = `read_session(sessionId="${childId}")`
@@ -152,8 +156,9 @@ const PERSON_SINCE = 'The person also wrote in this session after your task was 
 const AFTER = 'Your task arrived after this response was written.'
 
 /**
- * The line of a turn-ended report on where the session's last response is (`read`: the read_session call that shows its turn): its answer is the
- * report's fact, which reading the report shows (`MailTool`), never these words (#120); cut, read_session reads the rest; or that it wrote none
+ * The line of a turn-ended report on where the session's last response is (`read`: the read_session call that shows its turn):
+ * its answer is the report's fact, which reading the report shows (`MailTool`), never these words (#120); cut, read_session
+ * reads the rest; or that it wrote none
  */
 export function lastResponseLine(read: string, answer: AnswerKept): string {
   if (answer === 'none') return `It wrote no response: ${read} shows its turn.`

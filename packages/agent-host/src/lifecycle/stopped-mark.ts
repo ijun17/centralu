@@ -7,12 +7,11 @@ import { realOs } from '../os/real.js'
 import { writeFileWhole } from '../os/write-file-whole.js'
 
 /**
- * The person's stop, kept in the data folder (#1143). A linked hub that finds no host running here starts one
- * (`centralu serve --detach`) unless this mark says the person stopped it: with `centralu serve --stop`, which the
- * launcher marks (`markStopped` in packaging/npm/centralu/bin/serve-files.mjs, the same file), or by quitting
- * Centralu here, which this host marks when the keeper stops it for good (`markQuit`). `serve --connection` reports
- * it while no host runs. Every host that starts in the folder removes it (`clearStoppedMark`): a start, by whoever,
- * is the person's again.
+ * The person's stop, kept in the data folder. A linked hub that finds no host running here starts one (`centralu serve
+ * --detach`) unless this mark says the person stopped it: with `centralu serve --stop` (the launcher marks it, `markStopped` in
+ * packaging/npm/centralu/bin/serve-files.mjs, the same file) or by quitting Centralu here (`markQuit`, when the keeper stops it
+ * for good). `serve --connection` reports it while no host runs. Every host that starts in the folder removes it
+ * (`clearStoppedMark`): a start, by whoever, is the person's again
  */
 export const STOPPED_MARK_FILE = 'stopped.json'
 
@@ -26,8 +25,8 @@ export function clearStoppedMark(dataDir: string): void {
 }
 
 /**
- * The keeper stops this host for good (Quit completely, the last window closed with background mode off). Restart
- * completely comes the same way; the host it starts next removes the mark
+ * The keeper stops this host for good (Quit completely, the last window closed with background mode off). Restart completely
+ * comes the same way; the host it starts next removes the mark
  */
 export function markQuit(dataDir: string, now: number = Date.now()): void {
   try {
@@ -67,13 +66,13 @@ export function takeSystemEnd(dataDir: string): SystemEnd | null {
 }
 
 /**
- * The data folder's lists of the turns an update cut (#1618, update-resume.ts): each written by a host an update stops,
- * read by the next to start. Here beside the person's stop mark, the other file one host leaves in the folder for the next.
- * Each list is written under a new name of its own (`wx`), and a host killed while it wrote leaves text that is not JSON, which the
- * next start removes. One is written again without an entry dealt with (`replace`, #2264 re-check) whole (`writeFileWhole`): a temporary
- * file renamed over it, retried while a scanner holds the file, and one that still fails leaves the old list as it was. The temporary name
- * (`<list>.<pid>-<hex>.tmp`) is no list's, so `names` never reads one a killed host left. Not synced before the rename: a power cut can leave
- * the list empty, which reads as torn and goes, so its turns end as a quit's do (never continued twice)
+ * The data folder's lists of the turns an update cut (update-resume.ts): each written by a host an update stops, read by the
+ * next to start, beside the person's stop mark. Each is written under a new name (`wx`); a host killed while it wrote leaves
+ * text that is not JSON, which the next start removes. One is written again without an entry dealt with (`replace`) whole
+ * (`writeFileWhole`): a temporary file renamed over it, retried while a scanner holds the file; one that still fails leaves the
+ * old list. The temporary name (`<list>.<pid>-<hex>.tmp`) is no list's, so `names` never reads one a killed host left. Not
+ * synced before the rename: a power cut can leave the list empty, which reads as torn and goes, so its turns end as a quit's do
+ * (never continued twice)
  */
 export function updateResumeFolder(dataDir: string): UpdateResumeFolder {
   // `update-resume.<uuid>.json`, the names `add` gives (UPDATE_RESUME_PREFIX)

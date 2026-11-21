@@ -4,23 +4,16 @@ import { writeFileWhole } from '../os/write-file-whole.js'
 import { encodeUsedRecord, parseUsedRecords, type UsedCredentials, type UsedRecord } from './serve-credentials.js'
 
 /**
- * The file of full credentials a socket said hello with on a `centralu serve` host (#1712), next to `serve.json`.
- *
- * Why it exists: the host keeps this record in memory (`UsedCredentials`) and a hub reads it every 30 seconds, so a
- * program of the machine's user that paired, used full rights, withdrew and stopped the host in between left no trace.
- * A record is added here BEFORE the socket gets its rights, and a host that starts again reads it back, so the next
- * `host.credentials` reports it as it would have had the host stayed up.
- *
- * Lines only ever added at the end, one JSON object each (`encodeUsedRecord`), each ending in a newline (a write cut
- * short leaves a line without one, and the next record then starts on a line of its own). A reader skips any line it
- * cannot read, and reads each line once: from where it stopped last time (`refresh`), whole lines only, at most
- * `READ_AT_MOST` bytes of new ones at a time. An older build does not know the file and leaves it alone, and this one
- * reads whatever lines it finds, so nothing here breaks the build that may still be serving during a host swap. The
- * file holds what `serve.json` already holds beside it (the verifier, never the credential; for a hub's key entry the public key, #1711), with the same rights.
- *
- * Never throws: a record that cannot be written down (a full disk, a folder gone) is said on stderr and the hello goes
- * on. Refusing a hello for it would stop the person's own window and every agent's work for a disk error, which the
- * owner ruled out (#1712); the in-memory record and the event to the hubs still happen.
+ * The file of full credentials a socket said hello with on a `centralu serve` host, next to `serve.json`. The host keeps this
+ * record in memory (`UsedCredentials`) and a hub reads it every 30 seconds, so a program of the machine's user that paired,
+ * used full rights, withdrew and stopped the host in between would leave no trace; a record is added here BEFORE the socket
+ * gets its rights and a host that starts again reads it back. Lines are only added at the end, one JSON object each
+ * (`encodeUsedRecord`) ending in a newline, so a write cut short leaves a line the next record does not join; a reader skips
+ * any line it cannot read and reads each once (`refresh`). An older build leaves the file alone, so nothing here breaks a build
+ * still serving during a host swap. It holds what `serve.json` holds (the verifier, never the credential; a hub's key entry its
+ * public key), with the same rights. Never throws: a record that cannot be written (a full disk) is said on stderr and the
+ * hello goes on, since refusing it would stop the person's own window and every agent's work (the owner ruled it out); the
+ * in-memory record and the event to the hubs still happen.
  */
 export const USED_CREDENTIALS_FILE = 'serve-used.jsonl'
 
@@ -34,9 +27,9 @@ export function usedCredentialsPath(serveState: string, os: Os): string {
 const REWRITE_AT = 4
 
 /**
- * The most one read takes of what was added to the file (#1712). A program of the machine's user can append as much as it
- * likes, and a report must not hold the host's event loop for it: past this much new, the older part is skipped (and
- * said) and the newest is read. A record is under 300 bytes, so this holds thousands
+ * The most one read takes of what was added to the file. A program of the machine's user can append as much as it likes and a
+ * report must not hold the host's event loop for it: past this, the older part is skipped (and said) and the newest read. A
+ * record is under 300 bytes, so this holds thousands
  */
 export const READ_AT_MOST = 1 << 20
 
@@ -71,10 +64,10 @@ export class UsedCredentialsFile {
   }
 
   /**
-   * Takes in what was added to the file since the last read, before a report is made (in a swap, the host being replaced
-   * goes on serving until the new one holds the folder's lock; a program may append too). Only the new part is read,
-   * whole lines of it, merged in the order of the file (`UsedCredentials.load`): the memory stays the file's newest
-   * `max` records however often this is called, and what is known is not counted twice. Shortens nothing
+   * Takes in what was added to the file since the last read, before a report is made (in a swap the host being replaced serves
+   * on until the new one holds the folder's lock; a program may append too): only whole new lines, merged in the order of the
+   * file (`UsedCredentials.load`), so the memory stays the file's newest `max` records however often this is called and nothing
+   * is counted twice. Shortens nothing
    */
   refresh(): void {
     const taken = this.readNew()
@@ -82,9 +75,9 @@ export class UsedCredentialsFile {
   }
 
   /**
-   * Notes the records `listed` (what `serve.json` names now) does not hold as withdrawn now, writes that down, forgets the
-   * note of those it names again (written too), and drops those withdrawn a week ago (`UsedCredentials.settle`): from
-   * memory now, and from the file, which is rewritten then
+   * Notes the records `listed` (what `serve.json` names now) does not hold as withdrawn now and writes that down, forgets the
+   * note of those it names again, and drops those withdrawn a week ago (`UsedCredentials.settle`): from memory, and from the
+   * file, which is rewritten then
    */
   settle(listed: readonly { id: string; verifier?: string; publicKey?: string }[], now: number = Date.now()): void {
     const { noted, restored, dropped } = this.used.settle(listed, now)
@@ -184,11 +177,11 @@ export class UsedCredentialsFile {
   }
 
   /**
-   * Adds `records` at the end of the file, on the hello's path (`add`), so it reads nothing back (#1715 recheck: on Windows
-   * the first open of a file just written costs milliseconds). The memory holds these records already, so when the file is
-   * exactly as long as what was read, is the file that was read, and nothing else was added while writing, the lines are
-   * counted where they stand (`offset` moves past them). In any other case the offset stays and the next report's
-   * `refresh` reads them with whatever else is there: a known record only moves its rank
+   * Adds `records` at the end of the file, on the hello's path (`add`), so it reads nothing back (on Windows the first open of
+   * a file just written costs milliseconds). The memory holds these records already, so when the file is exactly as long as
+   * what was read, is the file that was read, and nothing else was added while writing, the lines are counted where they stand
+   * (`offset` moves past them); otherwise the offset stays and the next `refresh` reads them with the rest: a known record only
+   * moves its rank
    */
   private append(records: readonly UsedRecord[]): void {
     let fd: number | null = null
@@ -237,9 +230,9 @@ export class UsedCredentialsFile {
   }
 
   /**
-   * The file again from the records kept, the oldest dropped: a new file moved over the old, so a stop in the middle
-   * loses nothing. Only from a state that holds the whole file as it is now (what was added since is read first): the
-   * memory is the file's newest `max` records, so what is written is those
+   * The file again from the records kept, the oldest dropped: a new file moved over the old, so a stop in the middle loses
+   * nothing. Only from a state that holds the whole file as it is now (what was added since is read first): the memory is the
+   * file's newest `max` records, so those are written
    */
   private rewrite(): void {
     this.refresh()
