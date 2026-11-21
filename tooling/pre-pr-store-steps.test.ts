@@ -1,12 +1,11 @@
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 // @ts-expect-error — a plain .mjs script, so the board app can start it with Node alone
 import { prePr } from '../scripts/pre-pr.mjs'
 // @ts-expect-error — a plain .mjs script, as above
 import { STEP_DIR, stepNumbers, stepsAddedByDiff } from '../scripts/pre-pr-store-steps.mjs'
-import { fakeRunners, git, yieldBetweenTests } from './pre-pr.test-helpers.js'
+import { fakeRunners, git, tempDir, yieldBetweenTests } from './pre-pr.test-helpers.js'
 
 yieldBetweenTests()
 
@@ -63,7 +62,7 @@ ${ns.map(step).join('')}    ]
   // The repository every test starts from, built once and copied: the init and the commits per test were most of the setup
   let template = ''
   beforeAll(() => {
-    repo = mkdtempSync(join(tmpdir(), 'cc-prepr-step-template-'))
+    repo = tempDir('cc-prepr-step-template-')
     git(repo, 'init', '-q', '-b', 'main')
     write(`${STEP_DIR}v55.ts`, file(55, 56, 57))
     write(`${STEP_DIR}index.ts`, 'export const note = "a step is { to: 3, }"\n')
@@ -79,7 +78,7 @@ ${ns.map(step).join('')}    ]
   })
 
   beforeEach(() => {
-    repo = mkdtempSync(join(tmpdir(), 'cc-prepr-step-'))
+    repo = tempDir('cc-prepr-step-')
     cpSync(template, repo, { recursive: true })
   })
 

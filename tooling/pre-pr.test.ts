@@ -1,7 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { SLOW } from './test-timing.js'
@@ -11,7 +10,7 @@ import { isTestFile, isVitestFile, nodeBin, parseArgs, prePr, stackHeads } from 
 import { GUARD_REFS, removeRun, runDir, sweepStale } from '../scripts/pre-pr-worktrees.mjs'
 // @ts-expect-error — a plain .mjs script, as above
 import { interruptsSoFar, runTool } from '../scripts/interrupts.mjs'
-import { fakeRunners, git, GIT_ENV, gitIn, type Pass, recordedReport, yieldBetweenTests } from './pre-pr.test-helpers.js'
+import { fakeRunners, git, GIT_ENV, gitIn, type Pass, recordedReport, tempDir, yieldBetweenTests } from './pre-pr.test-helpers.js'
 
 /**
  * `pnpm pre-pr` (#1181): the checks run on real git repositories made here, with the tools replaced by fakes
@@ -95,7 +94,7 @@ describe('what pre-pr reads', () => {
  */
 describe('the repositories this file builds', () => {
   it('start no background git maintenance when they commit', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cc-prepr-maintenance-'))
+    const dir = tempDir('cc-prepr-maintenance-')
     try {
       const repo = join(dir, 'repo')
       mkdirSync(repo)
@@ -135,7 +134,7 @@ describe('pre-pr on a stack of two pull requests', () => {
   // The repository every test starts from, built once and copied: the init and the commits per test were most of the setup
   let template = ''
   beforeAll(() => {
-    repo = mkdtempSync(join(tmpdir(), 'cc-prepr-test-template-'))
+    repo = tempDir('cc-prepr-test-template-')
     git(repo, 'init', '-q', '-b', 'main')
     write('src/a.mjs', 'export const value = 1\n')
     write('src/a.test.mjs', 'keeps a value :: src/a.mjs :: value\n')
@@ -159,7 +158,7 @@ describe('pre-pr on a stack of two pull requests', () => {
   })
 
   beforeEach(() => {
-    repo = mkdtempSync(join(tmpdir(), 'cc-prepr-test-'))
+    repo = tempDir('cc-prepr-test-')
     cpSync(template, repo, { recursive: true })
   })
 
@@ -596,7 +595,7 @@ describe('pre-pr on a stack of two pull requests', () => {
   }, 60_000 * SLOW)
 
   it('stops when interrupted, and takes its worktrees and their links away without reaching through them', () => {
-    const deps = mkdtempSync(join(tmpdir(), 'cc-prepr-checkout-deps-'))
+    const deps = tempDir('cc-prepr-checkout-deps-')
     try {
       writeFileSync(join(deps, 'keep.js'), 'keep')
       let tscs = 0
@@ -632,7 +631,7 @@ describe('pre-pr on a stack of two pull requests', () => {
   }, 60_000 * SLOW)
 
   it('cleans up after a run that was killed: by --cleanup, or by the next run once its process is gone', () => {
-    const deps = mkdtempSync(join(tmpdir(), 'cc-prepr-checkout-deps-'))
+    const deps = tempDir('cc-prepr-checkout-deps-')
     const root = git(repo, 'rev-parse', '--show-toplevel')
     const guardRefs = () => git(repo, 'for-each-ref', '--format=%(refname)', `${GUARD_REFS}/`)
     // What a killed run leaves: its folder, its owner, a registered worktree with a link into the checkout's dependencies, and
@@ -678,7 +677,7 @@ describe('pre-pr on a stack of two pull requests', () => {
   })
 
   it('leaves the checkout as it was, and no worktree, run folder or link target touched', () => {
-    const deps = mkdtempSync(join(tmpdir(), 'cc-prepr-checkout-deps-'))
+    const deps = tempDir('cc-prepr-checkout-deps-')
     writeFileSync(join(deps, 'keep.js'), 'keep')
     write('uncommitted.txt', 'mine\n')
     const before = git(repo, 'status', '--porcelain')
@@ -708,7 +707,7 @@ describe('pre-pr on a stack of two pull requests', () => {
 
 describe('a tool that runs out of time is stopped with everything it started (#1816)', () => {
   it('ends the grandchild a timed-out entry point left behind, and says it ran out of time', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cc-prepr-limit-'))
+    const dir = tempDir('cc-prepr-limit-')
     mkdirSync(join(dir, 'node_modules'))
     const pidFile = join(dir, 'pid')
     // The entry point starts a worker (as vitest does) and both then wait; the worker writes its pid
@@ -738,7 +737,7 @@ describe('a tool that runs out of time is stopped with everything it started (#1
   })
 
   it.skipIf(process.platform === 'win32')('is ended with its tool when the group it runs in is killed (the board cancelling pre-pr)', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cc-prepr-group-'))
+    const dir = tempDir('cc-prepr-group-')
     const pidFile = join(dir, 'pid')
     writeFileSync(join(dir, 'worker.js'), `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000)`)
     writeFileSync(join(dir, 'main.js'), `require('child_process').spawn(process.execPath, [require('path').join(__dirname, 'worker.js')], { stdio: 'ignore' }); setInterval(() => {}, 1000)`)

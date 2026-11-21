@@ -1,6 +1,5 @@
 import { fileURLToPath } from 'node:url'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { SLOW } from './test-timing.js'
@@ -8,7 +7,7 @@ import { SLOW } from './test-timing.js'
 import { prePr, realRunners } from '../scripts/pre-pr.mjs'
 // @ts-expect-error — a plain .mjs script, as above
 import { guardWarnings } from '../scripts/pre-pr-open-prs.mjs'
-import { fakeRunners, git, yieldBetweenTests } from './pre-pr.test-helpers.js'
+import { fakeRunners, git, tempDir, yieldBetweenTests } from './pre-pr.test-helpers.js'
 import { GUARDS } from './guards.js'
 
 yieldBetweenTests()
@@ -106,8 +105,8 @@ describe('pre-pr and the guards a branch adds', () => {
   let template = ''
   let templateBare = ''
   beforeAll(() => {
-    repo = mkdtempSync(join(tmpdir(), 'cc-prepr-guard-template-'))
-    templateBare = mkdtempSync(join(tmpdir(), 'cc-prepr-bare-template-'))
+    repo = tempDir('cc-prepr-guard-template-')
+    templateBare = tempDir('cc-prepr-bare-template-')
     git(templateBare, 'init', '-q', '--bare')
     git(repo, 'init', '-q', '-b', 'main')
     git(repo, 'remote', 'add', 'origin', templateBare)
@@ -130,8 +129,8 @@ describe('pre-pr and the guards a branch adds', () => {
     vitestCalls.length = 0
     vitestPatterns.length = 0
     // Each test copies the template's repository and its own origin: no test writes to another's
-    repo = mkdtempSync(join(tmpdir(), 'cc-prepr-guard-'))
-    bare = mkdtempSync(join(tmpdir(), 'cc-prepr-bare-'))
+    repo = tempDir('cc-prepr-guard-')
+    bare = tempDir('cc-prepr-bare-')
     cpSync(template, repo, { recursive: true })
     cpSync(templateBare, bare, { recursive: true })
     git(repo, 'remote', 'set-url', 'origin', bare)

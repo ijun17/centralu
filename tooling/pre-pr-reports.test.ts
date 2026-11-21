@@ -1,6 +1,6 @@
 /** What `pnpm pre-pr` reads in its tools' answers (scripts/pre-pr-reports.mjs): vitest's JSON report, recorded or from a real run, and dependency-cruiser's. */
 import { fileURLToPath } from 'node:url'
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -11,7 +11,7 @@ import { realRunners } from '../scripts/pre-pr.mjs'
 import { depErrorsOf, failuresOf, filesRunMs, orphansOf, passingNewTests, vitestTests } from '../scripts/pre-pr-reports.mjs'
 // @ts-expect-error — a plain .mjs script, as above
 import { canonical, unlinkLinks } from '../scripts/pre-pr-worktrees.mjs'
-import { recordedReport, yieldBetweenTests } from './pre-pr.test-helpers.js'
+import { recordedReport, tempDir, yieldBetweenTests } from './pre-pr.test-helpers.js'
 
 yieldBetweenTests()
 
@@ -39,7 +39,7 @@ describe("what pre-pr reads in its tools' answers", () => {
 
   it('names a file from a root given by another spelling of its folder, as vitest reports it by its real path', () => {
     // A link stands in for a Windows temporary folder's 8.3 name: both reach the folder vitest names by its real path
-    const base = mkdtempSync(join(tmpdir(), 'cc-prepr-spelling-'))
+    const base = tempDir('cc-prepr-spelling-')
     try {
       mkdirSync(join(base, 'real'))
       symlinkSync(join(base, 'real'), join(base, 'link'), 'junction')
@@ -57,7 +57,7 @@ describe("what pre-pr reads in its tools' answers", () => {
 
   it('names the tests of a file with the real vitest without running one, the skipped and todo ones too', () => {
     // A folder of its own that reaches this checkout's dependencies, so no test file lands among the repository's
-    const dir = mkdtempSync(join(tmpdir(), 'cc-prepr-names-'))
+    const dir = tempDir('cc-prepr-names-')
     try {
       symlinkSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'node_modules'), join(dir, 'node_modules'), 'junction')
       writeFileSync(
@@ -90,7 +90,7 @@ describe("what pre-pr reads in its tools' answers", () => {
   }, 90_000 * SLOW)
 
   it('ends a real vitest run at the first passing test that is not known, the rest left pending', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cc-prepr-stop-'))
+    const dir = tempDir('cc-prepr-stop-')
     try {
       symlinkSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'node_modules'), join(dir, 'node_modules'), 'junction')
       const later = Array.from({ length: 5 }, (_, i) => `  it('later ${i}', async () => { await new Promise((r) => setTimeout(r, 500)); expect(1).toBe(2) })`)

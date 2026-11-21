@@ -4,12 +4,15 @@
  */
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { existsSync, readFileSync, symlinkSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach } from 'vitest'
 import { NO_GIT_MAINTENANCE } from './git-fixture.test-helpers.js'
 // @ts-expect-error — a plain .mjs script, so the board app can start it with Node alone
 import { realRunners } from '../scripts/pre-pr.mjs'
+// @ts-expect-error — a plain .mjs script, as above
+import { canonical } from '../scripts/pre-pr-worktrees.mjs'
 
 /**
  * Much of what these tests do is synchronous work (git, tsc and vitest through `execFileSync`) that holds the worker's event loop,
@@ -18,6 +21,9 @@ import { realRunners } from '../scripts/pre-pr.mjs'
  * each test, so a report is answered between tests and not only when the file ends.
  */
 export const yieldBetweenTests = () => afterEach(() => new Promise<void>((resolve) => setImmediate(resolve)))
+
+/** A new temporary folder, named as the file system names it, as vitest and git name their paths: a Windows runner gives its temporary folder in the 8.3 form */
+export const tempDir = (prefix: string): string => canonical(mkdtempSync(join(tmpdir(), prefix)))
 
 // No automatic maintenance: a commit starts a detached `git maintenance run --auto` that holds objects/maintenance.lock after the
 // commit returns, and the copy of a template made right then (cpSync) meets the lock vanishing: ENOENT on its .git/objects
