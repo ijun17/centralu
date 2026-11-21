@@ -4,6 +4,7 @@ import { isPeerAnswer } from '../rpc-error.js'
 import { durationText } from '../timing.js'
 import { PERSON, PERSON_ID, inHubTerms, parseAddress, sessionAddress } from './address.js'
 import type { FoundEntry } from './find.js'
+import type { MessageCalls } from './frame.js'
 import type { DelegationOrigin, MessageService } from './messages.js'
 import type { MailReach } from './reach.js'
 
@@ -18,15 +19,15 @@ import type { MailReach } from './reach.js'
  */
 export type AcrossSent = { ok: true; messageId: string; to: string; address: string; computer: string; held?: true } | { ok: false; why: string; text: string }
 
-/**
- * How long mail held for its link (`LINK_HOLD`, #2354) goes by itself once the link is back. Within it the mail is still the news it was when written;
- * later its sender may have acted another way meanwhile, so it is asked whether to send it then or drop it, rather than have it arrive late unasked
- */
+/** How long mail held for its link goes by itself once the link is back (docs/plans/linked-mail.md §12) */
 export const LINK_HOLD_MS = 10 * 60_000
 
 /** What a send held for its link says, in the mail tool's answer, a delegation's and the inbox alike */
 export const heldLine = (computer: string): string =>
   `${computer} is not reachable right now, so it is held here and goes when the link is back, saying when it was written. Held longer than ${durationText(LINK_HOLD_MS)}, it waits for you to send it or drop it.`
+
+/** What the sender of mail held for its link can do with it */
+export const sendOrDrop = (calls: MessageCalls, id: string): string => `send it with ${calls.send(id)}, or drop it with ${calls.done(id)}`
 
 /** One side of a link this host calls: a hub that offered on a connection here, or a machine this hub links */
 export type AcrossPeer = {

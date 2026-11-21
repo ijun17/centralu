@@ -564,8 +564,7 @@ export type CentraluTools = {
    *
    * A session that cannot take it now (in a turn, on a card, at a limit) is sent it as mail (`busy.state` `mailed`,
    * docs/plans/mailbox.md §10.6.2): a task with `reportBack`, reported as any task's; without it a note that needs no reply, at rest too (#2258).
-   * On a linked machine, a new instruction without `reportBack` still replaces this Assistant's earlier request (#166). `held`: its machine is not
-   * reachable, so the instruction is held here for the link, in these words (#2354)
+   * On a linked machine, a new instruction without `reportBack` still replaces this Assistant's earlier request (#166). `held`: why it waits here
    */
   sendToSession(
     sessionId: string,

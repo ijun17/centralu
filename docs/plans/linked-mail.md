@@ -13,8 +13,7 @@ per-link numbering, and the one outbox is the rows this host owes the other side
   answered) come back. (3) Names of sessions on linked hosts resolve as #2066 resolves this host's, with the same
   refusal for an ambiguous name.
 - **Link down:** a session's send to a computer that is linked and down now is held here and goes when the link is back
-  (#2354, §12). One from the person, or to a computer no longer linked, from an older build, or still connecting, is
-  refused at once, with the reason.
+  (#2354); what is still refused at once: §12.
 - **Retry:** a send the link refuses is not written anywhere, so the `repeat` guard never counts it and the sender can
   send the same text again.
 - **Guards** (#2014, #2035) warn the person and never block agent mail. They run where the message is written.
@@ -511,13 +510,12 @@ outbox it already has for Centralu's own notices and reports (§6).
 - **When it goes.** At a connect or any change (`retryOwed`, the one loop that passes what is owed to the other side), a
   held row whose side can take it now (reachable, and a machine past this connection's offer, before which it takes no
   mail) goes by itself if it was written less than `LINK_HOLD_MS` (10 minutes) ago, under its own id, one after another
-  in the order written. Its words go led by
-  `[Written at <UTC time> on <computer>, while the link between the computers was down.]`, so a reader knows it is late;
-  this is in the text, so a build from before this shows it too. The other side writes it as any send (a second send of
+  in the order written. Its words go led by when and on which computer they were written (`writtenLate`), so a reader
+  knows it is late; this is in the text, so a build from before this shows it too. The other side writes it as any send (a second send of
   an id it has is taken as the one it has), and the row here is then delivered and no longer held. A refusal there, or a
   computer no longer linked, deletes the copy and tells the sender why; an answer lost keeps it held, and it goes again
   under its id.
-- **Older than `LINK_HOLD_MS`.** It does not go by itself: what was news ten minutes ago may be out of date, and only the
+- **Older than `LINK_HOLD_MS`.** It does not go by itself: what was news when written may be out of date, and only the
   sender knows. The sender gets one Centralu notice for all it holds then (id, to whom, first line), with what to do per
   message: `mail send` with `thread` = its id sends it now, `handled` drops it. The rows are marked told (`told_at`:
   the sender was told what became of the row), so no row is named twice. Ten minutes covers a link that drops and comes

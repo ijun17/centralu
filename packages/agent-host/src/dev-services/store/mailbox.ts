@@ -194,10 +194,7 @@ export const RECIPIENT_HOLD_WORDS = ['uncertain', 'failed', 'loop', 'policy'] as
 /** `RECIPIENT_HOLD_WORDS` as an SQL list, for `held IN ...` */
 export const RECIPIENT_HOLDS = `(${RECIPIENT_HOLD_WORDS.map((w) => `'${w}'`).join(', ')})`
 
-/**
- * The hold of a sender's copy of mail to a session on a linked computer whose link was down when it was sent (#2354, docs/plans/linked-mail.md
- * §12): nothing went yet. Its sender acts on it, never the person, and it goes when the link is back (`MailAcross.retryOwed`)
- */
+/** The hold of a sender's copy of mail across while its link is down (docs/plans/linked-mail.md §12): its sender acts on it, never the person */
 export const LINK_HOLD = 'link' as const
 
 /** Holds that keep a message from its recipient altogether: it was not told of it, so it reads as a phantom (§5.5) */
@@ -781,7 +778,7 @@ export class MailboxRecords {
     return this.db
       .prepare<[string, number, number], { id: string }>(
         `SELECT m.id FROM mail m JOIN mail_recipients r ON r.message_id = m.id
-          WHERE m.kind = 'task' AND r.recipient LIKE ? ESCAPE '\\' AND r.settled IS NULL AND r.released_at IS NULL AND r.held IS NULL AND m.created_at > ?
+          WHERE m.kind = 'task' AND r.recipient LIKE ? ESCAPE '\\' AND r.settled IS NULL AND r.released_at IS NULL AND COALESCE(r.held, '') <> '${LINK_HOLD}' AND m.created_at > ?
           ORDER BY m.created_at, m.id LIMIT ?`,
       )
       .all(likePrefix(prefix), since, limit)

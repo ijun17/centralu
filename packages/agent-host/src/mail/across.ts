@@ -6,7 +6,7 @@ import { durationText, withTimeout } from '../timing.js'
 import { bodyLimit, refusalReason, tooLongText } from './rules.js'
 import { answerKept, reportWords } from './last-response.js'
 import { mailCalls } from './frame.js'
-import { LINK_HOLD_MS, older, unreachable, type AcrossMachine, type AcrossPeer, type AcrossSent, type Answer, type Kept, type Work } from './across-core.js'
+import { LINK_HOLD_MS, older, sendOrDrop, unreachable, type AcrossMachine, type AcrossPeer, type AcrossSent, type Answer, type Kept, type Work } from './across-core.js'
 import { AcrossReceipts } from './across-receipts.js'
 import { MAILBOX_RETENTION, type MailRow, type PendingRow } from '../dev-services/store/mailbox.js'
 
@@ -32,8 +32,8 @@ export function mayReachAcross(_from: string, _to: string): boolean {
 
 /** A send across: its fields, and what only the recipient's side reads (the person's Inbox shows a subject and a question's choices) */
 type SendInput = { to: string; text: string; needsReply: boolean; urgent?: boolean; replyTo?: string; subject?: string; choices?: string[]; question?: true }
-/** The fields of a send that cross */
-type Fields = Omit<Kept, 'question'>
+/** The fields of a send that cross, but its words, which `Way.params` takes */
+type Fields = Omit<Kept, 'question' | 'text'>
 /** What only the recipient's side reads, on a hub's side: the person's Inbox shows a subject and a question's choices */
 type Extra = { subject?: string; choices?: string[] }
 /** A task as it goes to a machine (`HostMailParams.task`), and as its copy here keeps it */
@@ -101,7 +101,7 @@ export class MailAcross extends AcrossReceipts {
     if (text.length > bodyLimit('session')) return { ok: false, why: 'too_long', text: tooLongText('session') }
     const origin = task.origin === 'script' ? 'send_to_session' : task.origin
     const fields = { text, needsReply: false }
-    const work: Work = { origin, ...(task.note ? { note: true as const } : {}) }
+    const work = workOf({ ...task, origin })
     // For the person only as `forPersonOf` reads it here: this host's own Assistant's send_to_session (#2258, #2274)
     const given = { ...work, origin, ...(task.forPerson && origin === 'send_to_session' && this.d.reach.isAssistant(sender) ? { forPerson: true as const } : {}), ...(task.depth ? { depth: task.depth } : {}) }
     if (away || !m.reachable) return this.hold(sender, to, { ...fields, task: given }, m)
@@ -255,8 +255,7 @@ export class MailAcross extends AcrossReceipts {
     const kept: Kept = { ...fields, ...(input.question ? { question: true } : {}) }
     // What only the recipient's side reads (the person's Inbox): the copy here keeps the message without them
     const extra = { ...(input.subject ? { subject: input.subject } : {}), ...(input.choices ? { choices: input.choices } : {}) }
-    const party = parseAddress(sender)
-    const sessionId = party?.kind === 'session' ? party.sessionId : null
+    const sessionId = sessionIdOf(sender)
     if (input.to === 'parent') return sessionId ? this.toParent(sessionId, sender, kept) : { ok: false, why: 'bad_address', text: 'only a session has a parent.' }
     const way = this.way(sender, input.to, fields, extra)
     if ('why' in way) return { ok: false, ...way }
@@ -286,8 +285,7 @@ export class MailAcross extends AcrossReceipts {
         older: (r) => (!r.ok && r.why === 'not_allowed' && sender === PERSON ? { ok: false, why: 'older', text: `${m.name} runs an older Centralu, which takes no answer from the person here. Update it there.` } : r),
       }
     }
-    const party = parseAddress(sender)
-    const sessionId = party?.kind === 'session' ? party.sessionId : null
+    const sessionId = sessionIdOf(sender)
     if (!sessionId) return { why: 'not_allowed', text: `only a session here writes to ${to}.` }
     const h = this.peers?.hub?.(route.hubId)
     if (!h) return { why: 'link_down', text: `the computer ${route.hubId} is not linked to this one right now (or runs a Centralu from before mail crossed computers), so nothing was sent.` }
@@ -302,17 +300,16 @@ export class MailAcross extends AcrossReceipts {
     }
   }
 
-  // ── Held while the link is down (#2354, docs/plans/linked-mail.md §12) ──
+  // ── Held while the link is down (docs/plans/linked-mail.md §12) ──
 
   /**
-   * A send to a side that is linked and down now: its copy is kept here under the id `idFor` gives, held for the link (`LINK_HOLD`), and goes when the
-   * link is back (`retryOwed`). An earlier send of the same words whose answer was lost has its copy already: that one stands, and its answer or the
-   * other side's rows settle it, so nothing more is held
+   * A send to a side linked and down now, its copy kept here held for its link. An earlier send of the same words whose answer was lost has its copy
+   * already: that one stands, and its answer or the other side's rows settle it, so nothing more is held
    */
   private hold(sender: string, to: string, copy: Kept & Extra & { task?: GivenTask }, peer: AcrossPeer): AcrossSent {
     if (writtenLate(this.now(), this.selfName(), copy.text).length > bodyLimit('session')) return { ok: false, why: 'too_long', text: `${tooLongText('session')}, with the line held mail goes with` }
     const { subject: _s, choices: _c, task, ...fields } = copy
-    const id = this.idFor(sender, to, fields, peer.name, task && { origin: task.origin, ...(task.note ? { note: true as const } : {}) })
+    const id = this.idFor(sender, to, fields, peer.name, task && workOf(task))
     if (this.d.records.message(id)) return unreachable(peer)
     // Kept, so not unsure: a send again of the same words is another message, held or sent on its own
     this.unsure.delete(id)
@@ -325,10 +322,8 @@ export class MailAcross extends AcrossReceipts {
   }
 
   /**
-   * Centralu's mail owed to the other side (`AcrossReceipts.retryOwed`), and the sends held for their link, at a connect or any change. A held one whose
-   * side can take it now goes by itself while it is younger than `LINK_HOLD_MS`, one after another in the order written. An older one waits for its
-   * sender, told once (`markTold`) in one notice for all it holds then (`heldTooLong`): it may be out of date, and only the sender knows. One to a
-   * computer no longer linked can never go: it is refused (`refusedHeld`)
+   * Also the sends held for their link. Each is marked `sending` before the first goes, so a drop or `mail send` of one still waiting its turn is
+   * refused rather than raced; one to a computer no longer linked goes to `resend`, which refuses it
    */
   protected override retryOwed(): void {
     super.retryOwed()
@@ -384,17 +379,12 @@ export class MailAcross extends AcrossReceipts {
     return (hub?.reachable ?? false) || (m?.reachable === true && m.tasks !== undefined) ? 'ready' : 'down'
   }
 
-  /**
-   * Mail held for its link goes now, under its own id, its words led by when they were written (`writtenLate`), so the reader there knows they come late.
-   * Taken there, its row is delivered as a send that went at once is (`heldWent`). Refused there, or its computer no longer linked, it is deleted here and
-   * its sender told why. Its answer lost, it stays held and goes again under its id, which the other side takes as the message it has. The caller marks
-   * it `sending` while it goes
-   */
+  /** Mail held for its link goes now under its own id, led by `writtenLate`. Its answer lost, it stays held; refused, it is deleted. The caller marks it `sending` */
   private async resend({ row, message: m }: PendingRow): Promise<AcrossSent> {
     const to = row.recipient
     const text = writtenLate(m.createdAt, this.selfName(), m.body)
     const origin = HostMailParams.shape.task.unwrap().shape.origin.safeParse(m.origin)
-    const fields = { text: m.body, needsReply: m.needsReply, ...(m.urgent ? { urgent: true } : {}), ...(m.replyTo ? { replyTo: m.replyTo } : {}) }
+    const fields = { needsReply: m.needsReply, ...(m.urgent ? { urgent: true } : {}), ...(m.replyTo ? { replyTo: m.replyTo } : {}) }
     const extra = { ...(m.subject ? { subject: m.subject } : {}), ...(m.choices ? { choices: m.choices } : {}) }
     let peer: AcrossPeer
     let r: Answer
@@ -728,6 +718,14 @@ function pick(p: { needsReply?: boolean | undefined; urgent?: boolean | undefine
 
 const noAnswer = (ms: number): string => `no answer within ${durationText(ms)}`
 
+const sessionIdOf = (sender: string): string | null => {
+  const party = parseAddress(sender)
+  return party?.kind === 'session' ? party.sessionId : null
+}
+
+/** What `idFor` reads of a task */
+const workOf = (task: { origin: Work['origin']; note?: true | undefined }): Work => ({ origin: task.origin, ...(task.note ? { note: true as const } : {}) })
+
 /** The words of mail held for its link as they go, led by when and where they were written, so the reader there knows they come late */
 const writtenLate = (at: number, computer: string, body: string): string =>
   `[Written at ${new Date(at).toISOString().slice(0, 16).replace('T', ' ')} UTC on ${computer}, while the link between the computers was down.]\n\n${body}`
@@ -741,7 +739,7 @@ function heldTooLong(held: readonly { id: string; to: string; body: string }[]):
   const each = held.slice(0, NAMED_MAX).map((h) => `${h.id} to ${oneLineText(h.to, 200)}: ${JSON.stringify(oneLineText(h.body, 120))}`)
   const more = held.length > NAMED_MAX ? `, and ${held.length - NAMED_MAX} more, which your inbox lists` : ''
   const what = held.length === 1 ? 'Your message held while the link was down was' : `${held.length} of your messages held while the link was down were`
-  const body = `[Centralu] The link is back. ${what} written more than ${durationText(LINK_HOLD_MS)} ago, so it did not go by itself: it may be out of date. ${each.join('; ')}${more}. For each, send it now with ${calls.send('<id>')}, or drop it with ${calls.done('<id>')}.`
+  const body = `[Centralu] The link is back. ${what} written more than ${durationText(LINK_HOLD_MS)} ago, so it did not go by itself: it may be out of date. ${each.join('; ')}${more}. For each, ${sendOrDrop(calls, '<id>')}.`
   return { body, facts: {}, dedupeKey: `held-too-long:${held.map((h) => h.id).join(',')}` }
 }
 

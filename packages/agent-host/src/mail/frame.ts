@@ -145,7 +145,7 @@ export type MessageCalls = {
   done(id: string): string
   inbox(): string
   close(id: string): string
-  /** Sends the caller's mail held for its link now (#2354) */
+  /** Sends the caller's mail held for its link now */
   send(id: string): string
 }
 

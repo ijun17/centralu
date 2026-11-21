@@ -340,7 +340,7 @@ export class AskProjectFlow {
     const sent = await tasks.send(callerId, chosen.id, frame, { origin: 'ask_project', depth: depthOf(this.host, callerId) + 1 })
     if (!sent.ok) return { ok: false, error: `Could not hand the task to ${label}: ${sent.text}` }
     const ask = of({ taskId: sent.messageId, sessionId: chosen.id }, chosen.name)
-    // Held for its link (#2354): nothing went, so there is nothing to wait for yet
+    // Held for its link: nothing went, so there is nothing to wait for yet
     if (sent.held) return { ok: true, state: 'working', project: ask.project, sessionId: ask.sessionId, sessionName: ask.sessionName, notice: heldLine(sent.computer) }
     return this.awaitAsk(callerId, ask, reader, signal)
   }

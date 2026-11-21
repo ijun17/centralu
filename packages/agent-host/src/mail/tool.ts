@@ -1,6 +1,6 @@
 import { errorMessage, oneLineText } from '@cc/protocol'
 import { LINK_HOLD, ROLE_VIA, type MailRow, type MailboxRecords } from '../dev-services/store/mailbox.js'
-import { heldLine } from './across-core.js'
+import { heldLine, sendOrDrop } from './across-core.js'
 import { CENTRALU, PERSON, isPerson, parseAddress } from './address.js'
 import { NOT_AN_INSTRUCTION, UNTRUSTED_LINES, escapeFrameTags, mailCalls, quoted, type MessageCalls } from './frame.js'
 import { parseMailId } from './ids.js'
@@ -25,7 +25,7 @@ const CANCEL_ANSWER: Record<ReturnType<Watches['cancel']>, (id: string) => strin
 const HELD_WHY: Record<InboxView['held'][number]['why'], (m: MailRow, calls: MessageCalls) => string> = {
   loop: () => 'waits until the person lets it go',
   policy: (m) => `waits until the person trusts ${m.senderProject ?? 'your project'}`,
-  [LINK_HOLD]: (m, calls) => `${heldLine('its computer')} Send it with ${calls.send(m.id)} once the link is back, or drop it with ${calls.done(m.id)}`,
+  [LINK_HOLD]: (m, calls) => `${heldLine('its computer')} Once the link is back, ${sendOrDrop(calls, m.id)}`,
 }
 
 /**
@@ -135,7 +135,7 @@ export class MailTool {
         if (!across) return { text: 'Finding sessions is not available here.', isError: true }
         return { text: await across.find((args.to ?? args.text ?? '').trim(), me.address) }
       }
-      // The caller's mail held for its link, sent now whatever its age (#2354): `send` with its id and no recipient
+      // The caller's mail held for its link, sent now whatever its age: `send` with its id and no recipient
       if (args.action === 'send' && across && args.thread?.trim() && !args.to?.trim()) {
         const r = await across.sendHeld(me.address, args.thread.trim())
         return r.ok ? { text: `Sent ${r.messageId} to ${JSON.stringify(r.to)} on ${r.computer}.` } : { text: `Refused (${r.why}): ${r.text}`, isError: true }

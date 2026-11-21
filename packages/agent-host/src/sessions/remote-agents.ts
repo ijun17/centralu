@@ -382,7 +382,7 @@ export class RemoteAgents {
     // It counts by itself now: its task is open (`workingIn`)
     counted()
     const unchecked = [
-      // The link dropped since the session was made: the task waits here for it (#2354)
+      // The link dropped since the session was made: the task waits here for it
       sent.held ? heldLine(machine.name) : '',
       fellBack ?? '',
       // Where its worktree forked from, as the machine said (#1488); a machine from before it says nothing
@@ -464,7 +464,7 @@ export class RemoteAgents {
         if (full) return { ok: false, error: full }
         const sent = await this.giveTask(rec, callerId, opts.text, 'agent_session')
         if (!sent.ok) return { ok: false, error: `Could not send to "${rec.name}" on ${rec.machine}: ${bare(sent.text)}.` }
-        // Its machine gives it the task once it is free (or once the link is back, #2354), and its report comes back as mail
+        // Its machine gives it the task once it is free (or once the link is back), and its report comes back as mail
         return sent.held ? { ...this.working(rec, true), notice: heldLine(rec.machine) } : this.working(rec, true)
       }
       case 'stop': {

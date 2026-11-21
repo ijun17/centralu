@@ -86,7 +86,7 @@ export function linkedTasksOf(mail: MessageService, records: MailboxRecords, acr
         ...(typeof answer === 'string' ? { answer } : {}), ...(typeof error === 'string' ? { error } : {}), ...(typeof reason === 'string' ? { reason } : {}),
       }
     }
-    // A task across has one recipient, the session there; none once a held one was dropped or refused (#2354)
+    // A task across has one recipient, the session there; none once a held one was dropped or refused
     const row = records.recipients(taskId)[0]
     if (row && row.settled === null && row.releasedAt === null) return { state: 'open' }
     return { state: 'ended', why: row?.releasedWhy ?? row?.settled ?? 'gone' }

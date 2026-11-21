@@ -2569,8 +2569,8 @@ section when it is briefed:
 ## 14. Linked machines
 
 The owner's decisions of 2026-11-08 (#2067) replace the outline below where they differ: there is no per-link
-numbering, and mail sent while a link is down is held by its sender's host in the outbox of what it owes the other side
-(#2354, [linked-mail.md](linked-mail.md) §12). The plan is [linked-mail.md](linked-mail.md).
+numbering, and mail sent while a link is down is held by its sender's host ([linked-mail.md](linked-mail.md) §12). The
+plan is [linked-mail.md](linked-mail.md).
 
 Old §11 stays: one mailbox per host, store-and-forward, the hub pulls, the receiving host wakes its own session, and
 §11.9's chains and declines. Without threads, these parts go: a thread's home host, `seq` and `home_seq`; task-field
