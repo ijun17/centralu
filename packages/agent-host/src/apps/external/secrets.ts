@@ -24,11 +24,10 @@ type SecretsDoc = Record<string, Record<string, string>>
 
 export class SecretStore {
   /*
-   * An unreadable file is moved aside, not overwritten (#841 item 2): it used to read as empty, and
-   * the next `set()` replaced it, so one damaged byte cost every app every value. Moving it aside
-   * rather than refusing every `set()` until a person repairs it by hand: the copy aside keeps the
-   * values for whoever wants them back, and re-entering a key on the screen is the fix a person can
-   * actually reach. `set()` is refused only while the file could not be moved and is still in place.
+   * An unreadable file is moved aside, not overwritten (#841 item 2): read as empty, it would be replaced by the next `set()`,
+   * and one damaged byte would cost every app every value. Moving it aside rather than refusing every `set()` until a person
+   * repairs it by hand: the copy aside keeps the values for whoever wants them back, and re-entering a key on the screen is the
+   * fix a person can actually reach. `set()` is refused only while the file could not be moved and is still in place.
    */
   private file: PrivateJsonFile<SecretsDoc>
   /**
@@ -47,11 +46,11 @@ export class SecretStore {
   }
 
   /**
-   * Whether the saved secrets could not be read, as it concerns this app (#944): the file is stuck in place (null for
-   * where it went, until it reads again), or a copy moved aside is in the data folder and this app has no value in the
-   * current file. One file holds every app's values (#993 review): re-entering app A's value says nothing of app B's,
-   * so each app's line goes when that app has a value again. Read from the folder, not kept, so a restart finds it; why
-   * the copy was moved is known only to the host that moved it, and said while that host runs.
+   * Whether the saved secrets could not be read, as it concerns this app (#944): the file is stuck in place (null for where it
+   * went, until it reads again), or a copy moved aside is in the data folder and this app has no value in the current file. One
+   * file holds every app's values: re-entering app A's value says nothing of app B's, so each app's line goes when that app has
+   * a value again. Read from the folder, not kept, so a restart finds it; why the copy was moved is known only to the host that
+   * moved it, and said while that host runs.
    */
   trouble(appKey: string): FileTrouble | null {
     const doc = this.read()
@@ -194,21 +193,19 @@ export type Redact = ((text: string) => string) & { reach?: number }
 
 export function redactor(secrets: Record<string, string>): Redact {
   /*
-   * Each value also in its JSON-escaped form (#838): a run record keeps the arguments as JSON (`describeArgs`), where
-   * a value with a line break, a quote, a backslash or a control character is spelled differently (`\n`, `\"`), so a
-   * multi-line key (a PEM, a service account's JSON) passed as an argument was kept unmasked. Both forms are sorted
-   * together, longest first, by the same rule as the values.
-   *
-   * And each line of a multi-line value on its own (#838 review): the app's log is masked a line at a time (`AppLog`),
-   * so a PEM printed raw never matched the whole value, and every line of the key went to the log. A line shorter than
-   * `SECRET_LINE_MIN_CHARS` is left out, as a short value is: `}` or an empty line would mask half the log.
+   * Each value also in its JSON-escaped form (#838): a run record keeps the arguments as JSON (`describeArgs`), where a value
+   * with a line break, a quote, a backslash or a control character is spelled differently (`\n`, `\"`), so a multi-line key (a
+   * PEM, a service account's JSON) passed as an argument would be kept unmasked. Both forms are sorted together, longest first,
+   * by the same rule as the values. And each line of a multi-line value on its own: the app's log is masked a line at a time
+   * (`AppLog`), so a PEM printed raw never matches the whole value, and every line of the key would go to the log. A line
+   * shorter than `SECRET_LINE_MIN_CHARS` is left out, as a short value is: `}` or an empty line would mask half the log.
    */
   const pairs = Object.entries(secrets)
     .filter(([, v]) => v.length >= 4)
     .flatMap(([name, v]): [string, string][] => {
       const escaped = JSON.stringify(v).slice(1, -1)
       const forms: [string, string][] = escaped === v ? [[name, v]] : [[name, v], [name, escaped]]
-      // A value with a line break in it, however many of its lines are long enough to mask (#945 review)
+      // A value with a line break in it, however many of its lines are long enough to mask
       if (!/[\r\n]/.test(v)) return forms
       const lines = v.split(/\r?\n|\r/).map((l) => l.trim()).filter((l) => l.length >= SECRET_LINE_MIN_CHARS)
       return [...forms, ...lines.map((l): [string, string] => [name, l])]

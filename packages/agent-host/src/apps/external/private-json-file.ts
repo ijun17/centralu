@@ -5,30 +5,16 @@ import { realOs } from '../../os/real.js'
 import { writeFileWhole } from '../../os/write-file-whole.js'
 
 /**
- * One small JSON document kept in the host's data folder that only this user may read (app secrets,
- * the imported-app marks). Both used to write it by hand, and the copies drifted (#850 item 6,
- * #841 item 2): the secrets file treated an unparseable file as empty and the next write replaced it,
- * losing every value in it, and both wrote through one fixed `<file>.tmp`.
- *
- * **Reading.** A missing file is the empty document. A file that parses to something other than the
- * expected shape, or does not parse at all, is moved aside as `<file>.unreadable-<ms>` and reported,
- * and the empty document is returned: nothing in it is guessed at, and nothing in it is lost, since a
- * person can recover it from the moved-aside copy (the rename keeps its 0600 mode).
- *
- * **A file that could not be read at all is left where it is.** A read error (EACCES, EMFILE, a file
- * an antivirus scan holds on Windows) says nothing about the contents, which are most likely fine:
- * moving it aside would make every secret read as unset, and the next save would write a file
- * holding that one value. The read returns the empty document as a stand-in and says so once, and
- * the next read tries again.
- *
- * **A write is refused while the last read was such a stand-in** (a read error, or a damaged file
- * that could not be moved aside): a document built from it would replace whatever the file on disk
- * holds with what was built from nothing. A caller writes what it built from a read that succeeded.
- *
- * **The temp file has a name of its own per write.** During a host swap the old and the new host both
- * run for a while and may write the same file at once: with one shared `<file>.tmp`, one host's rename
- * moved the other's half-written temp file into place, and the other's rename then failed. `wx` makes
- * a name that somehow exists already an error rather than a write through it.
+ * One small JSON document kept in the host's data folder that only this user may read (app secrets, the imported-app marks).
+ * **Reading:** a missing file is the empty document; a file that parses to another shape, or not at all, is moved aside as
+ * `<file>.unreadable-<ms>` and reported (a person can recover it; the rename keeps its 0600 mode) and the empty document is
+ * returned. **A file that could not be read at all is left where it is:** a read error (EACCES, EMFILE, a file an antivirus
+ * scan holds on Windows) says nothing about the contents, and moving it aside would make every secret read as unset and the
+ * next save write a file with that one value; the read returns the empty document as a stand-in and the next read tries again.
+ * **A write is refused while the last read was such a stand-in** (a read error, or a damaged file that could not be moved
+ * aside), as a document built from nothing would replace what is on disk. **Each write has a temp file name of its own:**
+ * during a host swap both hosts may write the file at once, and with one shared `<file>.tmp` one host's rename would move the
+ * other's half-written file into place; `wx` makes an existing name an error rather than a write through it.
  */
 export class PrivateJsonFile<T> {
   /** True while the last read returned the empty document in place of a file it could not use */
@@ -92,10 +78,10 @@ export class PrivateJsonFile<T> {
   }
 
   /**
-   * Writes `doc` as the file **only while there is none**, and says whether it did. A check for the file and then
-   * `write` leaves a window in which a file the other host of a swap wrote, or a person put back, is replaced by the
-   * rename (#1172 review). A hard link to the finished temp file never replaces anything: EEXIST means another file
-   * won, and it is left as it is. Throws, writing nothing, while the last read was a stand-in, as `write` does
+   * Writes `doc` as the file **only while there is none**, and says whether it did. A check for the file and then `write`
+   * leaves a window in which a file the other host of a swap wrote, or a person put back, is replaced by the rename (#1172). A
+   * hard link to the finished temp file never replaces anything: EEXIST means another file won, and it is left as it is.
+   * Throws, writing nothing, while the last read was a stand-in, as `write` does
    */
   create(doc: T): boolean {
     return this.put(doc, 'create')

@@ -86,7 +86,7 @@ describe.each(owners)('$file', ({ file, write, wrote }) => {
 
   it("does not write through the other host's temp file during a swap, and leaves none of its own behind", () => {
     const path = join(dataRoot, file)
-    // The old host of a swap, halfway through its own write under the name both hosts used to share
+    // The other host of a swap, halfway through its own write to `<file>.tmp`, the name a shared temp file would have
     writeFileSync(`${path}.tmp`, 'the other host, half written')
 
     write()
@@ -123,7 +123,7 @@ describe('the secrets store says when its file could not be used', () => {
     expect(existsSync(join(dataRoot, trouble!.movedTo!))).toBe(true)
     // Further reads find no file, which is no news: it stays said
     expect(store.trouble('p1/keys')).toEqual(trouble)
-    // One file holds every app's values (#993 review): app A's value entered again says nothing of app B's, nor of why
+    // One file holds every app's values: app A's value entered again says nothing of app B's, nor of why
     store.set('p1/keys', 'API_KEY', 'sk-new-value')
     expect(store.trouble('p1/keys')).toBeNull()
     expect(store.trouble('p2/other')).toEqual(trouble)

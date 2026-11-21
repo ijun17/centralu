@@ -92,11 +92,11 @@ export type Blocker = { kind: 'invalid' | 'untrusted' | 'unconfirmed' | 'off' | 
 
 /**
  * Clears what a run of failures left behind — the count, the backoff, the reason, the stop — and the remembered spec
- * generation. Every door that gives an app a fresh start passes through here: Restart, a check, a reload on changed
- * files, a restored version, a changed secret. The generation goes too: it describes the code that last connected,
- * and the SDK warns that a stale one fails (a modern verdict against a server that went back to the 2025 SDK) or,
- * worse, succeeds silently forever (a legacy verdict against an upgraded server keeps speaking `initialize`). Only
- * Restart used to clear it, so a check or a reload after switching SDKs kept connecting the old way.
+ * generation. Every door that gives an app a fresh start passes through here: Restart, a check, a reload on changed files, a
+ * restored version, a changed secret. The generation goes too: it describes the code that last connected, and the SDK warns
+ * that a stale one fails (a modern verdict against a server that went back to the 2025 SDK) or, worse, succeeds silently
+ * forever (a legacy verdict against an upgraded server keeps speaking `initialize`). Without clearing it, a check or a reload
+ * after switching SDKs would keep connecting the old way.
  */
 export function resetLife(L: Life): void {
   Object.assign(L, { failures: 0, retryAt: 0, lastError: null, gaveUp: false, verdict: undefined })

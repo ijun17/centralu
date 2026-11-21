@@ -8,10 +8,10 @@ import type { Os } from '../../os/port.js'
 import { carryAppFiles } from './carry.js'
 
 /**
- * An app's data carried to its new key (#1650 review): an app writes its own data folder, so whatever links it left
- * there are copied, by the `Os`'s copy, as links. Node's own `cpSync` ended the host over a junction back to the folder
- * (Windows, 0xC0000409) and over a link in a circle. A link into the folder leads into the new key's: kept as written,
- * a junction (always a whole path) tied the new key's data to the old key's folder.
+ * An app's data carried to its new key (#1650): an app writes its own data folder, so whatever links it left there are copied,
+ * by the `Os`'s copy, as links. Node's own `cpSync` ended the host over a junction back to the folder (Windows, 0xC0000409) and
+ * over a link in a circle. A link into the folder leads into the new key's: kept as written, a junction (always a whole path)
+ * tied the new key's data to the old key's folder.
  */
 const os = realOs()
 const { join } = os.paths.path

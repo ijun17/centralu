@@ -87,23 +87,15 @@ export type RunLedger = {
 }
 
 /**
- * A ledger that announces when the record changes (M4 D-6) — when a row starts (`begin`), gets
- * linked to a session (`link`), and ends (`end`), it calls `announce` for **every app whose runs
- * panel can see that row.** One app's runs panel shows that app's own rows and the chain beneath
- * them (`listAppRuns`) — so a single row is visible on the panel of its own app, and on the panels
- * of every app further up the chain it descended from.
- *
- * Each row decides those apps and holds onto them **at the moment the row starts.** Its parent is
- * open at that point (a row only ever starts under an open run — a denied row with no parent belongs
- * only to its own app). It is not recomputed by walking up again when the row ends: if the parent
- * ended first, the chain is already broken, and a panel further up would never hear about this row
- * ending.
- *
- * Why this is a different signal from "changed" (`emitChanged`): that one means a value inside the
- * app changed, and its open screen re-reads. A read-only tool's call never emits that (doing so
- * would turn the screen's re-read into a loop, #190). But a read-only tool can still request an
- * agent and start a chain that runs for minutes — the runs panel has to hear about that, and the
- * screen must not.
+ * A ledger that announces when the record changes (M4 D-6): when a row starts (`begin`), is linked to a session (`link`) and
+ * ends (`end`), it calls `announce` for **every app whose runs panel can see that row**: its own app, and every app further up
+ * the chain it descended from (`listAppRuns`). Each row decides those apps and holds them **at the moment it starts**, when its
+ * parent is open (a row only ever starts under an open run; a denied row with no parent belongs only to its own app). They are
+ * not recomputed by walking up when the row ends: if the parent ended first the chain is already broken, and a panel further up
+ * would never hear of this row ending. This is a different signal from "changed" (`emitChanged`): that one means a value inside
+ * the app changed and its open screen re-reads, and a read-only tool's call never emits it (that would turn the screen's
+ * re-read into a loop, #190). But a read-only tool can still request an agent and start a chain that runs for minutes: the runs
+ * panel has to hear about that, and the screen must not.
  */
 export function announcingLedger(inner: RunLedger, announce: (app: { projectId: string | null; appId: string }) => void): RunLedger {
   type App = { projectId: string | null; appId: string }

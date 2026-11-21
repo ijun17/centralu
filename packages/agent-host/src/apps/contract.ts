@@ -1,21 +1,14 @@
 import { RESERVED_NAME_PREFIX, appIdProblemText, newAppIdProblem, serverNameProblem } from '@cc/protocol'
 
 /*
- * The host's tool contract (#97) — what a session's tools are and who called one.
- *
- * These used to be defined in sessions/centralu-tools.ts, which left the source of truth for
- * "what can be called, by whom" with one of its callers (the Assistant) instead of with the
- * layer the adapters, the Centralu tools and the app runtime all stand on. They were moved
- * here, and stayed here when the built-in app framework that also used them (HostAppModule, the
- * control app) was removed in #372.
+ * The host's tool contract (#97): what a session's tools are and who called one. It sits under the adapters, the Centralu tools
+ * and the app runtime that all stand on it, so no caller of it owns the definition.
  */
 
 /**
- * The set of tools a session receives (#69). The Assistant gets all of them, a coordination session
- * gets the three within its scope, and an app's building session (M4 C-3) gets exactly one, `check`, to
- * check its own app. Every other session gets the light `reader` set (#320): it reads its own project's
- * sessions, and directs only the agents it started itself (#561). The worktree manager's seat went with
- * the role (#561 part 3).
+ * The set of tools a session receives (#69). The Assistant gets all of them, a coordination session gets the three within its
+ * scope, an app's building session (M4 C-3) gets exactly one, `check`, to check its own app. Every other session gets the light
+ * `reader` set (#320): it reads its own project's sessions, and directs only the agents it started itself (#561).
  */
 export type ToolProfile = 'assistant' | 'scoped' | 'builder' | 'reader'
 
@@ -29,47 +22,26 @@ export type ToolCaller = { sessionId: string | null; profile: ToolProfile | 'hum
 export type ToolOutput = { text: string; isError?: boolean; content?: unknown[]; structuredContent?: Record<string, unknown> }
 
 /**
- * The name of the Assistant MCP server.
- *
- * **This is both the name shown on screen and the key trust is checked against** — it shows up on a
- * tool call card as `mcp__centralu__list_sessions`, and both the claude adapter's approval exception
- * and codex's elicitation acceptance judge trust by this same name.
- *
- * Why this lives in exactly one place: there used to be one literal copy each in the claude and codex
- * adapters, and the manager, which is precisely the thing that needs to validate a proposed server
- * name, could import neither (importing an adapter drags its SDK along). With the key duplicated, a
- * fix to only one copy is an accident waiting to happen — it is written once here, and everything
- * else imports it (#93).
- *
- * **Why it lives here, in the app contract (M4 A-1)**: it used to sit next to the Assistant's tool
- * definitions. An external app's id has to follow the same rule (the server name attached to a
- * session is `app-<id>`), but the app runtime cannot import the sessions layer — if the rule stayed
- * with a passenger (the Assistant), the runtime would end up with two copies of it. This is the
- * same direction #97 moved the central types in, into this file.
- *
- * **The value and its validation moved once more, into `app-id.ts` in `@cc/protocol` (M4 C-1).** The
- * "new app" dialog has to validate the id it builds from the name before creating it, and that
- * package is the only place the UI can reach. This file only attaches the host's name and the reason
- * text an agent or a log reads — validation travels together with the dialog.
+ * The name of the Assistant MCP server: both the name shown on screen and the key trust is checked against (a tool call card
+ * shows `mcp__centralu__list_sessions`; the claude adapter's approval exception and codex's elicitation acceptance judge trust
+ * by this same name). It lives once, here, because the manager has to validate a proposed server name and cannot import an
+ * adapter (that drags its SDK along), and a fix to one of two copies of the key would be an accident waiting to happen (#93).
+ * It sits in the app contract because an external app's id follows the same rule (the server attached to a session is
+ * `app-<id>`) and the app runtime cannot import the sessions layer (M4 A-1, #97). The value and its validation are in
+ * `app-id.ts` in `@cc/protocol` (M4 C-1), where the "new app" dialog can reach them; this file adds the host's name and the
+ * reason text an agent or a log reads.
  */
 export const CENTRALU_MCP_NAME = RESERVED_NAME_PREFIX
 
 /**
- * Whether a proposed MCP server name is safe to use (#93). Returns a reason a person can read if it
- * is not, or null if it is fine.
- *
- * **This is blocked at the point where the name comes in.** An approved server's name becomes a tool
- * prefix, and that tool prefix is what the approval exception judges. Two holes found by measurement:
- *
- *   centralu      **completely replaced** the in-process assistant server (the approved server
- *                 expands after the built-in entry — the same key ends up belonging to someone else)
- *   centralu__pw  the tool name became `mcp__centralu__pw__*`, which passed the prefix check →
- *                 skipped canUseTool entirely
- *
- * So there are two layers of defense here. Excluding underscores from the character rule makes `__`
- * impossible to form (closing the second hole), and the reserved-word check keeps the name itself
- * from being taken (closing the first). Checking reserved words first means that even if the
- * character rule is loosened later, this particular check still survives.
+ * Whether a proposed MCP server name is safe to use (#93): a reason a person can read if it is not, or null. **Blocked where
+ * the name comes in.** An approved server's name becomes a tool prefix, which is what the approval exception judges. Two
+ * holes found by measurement:
+ *   centralu      **completely replaced** the in-process assistant server (an approved server expands after the
+ *                 built-in entry, so the same key ends up belonging to someone else)
+ *   centralu__pw  the tool name became `mcp__centralu__pw__*`, which passed the prefix check and skipped canUseTool entirely
+ * Excluding underscores from the character rule makes `__` impossible to form (the second hole); the reserved-word check keeps
+ * the name itself from being taken (the first). It runs first, so it survives a loosened character rule.
  */
 export function mcpServerNameError(name: string): string | null {
   // Reserved words are checked first — the order of validation is enforced by protocol's serverNameProblem
@@ -84,16 +56,11 @@ export function mcpServerNameError(name: string): string | null {
 }
 
 /**
- * Validation for a MCP server name **as proposed** to a person — adds a ban on the `app-` prefix to
- * the rules above (M4 A-5).
- *
- * This does not ban the prefix from an app's own id (an app called `app-store` attaches as
- * `app-app-store`, so it never collides). What is banned is a proposed server: an approved `app-notes`
- * server would land in the same slot as app `notes`'s own proxy server. An adapter expands the app
- * afterward so the app wins, but that means a server the person approved silently disappears. And a
- * tool under an `app-` name is a slot that can skip approval through an app's read-only annotation —
- * that slot must belong only to an app the runtime itself knows about. So this is blocked at the
- * point where the name comes in.
+ * Validation for a MCP server name **as proposed** to a person: the rules above plus a ban on the `app-` prefix (M4 A-5). An
+ * app's own id may start with it (`app-store` attaches as `app-app-store`, so it never collides); a proposed server may not: an
+ * approved `app-notes` would land in the slot of app `notes`'s own proxy server, the adapter expands the app afterward so the
+ * app wins, and the approved server silently disappears. A tool under an `app-` name can also skip approval through an app's
+ * read-only annotation, so that slot must belong only to an app the runtime itself knows about.
  */
 export function proposedMcpServerNameError(name: string): string | null {
   const base = mcpServerNameError(name)

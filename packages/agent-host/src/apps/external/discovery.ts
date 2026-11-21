@@ -35,7 +35,7 @@ export type ScannedApp = {
   root?: true
   /** The absolute path that will become the app process's cwd — exactly the path that was checked */
   dir: string
-  /** A hash of the raw manifest text, used to detect changes (null if missing or unreadable) */
+  /** A hash of the raw manifest text, to detect changes (null if missing or unreadable) */
   hash: string | null
   manifest: AppManifest | null
   error: string | null

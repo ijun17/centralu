@@ -46,30 +46,15 @@ export type NewAppSpec = { projectId: string | null; id: string; name: string; d
 export type AppProjectTarget = { path: string; isDefault: boolean }
 
 /**
- * Creates a screen-less app in the user folder (M4 A-7, decision 8) — where an MCP server a person
- * approved turns into an app.
- *
- * If an approved server lived in a separate registry (app_settings), the approval flow and the
- * attach path would both be duplicated. That server's calls never went through the broker, were
- * never recorded, and could not even be removed from a list. Becoming an app puts it on the same one
- * path every other app takes (audience, the run ledger, starting only when first needed, stopping
- * when idle). Since it is a user-folder app, it attaches to the Assistant (decision 4 — the same
- * place a previously approved server used to attach).
- *
- * Validation is the same single set discovery uses: a manifest is built and passed through
- * `parseManifest` before it is written (the id rule from #93 lives there too). A reserved id
- * cannot be taken. **If an app with the same id already exists** — if it is the same server, that
- * app is returned as-is (calling this again produces the same result: when a move was interrupted
- * partway and runs again), and if different, this refuses (a person-made app is never overwritten).
- *
- * How it is written: through `placeAppFolder` — to a temp folder starting with a dot (skipped by
- * discovery), then renamed, so there is never a moment where discovery could read a half-written
- * manifest as "a broken app"; the parent is created through the path guard, so an `apps/` that is
- * a link pointing outside the data folder stops it. The data folder is also created right away.
- * Rescanned immediately after writing: on the user side, nothing is watched while `apps/` does not
- * exist yet (watching the data folder itself would wake up on every write to store.db), so watching
- * never catches the very first app. **This never starts it** — it starts the first time it is
- * needed.
+ * Creates a screen-less app in the user folder (M4 A-7, decision 8): where an MCP server a person approved turns into an app,
+ * so it takes the one path every other app takes instead of a separate registry whose calls skip the broker and the run ledger;
+ * as a user-folder app it attaches to the Assistant (decision 4). The manifest is built and passed through `parseManifest`
+ * before it is written (the id rule of #93 lives there; a reserved id cannot be taken). **An app with the same id:** the same
+ * server returns it as-is (an interrupted move can run again), a different one is refused (a person-made app is never
+ * overwritten). Written through `placeAppFolder`: a dot-named temp folder, then renamed, so discovery never reads a
+ * half-written manifest; the parent goes through the path guard, so an `apps/` that is a link out of the data folder stops it.
+ * Rescanned right after writing, as nothing is watched while `apps/` does not exist (watching the data folder wakes on every
+ * write to store.db). **This never starts it.**
  */
 export function installUserApp(host: FoldersHost, spec: UserAppSpec): ExternalAppInfo {
   if (host.disposed()) throw new AppUnavailableError('The app runtime has shut down')
@@ -121,31 +106,15 @@ export function installUserApp(host: FoldersHost, spec: UserAppSpec): ExternalAp
 }
 
 /**
- * Creates a new app from the template (M4 C-1b) — "New app" (`apps.create`) and the Assistant's
- * `create_app` use the same door.
- *
- *   project app     `<project>/.centralu/apps/<id>/` — committed to the repository and shared with
- *                   the team (decision 1's default)
- *   user-folder app `<data folder>/apps/<id>/` — for something used across several projects
- *                   (`projectId: null`)
- *
- * Three things refused, all before the folder is created:
- *   - **the name**: the same rule as a proposed MCP server (`newAppIdProblem` — #93's characters and
- *     the `centralu` reservation, plus a ban on the `app-` prefix). Discovery still reads an id with
- *     the `app-` prefix (a hand-made app), but there is no reason for a newly created app to have a
- *     server name like `app-app-notes`. A reserved id is also refused.
- *   - **an untrusted project**: a created app is code that runs on this machine, and an app in an
- *     untrusted project never starts (decision 3). An app that can be created but never runs would
- *     leave the building session spinning its wheels.
- *   - **an id that already exists**: even a folder standing there with an invalid manifest belongs
- *     to a person or an agent — never overwritten.
- *
- * Writing follows the same method as `installUserApp` (`placeAppFolder`): expanded into a temp
- * folder starting with a dot, then renamed (so discovery never sees a half-written app). The parent folder is created one
- * segment at a time through the path guard (`ensureDirInside` — stops if `.centralu` is a link
- * pointing outside). The data folder is also created right away. Rescanned immediately after
- * writing — watching might not be looking at that location yet. **This never starts it** — it
- * starts the first time it is needed.
+ * Creates a new app from the template (M4 C-1b): "New app" (`apps.create`) and the Assistant's `create_app` use this door. A project app
+ * goes to `<project>/.centralu/apps/<id>/` (committed, shared with the team: decision 1's default), a user-folder app (`projectId: null`)
+ * to `<data folder>/apps/<id>/`. Refused before the folder is created:
+ *   - **the name** (`newAppIdProblem`: #93's characters, the `centralu` reservation and a ban on the `app-` prefix: discovery still reads it in a hand-made app, a new one has no reason to carry it)
+ *   - **an untrusted project**: an app there never starts (decision 3), and a building session would spin its wheels on one it can create but never run
+ *   - **an id that already exists**: even a folder with an invalid manifest belongs to a person or an agent
+ * Written like `installUserApp` (`placeAppFolder`); the parent is created one segment at a time through the path guard (`ensureDirInside`,
+ * which stops at a `.centralu` link out of the project). Rescanned right after writing, as watching might not look at that location yet.
+ * **This never starts it.**
  */
 export function createApp(host: FoldersHost, spec: NewAppSpec): ExternalAppInfo {
   if (host.disposed()) throw new AppUnavailableError('The app runtime has shut down')
@@ -239,21 +208,14 @@ export function moveToAppTrash(dataRoot: string, dir: string, appId: string, at 
 }
 
 /**
- * Removes a user-folder app (M4 A-7) — the path for withdrawing an approved MCP server from the
- * list (a path that did not exist in the old registry).
- *
- * The folder is not deleted, only moved to `app-trash/` in the data folder: it could be a hand-made
- * app, and it is better to have a way to bring it back. The run ledger, data folder, and secrets
- * survive (a removed app's records are still readable — `runs`). **This never removes a project
- * app** — that is a file in a repository, and the place to withdraw it is git.
- *
- * A running app is stopped, and waited for, **before** the folder moves (#14). Windows refuses to
- * move a folder that a process has as its working directory, and an app runs in its own folder:
- * moving first failed with EBUSY and left the app in place and running. Nothing starts it again
- * meanwhile (`removing`). Rescanned after moving: an attached session detaches (appsChanged). A
- * Claude session drops it from its server set without restarting, and a Codex thread keeps the
- * tool name until its next thread, but calling it is refused with "not an attached app"
- * (attaching to a session re-checks on every call).
+ * Removes a user-folder app (M4 A-7): the path for withdrawing an approved MCP server from the list. The folder is moved to
+ * `app-trash/` in the data folder, not deleted: it could be a hand-made app. The run ledger, data folder and secrets survive
+ * (`runs` still reads a removed app's records). **This never removes a project app**: that is a file in a repository, and the
+ * place to withdraw it is git. A running app is stopped and waited for **before** the folder moves (#14): Windows refuses to
+ * move a folder a process has as its working directory, and an app runs in its own folder, so moving first failed with EBUSY
+ * and left the app running. Nothing starts it again meanwhile (`removing`). Rescanned after moving: an attached session
+ * detaches (appsChanged); a Claude session drops it from its server set without restarting, a Codex thread keeps the tool name
+ * until its next thread, but calling it is refused with "not an attached app" (attaching to a session re-checks on every call).
  */
 export async function removeUserApp(host: FoldersHost, ref: AppRef): Promise<void> {
   if (ref.projectId !== null) {

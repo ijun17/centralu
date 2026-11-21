@@ -243,6 +243,17 @@ export const ARCHIVE_ALLOWED = [
  */
 export const COMMENTS_LEFT = [
   'packages/agent-host/src/app-list-events.test.ts',
+  'packages/agent-host/src/apps/external/app-process-sweep.test.ts',
+  'packages/agent-host/src/apps/external/app-start-env.ts',
+  'packages/agent-host/src/apps/external/app-template.test.ts',
+  'packages/agent-host/src/apps/external/broker.ts',
+  'packages/agent-host/src/apps/external/capabilities.ts',
+  'packages/agent-host/src/apps/external/desk.ts',
+  'packages/agent-host/src/apps/external/discovery.test.ts',
+  'packages/agent-host/src/apps/external/limits.test.ts',
+  'packages/agent-host/src/apps/external/manifest.ts',
+  'packages/agent-host/src/apps/external/runtime.ts',
+  'packages/agent-host/src/apps/external/test-helpers.ts',
   'packages/agent-host/src/data-dir.test.ts',
   'packages/agent-host/src/data-dir.ts',
   'packages/agent-host/src/lifecycle/host-process.test.ts',
@@ -296,6 +307,17 @@ export const COMMENTS_LEFT = [
  */
 export const COMMENT_SHARE_HELD = {
   files: {
+    'packages/agent-host/src/apps/contract.ts': 67,
+    'packages/agent-host/src/apps/external/app-entry.ts': 44,
+    'packages/agent-host/src/apps/external/app-process.ts': 37,
+    'packages/agent-host/src/apps/external/change-reflector.ts': 39,
+    'packages/agent-host/src/apps/external/error-log.ts': 42,
+    'packages/agent-host/src/apps/external/errors.ts': 51,
+    'packages/agent-host/src/apps/external/placement.ts': 38,
+    'packages/agent-host/src/apps/external/runtime-types.ts': 64,
+    'packages/agent-host/src/apps/external/scaffold.ts': 44,
+    'packages/agent-host/src/apps/external/secrets.ts': 43,
+    'packages/agent-host/src/apps/external/visibility.ts': 50,
     'packages/agent-host/src/idle.ts': 44,
     'packages/agent-host/src/keeper-link.ts': 41,
     'packages/agent-host/src/lifecycle/launch-env.ts': 46,

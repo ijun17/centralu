@@ -27,7 +27,9 @@ const write = (rel: string, text: string) => {
   writeFileSync(join(app, rel), text)
 }
 
-/** A file in the 12th nested folder — deeper than the fingerprint used to look (8), within what an import accepts (16) */
+/**
+ * A file in the 12th nested folder: deeper than an older build's walk (8, `Snapshot.depth`), within what an import accepts (16)
+ */
 const DEEP = 'a/b/c/d/e/f/g/h/i/j/k/l/deep.mjs'
 
 const measured = (dir: string) => {

@@ -13,31 +13,16 @@ import { MANIFEST_FILE, appIdRefusal, parseManifest, type AppManifest } from './
 import { ZipError, readZipEntries, readZipEntry, type ZipEntry } from './zip.js'
 
 /**
- * Imports an app from outside (M4 E-3) — **validates while staging** a folder or a zip (a file on
- * this machine, or an https address), and builds what the person reviews.
- *
- * This file only goes as far as staging. The destination is an empty folder the caller supplies (the
- * staging area in the data folder), and moving it into the user folder plus the person's
- * confirmation is the runtime door's job (handover in `runtime.ts`). Since the staging area is not a
- * place discovery scans, nothing starts or attaches an app that has not finished validation to a
- * session.
- *
- * What is blocked:
- *   - **Links are never followed.** If a link inside the folder points outside the folder, the import
- *     is refused (stating what it points at). A link pointing inside is never moved, only listed. The
- *     same holds for a link entry inside a zip — leaving a link unpacked is the oldest form of a
- *     zip-slip attack.
- *   - **A name is never used to write outside (zip slip).** An absolute path, `..`, a backslash, a
- *     drive letter, an empty segment, and control characters are all rejected. The path written is
- *     built only from segments that pass validation.
- *   - **Size.** File count, the total, one file, depth, and the archive itself all have caps. A zip
- *     is first measured by its declared size, and unpacking stops if it exceeds that declaration
- *     (`zip.ts`).
- *   - **A name starting with a dot is never moved.** `.git`, `.env`, and also `.claude/` and
- *     `.codex/` — these two are settings read by a building session working in the app folder, so a
- *     hook an imported bundle carries in could otherwise run without the person's confirmation. The
- *     folder fingerprint (`fingerprint.ts`) also never treats a dot-name as part of the app's
- *     behavior (`hiddenName`, `folder-walk.ts`).
+ * Imports an app from outside (M4 E-3; what is refused and why: docs/apps/handing-over.md "Import (E-3)"): **validates while
+ * staging** a folder or a zip (a file on this machine, or an https address), and builds what the person reviews. It goes only
+ * as far as staging: the destination is an empty folder the caller supplies (the staging area in the data folder, which
+ * discovery does not scan, so nothing unvalidated starts or attaches to a session); moving it into the user folder plus the
+ * person's confirmation is the runtime door's job (handover in `runtime.ts`). What is blocked beyond the doc:
+ * - **Links are never followed**: one pointing outside refuses the import, one pointing inside is only listed; a link entry in
+ *   a zip is the oldest form of a zip-slip attack.
+ * - **A name never writes outside**: the written path is built only from segments that pass validation.
+ * - **A name starting with a dot is never moved**: `.git`, `.env`, and `.claude/` and `.codex/`, settings a building session
+ *   reads in the app folder, so an imported hook could run without the person's confirmation (`hiddenName`, `folder-walk.ts`).
  */
 
 export const IMPORT_LIMITS = {

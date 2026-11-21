@@ -2,23 +2,16 @@ import type { Readable, Writable } from 'node:stream'
 import { ReadBuffer, serializeMessage, type JSONRPCMessage, type Transport } from '@modelcontextprotocol/client'
 
 /**
- * An MCP transport over a pair of streams — newline-delimited JSON, the same as the stdio binding
- * (M4 A-3, spikes S-4 and S-5).
- *
- * Two reasons we do not use the SDK's `StdioClientTransport` (measured in the spikes):
- *   1. That transport **spawns its own child.** We have to give the child an extra pipe besides
- *      stdio (fd 3, for the broker), so spawning has to be our job.
- *   2. Figuring out the spec generation **starts the app twice** (a sibling process for the probe,
- *      then the real one). In S-4, a 2025-generation server started two processes for a single
- *      connection. This transport probes over the same connection instead — the SDK treats a
- *      stdio-shaped transport with no `_dispose` as "probing in place".
- *
- * `pid` and `stderr` **must exist even though nothing reads them.** The v2 client tells whether a
- * transport is stdio-shaped by whether these two properties exist (`detectProbeTransportKind`).
- * Without them it is treated as HTTP, and a 2025-generation server that does not answer the probe
- * gets disconnected as a "failure" instead of falling back to initialize because it is treated as
- * an old server (S-5 probe-classify: reusing the SDK transport produces `REQUEST_TIMEOUT`, this
- * transport connects as legacy instead).
+ * An MCP transport over a pair of streams: newline-delimited JSON, as the stdio binding (M4 A-3, spikes S-4 and S-5). Not the SDK's
+ * `StdioClientTransport` (measured in the spikes), for two reasons:
+ *   1. It **spawns its own child**, and the child needs an extra pipe besides stdio (fd 3, for the broker), so spawning is our job.
+ *   2. Working out the spec generation **starts the app twice** (a sibling process for the probe, then the real one; in S-4 a 2025-generation
+ *      server started two processes for one connection): this transport probes over the same connection, as the SDK does for a stdio-shaped
+ *      transport with no `_dispose` ("probing in place").
+ * `pid` and `stderr` **must exist though nothing reads them**: the v2 client tells a stdio-shaped transport by these two properties
+ * (`detectProbeTransportKind`). Without them it is treated as HTTP, and a 2025-generation server that does not answer the probe is
+ * disconnected as a "failure" instead of falling back to initialize as an old server (S-5 probe-classify: the SDK transport gives
+ * `REQUEST_TIMEOUT`, this one connects as legacy).
  */
 export class StreamTransport implements Transport {
   readonly pid: number | null
