@@ -239,7 +239,7 @@ function rawBytes(raw: RawData): number {
   return raw.byteLength
 }
 
-/** Bytes a server-to-client frame adds around its payload (RFC 6455 §5.2, unmasked): a client's carry 4 more, so this undercounts incoming bytes */
+/** Bytes a server-to-client frame adds around its payload (RFC 6455 §5.2, unmasked) */
 function frameOverhead(payloadBytes: number): number {
   return payloadBytes < 126 ? 2 : payloadBytes < 65_536 ? 4 : 10
 }
