@@ -185,10 +185,9 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
        * still sends: measured with gpt-5.6-luna on codex-cli 0.147.0, 0.153.4 and 0.160.0 (2026-10-04,
        * scripts/probe-codex-compaction.mts), a manual compaction (`thread/compact/start`) and an automatic one both
        * arrive as `item/started` then `item/completed` of `{ type: 'contextCompaction', id }`, with no
-       * `thread/compacted` at all; 0.160.0's binding marks that notification deprecated in favour of this item. The
-       * marker used to come only from `thread/compacted`, so no Codex compaction left one. That notification is still
-       * mapped below for a CLI that sends it, and the adapter pairs the two (`CompactionMarks`) so that one compaction
-       * is one marker either way.
+       * `thread/compacted` at all; 0.160.0's binding marks that notification deprecated in favour of this item.
+       * `thread/compacted` is also mapped below for a CLI that sends it, and the adapter pairs the two
+       * (`CompactionMarks`) so that one compaction is one marker either way.
        */
       if (type === 'contextCompaction') {
         return [
@@ -197,19 +196,15 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
         ]
       }
       /*
-       * The end of a review. item.review carries the full result text, but we do not emit it —
-       * the same text has already streamed as agentMessage (measured). Emitting it again here
-       * would append the result twice. (The start/end items only ever surface as activity,
-       * whether they arrive via started or completed.)
+       * The end of a review. item.review's full result text is not emitted: the same text has already streamed as
+       * agentMessage (measured). The start/end items only ever surface as activity.
        */
       if (type === 'exitedReviewMode') return [{ type: 'activity', sessionId, activity: null }]
       if (type === 'enteredReviewMode') return []
       /*
-       * The agent viewed an image (#40). Measured shape: {type:'imageView', id, path} — only the
-       * path is carried. Reading the file is IO, which this pure function cannot do: it is
-       * emitted with data left empty, and the adapter (index.ts) reads and fills it in right
-       * before emitting. The mime type is also decided there, from the extension. (imageGeneration
-       * has not been measured yet — it will be wired up once observed, the same rule as #58.)
+       * The agent viewed an image (#40). Measured shape: {type:'imageView', id, path}. Reading the file is IO, so `data`
+       * is left empty and the adapter (index.ts) fills it and the mime (from the extension) right before emitting.
+       * imageGeneration is not measured, so not wired (the same rule as #58).
        */
       if (type === 'imageView') {
         const path = str(item.path)
@@ -235,25 +230,15 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
     }
 
     /*
-     * The turn ended — **read how it ended, too** (#107).
+     * The turn ended — **read how it ended, too** (#107). `turn/completed` also carries a failed turn
+     * (generated/v2/Turn.ts: `status` is "completed" | "interrupted" | "failed", and `error` is only filled in when
+     * failed). Read as a plain `turn_complete`, a turn that errored with a 400 leaves an **empty answer** and
+     * `waiting_input`, with nothing anywhere saying it failed.
      *
-     * `turn/completed` also carries a failed turn (generated/v2/Turn.ts: `status` is "completed" |
-     * "interrupted" | "failed", and `error` is only filled in when failed). We used to drop
-     * `turn.*` wholesale here, so a turn that errored with a 400 still went out as nothing more
-     * than a single `turn_complete`, same as a successful one — the screen was left with an
-     * **empty answer** while the state flipped to `waiting_input`. A real incident: the rollout
-     * had the full text of `The 'opus[1m]' model …`, but not a single character of it reached the
-     * app, and there was no adapter error in the host log either. Nowhere did anything say it had
-     * failed.
-     *
-     * A failure is emitted as `error` — **not together with `turn_complete`.** If both events go
-     * out, the state machine's last word ends up being "waiting for the person", which repeats
-     * exactly the lie we are trying to fix. The same rule the Claude adapter uses for `result`.
-     *
-     * An interrupted turn is not a finished one either (#698). It went out as `turn_complete`, so a turn Codex cut
-     * short told the Assistant that gave it that the work was done ("finished", as the report then read). It ends as the person's Stop ends a turn,
-     * `waiting_input` with `interrupted`; the adapter tells a Stop of ours from an interrupt it did not ask for
-     * (`INTERRUPTED_BY_TOOL`).
+     * A failure is emitted as `error` — **not together with `turn_complete`**, or the state machine's last word is
+     * "waiting for the person". The same rule the Claude adapter uses for `result`. An interrupted turn is not a finished
+     * one either (#698): it ends as the person's Stop does, `waiting_input` with `interrupted`, so the Assistant that gave
+     * it is not told the work was done; the adapter tells a Stop of ours from one it did not ask for (`INTERRUPTED_BY_TOOL`).
      */
     case 'turn/completed': {
       const turn = asObj(paramsOf(n, 'turn/completed').turn)
@@ -271,17 +256,10 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       return tokenUsageEvents(sessionId, paramsOf(n, 'thread/tokenUsage/updated'))
 
     /*
-     * A usage update is **not the same as hitting a limit.**
-     *
-     * Without a condition here, a codex session flipped to 'limited' right after its very first
-     * tool call — even when the measured usedPercent was only 27%. That freezes and dims the
-     * spinning icon and slaps on a "Limit 27%" label that does not actually apply (dogfooding:
-     * "the loading spinner does not spin while bash is running").
-     *
-     * The tool tells us directly whether the limit was hit — `rateLimitReachedType` being null
-     * means it was not hit (the Claude adapter also only emits this when `status !== 'allowed'`;
-     * both must follow the same rule). No usage information is lost by this: the usage panel
-     * reads it separately through `agents.usage`.
+     * A usage update is **not the same as hitting a limit**: one arrives at 27% right after a first tool call, and
+     * 'limited' would freeze the spinner under a "Limit 27%" label (dogfooding). `rateLimitReachedType` null means it was
+     * not hit (the Claude adapter likewise emits only on `rejected`, `turn-ending.ts`; both must follow the same rule). The usage panel reads
+     * usage through `agents.usage`.
      */
     case 'account/rateLimits/updated': {
       const snapshot = asObj(paramsOf(n, 'account/rateLimits/updated').rateLimits)
@@ -294,7 +272,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       /*
        * `rateLimitReachedType` does not name a window (generated/v2/RateLimitReachedType.ts), so the window that is
        * full says which one blocks. When both are, the later reset is when the session can run again. A spend or
-       * credit limit fills neither: the primary window describes it, as before.
+       * credit limit fills neither: the primary window describes it.
        */
       const primary = asObj(snapshot.primary)
       const full = [primary, asObj(snapshot.secondary)].filter((w) => (finite(w.usedPercent) ?? 0) >= 100)
@@ -315,9 +293,8 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
     case 'thread/name/updated': {
       // This is a name the tool made up on its own -> auto:true. A name the person set is not overwritten by this (issue #5)
       /*
-       * Codex sends the name as `threadName` (generated/v2/ThreadNameUpdatedNotification.ts); this read `name`, so
-       * every automatic name arrived empty, and an automatically named session's name went blank (#1339). `name` is
-       * still read for a CLI that sends it; with neither there is nothing to say.
+       * Codex sends the name as `threadName` (generated/v2/ThreadNameUpdatedNotification.ts, #1339); `name` is also read
+       * for a CLI that sends it; with neither there is nothing to say.
        */
       const title = str(paramsOf(n, 'thread/name/updated').threadName) || str(asObj(n.params).name)
       return title ? [{ type: 'session_title', sessionId, title, auto: true }] : []
@@ -328,11 +305,9 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       return [{ type: 'compaction', sessionId, failed: false }]
 
     /*
-     * Goal notifications (2026-09-07 — ThreadGoalUpdated/ClearedNotification). codex treats a goal
-     * as a first-class thing: objective, status (active | paused | blocked | usageLimited |
-     * budgetLimited | complete), and token budget/usage all arrive over the protocol. We carry
-     * the vocabulary through unchanged — the judgment belongs to the tool, and we only carry the
-     * basis for the badge.
+     * Goal notifications (ThreadGoalUpdated/ClearedNotification): objective, status (active | paused | blocked |
+     * usageLimited | budgetLimited | complete) and token budget/usage are carried through unchanged — the judgment
+     * belongs to the tool; we only carry the basis for the badge.
      */
     case 'thread/goal/updated':
       return [{ type: 'goal', sessionId, goal: goalFromCodex(asObj(paramsOf(n, 'thread/goal/updated').goal)) }]
@@ -386,8 +361,8 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      * An MCP server that failed to start (#304). Measured (codex-cli 0.160.0): every server reports `starting`, then
      * `ready` or `failed {error: "MCP client for \`<name>\` failed to start: MCP startup failed: No such file or
      * directory (os error 2)"}`, and a failing one goes through `starting` → `failed` **twice** on one thread start.
-     * Centralu's own assistant and app bridges are MCP servers too, and a failed start used to be silent: the model
-     * simply had no such tools. The adapter keeps one line per server until it starts again (index.ts).
+     * Centralu's own assistant and app bridges are MCP servers too: a failed start with no line leaves the model
+     * silently without those tools. The adapter keeps one line per server until it starts again (index.ts).
      */
     case 'mcpServer/startupStatus/updated': {
       const p = paramsOf(n, 'mcpServer/startupStatus/updated')
@@ -399,30 +374,20 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
     }
 
     /*
-     * The `error` notification has the shape `{ error, willRetry, threadId, turnId }` (generated
-     * binding ErrorNotification, codex-cli 0.153.4). Two cases are not left as a failure marker
-     * (#168):
-     *  - **an error that will be retried** (willRetry) — Codex continues on its own, e.g. by
-     *    reconnecting. Leaving a marker here would leave "this turn did not finish" in the
-     *    conversation even when the turn eventually succeeds. If it does fail for good, the
-     *    turn/completed(failed) below reports it. It shows as the `retrying` activity while
-     *    it lasts (the adapter puts the previous activity back once output resumes) and goes
-     *    to host.log with Codex's reason.
-     *  - **an error that belongs to a turn** — that turn ends with a turn/completed(failed)
-     *    carrying the same sentence. Emitting both would leave two lines of marker (measured: one
-     *    token-refresh failure left the same sentence three times across two lines within the same
-     *    second). We treat the turn's own outcome as the source of truth.
-     *
-     * Measured with codex-cli 0.153.4 (2026-10-03, a provider whose stream closed before
-     * `response.completed`, stream_max_retries=2): `error{message:"Reconnecting... 1/2",
-     * additionalDetails:<the reason>, willRetry:true, turnId}`, the same for 2/2, then
-     * `error{message:<the reason>, willRetry:false, turnId}` and `turn/completed{status:"failed",
-     * error:{message:<the same reason>}}`. A real 400 (an unsupported model) skipped the retries
-     * and sent the last two only.
+     * The `error` notification is `{ error, willRetry, threadId, turnId }` (generated ErrorNotification, codex-cli
+     * 0.153.4). Two cases leave no failure marker (#168):
+     *  - **an error that will be retried** (willRetry): Codex continues on its own, and a final failure comes as
+     *    turn/completed(failed). It shows as the `retrying` activity (put back once output resumes) and goes to host.log
+     *  - **an error that belongs to a turn**: its turn/completed(failed) carries the same sentence and is the source of
+     *    truth (emitting both repeats it: one token-refresh failure left it three times in one second, measured)
+     * Measured (codex-cli 0.153.4, 2026-10-03, a stream closed before `response.completed`, stream_max_retries=2):
+     * `error{message:"Reconnecting... 1/2", additionalDetails:<the reason>, willRetry:true, turnId}`, the same for 2/2,
+     * then `error{message:<the reason>, willRetry:false, turnId}` and `turn/completed{status:"failed", error:{message:<the
+     * same reason>}}`. A real 400 (an unsupported model) skipped the retries and sent the last two only.
      */
     case 'error': {
       const p = paramsOf(n, 'error')
-      // A top-level `message` is not in ErrorNotification: read as before, for a CLI that sends one
+      // A top-level `message` is not in ErrorNotification: read too, for a CLI that sends one
       const message = str(asObj(p.error).message) || str(asObj(n.params).message) || 'Unknown error'
       if (p.willRetry === true) {
         const why = str(asObj(p.error).additionalDetails)

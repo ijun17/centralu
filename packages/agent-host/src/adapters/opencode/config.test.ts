@@ -92,7 +92,7 @@ const perPlatform = new WeakMap<object, Record<Platform, Record<string, string>>
 
 /**
  * What OpenCode decides on every platform, with the env Centralu passes there; the platforms' answers when they differ,
- * so no assertion passes on one platform's match alone (#1565 Mac re-check of 4ca7a9fda: keys `BASH` held only on Windows)
+ * so no assertion passes on one platform's match alone (#1565: keys `BASH` hold only on Windows)
  */
 function decides(setup: Setup, env: Record<string, string>, agent: string, tool: string, pattern = 'x'): string {
   const envs = perPlatform.get(env)
@@ -146,7 +146,7 @@ describe("OpenCode's Safe, through its inline config", () => {
     const setup = { files: { helper: { mode: 'subagent' } } }
     const env = envFor('safe', setup)
     for (const agent of ['build', 'general']) {
-      // A subagent cannot ask, so it is denied (review of the subagent fix)
+      // A subagent cannot ask, so it is denied
       expect(decides(setup, env, agent, 'task', 'unseen')).toBe(agent === 'build' ? 'ask' : 'deny')
       expect(decides(setup, env, agent, 'task', 'helper')).toBe('allow')
       expect(decides(setup, env, agent, 'task', 'explore')).toBe('allow')
@@ -196,7 +196,7 @@ describe("OpenCode's Safe, through its inline config", () => {
 })
 
 /**
- * Case E of the #1565 Mac re-check, as OpenCode 1.19.4 logged it (its `evaluated` and `asking` lines, 2026-10-25): under
+ * Case E (#1565), as OpenCode 1.19.4 logged it on macOS (its `evaluated` and `asking` lines, 2026-10-25): under
  * Safe, `build` handed work through `task` to the project's `.opencode/agent/helper.md`, a subagent whose own rules allow
  * `bash` and `edit`; in the helper's session OpenCode evaluated `bash` for `echo pwned > marker.txt` and `echo hi` as
  * `ask` and asked, and its ACP side, which knows only the session it opened, sent no `session/request_permission`, so

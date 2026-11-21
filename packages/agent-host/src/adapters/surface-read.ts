@@ -1,11 +1,7 @@
 /**
- * Readers the adapters' `surface.read` share (#270): a CLI's `--help`, and the type declarations a vendor ships. Text
- * in, names out, no IO: the drift run gathers the text, and the tests feed recorded copies.
- *
- * The declarations are read by their text, not with the TypeScript compiler, because the host bundle carries these
- * readers and must not carry a compiler. That holds while the files are what `tsc` emits (one member per `;`, doc
- * comments in block comments), which is what the vendors ship. A shape these readers no longer understand throws rather than
- * reading as an empty surface: an empty read would report every name as gone.
+ * Readers the adapters' `surface.read` share (#270): a CLI's `--help` and a vendor's type declarations, text in, names out,
+ * no IO. Declarations are read as text, as the host bundle must not carry a compiler; that holds while vendors ship what `tsc` emits
+ * (one member per `;`, doc comments in blocks); the drift run gathers the text, tests feed recorded copies. A shape they no longer understand throws: an empty read would report all as gone.
  */
 
 /**

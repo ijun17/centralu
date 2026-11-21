@@ -22,14 +22,11 @@ function taskKind(type: string): BackgroundTask['kind'] {
  * comes from `task_started`, which arrived just after the level for the same task every time it was measured
  * (probe-background-tasks.mts). `task_notification` is how a task ended: `completed`, `failed` or `stopped`.
  *
- * What interrupting the turn does was measured, and is what `stopsWithTurn` says: a background subagent stops with
- * the turn (`task_notification` stopped, in the same millisecond), a backgrounded shell keeps running. A task a
- * subagent started, and any other kind, was not measured, so it carries nothing. Every task can be stopped on its own
- * (`Query.stopTask`, measured on a shell: the same three messages as an interrupt's).
- *
- * The level is per process and nothing is sent at startup (sdk.d.ts), so a new tracker starts empty. When the
- * process goes away its tasks go with it, silently (measured: `close()` killed a running shell and nothing was
- * emitted) — `release` says so.
+ * `stopsWithTurn` is measured: an interrupt stops a background subagent (`task_notification` stopped, same millisecond),
+ * not a backgrounded shell; a subagent's own task and other kinds were not measured, so carry nothing. `Query.stopTask`
+ * stops one task (measured on a shell: the same three messages as an interrupt's).
+ * The level is per process and nothing is sent at startup (sdk.d.ts), so a new tracker starts empty. A process that
+ * goes away takes its tasks silently (measured: `close()` killed a running shell, nothing emitted): `release` says so.
  */
 export class ClaudeBackgroundTracker {
   /** Ids in the last level, in its order. */

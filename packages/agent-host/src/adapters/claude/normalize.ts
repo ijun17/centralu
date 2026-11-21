@@ -34,24 +34,14 @@ export function normalizeMessage(
   sessionId: string,
   opts?: {
     /**
-     * Whether this assistant message's body already went out as streaming deltas — the adapter
-     * tracks this and passes it in.
-     *
-     * The body is normally drawn only from `stream_event` deltas, and an assistant message's own
-     * text block is dropped — but **a response that arrives with no deltas at all is real**: an
-     * answer the CLI synthesizes locally, like /usage, arrives as zero deltas and one whole-body
-     * assistant message (measured — 0 deltas, a 1,046-character body). In that case, not emitting
-     * it here means the command ran but the answer never shows up in the UI at all. Conversely,
-     * emitting it again on a turn that was streamed appends the same text twice — hence the need
-     * for this flag.
+     * This assistant message's body already went out as streaming deltas (the adapter tracks it). The body is drawn
+     * from deltas, but **a response with no deltas is real**: an answer the CLI synthesizes locally, like /usage, is
+     * one whole-body message (measured: 0 deltas, a 1,046-character body). Emitted again after deltas, it would double.
      */
     textStreamed?: boolean
     /**
-     * The thinking of this assistant message already went out as streamed `thinking_delta`s. The finished
-     * message repeats the whole thinking block, so emitting it again doubled every thought. That stayed
-     * hidden while thinking arrived encrypted as "" (#58); once models sent readable thinking, a message
-     * that thought and then called a tool (no text, so `textStreamed` stayed false) showed its thinking
-     * twice, stored twice in one row.
+     * The thinking already went out as `thinking_delta`s: the finished message repeats the whole block. Kept apart from
+     * `textStreamed`: a message can think and then call a tool with no text, and its thinking would be stored twice.
      */
     reasoningStreamed?: boolean
   },
@@ -59,37 +49,16 @@ export function normalizeMessage(
   const out: NormalizedEvent[] = []
 
   /*
-   * A subagent's messages are not the parent's conversation (#98).
-   *
-   * The assistant and user messages of a subagent launched with the Agent tool arrive mixed into
-   * the parent's own stream, carrying the id of the call that launched it in `parent_tool_use_id`
-   * (sdk.d.ts SDKAssistantMessage: "parent_tool_use_id is non-null when the message was produced
-   * inside a subagent started by that tool_use"). This field was never checked, so a subagent's
-   * tool call would get stuck right in the middle of the parent writing its own text (mid-word —
-   * split across `남았` / Bash / `는지`), and the full report (15-24KB) showed up once as the
-   * parent's own answer and once again as the parent's summary.
-   *
-   * **Do not assume text will never arrive here.** The SDK docs say text only arrives with
-   * `forwardSubagentText` turned on, but measured (CLI 2.1.282, with no such option set), a
-   * subagent's final text arrived anyway. Everything is dropped from the parent's own
-   * conversation, and only a tool call is routed — as **the live output of the card that launched
-   * it** — with `callId` recording who did it. Because this never adds a new line to the
-   * conversation, the parent's paragraph is no longer split either. Usage is dropped too: a
-   * subagent's own tokens were overwriting the parent's usage figures.
-   *
-   * Files are the exception — a file a subagent edited is still a file changed inside this
-   * session's own working folder, so it is still reported to conflict detection and highlighting
-   * (FR-2, FR-5), from its steps, once the edit's result says it went through (`ClaudeStreamNormalizer`).
-   *
-   * **What the subagent did is kept, under its launch card** (#222). Its text, readable thinking,
-   * tool calls and their results go out as `subagent_event`s tagged with that same
-   * `parent_tool_use_id`, which the host stores apart from the conversation. They are read the way
-   * the parent's own messages are read — `normalizeMessage` on the message as if it were the
-   * parent's — and only the four kinds of step are kept: usage, images and a nested agent's
-   * "launched" line are not the subagent's record. `forwardSubagentText` (index.ts) makes the
-   * text and thinking arrive for every subagent; without it only tool blocks are promised. A
-   * subagent's stream events carry no text of their own (measured: every stream_event had
-   * parent=null), so its text comes from the whole assistant message, block by block.
+   * A subagent's messages are not the parent's conversation (#98): they arrive in the parent's stream with the launching
+   * call's id in `parent_tool_use_id` (sdk.d.ts SDKAssistantMessage), and read as the parent's they split its paragraph
+   * mid-word and repeat the report (15-24KB) as its answer. **Text can arrive here** even without `forwardSubagentText`
+   * (measured, CLI 2.1.282). Nothing reaches the parent's conversation or usage (its tokens would overwrite the parent's).
+   * Files are the exception: a subagent's edit is still a change in this session's folder, reported to conflict
+   * detection and highlighting (FR-2, FR-5) once its result says it went through (`ClaudeStreamNormalizer`).
+   * **What it did is kept under its launch card** (#222): its text, readable thinking, tool calls and results, read as the
+   * parent's own, go out as `subagent_event`s stored apart; usage, images and a nested agent's "launched" line do not.
+   * `forwardSubagentText` (index.ts) makes text and thinking arrive for every subagent. Its stream events carry no text
+   * (measured: every stream_event had parent=null), so its text comes from the whole assistant message, block by block.
    */
   if (msg.type === 'assistant' || msg.type === 'user' || msg.type === 'stream_event') {
     const parent = str(msg.parent_tool_use_id)
@@ -97,10 +66,6 @@ export function normalizeMessage(
     if (parent) return subagentSteps(sessionId, parent, normalizeMessage({ ...msg, parent_tool_use_id: null }, sessionId))
   }
 
-  /*
-   * One family per file: what the CLI says about itself (cli-messages.ts), what the model says (model-messages.ts),
-   * and how the turn ends (turn-ending.ts).
-   */
   switch (msg.type) {
     case 'conversation_reset':
       return conversationResetEvents(msg, sessionId)
@@ -127,25 +92,11 @@ export function normalizeMessage(
  * Every message type the adapter handles or leaves out on purpose, keyed as `type`, or `system/<subtype>` for system
  * messages. Anything else is said once per session in host.log (`UnmappedTypes`, #58). The groups follow the #58
  * survey (2026-10-04, CLI 2.1.282, SDK 0.3.263, 39 `SDKMessage` members plus `active_goal`):
- *
  *   - mapped: a branch in `normalizeMessage`, this class, or `system/init` read in index.ts
  *   - ignored by #58's body as progress detail
- *   - correctly ignored: types only sent for options or features Centralu does not use (`side_question`, synchronous
- *     plugin installs, session-state events, the remote bridge, file checkpoints, URL elicitation, prompt suggestions,
- *     a `SessionStore`)
+ *   - correctly ignored: types only sent for options or features Centralu does not use (listed at the group)
  *   - ignored because something else already carries what they say (#2291, measured on CLI 2.1.296, recordings of every
- *     scenario and `permission-denied`):
- *       `system/commands_changed`  the command list after a mid-session change: the SDK keeps the latest in the query
- *                                  (`latestCommands`) and `listCommands` asks the query each time
- *       `command_lifecycle`       queued, started, completed or cancelled for each message sent with a uuid: delivery
- *                                  is read from the turn's own messages (`user_message_uuids`) and the interrupt's
- *                                  receipt (`cancelled`), and the SDK's types do not declare it at all. Read only as the
- *                                  CLI's receipt for an input given at rest (`TurnStartWait`)
- *       `system/permission_denied` a call the CLI denied without asking: the tool's result follows at once with an
- *                                  error carrying the same words (`message`), so the card already ends failed with them. Measured only for
- *                                  `decision_reason_type: "mode"` (don't-ask mode); a classifier's or a subagent's denial
- *                                  (`decision_reason`, `agent_id`) is not recorded
- *
+ *     scenario and `permission-denied`; why, at the group)
  * The types the survey would show or store but nobody has wired yet stay out on purpose: `system/memory_recall`,
  * `tool_use_summary` and `auth_status` among them. Their log line is how a real instance gets noticed.
  */
@@ -161,9 +112,20 @@ export const CLAUDE_KNOWN_TYPES: ReadonlySet<string> = new Set([
   // ignored by #58
   'tool_progress', 'system/task_progress', 'system/hook_started', 'system/hook_progress', 'system/hook_response',
   'system/thinking_tokens',
-  // ignored: what they say arrives some other way (#2291)
+  /*
+   * ignored: what they say arrives some other way (#2291).
+   *   `system/commands_changed`  the command list after a mid-session change: the SDK keeps the latest in the query
+   *                              (`latestCommands`) and `listCommands` asks the query each time
+   *   `command_lifecycle`        queued, started, completed or cancelled for each message sent with a uuid, undeclared in
+   *                              the SDK's types: delivery is read from the turn's messages (`user_message_uuids`) and the
+   *                              interrupt's receipt (`cancelled`); read only as the receipt for an input at rest (`TurnStartWait`)
+   *   `system/permission_denied` a call denied without asking: the tool's error result with the same words (`message`)
+   *                              follows at once. Measured only for `decision_reason_type: "mode"` (don't-ask mode); a
+   *                              classifier's or a subagent's denial (`decision_reason`, `agent_id`) is not recorded
+   */
   'system/commands_changed', 'command_lifecycle', 'system/permission_denied',
-  // correctly ignored
+  // correctly ignored: `side_question`, synchronous plugin installs, session-state events, the remote bridge, file
+  // checkpoints, URL elicitation, prompt suggestions, a `SessionStore`
   'system/control_request_progress', 'system/plugin_install', 'system/session_state_changed',
   'system/worker_shutting_down', 'system/files_persisted', 'system/elicitation_complete', 'prompt_suggestion',
   'system/mirror_error',
@@ -199,31 +161,22 @@ function readingOf(events: readonly NormalizedEvent[]): TokenUsage | undefined {
 /**
  * Normalizes while following one parent stream: what cannot be decided by looking at a single message alone.
  *
- * - Whether the body already went out as deltas (`textStreamed`) counts the parent's own messages only (#98): a
- *   subagent's assistant message between the parent's last delta and its body cleared it early, and the parent's whole
- *   text was appended a second time.
- * - A background agent's card (#98) stays open past the `tool_result` of its launch (`backgroundLaunch`) and is closed by
- *   `system/task_notification` (measured: `tool_use_id`, `status`, `summary`, `usage{tool_uses, duration_ms}`). That
- *   notification also comes (measured) for a background Bash the parent launched and for a subagent's Bash
- *   (`owned_by_subagent`), whose cards their own result closed, so only a card left open is closed.
- * - That closing waits while the parent is mid-write, which is routine with agents running side by side: a
- *   `tool_result` is a row boundary in the store (`SessionRecord.persistMessage`), so it would split the parent's
- *   paragraph into two rows, which the handoff record and the preview read apart. It goes out after the assistant
- *   message that closes the chunk.
+ * - `textStreamed` counts the parent's own messages only (#98): a subagent's message between the parent's last delta
+ *   and its body would clear it, and the parent's text would go out twice.
+ * - A background agent's card (#98) stays open past its launch's `tool_result` (`backgroundLaunch`) until
+ *   `system/task_notification` (measured: `tool_use_id`, `status`, `summary`, `usage{tool_uses, duration_ms}`), which
+ *   also comes for a background Bash and a subagent's Bash (`owned_by_subagent`): only a card left open is closed.
+ * - That closing waits while the parent is mid-write: a `tool_result` is a row boundary in the store
+ *   (`SessionRecord.persistMessage`) and would split the parent's paragraph; it goes out after the chunk's message.
  */
 export class ClaudeStreamNormalizer {
   private textStreamed = false
   /** Readable thinking of the current assistant message already went out as deltas (see normalizeMessage's opts) */
   private reasoningStreamed = false
   /**
-   * We interrupted the turn — the first `result` that arrives after that is the ending of the
-   * interrupted turn (#168).
-   *
-   * The CLI closes an interrupted turn with an `error_during_execution` result. Emitting that as
-   * an ordinary error would leave a turn the person stopped on purpose recorded with a "Turn
-   * failed: error_during_execution" marker and an error state. Since `interrupt()` has already
-   * returned the state to waiting-for-input, that ending emits nothing at all. An
-   * `error_during_execution` for any other reason is still a failure, as before.
+   * We interrupted the turn: the next `result` is its ending (#168). The CLI closes it with `error_during_execution`,
+   * which then emits nothing (`interrupt()` already returned the state to waiting-for-input) rather than a failure; an
+   * `error_during_execution` for any other reason is still a failure.
    */
   private stopping = false
   private readonly background = new Set<string>()
@@ -289,9 +242,7 @@ export class ClaudeStreamNormalizer {
   }
 
   /**
-   * The refusal pair (#304), not exercised: a refusal cannot be asked for. Shapes from sdk.d.ts (SDK 0.3.263) and the
-   * CLI's own code (2.1.289).
-   *
+   * The refusal pair (#304), not exercised (a refusal cannot be asked for); shapes from sdk.d.ts (SDK 0.3.263) and CLI 2.1.289:
    *   model_refusal_fallback      the model ended with stop_reason "refusal" and the turn is retried once on
    *                               `fallback_model`. With `scope` session (or absent, older CLIs) the CLI keeps the
    *                               fallback for the rest of the session, so the model the screen shows would be wrong:
@@ -331,8 +282,8 @@ export class ClaudeStreamNormalizer {
    * `requestsSeen`).
    *
    * A subagent's requests count too: they read and write the same account's cache, and its first request writes its
-   * whole prompt. Its usage is dropped from the parent's events (a subagent's tokens used to overwrite the parent's
-   * figures, see `normalizeMessage`), so its request rides on a `usage_update` that repeats the parent's last reading:
+   * whole prompt. Its usage is dropped from the parent's events (its tokens would overwrite the parent's figures, see
+   * `normalizeMessage`), so its request rides on a `usage_update` that repeats the parent's last reading:
    * every reader of `tokens` takes the last value, so the repeat changes nothing there. A parent always has a reading
    * by then, since it launched the subagent from a message of its own.
    */
@@ -343,10 +294,9 @@ export class ClaudeStreamNormalizer {
     const fresh = !!usage && !(id && this.requestsSeen.includes(id))
     if (!subagent) {
       /*
-       * `TokenUsage` is a running reading (#843): the turn's result carries the process's total, and an assistant
-       * message only its own request. Sent as it came, that request replaced the session's figures mid-turn (a reading
-       * of 2M dropped to one request's 80k), and the result put them back. The running reading is the last result's
-       * plus each request since, each counted once however many messages repeat it.
+       * `TokenUsage` is a running reading (#843): the turn's result carries the process's total, an assistant message
+       * only its own request (sent as it came, a reading of 2M would drop to one request's 80k mid-turn). So it is the
+       * last result's plus each request since, each counted once however many messages repeat it.
        */
       const request = readingOf(events)
       if (request && fresh) this.sinceResult = addTokens(this.sinceResult, request)
@@ -450,11 +400,9 @@ export class ClaudeStreamNormalizer {
       const status = str(msg.status, 'completed')
       const usage = asObj(msg.usage)
       /*
-       * The notification's `summary` is the agent's whole final report, not a one-line status (#221). Read in the
-       * CLI (2.1.282): a finished local agent's task is closed with `summary: <its final content joined by "\n"> ||
-       * <description>`, and the task_notification carries that summary as it is. (The model-facing notification
-       * puts `Agent "…" finished` in its own <summary> and the report in <result>; the SDK message has only the
-       * one field.) So the whole of it is the result's record, as for a foreground agent.
+       * The notification's `summary` is the agent's whole final report, not a one-line status (#221; read in CLI 2.1.282:
+       * `summary: <its final content joined by "\n"> || <description>`; the model-facing notification splits it into
+       * <summary> and <result>, the SDK message has one field). So all of it is the result's record, as for a foreground agent.
        */
       const output = agentReport(str(msg.summary), agentStats(usage.tool_uses, usage.duration_ms, status))
       const done = toolResultEvent(this.sessionId, callId, status === 'completed', output)
@@ -507,10 +455,9 @@ export class ClaudeStreamNormalizer {
     }
     /*
      * Which message a chunk of text belongs to (#212, Claude edition). A model call announces its id in
-     * `message_start` and its chunks carry none; a message that arrives whole carries its own. Two
-     * messages with nothing recorded between them used to become one row — measured with /goal
-     * (2026-10-03): the CLI's own "Goal set: <condition>" and the model's first words, and the model's
-     * words on either side of a Stop hook that sent it back to work, read as one sentence.
+     * `message_start` and its chunks carry none; a message that arrives whole carries its own. Without it two messages
+     * with nothing recorded between them become one row (measured with /goal, 2026-10-03: "Goal set: <condition>" and
+     * the model's first words, or the model's words on either side of a Stop hook, read as one sentence).
      */
     if (msg.type === 'stream_event') {
       const e = msg.event
@@ -535,11 +482,9 @@ export class ClaudeStreamNormalizer {
     // Only thinking that carried text counts: encrypted thinking streams token estimates, and its block is ""
     if (type === 'stream_event' && events.some((e) => e.type === 'reasoning_delta' && !!e.text)) this.reasoningStreamed = true
     /*
-     * An assistant message marks the end of one body — the next body starts counting again from
-     * scratch. **A result also marks an end** (#168): stopping mid-write means that chunk's
-     * assistant message never arrives, so the flag stayed set into the next turn and dropped a
-     * whole-response message that arrived with no deltas (a local response like /usage, or an API
-     * error the CLI synthesized).
+     * An assistant message ends one body. **So does a result** (#168): stopped mid-write, the chunk's assistant message
+     * never arrives, and a flag left set would drop the next turn's whole-response message with no deltas (/usage, or
+     * an API error the CLI synthesized).
      */
     if (type === 'assistant' || type === 'result') {
       this.textStreamed = false
@@ -554,22 +499,19 @@ export class ClaudeStreamNormalizer {
     return events
   }
 
-  /**
-   * A card for an agent that never reported back is **never left open silently.**
-   *
-   * A background agent runs inside the CLI process (`task_type: 'local_agent'`) — closing or
-   * losing the process makes it disappear along with it, and the notification never arrives at
-   * all. Left alone, the card would stay marked "still working" forever. This is the same rule as
-   * releasing approval and question cards in `dispose`.
-   */
   /** A background agent or task still runs in the process (the session's exit takes it along) */
   get backgroundRunning(): boolean {
     return this.background.size > 0 || this.tasks.running
   }
 
+  /**
+   * A card for an agent that never reported back is **never left open silently**: a background agent runs inside the
+   * CLI process (`task_type: 'local_agent'`) and goes with it, its notification never arriving (as `dispose` releases
+   * approval and question cards).
+   */
   release(why: string): NormalizedEvent[] {
     // Something that already reported back but was waiting for the parent's text to close is closed with its own result — it already finished.
-    // A request held for its output count still counts when the process ends mid-stream (#2135), as it did before
+    // A request held for its output count still counts when the process ends mid-stream (#2135)
     const out: NormalizedEvent[] = [...this.releaseRequest(), ...this.deferred.splice(0)]
     this.held = null
     for (const callId of this.background) out.push({ type: 'tool_result', sessionId: this.sessionId, callId, ok: false, summary: why })

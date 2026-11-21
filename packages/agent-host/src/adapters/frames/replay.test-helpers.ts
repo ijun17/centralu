@@ -136,16 +136,15 @@ export const jsonRpcCodec: FrameCodec = {
 
 /**
  * Codex's app-server: JSON-RPC as ACP's, with the recorded `<cwd>` read as the folder the replay runs in (a path in an
- * answer, a file change, a command's output). `cwd`: that folder. `ignoreParams`: parameters of a request that are not compared, for a
- * a thread's `thread/start` or `thread/resume`, for a recording whose values are not the replay's (the bridge's address and credential in
- * `config`, the tools' instructions in `developerInstructions`: words that change with the build); a test asserts what it needs of them.
- * `ignoreConfig`: paths into a thread's `config` that are not compared either (each a list of keys: the bridge, the trust list, the compaction
- * limit of the host that recorded); the rest of the config is.
- * `skills`: the session is a host's, which asks for the session's commands (`skills/list`) when it likes, so that is a probe, answered from the
- * recording if it holds an answer and else with this result, which an app-server answered a host with (`recordedSkillsList`).
- * `host`: the recording is of the driver alone and is played to a session of a host, which names every message it sends where the driver names
- * none: the name is accepted, and the app-server's echo of the message (an item with `clientId: null`) carries it, as the app-server's echo of a
- * named message does in the recordings made through a host. A recording made through a host holds the names its host gave, and is compared as it is.
+ * answer, a file change, a command's output). `cwd`: that folder.
+ * `ignoreParams`: parameters of a thread's `thread/start` or `thread/resume` not compared, where the recording's are not the
+ * replay's (the bridge's address and credential in `config`, the tools' instructions in `developerInstructions`: words that
+ * change with the build); a test asserts what it needs of them.
+ * `ignoreConfig`: paths (each a list of keys) into a thread's `config` not compared either (the bridge, the trust list, the
+ * recording host's compaction limit); the rest of the config is.
+ * `skills`: a host's session asks for `skills/list` when it likes, so it is a probe: from the recording, else with this (`recordedSkillsList`).
+ * `host`: a recording of the driver alone, played to a host's session; the driver names no message where a host names each, so the
+ * host's name is accepted, and the app-server's echo (an item with `clientId: null`) carries it. A recording made through a host is as is.
  */
 export const codexCodec = (cwd: string, opts: { ignoreParams?: readonly string[]; ignoreConfig?: readonly (readonly string[])[]; skills?: Record<string, unknown>; host?: boolean } = {}): FrameCodec => {
   /** The id a run makes up for an input (`clientUserMessageId`), which the app-server says back on the input's item */

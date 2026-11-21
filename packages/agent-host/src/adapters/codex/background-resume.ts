@@ -42,8 +42,8 @@ export function watchBackgroundResume(host: ResumeWatchHost): void {
       clearTimeout(timer)
       if (host.closed()) return
       /*
-       * A lock error keeps its code (#168, item 5). Arriving here instead of inside the 3-second
-       * window used to turn it into adapter_crashed, so the screen could not offer "continue in
+       * A lock error keeps its code (#168, item 5) when it arrives here, after the 3-second window,
+       * rather than turning into adapter_crashed: only the code lets the screen offer "continue in
        * a fork". Measured on 0.153.4: a second app-server resuming a held thread is refused with
        * -32600 "thread <id> already has an active writer" in 35 ms to 1.3 s, so this is rare,
        * but a slow start can push it past the window.

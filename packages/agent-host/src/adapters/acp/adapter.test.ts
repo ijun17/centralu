@@ -10,8 +10,8 @@ import { ACP_CAPABILITIES, type AcpProfile } from './profile.js'
 
 /**
  * What the ACP adapter starts a tool with, and what Cursor's profile lets it start under. The real-process side of each
- * is in `ends-with-host.test.ts` and `smoke:cursor`; these hold the declarations themselves (#1562 Mac re-check: removing
- * either passed every unit test).
+ * is in `ends-with-host.test.ts` and `smoke:cursor`; these hold the declarations themselves: with either removed, every
+ * other unit test still passes (#1562).
  */
 
 class FakeAdapter extends AcpAdapter {

@@ -26,15 +26,10 @@ export type ServerRequest = { id: number | string; method: string; params?: unkn
 
 export type CodexClientHandlers = {
   onNotification: (n: ServerNotification) => void
-  /** The server is requesting approval. The return value becomes the response result */
   onServerRequest: (r: ServerRequest) => void
   /**
-   * The process has ended. `expected` says **whether we are the ones who closed it.**
-   *
-   * Without this one value, an ordinary shutdown masqueraded as a crash: even closing gracefully
-   * through dispose made the adapter raise "codex app-server exited" as an error, and that
-   * message buried the real cause (a lock conflict). The exit handler below already
-   * distinguished the two cases — it just never surfaced that fact.
+   * The process has ended. `expected` says **whether we are the ones who closed it**, so a graceful dispose does not
+   * raise "codex app-server exited" as an error, a message that would bury a real cause (a lock conflict).
    */
   onExit: (code: number | null, expected: boolean) => void
 }
@@ -121,18 +116,11 @@ export class CodexClient {
     this.proc.stdin.on('error', () => {})
 
     /*
-     * **Split by hand, not with readline.** `readline.createInterface` silently chops a very long
-     * line into pieces — measured: a 23,244,422-byte `thread/resume` response (from a thread with
-     * a 164MB conversation) got split into 22,049,101 bytes plus the remainder, neither of which
-     * was valid JSON anymore, and once the response was dropped as "non-JSON output", that
-     * request's promise never resolved. The screen was left with "RPC timed out:
-     * agents.resumeSession" and a Retry button that did nothing (a real session).
-     *
-     * Capturing the raw stream directly clears codex of blame — the line arrived whole. What did
-     * the splitting was our own readline. So this switches to a buffer that only splits at
-     * newlines. Is concatenating a 23MB string not wasteful? This code only runs when a response
-     * arrives, and a line that huge happens once, at the moment of resume. No `maxLine`, for the same reason
-     * (`transport/json-lines.ts`).
+     * **Split by hand, not with readline.** `readline.createInterface` silently chops a very long line: measured, a
+     * 23,244,422-byte `thread/resume` response (a thread with a 164MB conversation) split at 22,049,101 bytes, neither
+     * piece valid JSON, and the request never resolved ("RPC timed out: agents.resumeSession"). The raw stream had the
+     * line whole. A line that huge comes once, at resume, so concatenating it costs little; no `maxLine`, for the same
+     * reason (`transport/json-lines.ts`).
      */
     const lines = lineSplitter((line) => this.onLine(line))
     this.proc.stdout.on('data', (chunk: Buffer | string) => lines.push(chunk))
@@ -141,13 +129,9 @@ export class CodexClient {
       if (this.finished) return
       this.finished = true
       /*
-       * **A shutdown we caused is not the same as the other side dying.**
-       *
-       * dispose() sets closed before killing, so arriving here with closed already true is an
-       * ordinary shutdown. Even so, this used to fail every pending request, and since nobody
-       * caught that rejection, **the entire process crashed** (this happened exactly at the
-       * moment of reading the model list and cleaning up). We distinguish the two cases by
-       * message — that one line is the fork in the road when tracking down the cause.
+       * **A shutdown we caused is not the same as the other side dying.** dispose() sets closed before killing, so
+       * closed here is an ordinary shutdown. Pending requests fail either way, with a message that tells the two apart
+       * when tracking down a cause.
        */
       const unexpected = !this.closed
       this.closed = true
@@ -164,25 +148,12 @@ export class CodexClient {
       raw = JSON.parse(line)
     } catch {
       /*
-       * **If a line starts with `{` but is not JSON, that is not someone else's stray text — it
-       * is a broken frame.**
+       * **A line that starts with `{` but is not JSON is a broken frame**, not stray text: a reply may be inside it, and
+       * a silent drop (a log nobody sees from an app launched from Finder, #56) leaves its request hanging to the timeout.
+       * So it wakes **every waiting request, on the spot, with a reason**: the id is somewhere in the fragment, and the
+       * manager follows a failure with a retry. The connection is not killed: the very next frame can arrive fine.
        *
-       * When readline chopped up a 23MB response, this spot logged the pieces as "non-JSON
-       * output" and dropped them — and nobody ever sees that log from an app launched from Finder
-       * (#56). The waiting request hung all the way to its timeout with no idea its answer had
-       * already arrived and been destroyed, and the screen was left with a "RPC timed out" and no
-       * cause. A silent drop turned into a hang.
-       *
-       * So a broken frame wakes **every waiting request, on the spot, with a reason.** We cannot
-       * tell which response's piece it was (the id is somewhere inside the fragment), so waking
-       * all of them is the honest move — the caller (the manager) already follows failure with a
-       * retry. The connection itself is not killed: now that the newline splitting is fixed, this
-       * path is a safety net for a future regression or codex writing over the buffer, and the
-       * very next frame can arrive fine.
-       *
-       * A line that does not start with `{` is passed through as-is — codex actually does mix
-       * banners and warnings into stdout, and failing the session every time that happens would
-       * be a new bug.
+       * A line that does not start with `{` is passed through: codex mixes banners and warnings into stdout.
        */
       if (line.startsWith('{')) {
         this.pending.rejectAll(new Error(`codex sent a frame this client could not parse (${line.length.toLocaleString()} bytes) — a waiting reply may have been destroyed`))
@@ -202,18 +173,15 @@ export class CodexClient {
     }
     const msg = frame.data
     const id = msg.id ?? undefined
-    // A response (to a request we sent)
     if (id !== undefined && msg.method === undefined) {
       if (msg.error) this.pending.reject(id, new Error(JSON.stringify(msg.error)))
       else this.pending.resolve(id, msg.result)
       return
     }
-    // A server-to-client request (approval, etc.)
     if (id !== undefined && typeof msg.method === 'string') {
       this.handlers.onServerRequest({ id, method: msg.method, params: msg.params })
       return
     }
-    // A notification
     if (typeof msg.method === 'string') {
       this.handlers.onNotification({ method: msg.method, params: msg.params })
     }
@@ -259,11 +227,8 @@ export class CodexClient {
      *   stdin EOF → exits on its own within 18ms, removing thread-writer-locks/<id>.lock
      *   SIGTERM   → dies instantly and leaves the lock file behind (same for both the wrapper and the vendor binary)
      *
-     * A leftover file does not block a resume — the lock is a flock, not mere existence, and the
-     * kernel releases a dead holder's flock (measured: resume succeeds even with the stray file
-     * left behind). Even so, the old dispose was piling up one piece of garbage every time a
-     * session closed. codex is the one best positioned to clean up, so we close it in a way that
-     * gives it the chance to. If it has not exited within 2 seconds, we kill it then.
+     * A leftover file does not block a resume (the lock is a flock, which the kernel releases with a dead holder:
+     * measured), but one would pile up per closed session. If it has not exited within 2 seconds, it is killed then.
      */
     await stopToolProcess(this.proc, { exited: this.finished })
   }

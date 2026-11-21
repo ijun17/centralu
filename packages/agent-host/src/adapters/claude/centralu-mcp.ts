@@ -12,24 +12,13 @@ import { DrainCut, drainToolResult, hostDrain } from '../../drain.js'
 /**
  * Attaches the Centralu tools to Claude (FR-11).
  *
- * **This is an in-process MCP** — no separate process, no port, no authentication. A function
- * inside the host becomes the tool as-is. So "only the sessions this app manages" is not a rule
- * we enforce, it is structural: everything these tools can see is whatever `CentraluTools`
- * was handed, and that object contains no files, no projects, no other tools.
- *
- * **The tools' names, descriptions and execution are not decided here** (see
- * sessions/centralu-tools.ts). Codex reaches the same definitions through a bridge, so if
- * there were two definitions the same app would end up with different tools depending on which
- * adapter is running.
- *
+ * **An in-process MCP**: no process, port or authentication. "Only the sessions this app manages" is structural:
+ * the tools see only what `CentraluTools` was handed, which holds no files, projects or other tools.
+ * Names, descriptions and execution live in sessions/centralu-tools.ts, which Codex reaches through a bridge too.
  * SDK types do not leave this file (anti-corruption).
  */
 
-/**
- * The server name comes from next to the tool definitions (sessions/centralu-tools.ts) —
- * both the approval exception and the check that blocks a proposed name have to look at the
- * same string (#93).
- */
+/** The approval exception and the check that blocks a proposed name look at this one string (#93) */
 export { CENTRALU_MCP_NAME }
 
 /**
@@ -55,7 +44,7 @@ export function centraluMcp(
   tools: CentraluTools,
   profile: ToolProfile,
   sessionId?: string,
-  /** An app is attached as the session starts (#957, #992 review): the instructions then name an app's help */
+  /** An app is attached as the session starts (#957): the instructions then name an app's help */
   appsAttached = false,
 ) {
   const defs = toolDefsFor(profile)
@@ -65,18 +54,10 @@ export function centraluMcp(
     name: CENTRALU_MCP_NAME,
     version: '1',
     /*
-     * **Do not defer.**
-     *
-     * By default the SDK defers MCP tools behind tool search (ToolSearch). Measured: because of
-     * that, the Assistant would look up and call only `list_sessions`, never even see
-     * `send_to_session`, and end the turn silently — it read the list and never handed out the
-     * work.
-     *
-     * For the Assistant these tools are not a side feature; they are the reason it exists.
-     *
-     * The reader set (#320) is loaded tool by tool instead: all but app_guide (deferring them made
-     * recall go unused, measured), while app_guide waits behind tool search — it rides in every
-     * ordinary session, and the person rarely asks one of them about the app.
+     * **Do not defer.** The SDK defers MCP tools behind ToolSearch by default; measured, the Assistant then called only
+     * `list_sessions`, never saw `send_to_session`, and ended the turn silently without handing out the work.
+     * The reader set (#320) is loaded tool by tool: all but app_guide (deferring them left recall unused, measured);
+     * app_guide waits behind tool search, as it rides in every ordinary session and is rarely needed.
      */
     alwaysLoad: !someDeferred,
     // None for the reader set (#320): server instructions are where a role would creep in

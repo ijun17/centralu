@@ -11,7 +11,7 @@ import { SLOW } from '../../../../tooling/test-timing.js'
 import { pidIn } from '../process.test-helpers.js'
 
 /**
- * A CLI this host starts must not outlive it (#1562 review, measured on macOS): Cursor with Centralu's bridge attached
+ * A CLI this host starts must not outlive it (#1562, measured on macOS): Cursor with Centralu's bridge attached
  * stayed up 60 s and more after its host was SIGKILLed, and a shell Cursor started in a group of its own outlived Cursor.
  * Real processes; macOS and Linux only (Windows ends a host's children with it: its kill-on-close job, and the sweep by
  * parent links after a CLI dies).
@@ -79,7 +79,7 @@ describe('a CLI that must end with its host', () => {
   })
 
   it.skipIf(!unix)('ends, when its host is SIGKILLed, a helper it started in a group of its own, once its tree was noted', async () => {
-    // #1562 Mac re-check: Cursor's `zsh -c …` and the `sleep 300` it ran, in a group of their own, outlived a killed host
+    // Cursor's `zsh -c …` and the `sleep 300` it runs, in a group of their own, would outlive a killed host (#1562)
     dir = mkdtempSync(join(tmpdir(), 'cc-ends-with-host-'))
     const host = join(dir, 'host.mts')
     writeFileSync(
@@ -99,7 +99,7 @@ describe('a CLI that must end with its host', () => {
   })
 
   it.skipIf(!unix)('ends such a helper when its host is SIGKILLed the moment it starts, before any of its tree was noted', async () => {
-    // #1562 Mac re-check: a host killed within 2 s of a command's start (before `noteTree`'s clock) left the shell alive
+    // A host killed within 2 s of a command's start (before `noteTree`'s clock) would leave the shell alive (#1562)
     dir = mkdtempSync(join(tmpdir(), 'cc-ends-with-host-'))
     const host = join(dir, 'host.mts')
     writeFileSync(
@@ -158,8 +158,8 @@ describe('a CLI that must end with its host', () => {
   })
 
   /*
-   * Behind the watch `sh` always starts, so a program that is not there or cannot be run used to read as an exit code (127,
-   * 126): Codex said "exited (code 127)". The shell that will `exec` looks it up itself and says so before it does, and the
+   * Behind the watch `sh` always starts, so a program that is not there or cannot be run would read as an exit code (127,
+   * 126; Codex: "exited (code 127)"). The shell that will `exec` looks it up itself and says so before it does, and the
    * host raises what Node's spawn raises without the watch. The PATH is the test's own, never the runner's: npx and pnpm put
    * a relative `./node_modules/.bin` on it, a login shell may leave `~/...` or an empty entry.
    */
@@ -220,7 +220,7 @@ describe('a CLI that must end with its host', () => {
 
   /*
    * The lookup is one script run by whatever `sh` the OS has, and shells differ on a file that cannot be run: dash's
-   * `command -v` prints its path, macOS's `sh` fails (the macOS re-check of #1668: an absolute path to a plain file read
+   * `command -v` prints its path, macOS's `sh` fails (#1668: an absolute path to a plain file reads
    * ENOENT where Node says EACCES), and Ubuntu 22.04's dash 0.5.11 prints the first file of a name, runnable or not, and
    * without its folder when an empty PATH entry found it (the 0.1.0-beta.43 rehearsal: no EACCES behind an empty entry, and
    * EACCES for a file Node runs from a later entry). So the decision is run under the OS's sh, under a POSIX bash, under a

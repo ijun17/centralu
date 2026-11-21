@@ -5,9 +5,9 @@ import { jsonObject, str, trimmed, type Obj } from '../json-value.js'
 
 /**
  * Whether an MCP call is one of Centralu's own tools (#843): Claude names it `mcp__centralu__<tool>`, Codex by its
- * server and tool, where an item with no server named is taken as Centralu's (a call made from inside `exec`). The
- * two used to differ: Claude took `ask_project` and `centralu_run` from any server, so another server's tool of the
- * same name was titled and re-read as Centralu's.
+ * server and tool, where an item with no server named is taken as Centralu's (a call made from inside `exec`). Both
+ * check the server: taking `ask_project` or `centralu_run` from any server would title and re-read another server's tool
+ * of the same name as Centralu's.
  */
 export function isCentraluTool(call: { name: string } | { server: string; tool: string }, tool: string): boolean {
   if ('name' in call) return call.name === `mcp__${CENTRALU_MCP_NAME}__${tool}`
@@ -135,7 +135,7 @@ const CENTRALU_LABELS: Record<string, string> = {
  */
 export function centraluMark(server: string, tool: string, args: Record<string, unknown>): { centralu: NonNullable<ToolSummary['centralu']>; title?: string } | null {
   const origin = centraluServer(server)
-  // An `app-<id>` server is never ours since #2231: apps are reached through the `app` tool, so such a server is the
+  // An `app-<id>` server is never ours (#2231): apps are reached through the `app` tool, so such a server is the
   // repository's or the person's own, and its calls are not marked as an app's
   if (!origin || origin.app) return null
   if (tool === 'app') return appMark(args)
@@ -219,7 +219,7 @@ function appMark(args: Obj): { centralu: NonNullable<ToolSummary['centralu']>; t
 }
 
 /**
- * An app's mark stays only on an `app` call naming an app this session has (#730 review, #2231): the agent may name one it
+ * An app's mark stays only on an `app` call naming an app this session has (#730, #2231): the agent may name one it
  * does not have, and that call is refused, not the app's. `attached` is the session's app server names. Applied where each
  * session emits, on its own calls and its subagents' steps; `attached` is read only for a marked app call.
  */

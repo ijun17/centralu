@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 /**
- * No committed recording carries the person who made it (#1562 review): a user name, a home or temp folder of any
+ * No committed recording carries the person who made it (#1562): a user name, a home or temp folder of any
  * system, or their own command list. Each recording is read as written and as the text its streamed chunks make joined,
  * since a path split across two chunks reads whole on the screen.
  */

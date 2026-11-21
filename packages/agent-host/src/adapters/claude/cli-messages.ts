@@ -9,9 +9,9 @@ import { str, type Json } from './json.js'
 /*
  * `/clear` (#304). Measured (CLI 2.1.289 through SDK 0.3.263, haiku, 2026-10-04): `/clear` passes straight through
  * to the CLI, which sends `conversation_reset {new_conversation_id, trigger: 'clear', user_message_uuid}`, then an
- * `init` carrying a **new `session_id`** (19eced5a… → b7843a7a…) and a result with `num_turns: 0`. The adapter
- * already follows the new id; what was missing is any sign on screen that the model now knows nothing above this
- * point. The context gauge read 15,967 before and 14,093 after (the system prompt alone).
+ * `init` carrying a **new `session_id`** (19eced5a… → b7843a7a…) and a result with `num_turns: 0`. This event is the
+ * sign on screen that the model knows nothing above this point. The context gauge read 15,967 before and 14,093 after
+ * (the system prompt alone).
  */
 export function conversationResetEvents(m: Json, sessionId: string): NormalizedEvent[] {
   const out: NormalizedEvent[] = []
@@ -21,17 +21,12 @@ export function conversationResetEvents(m: Json, sessionId: string): NormalizedE
 }
 
 /*
- * A goal-status notification (2026-09-07 — /goal's Stop hook, SDKActiveGoalMessage). The same
- * category as #58: while this type was not handled, goal state was silently dropped. A `value`
- * of null means the goal was cleared (including having been achieved), and while one is set,
- * Claude's status vocabulary has exactly one word, 'active' — the iteration count and the reason
+ * A goal-status notification (/goal's Stop hook, SDKActiveGoalMessage). A `value` of null means the goal was cleared
+ * (achieved included); while one is set, Claude's only status word is 'active' — the iteration count and the reason
  * it has not been reached are the actual content.
- *
- * **The installed CLI does not send this to us** (measured 2026-10-03, CLI 2.1.282 through SDK
- * 0.3.263, whose runtime does pass the type through): the CLI's headless loop folds the event into
- * its own state, and writes it to stdout only in a remote (`CLAUDE_CODE_REMOTE`) session. So the
- * badge is driven by `ClaudeGoalTracker` (goal-tracker.ts); this stays for a CLI that starts sending it, and
- * when one does, the tracker stands down.
+ * **The installed CLI does not send this** (measured 2026-10-03, CLI 2.1.282 through SDK 0.3.263, whose runtime does
+ * pass the type through): its headless loop writes it to stdout only in a remote (`CLAUDE_CODE_REMOTE`) session. So
+ * `ClaudeGoalTracker` (goal-tracker.ts) drives the badge; this is for a CLI that sends it, and then the tracker stands down.
  */
 export function activeGoalEvents(m: Json, sessionId: string): NormalizedEvent[] {
   const out: NormalizedEvent[] = []
@@ -75,8 +70,7 @@ export function systemEvents(m: Json, sessionId: string): NormalizedEvent[] {
  * Text the CLI shows its own user (#304). `system/informational` carries hook feedback: measured (CLI 2.1.289), a
  * `UserPromptSubmit` hook that exits 2 sends `{content: "UserPromptSubmit operation blocked by hook:\n[<command>]:
  * <its stderr>\n\nOriginal prompt: …", level: 'warning', prevent_continuation: true}`, then a result with
- * `num_turns: 0`. Nothing reached the screen before: the prompt simply went unanswered. The SDK says level `info`
- * "shows only in transcript mode", so the CLI itself hides it, and so does this.
+ * `num_turns: 0`. The SDK says level `info` "shows only in transcript mode", so the CLI hides it, and so does this.
  */
 function informationalEvents(m: Json, sessionId: string): NormalizedEvent[] {
   const out: NormalizedEvent[] = []
@@ -118,9 +112,8 @@ function notificationEvents(m: Json, sessionId: string): NormalizedEvent[] {
  * The CLI is retrying a failed API call (#304), the twin of Codex's `error {willRetry}`. Measured (CLI 2.1.289, an
  * `ANTHROPIC_BASE_URL` answering 529, `CLAUDE_CODE_MAX_RETRIES=2`): `{attempt: 1, max_retries: 2, retry_delay_ms: 556,
  * error_status: 529, error: 'overloaded'}`, the same for attempt 2, then a synthetic assistant message "API Error: 529
- * Overloaded…" and an error result. Nothing came between the attempts, so the screen read "waiting for a reply" for
- * the whole time. It shows as the `retrying` activity (`ClaudeStreamNormalizer` puts back what was showing once output
- * flows again) and goes to host.log with the reason.
+ * Overloaded…" and an error result, with nothing between the attempts. It shows as the `retrying` activity
+ * (`ClaudeStreamNormalizer` puts back what was showing once output flows again) and goes to host.log with the reason.
  */
 function apiRetryEvents(m: Json, sessionId: string): NormalizedEvent[] {
   const out: NormalizedEvent[] = []
@@ -134,21 +127,13 @@ function apiRetryEvents(m: Json, sessionId: string): NormalizedEvent[] {
 }
 
 /*
- * What is currently happening.
- *
- * A probe confirmed the actual ordering:
+ * What is currently happening. Probed ordering:
  *   status:'compacting' → (39 seconds) → status:null + compact_result:'success' → compact_boundary
- * For those 39 seconds, the UI looked no different from ordinary "waiting for response" — a
- * problem that surfaced from dogfooding.
  */
 function statusEvents(m: Json, sessionId: string): NormalizedEvent[] {
   const out: NormalizedEvent[] = []
   out.push({ type: 'activity', sessionId, activity: m.status === 'compacting' ? 'compacting' : null })
-  /*
-   * A failure is never swallowed. If compaction fails, the context stays exactly as it was, but
-   * the UI would otherwise look as if nothing had happened — a case that measured, actually
-   * occurred ("Not enough messages to compact.").
-   */
+  // A failed compaction leaves the context as it was and still gets a marker (measured: "Not enough messages to compact.")
   if (str(m.compact_result) === 'failed') {
     out.push({ type: 'compaction', sessionId, failed: true, reason: str(m.compact_error, 'Unknown reason') })
   }
@@ -156,13 +141,8 @@ function statusEvents(m: Json, sessionId: string): NormalizedEvent[] {
 }
 
 /*
- * The output of a local command (SDKLocalCommandOutputMessage — the **generalized channel** for
- * things like /usage).
- *
- * This is the sibling of the dogfooding incident where /usage's answer arrived as a delta-less
- * assistant message and never showed up: the output of a command the CLI handles locally can
- * also arrive as this system message, and dropping it means the command ran but only the answer
- * disappeared. To the person, this occupies the same place as something the assistant said.
+ * The output of a command the CLI handles locally, like /usage (SDKLocalCommandOutputMessage); it can also arrive as a
+ * delta-less assistant message. To the person it reads as something the assistant said.
  */
 function localCommandOutputEvents(m: Json, sessionId: string): NormalizedEvent[] {
   const out: NormalizedEvent[] = []
@@ -171,13 +151,7 @@ function localCommandOutputEvents(m: Json, sessionId: string): NormalizedEvent[]
   return out
 }
 
-/*
- * The point where compaction finished (FR-14).
- *
- * Without this, **a compaction marker never once appeared in a Claude session** — only Codex
- * had one. Without a marker, there is no way to know where the fold is, so "scroll back past
- * this point" cannot work either.
- */
+/** The point where compaction finished (FR-14): the marker "scroll back past this point" needs */
 function compactBoundaryEvents(m: Json, sessionId: string): NormalizedEvent[] {
   const out: NormalizedEvent[] = []
   const meta = (m.compact_metadata ?? {}) as Json

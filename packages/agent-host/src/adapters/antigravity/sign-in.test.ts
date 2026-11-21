@@ -66,7 +66,7 @@ describe("Antigravity's sign-in", () => {
     const peers: FakeAcpPeer[] = []
     const opened: string[] = []
     const run = runSignIn(h, TEST_ARCHIVE, abort.signal, {
-      // On Windows too the host opens it, outside its job (review of #1685: the agent's own launcher opened it in the job)
+      // On Windows too the host opens it, outside its job: the agent's own launcher would open it in the job
       platform: 'win32',
       openUrl: (u) => opened.push(u),
       spawn: () => {
@@ -102,7 +102,7 @@ describe("Antigravity's sign-in", () => {
   })
 
   it('refuses an address with a user part or a port of its own, and passes on one rebuilt from its parts', () => {
-    // The re-review of #1680: each of these was taken, with what stood before the `@` kept in what went on
+    // Taken, each of these would keep what stands before the `@` in what goes on
     expect(signInUrl('https://evil.example@accounts.google.com/x')).toBeNull()
     expect(signInUrl('https://user%40mail.example@accounts.google.com/x')).toBeNull()
     expect(signInUrl('https://user:secret@accounts.google.com/x')).toBeNull()
@@ -133,7 +133,7 @@ describe("Antigravity's sign-in", () => {
     expect(signInFailure(new Error('connect ETIMEDOUT: timed out'), live).reason).toBe('failed')
   })
 
-  // The two answers 1.4.3 gave (deep review of #1680, raw captures): the same code and reason, told apart by their words
+  // The two answers 1.4.3 gave (raw captures): the same code and reason, told apart by their words
   const TIMED_OUT = new RpcError(AUTH_REQUIRED, 'Onboarding failed: Timed out waiting for the authentication flow to complete.', { reason: 'onboarding_failed' })
   const VERIFY = 'https://accounts.google.com/v3/signin/continue?flow=example'
   const INELIGIBLE = new RpcError(

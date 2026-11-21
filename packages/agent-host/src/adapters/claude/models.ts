@@ -17,11 +17,8 @@ export type ModelQuery = {
 /**
  * The list of selectable models (`supportedModels()`).
  *
- * **We do not write the list ourselves.** It carries whatever the SDK reports. We used to
- * hardcode it, and when Fable shipped it could not be selected — we do not want to repeat the
- * situation where the tool ships an update and only this app stays behind.
- *
- * Reasoning effort support and its levels also differ by model, so they are read here as well.
+ * **We do not write the list ourselves**: it is whatever the SDK reports, so a model the tool ships is selectable here
+ * at once. Reasoning effort support and its levels differ by model, so they are read here as well.
  */
 export async function readClaudeModels(q: ModelQuery): Promise<ModelOption[]> {
   const rows = await q.supportedModels()

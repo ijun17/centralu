@@ -1,23 +1,7 @@
 /**
- * What the installed tool says it can do, and what the adapter knowingly leaves out (#270).
- *
- * The weekly drift run used to look in one direction only: does the latest vendor surface still carry every name the
- * adapter touches (#46)? A command, message type or capability that **became possible** reached nobody. `/goal` worked
- * headless in the person's Claude Code for weeks while Centralu still answered it with a refusal written down on
- * 2026-09-07, and both drift checks stayed green, as they should for what they ask.
- *
- * This part of the contract asks the other question. Each adapter fills it in, so a new adapter gets the check by
- * filling it in too:
- *
- *   - `gather` + `read`: what the tool offers, read **without starting a turn** (versions, schemas, generated bindings,
- *     type declarations, the CLI's `--help`). `gather` does the reading; `read` is pure, so a test can feed it recorded
- *     inputs.
- *   - `limitations`: what the adapter blocks, drops or works around, each with the measurement it rests on. These used
- *     to be dated code comments that nothing re-checked when the tool moved.
- *   - `baseline`: everything the tool offered when someone last reviewed it, kept in `adapters/<tool>/surface-baseline.ts`
- *     and rewritten by `pnpm drift:surface --record`.
- *
- * The drift run (`scripts/surface-drift.mts`) compares the three (`compareSurface`) and files an issue for what is new.
+ * What the installed tool says it can do, and what the adapter knowingly leaves out (#270): the drift checks' other direction,
+ * what became possible, not only names that left (docs/agent-host/adapters/vendor-drift-checks.md). Each adapter fills it in;
+ * `scripts/surface-drift.mts` compares the read surface, limitations and baseline (`compareSurface`) and files an issue for what is new.
  */
 
 /** The three sorts of thing a tool can offer. Names are the tool's own; a prefix says where a capability was read. */
@@ -83,9 +67,12 @@ export type SurfaceEnv = {
 }
 
 export type AdapterSurface = {
+  /** What the tool offers, read **without starting a turn** (versions, schemas, generated bindings, type declarations, `--help`) */
   gather(env: SurfaceEnv): Promise<SurfaceInputs>
-  /** Pure: the same inputs give the same surface. Throws when an input it needs is missing or no longer parses. */
+  /** Pure, so a test can feed it recorded inputs. Throws when an input it needs is missing or no longer parses. */
   read(inputs: SurfaceInputs): ToolSurface
+  /** What the adapter blocks, drops or works around, each with the measurement it rests on */
   readonly limitations: readonly SurfaceLimitation[]
+  /** Everything the tool offered when someone last reviewed it (`adapters/<tool>/surface-baseline.ts`, `pnpm drift:surface --record`) */
   readonly baseline: SurfaceBaseline
 }

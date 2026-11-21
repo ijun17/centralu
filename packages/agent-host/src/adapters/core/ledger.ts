@@ -336,7 +336,7 @@ export class CoreSession<W extends ToolWire = ToolWire> {
     this.dropQueue('were still queued when the session closed')
     this.turn = null
     if (turn) {
-      // The calls it had open end with it (#1562 review: a host stopped mid-command left the card spinning after its restart)
+      // The calls it had open end with it, or a host stopped mid-command leaves the card spinning after its restart (#1562)
       this.wire.turnOver('Centralu stopped this session while the call ran')
       if (turn.stopTimer) clearTimeout(turn.stopTimer)
       this.receipts.fail([turn.input.input.id], new Error('the session closed'))

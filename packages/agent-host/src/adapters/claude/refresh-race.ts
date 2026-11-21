@@ -71,12 +71,9 @@ export class ClaudeRaceRetry {
   /**
    * A turn that lost the race to refresh the sign-in goes again once, after a few seconds (#353).
    *
-   * Claude Code lets one process at a time refresh an expired sign-in; another process that needs it
-   * at that moment ends its turn with "another Claude Code process is refreshing it", which the CLI
-   * itself calls transient. By the time the delay is over the other process has written the new
-   * token, and the resent turn reads it. The person sees why in the conversation: the CLI's own words
-   * and a notice that the message goes again, instead of a failed turn. A second loss in a row is
-   * reported as the failure it is.
+   * Claude Code lets one process at a time refresh an expired sign-in; another that needs it then ends its turn with
+   * "another Claude Code process is refreshing it", which the CLI calls transient. After the delay the new token is
+   * written. The conversation shows the CLI's words and a notice that the message goes again; a second loss is a failure.
    *
    * What goes again is what the CLI read since its last result. The CLI has already recorded those
    * messages in its conversation, so the model reads them twice, next to each other — the cost of

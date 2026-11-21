@@ -1,12 +1,7 @@
 /**
- * The rules that used to live in `@cc/protocol`'s shape.
- *
- * `TOOL_META` was a `Record<ToolName, …>` there, so the compiler guaranteed exactly one
- * entry per tool and a test asserted the rest: that no two tools share a mark, and that the
- * install and login commands are real strings. Moving the values onto the adapters gave up
- * the compiler's half — a descriptor is now just an object each adapter writes for itself —
- * so the assertions have to be made across the whole registry instead, which is the only
- * place that can see every tool at once.
+ * A descriptor is an object each adapter writes for itself, so no compiler guarantees one entry per tool: these rules
+ * (one descriptor per tool, no two sharing a mark, real install and login commands) are asserted across the whole
+ * registry, the only place that can see every tool at once.
  *
  * The mark rule is the one that matters in use. It is drawn in a 14px square chip with no
  * label beside it, so two tools sharing a glyph are two tools a person cannot tell apart.

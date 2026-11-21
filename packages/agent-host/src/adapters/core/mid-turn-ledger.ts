@@ -46,7 +46,7 @@ export class MidTurnLedger {
   private readonly ended: string[] = []
   /** The latest turns our Stop was sent to (#698): any other turn the tool interrupted, it did on its own */
   private readonly stopped: string[] = []
-  /** Writes the tool has not answered: a message not yet answered is in flight, so an exit then is a crash (#1397 review) */
+  /** Writes the tool has not answered: a message not yet answered is in flight, so an exit then is a crash */
   private unanswered = 0
   /**
    * A turn no input may join runs (Codex's /compact and /review, which we started): Codex 0.147.0 answered `turn/start`

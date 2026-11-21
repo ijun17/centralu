@@ -70,12 +70,12 @@ export function resumeThreadParams(opts: CreateSessionOpts, servers: Record<stri
      */
     ...(opts.model ? { model: opts.model } : {}),
     /*
-     * Metadata only, not the whole history (#342). Nothing here reads the history the resume used to return
-     * except the running turn's id, and that has its own one-turn query below. Measured (codex-cli 0.160.0,
+     * Metadata only, not the whole history (#342). Nothing here reads the resume's history except the running
+     * turn's id, and that has its own one-turn query below. Measured (codex-cli 0.160.0,
      * gpt-5.6-luna, a five-turn scratch thread, 2026-10-05): 1,206 KB / 761 ms and a `deprecationNotice`
      * ("Full-history hydration is deprecated for paginated threads; use `excludeTurns: true`…") that #304 put
      * in the conversation, against 1.9 KB / 351 ms and no notice. One long thread's answer was 23 MB
-     * (client.ts). A Codex that predates the flag ignores it and answers with the turns, as before.
+     * (client.ts). A Codex that predates the flag ignores it and answers with the turns.
      */
     excludeTurns: true,
     /*
@@ -161,11 +161,8 @@ export function startThreadParams(opts: CreateSessionOpts, servers: Record<strin
      */
     ...developerInstructions(opts),
     /*
-     * config is **assembled in this one place only.** There used to be a trap where the
-     * verbosity spread and the Assistant spread each built their own config keys, and one
-     * would silently overwrite the other entirely — once there were three contributors
-     * (summary, verbosity, assistant), it became cheaper to remove the trap than to keep
-     * remembering it.
+     * config is **assembled in this one place only**: with three contributors (summary, verbosity, assistant), one
+     * that built its own config keys would silently overwrite another's entirely.
      */
     config: {
       // The reasoning-summary switch (measured for #58): without it, the item/reasoning/* stream never arrives
@@ -205,7 +202,7 @@ export const CODEX_SUBAGENT_TOOL = 'spawn_agent'
  * keeps its tools' new rules from the tool descriptions alone until it starts a new thread.
  */
 export function developerInstructions(opts: CreateSessionOpts): { developerInstructions?: string } {
-  // An app attached as the thread starts adds the line on repository work (#957, #992 review)
+  // An app attached as the thread starts adds the line on repository work (#957, #992)
   const apps = (opts.apps?.current().length ?? 0) > 0
   const tools = opts.centraluTools && opts.centraluBridge ? codexToolInstructionsFor(toolProfileOf(opts), undefined, apps, CODEX_SUBAGENT_TOOL) : undefined
   const text = [opts.systemPromptAppend, tools].filter(Boolean).join('\n\n')

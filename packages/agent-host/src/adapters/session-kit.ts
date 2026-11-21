@@ -2,8 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { STOP_NOT_CONFIRMED_LABEL, type NormalizedEvent } from '@cc/protocol'
 
 /**
- * Bookkeeping both adapters do the same way. Each helper here replaces copies that had drifted apart, so a rule
- * changed here changes for Claude and Codex at once.
+ * Bookkeeping both adapters do the same way, so a rule changed here changes for Claude and Codex at once.
  */
 
 /** Counts notices across every handle in this host, so a notice from a new handle never reuses an open row's id */
@@ -12,7 +11,7 @@ let notices = 0
 /**
  * A line Centralu itself says in a session's chat (a `/goal` confirmation or refusal), as an assistant message of
  * its own. It carries its own message id: the record and the screen join a chunk that names no message onto the
- * open row (session-record.ts, #212), so a notice without one was glued onto the model's open reply mid-turn.
+ * open row (session-record.ts, #212), so a notice without one would be glued onto the model's open reply mid-turn.
  */
 export function adapterNotice(sessionId: string, text: string): NormalizedEvent {
   return { type: 'message_delta', sessionId, role: 'assistant', messageId: `centralu-notice-${++notices}`, text }
@@ -96,10 +95,10 @@ export const stopNotEnded = (sessionId: string, label: string) => stopNotConfirm
 
 /**
  * The ids of the approval and question cards a handle raises, `<prefix>-<tag>-<n>`. Part of every id is this
- * handle's own tag (#683 review). The counter starts at 0 in each process, so after a swap a window that missed the
+ * handle's own tag (#683). The counter starts at 0 in each process, so after a swap a window that missed the
  * events between could still hold `req-1` of the old process while the new one raises its own `req-1`, and an answer
  * meant for the first would land on the second. With the tag the ids of two handles never meet, and the old id is
- * refused as gone. Both adapters kept this counter and tag apart.
+ * refused as gone.
  */
 export class CardIds {
   private counter = 0

@@ -2,15 +2,13 @@ import type { Readable } from 'node:stream'
 import { ownProcesses } from '../process.test-helpers.js'
 
 /**
- * A stand-in for an agent CLI that starts a helper of its own, the way Claude Code's LSP tool starts
- * `typescript-language-server` (which starts `tsserver`), or an MCP server from the user's config.
- * The helper is an ordinary child: it shares the CLI's process group and is never stopped by the
- * CLI, so a CLI that ends leaves it behind unless whoever stops the CLI reaches it too.
+ * A stand-in for an agent CLI that starts a helper of its own, as Claude Code's LSP tool starts `typescript-language-server`
+ * (which starts `tsserver`), or an MCP server from the user's config. The helper is an ordinary child: it shares the CLI's
+ * process group and is never stopped by the CLI, so a CLI that ends leaves it behind unless whoever stops the CLI reaches it.
  *
- * On Windows the helper is started `detached`. A child Node starts there otherwise joins Node's
- * kill-on-close job and dies with the CLI whatever the host does, so the fake would prove nothing;
- * detached, it stands for a helper started outside that job (by a native CLI, a Python MCP server),
- * which only the host's own cleanup ends. Elsewhere it stays in the CLI's process group.
+ * On Windows the helper is started `detached`: a child Node starts there otherwise joins Node's kill-on-close job and dies
+ * with the CLI whatever the host does, so the fake would prove nothing; detached, it stands for a helper started outside that
+ * job (by a native CLI, a Python MCP server), which only the host's own cleanup ends. Elsewhere it stays in the CLI's group.
  *
  * The CLI prints the helper's pid as its first line, then:
  *   - `ignoreTerm`: both it and its helper ignore SIGTERM, so only SIGKILL ends them;

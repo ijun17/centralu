@@ -8,28 +8,17 @@ import { Tail } from '../stream-text.js'
 import type { AgentProcess, AgentSpawnSpec } from './contract.js'
 
 /**
- * An agent CLI this host starts itself, on every path, under a keeper too (#1895 step 4: no host uses the
- * keeper's children service any more).
+ * An agent CLI this host starts itself (every path, under a keeper too: #1895 step 4), as the `ChildProcess` subset the SDK's
+ * `spawnClaudeCodeProcess` and `CodexClient` take (`AgentProcess`). Stopping it ends its helpers (Claude Code's LSP tool's
+ * `typescript-language-server` and `tsserver`, one reached 3.4 GB; MCP servers; shells): the SDK and `CodexClient` signal the CLI's pid
+ * alone, which leaves them under launchd/init when it was KILLed, crashed or does not clean up.
  *
- * The point is what stopping it ends. An agent CLI starts helpers of its own: Claude Code's LSP
- * tool runs `typescript-language-server`, which runs `tsserver` (one reached 3.4 GB); MCP servers from
- * the user's config; shells. A CLI that ends without stopping them, because it was KILLed after a
- * timeout, crashed, or just does not clean up, used to leave them running under launchd/init: the SDK
- * and `CodexClient` only ever signalled the CLI's own pid.
- *
- * - **macOS and Linux.** The CLI leads a process group of its own (`detached`), so its helpers are
- *   in that group and not in the host's. Stopping it is `kill-tree.ts`'s two shots: TERM to every
- *   group in its tree, then KILL to whatever of that tree is still there after the grace. After the
- *   CLI has exited, however it ended, its group is swept once more (`stopGroup`), which reaches the
- *   helpers that outlived it: they are no longer under it in `ps`, but they are still in its group,
- *   whose number is not reused while anyone is in it. The host's own group is never a target.
- * - **Windows** has no groups. Stopping it is one forceful shot in the order of `os/kill-tree.ts`: the process table is read
- *   while the tree is whole, the CLI is ended alone, then what it started, parents first (`taskkill /T` only when the table
- *   cannot be read in time). After it has exited, what it left running is found
- *   by parent links and creation times and ended the same way (`collectOrphansWindows`).
- *
- * Its surface is the `ChildProcess` subset adapters use (`AgentProcess`), so it is what both the
- * Agent SDK's `spawnClaudeCodeProcess` and `CodexClient` take.
+ * - **macOS and Linux.** The CLI leads its own process group (`detached`; the host's group is never a target), stopped by
+ *   `kill-tree.ts`'s TERM to every group in its tree, then KILL to what remains after the grace. After it exits, `stopGroup`
+ *   sweeps its group again, reaching helpers no longer under it in `ps` (a group's number is not reused while it has members).
+ * - **Windows** has no groups: one forceful shot in the order of `os/kill-tree.ts` (the table read while the tree is whole,
+ *   the CLI ended alone, then what it started, parents first; `taskkill /T` only when the table cannot be read in time).
+ *   After it exits, what it left is found by parent links and creation times and ended the same way (`collectOrphansWindows`).
  */
 
 /** What this needs from the OS, as a parameter so the Windows path can be tested on any OS */
@@ -61,12 +50,11 @@ export const FIND_CLI =
  * group (`kill -9 0`): the CLI, its MCP servers and the shells in its group. It needs no stdin's end to reach anyone.
  * Before that it ends the helper groups a shell the CLI starts in a group of its own lives in, and what that shell runs:
  * those of the CLI's descendants then (`watchTreeGroups`, read by parent links when the pipe closes, so a command
- * started a moment before the host died is reached too; #1562 Mac re-check), and those the host told it of on the pipe
+ * started a moment before the host died is reached too, see #1562), and those the host told it of on the pipe
  * (`+<pgid>` noted, `-<pgid>` dropped once empty, `noteTree`), which reach a helper whose shell has gone.
  *
- * Before all that the shell looks the CLI up itself (`FIND_CLI`) and says on fd 4 what Node's spawn would have raised, `enoent`
- * or `eacces`; the host turns it into the same 'error' (`LocalAgentProcess.readStatus`). fd 4 is closed by the `exec`, so a
- * CLI that starts says nothing.
+ * First the shell looks the CLI up (`FIND_CLI`) and says on fd 4 what Node's spawn would raise (`enoent`, `eacces`), which the
+ * host raises as that 'error' (`LocalAgentProcess.readStatus`); the `exec` closes fd 4, so a CLI that starts says nothing.
  */
 export const HOST_WATCH =
   FIND_CLI +
@@ -214,8 +202,8 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
 
   /**
    * The host watch (`HOST_WATCH`) is told each helper group as it is noted and as it is dropped, so a host killed outright
-   * still ends them: they are in groups of their own, which the watch's own `kill -9 0` does not reach (#1562 Mac re-check:
-   * Cursor's `zsh -c` and its `sleep 300` outlived a SIGKILLed host)
+   * still ends them: they are in groups of their own, which the watch's own `kill -9 0` does not reach (#1562 on macOS:
+   * Cursor's `zsh -c` and its `sleep 300` otherwise outlive a SIGKILLed host)
    */
   private tellWatch(before: ReadonlySet<number>, after: ReadonlySet<number>): void {
     const watch = this.child.stdio[3]

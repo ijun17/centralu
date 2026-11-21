@@ -23,18 +23,19 @@ import { AGY_SURFACE } from './surface.js'
  *   would skip Centralu, so they are never set, and `allow_always` is never sent (spike §5)
  * - **Context: exact** (`usage_update {used, size: 1048576}`), no cost
  * - Resume: `session/load` (replays, dropped) under the one `GEMINI_HOME` Centralu keeps
- * - Files of its own in the project: on Linux (measured, 1.4.3 and 1.5.0) and macOS (seen), it writes its `run_workflow`
- *   skill as `skills/system/run-workflow/SKILL.md` into the session's project at `session/new`; Windows 1.4.3 writes none
- *   (#2320, docs/plans/antigravity-acp.md §1 has the cause)
- * - Not offered yet: role text (`_meta.antigravity.systemPrompt.append` exists, unmeasured), untrusted projects (it reads
- *   the project's own instruction files, as the other ACP tools), images in the prompt, the model and effort menus
  */
 const CAPABILITIES: AdapterCapabilities = {
+  // What the agent does or lacks beyond these fields (`roleText`, `attachments` and `keepsRepoFilesOut` stay at the ACP defaults):
+  // - Files of its own in the project: on Linux (measured, 1.4.3 and 1.5.0) and macOS (seen), it writes its `run_workflow`
+  //   skill as `skills/system/run-workflow/SKILL.md` into the session's project at `session/new`; Windows 1.4.3 writes none
+  //   (#2320, docs/plans/antigravity-acp.md §1 has the cause)
+  // - Not offered yet: role text (`_meta.antigravity.systemPrompt.append` exists, unmeasured), untrusted projects (it reads
+  //   the project's own instruction files, as the other ACP tools), images in the prompt, the model and effort menus
   ...ACP_CAPABILITIES,
   autoTitle: false,
 }
 
-/** The label and mark carried over from the earlier `agy` design; install and sign-in are Centralu's own (`ToolSetup`) */
+/** Install and sign-in are Centralu's own (`ToolSetup`) */
 const DESCRIPTOR: ToolDescriptor = {
   name: 'antigravity',
   label: 'Antigravity',
@@ -75,7 +76,7 @@ export function antigravityProfile(deps: AgyProfileDeps = {}): AgyProfile {
       const folder = await browserFolder(home, deps.platform, deps.helperPlaces)
       if (folder.browser === '') {
         // Without a helper the agent's launcher would start the browser itself, on Windows inside the host's job, and a
-        // stored sign-in that stopped working would hang the start again (review of #1685): refused rather than started.
+        // stored sign-in that stopped working would hang the start again (#1685): refused rather than started.
         // A path does not change between tries, so the refusal is not worth retrying (#1688)
         console.error(`[Antigravity] session refused: ${folder.why}`)
         throw rpcError(`Antigravity cannot start: ${folder.why}`, 'refused', { retryable: false, data: { reason: 'no_browser_helper' } })

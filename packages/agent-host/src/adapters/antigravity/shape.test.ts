@@ -226,7 +226,7 @@ const SUBAGENT = {
   ],
 }
 
-/** An edit request as the agent asks for one (re-review of #1680: `replace_file_content`, kind `edit`) */
+/** An edit request as the agent asks for one (`replace_file_content`, kind `edit`) */
 const touching = (id: string, title: string, kind: string, rawInput: Record<string, unknown>) => ({
   sessionId: SID,
   toolCall: { toolCallId: id, title, kind, status: 'pending', rawInput },

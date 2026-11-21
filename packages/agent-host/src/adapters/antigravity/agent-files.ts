@@ -26,21 +26,6 @@ import { realOs } from '../../os/real.js'
  * - the folder layout under Centralu's data folder, and what is on disk there (`agyHome`, `isInstalled`, `hasSignIn`)
  * - the install: the download to disk, the unpack with each OS's file modes, the one rename that puts it in place
  * - the private folder of a process's `BROWSER` helper (`browserFolder`), and the person's browser (`openInBrowser`)
- *
- * The folder, under `<data>/tools/antigravity/`:
- *
- *     <version>/             the server and its harness, side by side, and `install.json` written last
- *     gemini-home/           GEMINI_HOME: the agent's settings, conversations, and its token where it keeps a file (not on
- *                            a Mac with a usable Keychain, plan §4.2). Not versioned, so a session made
- *                            under one Centralu still loads under the next (ids are per GEMINI_HOME, spike §3)
- *     .install-<owner>-<random>/  an install in progress (removed when it ends, however it ends)
- *     .sign-in-<owner>-<random>/  one process's browser helper and the address it hands over (a sign-in's or a session's;
- *                            removed when that process's sign-in or session ends)
- *
- * Where the data folder's path cannot be put in `BROWSER`, a helper's folder is `.sign-in-<owner>-<random>/` in the person's
- * own folder instead (`spareFolder`)
- *
- * `<owner>` names the host process that made the folder (`ownerTag`), so another host never removes it while that one runs
  */
 
 /** The registry's name for this machine's build, or null where Google ships none (a 32-bit or another OS) */
@@ -53,6 +38,20 @@ export function agyPlatformKey(platform: Platform = HOST_PLATFORM, arch: string 
   return null
 }
 
+/**
+ * The folder, under `<data>/tools/antigravity/`:
+ *
+ *     <version>/             the server and its harness, side by side, and `install.json` written last
+ *     gemini-home/           GEMINI_HOME: the agent's settings, conversations, and its token where it keeps a file (not on
+ *                            a Mac with a usable Keychain, plan §4.2). Not versioned, so a session made
+ *                            under one Centralu still loads under the next (ids are per GEMINI_HOME, spike §3)
+ *     .install-<owner>-<random>/  an install in progress (removed when it ends, however it ends)
+ *     .sign-in-<owner>-<random>/  one process's browser helper and the address it hands over (a sign-in's or a session's;
+ *                            removed when that process's sign-in or session ends; in the person's own folder instead,
+ *                            `spareFolder`, where the data folder's path cannot be put in `BROWSER`)
+ *
+ * `<owner>` names the host process that made the folder (`ownerTag`), so another host never removes it while that one runs
+ */
 export type AgyHome = {
   root: string
   /** The installed version's folder */
@@ -160,7 +159,7 @@ export type InstallIo = {
 export const realInstallIo: InstallIo = {
   async download(url, signal) {
     // The archive as stored: `fetch` asks for gzip by itself, and Google's server then sends the zip gzipped with a
-    // `content-length` of the gzipped size, which the decoded bytes never match (deep review of #1680, measured)
+    // `content-length` of the gzipped size, which the decoded bytes never match (#1680, measured)
     const res = await fetch(url, { signal, redirect: 'follow', headers: { 'accept-encoding': 'identity' } })
     if (!res.ok || !res.body) throw new InstallFailure('network', `The download answered ${res.status} ${res.statusText}`.trim())
     return { total: decodedLength(res.headers), chunks: chunksOf(res.body) }
@@ -362,7 +361,7 @@ export async function removeLeftovers(home: AgyHome): Promise<void> {
 /**
  * The folders of that kind whose owner is provably gone. Another host may share this data folder's `tools/` and be in
  * the middle of its own: the keeper's next host starts while the last one drains, and a second host on the same data
- * folder with another `--db` takes its own lock, not this folder (re-review of #1680: a second host's start removed a
+ * folder with another `--db` takes its own lock, not this folder (#1680: a second host's start removed a
  * live sign-in). So a folder goes only when the process its name records has ended, or that pid now belongs to a process
  * that started at another time; a folder whose owner cannot be told is kept
  */
@@ -512,23 +511,20 @@ export function notOwnFolder(facts: { folder: FolderFact; above: readonly Folder
 /**
  * A folder only this user can read (0700) beside the install, for one Antigravity process's browser: the `BROWSER` helper,
  * which writes the one argument it is given to a file of its own there (`url-<run>`) through a temporary name, so the
- * host never reads half an address. Every Antigravity process gets one (a sign-in, a session), so the agent never starts a browser itself on any
- * OS (review of #1685: on Windows it started the person's browser as its own child, inside the host's job object, and a
- * Stop, the sign-in's end or the host's exit ended it with every tab):
+ * host never reads half an address. Every Antigravity process gets one (a sign-in, a session), so the agent never starts a
+ * browser itself on any OS (#1685: on Windows that browser is the agent's child, inside the host's job object, and a Stop,
+ * the sign-in's end or the host's exit ends it with every tab):
  * - **macOS and Linux**: a `sh` script, `BROWSER` its path (measured on macOS: the launcher runs it, and opens no browser)
  * - **Windows**: a batch file would hand the address to `cmd`, which splits it at `&`. So `BROWSER` is a command line,
  *   `'<node>' '<dir>/open-url.mjs' %s`: Python's launcher splits a `BROWSER` entry holding `%s` with `shlex` and runs it
  *   with no shell (CPython 3.14 `webbrowser.get`, the agent's runtime), so the address reaches the helper whole. The
  *   helper exits 0, so the launcher does not fall back to the default browser
- *
- * A path holding the separator the launcher splits `BROWSER` at (`;` on Windows, `:` elsewhere) or `%s` cannot be in it
- * (#1688). Where the data folder's path holds one, the folder is made in the person's own folder instead (`spareFolder`),
- * so only that path holding one too (or it cannot be written), or on Windows a Node path with one, leaves no helper.
- * Each path is judged as made and absolute (the agent runs in the session's folder, so a relative path would name
- * another file there), and that string is the one used
  */
 export async function browserFolder(home: AgyHome, platform: Platform = HOST_PLATFORM, places: HelperPlaces = {}): Promise<BrowserFolder> {
   const node = places.node ?? process.execPath
+  // A path holding the separator the launcher splits `BROWSER` at, or `%s`, cannot be in it (#1688): a data folder with one
+  // falls back to `spareFolder`; that one too (or unwritable), or on Windows a Node path with one, leaves no helper. Each
+  // path is judged as made and absolute (the agent runs in the session's folder, where a relative path names another file)
   const sep = platform === 'win32' ? ';' : ':'
   const nodeBad = platform === 'win32' ? unusableIn(node, sep) : ''
   if (nodeBad) return noHelper(`the Node program Centralu runs on is at ${node}, and Antigravity cannot be given a path with ${nodeBad} in it. Install Centralu (or that Node) in a folder whose path has none.`)
@@ -546,7 +542,7 @@ export async function browserFolder(home: AgyHome, platform: Platform = HOST_PLA
     try {
       await mkdir(spare, { recursive: true, mode: 0o700 })
       // Not the person's alone (POSIX): another user who can change it, or a folder above it, could put their own helper
-      // in place of the person's, which the agent then runs as the person (deep review of #2012)
+      // in place of the person's, which the agent then runs as the person (#2012)
       const uid = platform === 'win32' ? undefined : process.getuid?.()
       const notOwn = uid === undefined ? '' : notOwnFolder(await folderFacts(spare), uid)
       if (notOwn) return noHelper(`${data}, and ${spare}, the folder Centralu tries instead, ${notOwn}. ${move}`)

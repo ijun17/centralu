@@ -43,8 +43,7 @@ type AskCause = { matchedAskRule?: unknown; decisionReason?: string }
  * The model's text when `auto` refuses an ask (#2134). Under `bypassPermissions` the CLI asks for an `ask` rule, a hook
  * whose answer is `ask`, or a check of its own, and says which: the rule in `matchedAskRule`, the reason in
  * `decisionReason` (measured with CLI 2.1.316: a PreToolUse hook's `permissionDecisionReason` arrives there as it was
- * written). Naming a settings rule when a hook asked sent an agent looking for a rule that did not exist, and the hook's
- * reason, which says what tripped it, was lost.
+ * written). So the text names the rule only when one matched, and otherwise passes the hook's reason, which says what tripped it.
  */
 /** How much of an ask's reason goes to the model: a hook may echo a whole command or file */
 const REASON_CHARS = 400
@@ -108,22 +107,14 @@ export class ClaudeCards {
      * **A choice is a question, not an approval** (FR: AskUserQuestion), under every preset: no step of the decision order
      * below answers it (it is not Centralu's tool, a read, an app tool or an edit, and `auto` lets it through).
      *
-     * The path here was found by measurement (probe-askuserquestion.mts, 2026-08-18):
+     * Measured (probe-askuserquestion.mts, 2026-08-18):
      *   arrives via canUseTool    yes — the arguments (question, choices) arrive whole
      *   arrives via onUserDialog  no — never called even once, no matter what kind was declared
      *   allow with the input unchanged → the CLI tries its own dialog, and the tool ends with
      *                                    "The user did not answer the questions."
-     *
-     * So this intercepts it here and asks the person. The answer goes back as an **allow whose
-     * `updatedInput.answers` carries it** (see `answerQuestion`). That field is the SDK's own
-     * ("User answers collected by the permission component", sdk-tools.d.ts), and with it filled the
-     * tool finishes normally: measured 2026-09-30, the result came back with `is_error: false` as
-     * `Your questions have been answered: "Pick a color"="Blue"…`, and the model replied "Blue".
-     *
-     * Until then the answer went back as a **deny's message**, the only other way found to hand the
-     * model arbitrary text as this tool's result. The model read it correctly, but the CLI marks a
-     * denied tool's result as an error, so every answered card read "Failed" (2026-09-30, the Mea
-     * session).
+     * The answer goes back as an **allow whose `updatedInput.answers` carries it** (`answerQuestion`; the SDK's field,
+     * sdk-tools.d.ts): measured 2026-09-30, `is_error: false`, `Your questions have been answered: "Pick a color"="Blue"…`.
+     * Not a deny's message: the model reads it, but the CLI marks a denied result as an error, so the card reads "Failed".
      */
     if (toolName === 'AskUserQuestion') {
       const questions = parseQuestions(toolInput)
@@ -139,40 +130,23 @@ export class ClaudeCards {
     const editPath = this.mayGrantEdit(preset, options) ? claudeEditPath(toolName, toolInput) : null
     const answer = this.grants.decide({
       /*
-       * **We vouch for our own tools ourselves.**
-       *
-       * The Assistant's centralu tools can never reach outside the sessions this app
-       * manages (only the manager ever sees them), and the actual dangerous part — what the
-       * target session runs — **is already gated entirely by that session's own permission
-       * settings.** Asking again here would double up approval, and the reason this feature
-       * exists in the first place — issuing instructions from one window — would disappear.
-       *
-       * Measured: without this, even a single list read popped an approval window, and the
-       * assistant stalled on its very first tool call.
-       *
-       * Checked before auto's refusal, so it holds under every preset (#382): in auto a call reaches this
-       * callback only when an `ask` rule matched, and a rule naming `mcp__centralu` (the person's, or a trusted
-       * project's file) used to refuse these tools in auto while safe and normal let them through. Codex's
-       * bridge is set to `approve` for the same reason (#363).
-       *
-       * Only when this session was given our server (#382). Without it (an agent an app stood up, the set turned
-       * off in Settings) a `centralu` server can still come from the person's own `~/.claude`, and its tools
-       * are not ours to vouch for.
+       * **We vouch for our own tools ourselves**: they reach only the sessions this app manages, and what a target session
+       * runs is gated by its own permission settings; asking again would stall the Assistant (measured: a list read
+       * popped a card on its first call). Checked before auto's refusal, so it holds under every preset (#382): in auto
+       * a call reaches here only when an `ask` rule matched, and a rule naming `mcp__centralu` must not refuse them there
+       * while safe and normal allow them. Codex's bridge is `approve` for the same reason (#363).
+       * Only when this session was given our server (#382): otherwise (an app's agent, the set off in Settings) a
+       * `centralu` server can come from the person's own `~/.claude`, and its tools are not ours to vouch for.
        */
       ownTool: isCentraluToolName(toolName) && this.host.ownServer(),
       before: [],
       auto: preset === 'auto',
       after: [() => this.readGranted(toolName, toolInput)],
       /*
-       * The rule's key — for a command it is the full command text, for a file edit it is
-       * **the path** (#170). This matches what the UI carries on "always allow" (both come
-       * from protocol's `alwaysAllowKey`, #428), and the Codex adapter looks
-       * things up by the same rule. This used to look up an edit by `Edit:file_edit`, so a
-       * rule saved by path could never match — the same file was asked about again every time
-       * it was edited again. Other kinds (`other`) have no key at all: what "always" would
-       * even mean for them has not been decided yet. The key is the card's path whether or not
-       * the file is new (`newFile` changes only what the card says), so it is read without the disk, and only when the
-       * step is reached.
+       * The rule's key: a command's full text, a file edit's **path** (#170), as the UI's "always allow" and the Codex
+       * adapter key it (protocol's `alwaysAllowKey`, #428). Other kinds (`other`) have no key: what "always" means for them
+       * is not decided. The key is the card's path whether or not the file is new (`newFile` changes only what the card
+       * says), so it is read without the disk, and only when the step is reached.
        */
       alwaysAllowKey: () => alwaysAllowKey(approvalDetail(toolName, toolInput, this.host.opts.cwd)),
       /*
@@ -259,9 +233,8 @@ export class ClaudeCards {
   /**
    * Closes a card when the CLI withdraws its question. The SDK aborts the callback's `signal` when the CLI sends
    * `control_cancel_request` for that permission request (the tool was aborted, or the turn ended without our Stop)
-   * and when the query closes. Nothing else tells us: without this the card stayed open forever, and answering it
-   * resolved a promise nobody was waiting on. A card already answered or released is no longer in its map, so this
-   * closes nothing twice.
+   * and when the query closes; nothing else tells us, and an open card would answer a promise nobody waits on. A card already answered or released is no longer in its map, so
+   * this closes nothing twice.
    */
   private releaseOnCancel(requestId: string, signal: AbortSignal | undefined): void {
     if (!signal) return

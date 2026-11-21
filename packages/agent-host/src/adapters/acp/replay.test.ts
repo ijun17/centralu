@@ -72,7 +72,7 @@ for (const dir of readdirSync(RECORDINGS)) {
         expect(r.problems).toEqual([])
         expect(r.left).toBe(0)
         // Every call the agent announced ends once, after it: a recording whose frames came out of order reads wrong here
-        // (#1562 review: a `completed` moved before its `tool_call` passed every other check)
+        // (#1562: a `completed` moved before its `tool_call` passes every other check)
         expect(callOrder(r.events)).toEqual([])
       })
     }

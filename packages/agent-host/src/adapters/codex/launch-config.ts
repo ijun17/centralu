@@ -11,10 +11,8 @@ import type { CreateSessionOpts } from '../contract.js'
  * details follow the preset separately (sandboxConfig). Auto runs without a sandbox, matching
  * Claude's bypass permissions; safe and normal workspace-write keep network disabled (#582, #585).
  *
- * It matters that there were two things being overridden. Not just approvalPolicy — **sandbox
- * was also pinned** to 'workspace-write'. That meant even if the user had written
- * danger-full-access into config.toml, anything outside the working folder was still blocked —
- * it failed without even asking.
+ * Both approvalPolicy and **sandbox** are left alone: a pinned 'workspace-write' blocks anything outside the working
+ * folder without asking, even when the user's config.toml says danger-full-access.
  */
 /*
  * "My settings" means the user's own `~/.codex/config.toml` — the repository's
@@ -30,54 +28,16 @@ export function permissionOptionsFor(preset: PermissionPreset): Record<string, u
 }
 
 /**
- * Keeps files in the repository from being able to alter this thread (M4 decision 3, #92, #152) —
- * for untrusted projects, and for sessions that must not read any files at all (`noSettingFiles`:
- * assistant and coordination sessions — that folder is a spot a worker can write into). This
- * mirrors Claude's `settingSources: ['user']` versus `[]`. In a trusted folder (a trusted project,
- * or a user-folder app) nothing is loaded here — same as before. The manager decides which case
- * applies from the session kind and the project, and passes that down: it is not decided by
- * whether the session receives tools (the worktree manager and the session that creates the
- * worktree also receive tools, but they are sessions of the project).
- *
- * Codex has its own separate project trust (`projects."<path>".trust_level` in
- * `~/.codex/config.toml`). In an untrusted folder, Codex loads the repository's
- * `.codex/config.toml` (which can change approval policy, sandbox and MCP servers), hooks and
- * exec policy, but disables them. The problem is a folder whose trust is **unset**: if
- * `thread/start` received a cwd, trust is empty, and the sandbox can write to that folder, the
- * app-server **writes trust into the user's settings file, marking the folder as trusted**
- * (`set_project_trust_level(…, Trusted)` in codex source `app-server/thread_processor.rs`). So
- * every repository opened through this app ended up trusted on the Codex side.
- *
- * The per-thread `config` sits at the same layer as the CLI's `-c` (SessionFlags), and the trust
- * decision reads `projects` from the settings merged up through that layer (`project_trust_context`
- * in codex source config `loader/mod.rs`). So writing "untrusted" for that folder in this thread
- * only:
- *   - leaves the repository's `.codex/config.toml`, hooks and exec policy in the disabled layer
- *     (`disabled_reason_for_decision`)
- *   - stops app-server from writing trust in (the auto-trust above only fires when
- *     `trust_level.is_none()`), because trust is now already set
- *   - stops AGENTS.md from being read (`agents_md.rs` skips it when `active_project.is_untrusted()`)
- * The decision looks at **that folder's own key first**, per folder (`decision_for_dir`) — it
- * writes every ancestor from the cwd up to the root. Even if the user has trusted one ancestor,
- * that entry does not win. Both the path as written and the real path (with symlinks resolved)
- * are written, because Codex looks up both spellings (`normalized_project_trust_keys`).
- *
- * `project_doc_max_bytes: 0` is loaded alongside it. We could not confirm from the binary whether
- * installed 0.153.4 has the line that filters AGENTS.md by trust. This key is here because it was
- * measured on the Assistant (a planted AGENTS.md that had been followed stopped being followed).
- * The user's own `~/.codex/AGENTS.md` is read through a different path and is unaffected.
- *
- * What remains: repository skills (`.codex/skills`, `.agents/skills`) are read regardless of trust
- * ("skills still load" — a warning string in the installed 0.153.4 binary). There is no key that
- * turns off only repository-scoped skills per thread (`skills.include_instructions` also turns off
- * the user's own skills). Skills are only instructions, so whatever the model does after following
- * a skill still goes through approval.
- *
- * **Confirmed from source and binary only** (Codex was logged out, so we could not re-verify by
- * running it): the keys and decisions were read from codex source (main 75e0e0a, 2026-09-25), and
- * we confirmed the same strings exist in the installed 0.153.4 binary —
- * "failed to persist trusted project state for", "is marked as untrusted in the effective configuration",
- * "Project-local config, hooks, and exec policies are disabled … but skills still load".
+ * Keeps the repository's files from altering this thread (M4 decision 3, #92, #152; docs/security-boundaries/project-trust.md
+ * "Repository configuration and project trust"): an untrusted project, or `noSettingFiles` (the manager decides from the
+ * session kind and project, not from whether it receives tools). Read from codex source (main 75e0e0a, 2026-09-25) and
+ * the installed 0.153.4 binary's strings, not by a logged-in run:
+ *   - with trust **unset** and a writable cwd, app-server persists the folder as trusted in `~/.codex/config.toml`
+ *     (`set_project_trust_level`, `thread_processor.rs`, only when `trust_level.is_none()`); `untrusted` also disables the
+ *     repository's config, hooks and exec policy (`disabled_reason_for_decision`) and AGENTS.md (`agents_md.rs`)
+ *   - the per-thread `config` is the CLI's `-c` layer, which `project_trust_context` reads; a folder's own key wins
+ *     (`decision_for_dir`), so every ancestor is written, as written and real (`normalized_project_trust_keys`)
+ *   - `project_doc_max_bytes: 0`: measured on the Assistant (a planted AGENTS.md stopped being followed); `~/.codex/AGENTS.md` still loads
  */
 export function repoFilesConfig(opts: Pick<CreateSessionOpts, 'cwd' | 'projectTrusted' | 'noSettingFiles'>): Record<string, unknown> {
   if (opts.projectTrusted === true && !opts.noSettingFiles) return {}

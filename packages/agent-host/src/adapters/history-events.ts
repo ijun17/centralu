@@ -17,7 +17,7 @@ export function historyEvents(events: readonly NormalizedEvent[], ts?: number): 
 }
 
 /**
- * How much of a tool's answer a result read back keeps as its record (#843 review). Live, the whole answer is the
+ * How much of a tool's answer a result read back keeps as its record (#843). Live, the whole answer is the
  * record (#221), written as it comes, one call at a time. An import writes every call it reads in one go, and a busy
  * thread's commands can answer megabytes each; the card itself shows the first 2,000 characters either way.
  */
