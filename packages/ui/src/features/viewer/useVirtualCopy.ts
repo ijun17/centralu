@@ -107,16 +107,23 @@ export function useVirtualCopy({
       const payload =
         whole.current && all !== null && claimStands(sel, rowsRef.current)
           ? all
-          : selectedText({ selection: sel, root, lines: current, lastAnchor: anchor.current, anchorMoved: anchorMoved(sel, anchorNode.current) })
+          : selectedText({
+              selection: sel,
+              root,
+              lines: current,
+              lastAnchor: anchor.current,
+              anchorMoved: anchorMoved(sel, anchorNode.current),
+            })
       if (payload === null) return
       e.preventDefault()
       e.clipboardData?.setData('text/plain', payload)
     }
-    // Any click starts a new selection, so ⌘A's claim on the clipboard ends there, and so does the old anchor's row
-    // (a double click can land its word before a collapsed caret is ever reported); Shift-click extends the selection
+    // Any click starts a new selection, so ⌘A's claim on the clipboard ends there. A press on the rows also forgets the
+    // old anchor's row (a double click can land its word before a collapsed caret is reported); one on the scrollbar or
+    // a button keeps the drag's selection, and Shift-click extends it
     const onMouseDown = (e: MouseEvent) => {
       whole.current = false
-      if (!e.shiftKey) anchorNode.current = null
+      if (!e.shiftKey && e.target instanceof Node && rowsRef.current?.contains(e.target)) anchorNode.current = null
     }
     // So does extending a selection by keyboard (Shift with an arrow, Home, End or a page key)
     const onKeyDown = (e: globalThis.KeyboardEvent) => {
