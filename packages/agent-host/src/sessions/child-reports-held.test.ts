@@ -1,6 +1,7 @@
 import { tmpdir } from 'node:os'
 import { describe, expect, it, vi } from 'vitest'
 import { ChildReports, type ChildReportsHost } from './child-reports.js'
+import { OWN_WORK_SETTLE_MS } from './child-ownership.js'
 import { managerWorld } from './manager.test-helpers.js'
 
 /*
@@ -43,5 +44,28 @@ describe('notices kept for a session that could not be woken', () => {
     await mgr.trash.trashSession(s.id)
     expect(forget).toHaveBeenCalledWith(s.id)
     await mgr.tenure.disposeAll()
+  })
+})
+
+describe("an input that waits to run after a turn of the tool's own (#2318)", () => {
+  it('is no longer waited on once the session settled at rest and answered: a later end of its process is no stop of that work', () => {
+    vi.useFakeTimers()
+    const host = {
+      disposing: false,
+      meta: new Map([['s', { id: 's', state: 'idle', backgroundTasks: [] }]]),
+      children: { openTasks: () => [{ id: 't' }] },
+      mailWatchedAtRest: () => false,
+      selfCompaction: { goesOn: () => true },
+    } as unknown as ChildReportsHost
+    const reports = new ChildReports(host)
+    reports.inputWaiting('s')
+    vi.advanceTimersByTime(OWN_WORK_SETTLE_MS)
+    expect(reports.inputEnded('s')).toBe(false)
+    // Before the settle answers, the input still waits
+    reports.inputWaiting('s')
+    vi.advanceTimersByTime(OWN_WORK_SETTLE_MS - 1)
+    expect(reports.inputEnded('s')).toBe(true)
+    reports.stopSettling()
+    vi.useRealTimers()
   })
 })

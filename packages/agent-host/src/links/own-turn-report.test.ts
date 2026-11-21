@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ClaudeAdapter } from '../adapters/claude/index.js'
 import { claudeCli, offlineClaude } from '../adapters/claude/claude-cli-fake.test-helpers.js'
-import { OWN_WORK_SETTLE_MS } from '../sessions/child-ownership.js'
 import { MAIL_ACCEPT_MS } from '../sessions/mail-accept.js'
 import { sessionAddress } from '../mail/address.js'
 import { cleanups, folder, runCleanups } from './links-world.test-helpers.js'
@@ -105,17 +104,13 @@ describe("a task that comes with a background task's notification (#2318)", { ti
     expect(machine.store.mailbox.reportsOn(task.id)[0]!.facts).toMatchObject({ outcome: 'finished', answer: expect.stringContaining('all done') })
   })
 
-  it('is answered once the session settles at rest when its tool never runs the input: no report is lost for good', async () => {
+  it("is told to its giver as stopped, not answered with the notification turn's words, when its tool never runs the input", async () => {
     const { machine, at } = await asleep()
     claudeCli.notifyNext('drop')
     const task = machine.mail!.service.task(at('w1'), at('w2'), { text: 'a long job', origin: 'agent_session', delivered: false })
-    // The wait for the tool to take the wake and the settle's bound, and only they (their call sites, not every timer of that length), are short
-    // here: the rest runs on real time
+    // The wait for the tool to take the wake, and only it (its call site, not every timer of that length), is short here: the rest runs on real time
     const realTimeout = globalThis.setTimeout
-    const short = (ms?: number) => {
-      const stack = new Error().stack ?? ''
-      return (ms === OWN_WORK_SETTLE_MS && stack.includes('settleAtRest')) || (ms === MAIL_ACCEPT_MS && stack.includes('takeInput'))
-    }
+    const short = (ms?: number) => ms === MAIL_ACCEPT_MS && (new Error().stack ?? '').includes('takeInput')
     vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number) => realTimeout(fn, short(ms) ? 500 : ms)) as typeof setTimeout)
     machine.mail!.delivery.start()
     cleanups.push(() => machine.mail!.delivery.stop())
@@ -124,10 +119,33 @@ describe("a task that comes with a background task's notification (#2318)", { ti
       await machine.mail!.delivery.process(at('w2'))
       return claudeCli.ran('a long job') && running(machine, 'w2') === 'waiting_input'
     })
+    // The wake is counted as taken with no turn running: no turn will end for it, so the work stops and its giver is told
+    await eventually(() => machine.store.mailbox.recipient(task.id, at('w2'))?.releasedAt != null)
+    expect(machine.store.mailbox.recipient(task.id, at('w2'))).toMatchObject({ deliveredAt: expect.any(Number), releasedWhy: 'error', settled: null })
     expect(machine.store.mailbox.reportsOn(task.id)).toEqual([])
-    // The wake is counted as taken, and the session, still at rest, settles and answers it
-    await eventually(() => machine.store.mailbox.reportsOn(task.id).length === 1)
-    expect(machine.store.mailbox.recipient(task.id, at('w2'))?.deliveredAt).not.toBeNull()
+    const told = machine.store.mailbox.feedOf(at('w1'), { limit: 20 }).filter((m) => m.kind === 'notice' && Array.isArray(m.facts.unanswered))
+    expect(told.flatMap((m) => m.facts.unanswered ?? [])).toEqual([expect.objectContaining({ id: task.id, why: 'error' })])
+  })
+
+  it('is answered by a turn that begins and ends in one read: a quick task to a session asleep, and to one whose process runs', async () => {
+    const { machine, at } = await asleep()
+    machine.mail!.delivery.start()
+    cleanups.push(() => machine.mail!.delivery.stop())
+    // Its turn's init and result come in one read, before the delivery's own step after the tool took it (2.1.296: 14 ms apart)
+    const woken = machine.mail!.service.task(at('w1'), at('w2'), { text: 'say hello', origin: 'agent_session', delivered: false })
+    await eventually(async () => {
+      await machine.mail!.delivery.process(at('w2'))
+      return machine.store.mailbox.reportsOn(woken.id).length === 1
+    })
+    expect(machine.store.mailbox.reportsOn(woken.id)[0]!.facts).toMatchObject({ outcome: 'finished', answer: expect.stringContaining('echo:') })
+    // Its process runs now and said what it tracks: the next one goes in tracked into it
+    await eventually(() => running(machine, 'w2') === 'waiting_input')
+    const live = machine.mail!.service.task(at('w1'), at('w2'), { text: 'say goodbye', origin: 'agent_session', delivered: false })
+    await eventually(async () => {
+      await machine.mail!.delivery.process(at('w2'))
+      return machine.store.mailbox.reportsOn(live.id).length === 1
+    })
+    expect(machine.store.mailbox.reportsOn(live.id)[0]!.facts).toMatchObject({ outcome: 'finished', answer: expect.stringContaining('say goodbye') })
   })
 
   it('is given again, not released, when the process goes before the waiting input ran', async () => {
