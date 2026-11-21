@@ -1,7 +1,8 @@
-import { TASK_REPORT_COVERS_MAX, TaskReport as TaskReportShape, errorMessage, oneLineText, type HostMailParams, type HubMailParams, type MailMoveParams, type MailRowState, type TaskReport } from '@cc/protocol'
+import { TASK_REPORT_ANSWER_MAX, TASK_REPORT_COVERS_MAX, TaskReport as TaskReportShape, errorMessage, oneLineText, type HostMailParams, type HubMailParams, type MailMoveParams, type MailRowState, type TaskReport } from '@cc/protocol'
 import type { MailRow, RecipientRow } from '../dev-services/store/mailbox.js'
 import { CENTRALU, PERSON, PERSON_ID, parseAddress, sessionAddress } from './address.js'
 import { AcrossCore, older, type AcrossPeers, type Route } from './across-core.js'
+import { clipped } from './last-response.js'
 
 /**
  * What became of mail that crossed a link (docs/plans/linked-mail.md §6): receipts both ways as the rows' state (`*.mailRows`), Centralu's reports and
@@ -376,7 +377,7 @@ export class AcrossReceipts extends AcrossCore {
 const REPORT_FACTS = ['outcome', 'answer', 'error', 'reason', 'paused', 'waitingOn', 'personSince', 'after', 'covers'] as const
 
 /** A report's words cut to what `TaskReport` takes (2,000 for the answer, 200 for an error or reason), so a long one still crosses as what it says */
-const clip = (v: unknown, max: number): unknown => (typeof v === 'string' && v.length > max ? `${v.slice(0, max - 1)}…` : v)
+const clip = (v: unknown, max: number): unknown => (typeof v === 'string' ? clipped(v, max) : v)
 
 /**
  * The tasks a report covers, as many as `TaskReport` takes: the newest. The other side's copies of the rest stay open (a row that crosses never
@@ -386,7 +387,7 @@ const newestCovers = (v: unknown): unknown => (Array.isArray(v) ? v.slice(-TASK_
 
 /** A report's facts as `TaskReport` takes them; one whose facts do not fit is a turn that ended */
 function reportOf(m: MailRow): TaskReport {
-  const facts = TaskReportShape.safeParse(Object.fromEntries(REPORT_FACTS.flatMap((k) => (m.facts[k] === undefined ? [] : [[k, k === 'covers' ? newestCovers(m.facts[k]) : clip(m.facts[k], k === 'answer' ? 2_000 : 200)]]))))
+  const facts = TaskReportShape.safeParse(Object.fromEntries(REPORT_FACTS.flatMap((k) => (m.facts[k] === undefined ? [] : [[k, k === 'covers' ? newestCovers(m.facts[k]) : clip(m.facts[k], k === 'answer' ? TASK_REPORT_ANSWER_MAX : 200)]]))))
   return facts.success ? facts.data : { outcome: 'finished' }
 }
 

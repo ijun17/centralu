@@ -9,15 +9,15 @@ import { inTurn } from '../idle.js'
 import { agentLook, errorMessage, SHUTDOWN_WORDS } from '@cc/protocol'
 import { errorKind } from './error-kind.js'
 import { wentWithItsProcess } from './interruptions.js'
-import { PERSON_TURN_ENDED, TURN_ENDED, lastResponseLine } from '../mail/last-response.js'
-import type { LastResponse } from '../mail/last-response.js'
+import { ANSWER_KEPT_CHARS, PERSON_TURN_ENDED, PREVIEW_CHARS, TURN_ENDED, answerKept, clipped, lastResponseLine } from '../mail/last-response.js'
+import type { AnswerKept, LastResponse } from '../mail/last-response.js'
 import type { StopWhy } from '../mail/stop-notices.js'
 import { asObj, str } from '../json-value.js'
 import { OWN_WORK_SETTLE_MS } from './child-ownership.js'
 import type { DelegationHost } from './delegation-flow.js'
 import type { ProjectRegistry } from './project-registry.js'
 import { labelOf, previewOf } from './transcript-view.js'
-import { clipPreview, lastResponse, lastResponseSeq } from './turn-answer.js'
+import { lastResponse, lastResponseSeq } from './turn-answer.js'
 import { cleanUpLine } from './tool-answers.js'
 import { namedCall } from './tool-seats.js'
 import type { RoutedCardsHost } from './routed-cards.js'
@@ -157,14 +157,14 @@ export class ChildReports {
     // A turn that asked to compact with a next step is not the work's end: the step's turn goes on with it (#2164)
     if (this.host.disposing || !m || agentLook(m) !== 'finished' || this.host.selfCompaction.goesOn(sessionId)) return
     try {
-      const { preview: words, seq } = this.turnWords(sessionId)
+      const { words, preview, seq } = this.turnWords(sessionId)
       const writtenAt = seq === undefined ? undefined : this.host.store.messages.loadMessages(sessionId, 200).find((r) => r.seq === seq)?.ts
       const cut = this.cutsUntold.delete(sessionId)
       this.host.mailLastResponse(sessionId, {
-        body: (receiverId) => this.lastResponseWords(receiverId, sessionId, words !== '', seq, cut),
+        body: (receiverId) => this.lastResponseWords(receiverId, sessionId, answerKept(words, ANSWER_KEPT_CHARS), seq, cut),
         relay: (receiverId, told) => {
           const { name, project } = this.reportedAs(m)
-          void this.deliverReport(receiverId, sessionId, name, project, words, { type: 'turn_complete' }, seq, cut ? { cut: true } : undefined, told)
+          void this.deliverReport(receiverId, sessionId, name, project, preview, { type: 'turn_complete' }, seq, cut ? { cut: true } : undefined, told)
         },
         ...(words ? { answer: words } : {}),
         ...(writtenAt !== undefined ? { writtenAt } : {}),
@@ -179,7 +179,7 @@ export class ChildReports {
    * Centralu's words beside a last response, for the session that gave the work, in its form of the calls named. The person (`null`) reads one line, and
    * the cut's when there was one: the window shows the last response itself
    */
-  private lastResponseWords(receiverId: string | null, childId: string, answered: boolean, seq: number | undefined, cut: boolean): string {
+  private lastResponseWords(receiverId: string | null, childId: string, answered: AnswerKept, seq: number | undefined, cut: boolean): string {
     if (receiverId === null) return cut ? `${PERSON_TURN_ENDED}\n${CUT_CONTINUED.trimEnd()}` : PERSON_TURN_ENDED
     const read = `read_session(sessionId="${childId}"${seq !== undefined ? `, around=${seq}` : ''})`
     return (
@@ -217,13 +217,15 @@ export class ChildReports {
 
   /**
    * The words of the session's latest turn: those it said so far, or none, never the turn before's (#1604, #1946). A stop notice quotes them for the turn
-   * a stop cut; a last response is them (§10.6.3). A turn not seen to begin (one an older build ran) reads as the session's preview does
+   * a stop cut, and the report relayed to a seat without mail, as a `preview`; a last response is them (§10.6.3), kept whole as a report's answer up
+   * to `ANSWER_KEPT_CHARS` (#2358 item 3). A turn not seen to begin (one an older build ran) reads as the session's preview does
    */
-  turnWords(sessionId: string): { preview: string; seq: number | undefined } {
+  turnWords(sessionId: string): { words: string; preview: string; seq: number | undefined } {
     const span = this.host.children.latestTurnRows(sessionId)
-    if (!span) return { preview: previewOf(this.host.store.messages, sessionId, 600), seq: this.answerSeq(sessionId) }
-    const rows = this.host.store.messages.loadMessages(sessionId, 200)
-    return { preview: clipPreview(lastResponse(rows, span), 600), seq: lastResponseSeq(rows, span) ?? undefined }
+    const rows = span ? this.host.store.messages.loadMessages(sessionId, 200) : undefined
+    const full = rows && span ? lastResponse(rows, span) : previewOf(this.host.store.messages, sessionId, ANSWER_KEPT_CHARS)
+    const seq = rows && span ? (lastResponseSeq(rows, span) ?? undefined) : this.answerSeq(sessionId)
+    return { words: clipped(full, ANSWER_KEPT_CHARS), preview: clipped(full, PREVIEW_CHARS), seq }
   }
 
   /**

@@ -391,7 +391,7 @@ describe('the reader set', () => {
 
   // #1948: every report an agent writes is mail, so the line on saying what a claim rests on is in the words of every seat that has mail
   it('says in the mail tool, for every seat that has it as a tool or a command, what a report says about its claims', async () => {
-    const sentence = 'In a report, say what each claim was checked against, and what was not.'
+    const sentence = 'In a report, say what each claim rests on and what you did not check.'
     const seats = TOOL_PROFILES.filter((p) => toolDefsFor(p).some((t) => t.name === 'mail'))
     expect(seats).toContain('reader')
     for (const p of seats) expect(toolDefsFor(p).find((t) => t.name === 'mail')?.description, p).toContain(sentence)

@@ -331,10 +331,10 @@ export class MailSessionsView {
     this.host.reports.relayStop(receiverId, stoppedId, why, told)
   }
 
-  /** The words of the turn a stop cut, as a stop notice quotes them (`ChildReports.turnWords`, at most 600 characters), or null when it said none */
+  /** The words of the turn a stop cut, which a stop notice quotes cut to `PREVIEW_CHARS` (`ChildReports.turnWords`), or null when it said none */
   stoppedWords(sessionId: string): string | null {
     if (!this.host.meta.has(sessionId)) return null
-    return this.host.reports.turnWords(sessionId).preview || null
+    return this.host.reports.turnWords(sessionId).words || null
   }
 
   /**

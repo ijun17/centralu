@@ -7,7 +7,7 @@ import type { MailTurns, TurnStart } from './turns.js'
 import type { AcrossSent } from './across-core.js'
 import type { MailAcross } from './across.js'
 import { raceBound } from '../timing.js'
-import { reportWords } from './last-response.js'
+import { ANSWER_KEPT_CHARS, answerKept, clipped, reportWords } from './last-response.js'
 
 /**
  * What the mailbox does when a session gives another one work through a tool whose delivery the host already makes (`ChildOwnership.delegated`,
@@ -214,9 +214,6 @@ export function personWorkWithdrawer(mail: MessageService, records: MailboxRecor
 /** What a call gave back: the child's last response, or that its turn did not finish, with the kind of the error (a word of Centralu's) */
 export type AnswerGiven = { ok: true; text: string } | { ok: false; error: string }
 
-/** The most of the answer a call returned that the report keeps */
-const ANSWER_KEPT = 600
-
 /**
  * What the mailbox does when a call returns the answer of work a session gave another, or reads where it stands (§9.6): the reports on the caller's
  * tasks to the child are read. A call that returned how the turn ended is the report: it is written on the task as told (delivered and read), which
@@ -235,10 +232,11 @@ export function answerRecorder(mail: MessageService, records: MailboxRecords): (
     // Work the child handed on in it is still open (§9.4): the task stays open, and the turn that work's answer starts answers it (§10.6.3)
     if (!how || !task || (how.ok && records.handedOn(task.id).length > 0)) return
     const outcome = how.ok ? ('finished' as const) : ('failed' as const)
+    const answer = how.ok ? clipped(how.text, ANSWER_KEPT_CHARS) : undefined
     const written = mail.report(task.id, {
       outcome,
-      body: reportWords(childId, { outcome, answered: how.ok && how.text !== '', ...(how.ok ? {} : { kind: how.error }) }),
-      ...(how.ok ? { answer: how.text.length > ANSWER_KEPT ? `${how.text.slice(0, ANSWER_KEPT)}…` : how.text } : { error: how.error }),
+      body: reportWords(childId, { outcome, answer: answerKept(answer, ANSWER_KEPT_CHARS), ...(how.ok ? {} : { kind: how.error }) }),
+      ...(how.ok ? { answer } : { error: how.error }),
     })
     if ('message' in written) {
       records.markDelivered(owner, [written.message.id], now, null)

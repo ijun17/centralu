@@ -92,8 +92,9 @@ class ScriptedHandle implements SessionHandle {
   private turn(text: string): void {
     this.open = true
     const id = `${this.sessionId.slice(0, 8)}-${++this.seq}`
-    // What the task says, not Centralu's frame around it, which names the mail tool's `kind: "question"` (#2348)
-    const said = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').replace(/kind: "question"/g, '')
+    // What the task says, not Centralu's words around it, whatever they say: a wake's reminder, and a frame's bracketed line (start_agent's,
+    // ask_project's), quoted when the task came as mail
+    const said = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').replace(/^(> )?\[.*\]$/gm, '')
     if (/approve/i.test(said)) {
       this.approvals.add(id)
       this.emit({ type: 'approval_request', sessionId: this.sessionId, requestId: id, detail: { kind: 'command', command: 'echo linked', cwd: '.' } })

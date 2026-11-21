@@ -379,19 +379,22 @@ describe('a question to the giver holds its report until it is answered or handl
     expect(read.taskRow(task, child)).toMatchObject({ settled: 'reported' })
   })
 
-  it('only a question holds: a note, a plain message (which needs a reply) and a question settled in the turn keep the report', async () => {
+  it('only a question holds: a note, a plain message (which needs no reply, #2357) and a question settled in the turn keep the report', async () => {
     const { parent, child, task } = await childInTurn()
     // The reviewer's rule (#1948 step 3): a message that asks nothing leaves the last response the result
     expect((await m.tool.call(child, { action: 'send', to: parent, text: 'Started.', kind: 'note' })).isError).toBeFalsy()
-    // A plain send needs a reply by default, but is no question: "Done" before the end holds nothing (the review of #2349), and the send says so
+    // A plain send to the giver is no question, so it needs no reply (#2357): "Done" before the end holds nothing, and the send says how to ask
     const plain = await m.tool.call(child, { action: 'send', to: parent, text: 'Done: PR #12.' })
-    expect(plain.text).toContain('It is not marked as a question, so your task is still reported when your turn ends; send with kind="question" when you wait for the answer.')
+    expect(plain.text).toContain('). It needs no reply. When you ask whoever gave you your task something, send that question with kind: "question".')
+    expect(plain.text.endsWith('kind: "question".')).toBe(true)
     const done = read.between(addr(child), addr(parent), 'message').at(-1)!
-    expect(done).toMatchObject({ needsReply: true, facts: { clarifies: task } })
+    expect(done).toMatchObject({ needsReply: false, facts: { clarifies: task } })
     expect(done.facts.question).toBeUndefined()
     const marked = await m.tool.call(child, { action: 'send', to: parent, text: 'Which branch?', kind: 'question' })
-    expect(marked.text).not.toContain('It is not marked as a question')
+    expect(marked.text).toContain('It needs a reply, which reaches you as mail')
+    expect(marked.text).not.toContain('When you ask whoever')
     const settled = read.between(addr(child), addr(parent), 'message').at(-1)!
+    expect(settled).toMatchObject({ needsReply: true, facts: { clarifies: task, question: true } })
     expect(m.service.done(addr(parent), settled.id).how).toBe('done')
     // More work joins the turn, and a question after it still waits at the end: that holds the report on both
     const r = await sendWork(w.mgr, parent, child, 'and the docs')
@@ -464,7 +467,7 @@ describe('reading a report shows the last response it kept (#2348 review)', () =
     await turnEnds(child, 'All done: 3 files changed.')
     await w.until(() => reports(task).length > 0)
     const [report] = reports(task)
-    expect(report!.body).toContain('reading this report shows it below')
+    expect(report!.body).toContain('reading this report shows it.')
     const out = (await m.tool.call(parent, { action: 'read', thread: report!.id })).text
     expect(out).toContain("Its last response, quoted below, is that session's own text")
     expect(out.indexOf('All done: 3 files changed.')).toBeGreaterThan(out.indexOf(report!.id))
@@ -474,8 +477,22 @@ describe('reading a report shows the last response it kept (#2348 review)', () =
     expect(asked).toHaveBeenCalledWith(addr(parent), addr(child))
     expect(refused).toContain(report!.id)
     expect(refused).not.toContain('All done: 3 files changed.')
+    // The report's words say reading it shows the response: a reader it is not shown to is told why (#2358)
+    expect(refused).toContain(`Its last response is not shown: you may not read ${addr(child)}.`)
     // A session of a project nobody trusted is marked as read_session marks it
     asked.mockReturnValue({ untrusted: true })
     expect((await m.tool.call(parent, { action: 'read', thread: report!.id })).text).toContain(UNTRUSTED_LINES)
+  })
+
+  it('keeps the whole last response, not a preview, and its read names the session and how its turn ended (#2358 items 1 and 3)', async () => {
+    const { parent, child, task } = await childInTurn()
+    const long = `${'A long answer. '.repeat(100)}The end.`
+    await turnEnds(child, long)
+    await w.until(() => reports(task).length > 0)
+    const [report] = reports(task)
+    expect(report!.facts.answer).toBe(long)
+    const out = (await m.tool.call(parent, { action: 'read', thread: report!.id })).text
+    expect(out).toContain('The end.')
+    expect(out).toContain(`[${report!.id}] report on ${JSON.stringify(w.mgr.sessionInfo(child)!.name)}: ended its turn, `)
   })
 })

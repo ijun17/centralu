@@ -58,7 +58,7 @@ describe("a linked machine's mail to the person reaches the hub's Inbox (#1987)"
   it("a child the hub started asks the person a question with choices: it is in the hub's Inbox, and the machine keeps the copy", async () => {
     const { machine, hub, person, hubPerson } = await rig()
     const r = await tool(machine, 'c1', { action: 'send', to: 'person', kind: 'question', subject: 'Blocked', text: 'the tool here stopped answering: wait or stop?', choices: ['wait', 'stop'] })
-    expect(r.text).toMatch(/^Sent \S+ to the person on Hub mac\. It waits for a reply/)
+    expect(r.text).toMatch(/^Sent \S+ to the person on Hub mac\. It needs a reply/)
     const id = idOf(r)
     expect(hub.store.mailbox.message(id)).toMatchObject({ sender: at(hub, 'm1.c1'), needsReply: true, subject: 'Blocked', choices: ['wait', 'stop'] })
     expect(person.list().threads.map((t) => t.subject)).toEqual(['Blocked'])

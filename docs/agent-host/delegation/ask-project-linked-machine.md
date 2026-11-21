@@ -29,7 +29,7 @@ task still open there. The answer is the session's last words, read there whole 
 to 100,000 characters, its length and its first message's seq there), cut as an answer is cut here, the cut naming
 `read_session` on that session with that seq and an offset. The hub used to read it from `host.readSession`'s lines,
 which the machine cut at 2,000 characters of JSON, so a long answer came back as an older line or empty. A read that
-fails gives the words the report kept (600 characters); with none either, the call says the turn ended and how to read
+fails gives the words the report kept (up to 2,000 characters, as they crossed); with none either, the call says the turn ended and how to read
 it once the machine answers. It runs on that machine with its own logins, folder and preset.
 
 | Choice | Reason |

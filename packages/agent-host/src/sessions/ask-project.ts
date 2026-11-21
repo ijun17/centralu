@@ -45,6 +45,14 @@ export function taskLine(task: string, max = 160): string {
 export const ANSWER_GROUNDS = 'In your answer, say what each claim rests on (a file, a command\'s output, a message) and mark what you did not check as unchecked.'
 
 /**
+ * How a session asks whoever gave it its task something before it finishes (#1984, #2357): that one's address, and the mark that makes the message a
+ * question, the only message to it that waits for a reply. One sentence for start_agent's and ask_project's frames
+ */
+export function askBeforeFinish(to: string): string {
+  return `To ask it something before you finish, call mail with \`to: "${to}"\` and \`kind: "question"\``
+}
+
+/**
  * The message the delegated session receives. It says who asks and how the answer travels back, because the
  * delegated session cannot see the caller: its final text is all the caller will read, and a file it does not name
  * by its absolute path is a file the caller cannot find.
@@ -57,7 +65,7 @@ export const ANSWER_GROUNDS = 'In your answer, say what each claim rests on (a f
 export function askFrame(callerProject: string, task: string, asker?: { name: string; sessionId?: string; mailable?: boolean }): string {
   const who = asker ? ` It is the session ${JSON.stringify(frameField(asker.name))}${asker.sessionId ? ` [${asker.sessionId}]` : ''}.` : ''
   // #1984: this session is not the asker's child, so `parent` does not resolve for it; the asker is reached by its session id (a bare id `mail` accepts)
-  const reach = asker?.sessionId && asker.mailable !== false ? ` To write to it before you finish, call mail with \`to: "${asker.sessionId}"\` (and \`kind: "question"\` to ask it something).` : ''
+  const reach = asker?.sessionId && asker.mailable !== false ? ` ${askBeforeFinish(asker.sessionId)}.` : ''
   return [
     `[A session in the project "${frameField(callerProject)}" asks this project, through Centralu's ask_project.${who} ` +
       `Your final message goes back to it as the answer: keep it short, and name every file it should read by its absolute path. ${ANSWER_GROUNDS}${reach}]`,
