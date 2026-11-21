@@ -7,6 +7,15 @@ import { NO_PATH, type ApprovalDetail, type NormalizedEvent } from '@cc/protocol
  */
 export type FileChange = { path: string; diff: string; change?: 'add' | 'update' | 'delete' | 'move'; movePath?: string }
 
+const CHANGE_TOOL = { add: 'Create', update: 'Edit', delete: 'Delete', move: 'Move' } as const
+
+/** The card's name (#2060), in RowApproval.tsx's words: change both */
+export function fileChangeTool(changes: readonly FileChange[]): string {
+  const kinds = new Set(changes.map((c) => c.change ?? 'update'))
+  const [only] = kinds
+  return kinds.size === 1 && only ? CHANGE_TOOL[only] : 'Edit'
+}
+
 /** How much of the diff an approval card carries, the same for both tools */
 export const DIFF_PREVIEW_CHARS = 4000
 

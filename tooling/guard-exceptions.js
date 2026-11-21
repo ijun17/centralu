@@ -354,7 +354,7 @@ export const COMMENT_SHARE_HELD = {
     'packages/agent-host/src/adapters/claude/turn-start.ts': 40,
     'packages/agent-host/src/adapters/codex/child-threads.ts': 41,
     'packages/agent-host/src/adapters/codex/client.ts': 42,
-    'packages/agent-host/src/adapters/codex/items.ts': 39,
+    'packages/agent-host/src/adapters/codex/items.ts': 38,
     'packages/agent-host/src/adapters/codex/known-notifications.ts': 44,
     'packages/agent-host/src/adapters/codex/launch-config.ts': 54,
     'packages/agent-host/src/adapters/codex/model-rejected.ts': 38,

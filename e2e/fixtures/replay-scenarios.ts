@@ -41,6 +41,13 @@ export type Held = {
 /** Whether the MCP server's calls are drawn with a mark of their own: Centralu's own tools and an attached app's */
 const marked = (server: string): boolean => server === CENTRALU_MCP_NAME || server.startsWith('app-')
 
+/** A Codex file change's card (#2060): Create, Delete or Move when every file had that kind of change, else Edit */
+function changeCard(item: unknown): string {
+  const changes = (item as { changes?: { kind?: { type?: string; move_path?: string | null } }[] }).changes ?? []
+  const names = new Set(changes.map(({ kind }) => (kind?.type === 'add' ? 'Create' : kind?.type === 'delete' ? 'Delete' : kind?.move_path ? 'Move' : 'Edit')))
+  return names.size === 1 ? [...names][0]! : 'Edit'
+}
+
 /** The tool's frames, read for `Held`; one per recorded tool */
 const HELD: Record<string, (recording: Recording) => Held> = {
   claude: (recording) => {
@@ -154,7 +161,7 @@ const HELD: Record<string, (recording: Recording) => Held> = {
       // The words the screen draws are the ones streamed; the whole message is the words of a message that was not streamed
       else if (m.method === 'item/completed' && item?.type === 'agentMessage' && held.said[blocks.get(item.id)!] === '') held.said[blocks.get(item.id)!] = item.text ?? ''
       else if (m.method === 'item/started' && item?.type === 'commandExecution') held.tools.push({ name: 'Bash' })
-      else if (m.method === 'item/started' && item?.type === 'fileChange') held.tools.push({ name: 'Edit' })
+      else if (m.method === 'item/started' && item?.type === 'fileChange') held.tools.push({ name: changeCard(p.item) })
       else if (m.method === 'item/started' && item?.type === 'mcpToolCall') {
         askedToCompact ||= item.tool === 'compact_self'
         held.tools.push(marked(String(item.server)) ? { name: String(item.tool), marked: true } : { name: String(item.tool) })
@@ -579,10 +586,8 @@ export const REPLAYS: Replay[] = [
     tool: 'codex',
     scenario: 'files',
     async shows(page) {
-      // A file created and one deleted are two cards of the same kind and path; nothing on the card says which is the delete (#2060)
-      const cards = await cardTexts(page)
-      expect(cards).toHaveLength(2)
-      expect(cards.every((c) => c.includes('gone.txt'))).toBe(true)
+      // A file created, then deleted: each card says which it was (#2060)
+      expect(await cardTexts(page)).toEqual([expect.stringMatching(/^Create \S*gone\.txt/), expect.stringMatching(/^Delete \S*gone\.txt/)])
     },
   },
   {
