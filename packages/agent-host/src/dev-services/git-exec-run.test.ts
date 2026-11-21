@@ -280,7 +280,7 @@ describe('a git that is stopped takes its lock away (#982)', () => {
     endedFirst(await commitStopped(() => stopGitChildren()))
   })
 
-  // #2142 re-check: one git at a time read the process table twice each on Windows, a PowerShell per reading
+  // Stopping goes through one `stopAll`, not one stop per git: each stop read the process table twice on Windows, a PowerShell per reading (#2142)
   it('when the host stops: every git still running is stopped in one go, and each ends', { timeout: 60_000 * SLOW }, async () => {
     const stopAll = vi.spyOn(realOs().processes, 'stopAll')
     try {

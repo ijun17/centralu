@@ -173,7 +173,7 @@ describe('an address opened for the person through the broker', () => {
   })
 
   /*
-   * The real broker's handler (deep review of #1687, follow-up 2: a no-op there kept every test green). Its own
+   * The real broker's handler (#1687), pinned because a no-op there would keep every other test green. Its own
    * `pty-broker.mjs`, imported in a node of its own without starting as a broker, with a stand-in for `spawn`, so no
    * browser opens: an https address goes to `rundll32 url.dll,FileProtocolHandler` detached, nothing else is started
    */
