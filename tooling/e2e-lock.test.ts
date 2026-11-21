@@ -26,6 +26,7 @@ import {
   withoutSeparator,
   PS_ENV,
   readHolder,
+  runsInTurn,
   signalExit,
   startTimeCommand,
   trackChild,
@@ -444,6 +445,32 @@ describe('naming the child', () => {
     await eventually(() => more > 2 || undefined, 5_000)
     held.release()
     await loop
+  })
+
+  it("starts the next run only once the previous run's start-time lookup has settled, so it never names that run over the next", async () => {
+    const held = taken(tryAcquire(file, holder(1, 1 * HOUR), probeOf({ 1: 1 * HOUR })))
+    const tracked: number[] = []
+    let settle = () => {}
+    const inTurn = runsInTurn(held, (_h, pid) => {
+      tracked.push(pid)
+      return new Promise<void>((resolve) => (settle = resolve))
+    })
+    const started: number[] = []
+    const run = (pid: number | undefined, code: number) => () => (started.push(pid ?? 0), { pid, done: Promise.resolve(code) })
+    expect(await inTurn(run(9, 0))).toBe(0)
+    const second = inTurn(run(10, 1))
+    // The first run has ended, and its lookup goes on: the second is not started yet
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(started).toEqual([9])
+    settle()
+    expect(await second).toBe(1)
+    expect(started).toEqual([9, 10])
+    expect(tracked).toEqual([9, 10])
+    // A run that could not be started (no pid) is tracked by nothing, and the next one waits for nothing of it
+    settle()
+    expect(await inTurn(run(undefined, 2))).toBe(2)
+    expect(await inTurn(run(11, 0))).toBe(0)
+    expect(tracked).toEqual([9, 10, 11])
   })
 })
 

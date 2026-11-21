@@ -12,16 +12,18 @@
  * holds the lock. A SIGINT (Ctrl-C) or SIGTERM that reaches this process:
  *  - while it waits: ends it with 130 or 143, having taken nothing;
  *  - while the command runs: is passed on to the command, no further run starts, and the lock is given back when the
- *    command has ended. The exit code is the command's own, except that a command a signal ended gives 128 plus its
- *    number (as a shell reports it), and one that was told to stop and then exited with 0 gives 130 or 143 too.
+ *    command has ended. The exit code is then 130 or 143 (128 plus the signal's number, as a shell reports it), whatever
+ *    the command exited with: Playwright told to stop ends its run with 1, which would read as a failed test.
+ * A command a signal the runner never saw ended gives 128 plus that signal's number.
  * Windows has no signals. A console's Ctrl-C reaches every process on the console, the command too, so it is not passed on
  * there (`child.kill` would end Playwright outright, without its teardown and report): the runner waits for the command to
  * end and gives the lock back. Anything else that ends the runner there ends it outright, and nothing above runs.
  */
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { AFFECTED, affectedArgs, affectedEngines, engineOutput, mergeBase, reachesScreen, runAffected } from './e2e-affected.js'
-import { acquireLock, passesSignalOn, signalExit, trackChild, withoutSeparator, type Held } from './e2e-lock.js'
+import { resolve } from 'node:path'
+import { AFFECTED, affectedEngines, changedFiles, engineOutput, listedSpecs, mergeBase, reachesScreen, runAffected, specFilter, specsReaching } from './e2e-affected.js'
+import { acquireLock, passesSignalOn, runsInTurn, signalExit, withoutSeparator, type Held } from './e2e-lock.js'
 
 const [program, ...rest] = process.argv.slice(2)
 const args = withoutSeparator(rest)
@@ -36,7 +38,7 @@ if (affected && !base) {
   process.exit(2)
 }
 const cli = createRequire(import.meta.url).resolve('@playwright/test/cli')
-const commandArgs = base ? affectedArgs(args, base) : args
+const commandArgs = args.filter((a) => a !== AFFECTED)
 const argv = program === 'playwright' ? [cli, ...commandArgs] : commandArgs
 
 const waiting = new AbortController()
@@ -73,51 +75,60 @@ process.off('SIGINT', onInt)
 process.off('SIGTERM', onTerm)
 console.error('e2e lock: taken')
 
-// The previous run's start-time lookup: awaited before the next run starts, so a late answer about it never names it over
-// the next run in the lock
-let tracking: Promise<void> = Promise.resolve()
+// Each run named in the lock at once, and its start time filled in as soon as it is known (on Windows that takes seconds):
+// a runner killed in between must not leave Playwright running with the lock free
+const inTurn = runsInTurn(held)
 
 /** Runs the command once, with `more` arguments and `env` added; answers its exit code, as this process would report it. */
-async function runOnce(more: string[] = [], env: Record<string, string> = {}): Promise<number> {
-  await tracking
-  return new Promise((resolve) => {
+function runOnce(more: string[] = [], env: Record<string, string> = {}): Promise<number> {
+  return inTurn(() => {
     child = spawn(process.execPath, [...argv, ...more], { stdio: 'inherit', env: { ...process.env, ...env } })
     if (passedOn !== null && passesSignalOn()) child.kill(passedOn)
-    // Named in the lock at once, and its start time filled in as soon as it is known (on Windows that takes seconds): a runner
-    // killed in between must not leave Playwright running with the lock free
-    if (child.pid !== undefined) tracking = trackChild(held, child.pid)
     // A run that cannot be started gives the lock back before it fails
     child.on('error', (err) => {
       held.release()
       console.error(`e2e lock: could not start ${program}: ${err.message}`)
       process.exit(1)
     })
-    child.on('close', (exitCode, signal) => resolve(exitCode === null || (exitCode === 0 && passedOn !== null) ? signalExit(signal ?? passedOn) : exitCode))
+    const done = new Promise<number>((resolve) => {
+      child?.on('close', (exitCode, signal) => resolve(passedOn !== null ? signalExit(passedOn) : exitCode ?? signalExit(signal)))
+    })
+    return { pid: child.pid, done }
   })
 }
 
-/** Playwright's `--list` of the same arguments, its output answered: it loads the config and the specs and starts nothing. */
-function listing(): Promise<string> {
+/** The spec files Playwright lists in `engine` for the same arguments (JSON): it loads the config and the specs and starts nothing. */
+function listing(engine: string): Promise<{ specs: string[] } | { why: string }> {
   return new Promise((resolve) => {
-    const list = spawn(process.execPath, [...argv, '--list'], { stdio: ['ignore', 'pipe', 'pipe'] })
+    const list = spawn(process.execPath, [...argv, '--list', '--reporter=json'], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, E2E_BROWSER: engine } })
     let out = ''
+    let err = ''
     list.stdout.on('data', (d: Buffer) => (out += d.toString()))
-    list.stderr.on('data', (d: Buffer) => (out += d.toString()))
-    list.on('error', () => resolve(out))
-    list.on('close', () => resolve(out))
+    list.stderr.on('data', (d: Buffer) => (err += d.toString()))
+    list.on('error', (e) => resolve({ why: e.message }))
+    list.on('close', () => {
+      const listed = listedSpecs(out)
+      resolve('why' in listed && err.trim() ? { why: `${listed.why}
+${err.trim()}` } : listed)
+    })
   })
 }
 
 const code = base
-  ? await runAffected({
-      base,
-      engines: affectedEngines(),
-      list: listing,
-      run: (engine) => runOnce([engineOutput(commandArgs, engine)], { E2E_BROWSER: engine }),
-      stopCode: () => (passedOn === null ? null : signalExit(passedOn)),
-      screen: () => reachesScreen(base),
-      say: (line) => console.error(line),
-    })
+  ? await (async () => {
+      const root = process.cwd()
+      const changed = changedFiles(base, root)
+      return runAffected({
+        base,
+        engines: affectedEngines(),
+        list: listing,
+        pick: (specs) => specsReaching(specs, changed.map((f) => resolve(root, f)), root),
+        run: (engine, specs) => runOnce([engineOutput(commandArgs, engine), ...specs.map(specFilter)], { E2E_BROWSER: engine }),
+        stopCode: () => (passedOn === null ? null : signalExit(passedOn)),
+        screen: () => reachesScreen(changed, root),
+        say: (line) => console.error(line),
+      })
+    })()
   : await runOnce()
 held.release()
 process.exit(code)

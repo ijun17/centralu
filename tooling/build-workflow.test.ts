@@ -1073,6 +1073,7 @@ describe('every file the UI scenarios render or read reaches the screen (#1538)'
     // file, the start of the call, and why it does not point at a file of the repository
     const LISTED: [string, string, string][] = [
       ['apps/web/vite.config.ts', 'new URL(p, import.meta.url', 'the helper r(): every call passes a literal path into packages/, all of it screen'],
+      ['e2e/flaky-report.ts', 'import(pathToFileURL(module)', "the board app's known-failures.mjs, which a local run's report asks about its failures after the run: nothing on screen"],
       ['e2e/fixtures/heavy-store.ts', 'join(dir, `${ts}-${images}.png`)', 'a file the fixture writes in a temporary folder'],
       ['e2e/fixtures/linked-hosts.ts', 'join(dir, `${name}-project`)', 'a folder under a temporary one'],
       ['e2e/fixtures/public-apps.ts', 'join(CACHE_DIR, `${app.pkg.replace(', 'the cache of downloaded packages, outside the repository'],

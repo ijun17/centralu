@@ -1,6 +1,5 @@
-import { execFileSync } from 'node:child_process'
-import { appendFileSync, readFileSync } from 'node:fs'
-import { dirname, join, relative } from 'node:path'
+import { appendFileSync } from 'node:fs'
+import { basename, dirname, join, relative } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { stripVTControlCharacters } from 'node:util'
 import type { FullResult, Reporter, Suite, TestCase } from '@playwright/test/reporter'
@@ -19,7 +18,6 @@ import { errorMessage } from '@cc/protocol'
  */
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
-const runGh = (args: string[]) => execFileSync('gh', args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 15_000, windowsHide: true })
 
 export interface FlakyTest {
   /** The spec file, relative to the repository */
@@ -63,53 +61,37 @@ export function failedTests(tests: TestCase[], cwd = process.cwd()): FailedTest[
     })
 }
 
-/**
- * The text of the issue that lists the known intermittent failures (the board's project.json `ci.knownFailuresIssue`), read
- * with `gh`; or why it could not be read. One list for CI and local runs: ci_status matches against the same issue.
- */
-export function knownFailuresText(root = ROOT, gh: (args: string[]) => string = runGh): { issue: number; text: string } | { why: string } {
-  let issue: unknown
-  try {
-    issue = JSON.parse(readFileSync(join(root, '.centralu/apps/project-board/project.json'), 'utf8'))?.ci?.knownFailuresIssue
-  } catch (e) {
-    return { why: `project.json could not be read (${errorMessage(e)})` }
-  }
-  if (typeof issue !== 'number') return { why: 'project.json names no ci.knownFailuresIssue' }
-  try {
-    return { issue, text: gh(['issue', 'view', String(issue), '--json', 'body', '--jq', '.body']) }
-  } catch (e) {
-    return { why: `gh issue view ${issue} failed (${errorMessage(e).split('\n')[0]})` }
-  }
+const KNOWN_FAILURES = join(ROOT, '.centralu/apps/project-board/known-failures.mjs')
+
+/** The known intermittent failures issue's word on a run's failures: the issue, whether it is closed, a quote or null for each; or why there is none */
+export type KnownFailures = { issue: number; closed: boolean; quotes: (string | null)[] } | { why: string }
+
+/** The board's answer (`knownFailureQuotes`) for `n` failures, checked: the board is plain JavaScript without types (the app rules) */
+function knownFailuresOf(answer: unknown, n: number): KnownFailures {
+  if (typeof answer !== 'object' || answer === null) return { why: 'the board answered nothing' }
+  if ('why' in answer && typeof answer.why === 'string') return { why: answer.why }
+  const quotes: unknown[] = 'quotes' in answer && Array.isArray(answer.quotes) ? answer.quotes : []
+  const checked = quotes.filter((q): q is string | null => q === null || typeof q === 'string')
+  const issue = 'issue' in answer ? answer.issue : null
+  const closed = 'closed' in answer ? answer.closed : null
+  if (typeof issue !== 'number' || typeof closed !== 'boolean' || quotes.length !== n || checked.length !== n) return { why: 'the board answered something else' }
+  return { issue, closed, quotes: checked }
 }
 
-/** Whether a failure is one the issue lists: the quote it matches, or null */
-export type KnownFailureMatch = (failure: { line: string; error: string }, issueText: string) => string | null
-
 /**
- * The board's own matcher (ci.mjs `matchKnownFailure`), the one its ci_status judges CI's failures by, so a local run and CI
- * set apart the same failures. ci.mjs is plain JavaScript without types (the app rules), so what it exports is checked here.
+ * Which of `failed` the known intermittent failures issue quotes, asked of the board app (known-failures.mjs): the issue and
+ * the matcher ci_status judges CI's failures by, so a local run and CI set apart the same ones. Each failure is named by its
+ * heading, as CI's log names it. `module` is for the tests.
  */
-export async function knownFailureMatcher(): Promise<KnownFailureMatch> {
-  const ci: unknown = await import(pathToFileURL(join(ROOT, '.centralu/apps/project-board/ci.mjs')).href)
-  const match = typeof ci === 'object' && ci !== null && 'matchKnownFailure' in ci ? ci.matchKnownFailure : null
-  if (typeof match !== 'function') throw new Error('.centralu/apps/project-board/ci.mjs exports no matchKnownFailure')
-  return (failure, issueText) => {
-    const quote: unknown = Reflect.apply(match, undefined, [failure, issueText])
-    return typeof quote === 'string' ? quote : null
-  }
-}
-
-/** The known intermittent failures as a local run reads them: the issue and how a failure is matched to it, or why not */
-export type KnownFailures = { issue: number; text: string; match: KnownFailureMatch } | { why: string }
-
-/** The issue's text (knownFailuresText) and the board's matcher (knownFailureMatcher), or why either could not be had */
-export async function knownFailures(root = ROOT, gh: (args: string[]) => string = runGh, load = knownFailureMatcher): Promise<KnownFailures> {
-  const known = knownFailuresText(root, gh)
-  if ('why' in known) return known
+export async function knownFailures(failed: FailedTest[], module = KNOWN_FAILURES): Promise<KnownFailures> {
   try {
-    return { ...known, match: await load() }
+    const board: unknown = await import(pathToFileURL(module).href)
+    const ask = typeof board === 'object' && board !== null && 'knownFailureQuotes' in board ? board.knownFailureQuotes : null
+    if (typeof ask !== 'function') return { why: `${basename(module)} exports no knownFailureQuotes` }
+    const answer: unknown = await Reflect.apply(ask, undefined, [failed.map((t) => ({ line: t.heading, error: t.error }))])
+    return knownFailuresOf(answer, failed.length)
   } catch (e) {
-    return { why: `the board's matcher could not be loaded (${errorMessage(e)})` }
+    return { why: `the board's known-failures reader failed (${errorMessage(e)})` }
   }
 }
 
@@ -120,9 +102,13 @@ export async function knownFailures(root = ROOT, gh: (args: string[]) => string 
 export function knownFailureLines(failed: FailedTest[], known: KnownFailures): string[] {
   if (!failed.length) return []
   if ('why' in known) return [`[e2e] known-failures list unavailable: ${known.why}; no failure is set apart`]
-  const matched = failed.map((t) => ({ t, quote: known.match({ line: t.heading, error: t.error }, known.text) })).filter((m) => m.quote)
-  if (!matched.length) return [`[e2e] none of the ${failed.length} failure(s) is a known intermittent one (#${known.issue})`]
-  return [`[e2e] ${matched.length} of ${failed.length} failure(s) are known intermittent ones (#${known.issue}):`, ...matched.map(({ t, quote }) => `[e2e]   ${t.file}:${t.line} ${t.title}: matches "${quote}"`)]
+  const issue = `#${known.issue}${known.closed ? ', closed' : ''}`
+  const matched = failed.flatMap((t, i) => {
+    const quote = known.quotes[i]
+    return quote ? [{ t, quote }] : []
+  })
+  if (!matched.length) return [`[e2e] none of the ${failed.length} failure(s) is a known intermittent one (${issue})`]
+  return [`[e2e] ${matched.length} of ${failed.length} failure(s) are known intermittent ones (${issue}):`, ...matched.map(({ t, quote }) => `[e2e]   ${t.file}:${t.line} ${t.title}: matches "${quote}"`)]
 }
 
 /** What the runner prints: an annotation per test on GitHub Actions, plain lines elsewhere */
@@ -168,7 +154,7 @@ export default class FlakyReporter implements Reporter {
     if (!label) for (const line of flakyLines(tests, github)) console.log(line)
     // CI's own check run is matched against the issue by the board (ci_status); a local run has no such reader
     const failed = github ? [] : failedTests(all)
-    if (failed.length) for (const line of knownFailureLines(failed, await knownFailures())) console.log(line)
+    if (failed.length) for (const line of knownFailureLines(failed, await knownFailures(failed))) console.log(line)
     if (!tests.length || !github) return
     if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${flakySummary(tests, label)}\n`)
     if (!label && process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, 'flaky=true\n')
