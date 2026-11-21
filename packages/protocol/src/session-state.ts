@@ -2,97 +2,63 @@ import type { LiveStateFields, SessionInfo } from './commands.js'
 import { liveBackgroundTasks, workTasks, type BackgroundTask, type SessionState } from './entities.js'
 import type { NormalizedEvent } from './events.js'
 
-/**
- * The session state machine (product-spec FR-12), shared by both sides.
- *
- * The UI's reducer (core `applyEvent`) holds the live state; the host keeps the same state for a reconnecting
- * window and for the next host after a swap (`SessionInfo.state`, `waitingSince`, the open cards). Both sides
- * run these rules: a hand-copied table drifts (#428), and a window that reconnects is then shown a different
- * state from the one it was showing live. They are pure and live here because the host may not import core (docs/architecture.md §2).
- */
+// The session state machine (product-spec FR-12, docs/domain-model.md §3). The UI's reducer and the host's copy for a
+// reconnecting window run these same rules; they live here because the host may not import core (architecture.md §2).
 
 /** Whether the state is waiting for the user to step in (what the inbox holds) */
 export function isWaiting(state: SessionState): boolean {
   return state === 'waiting_approval' || state === 'waiting_input' || state === 'error'
 }
 
-/**
- * In a turn: producing an answer or blocked on a card inside it. Anything else (awaiting input, idle, limit hit,
- * error) means the turn is over (C-4). Takes a raw value too, since a linked machine's event is read before it is
- * parsed (`state` is then whatever that machine sent).
- */
+/** Takes a raw value: a linked machine's event is read before it is parsed */
 export function isInTurn(state: unknown): boolean {
   return state === 'working' || state === 'waiting_approval'
 }
 
 /**
- * **Paused on its own background work** (#2146, owner decisions 2026-11-09 and 2026-11-10): its turn ended as a turn does (`waiting_input`,
- * `idle`) while work it started still runs: background commands, or the tool's own background subagents (Claude Code's
- * Agent tasks run in the background, `kind: 'agent'`). Its report is still to come (the parent was told it paused, #721).
- *
- * The one rule for it. Agents see it as
- * `paused (background work)` in `agent_session list` and mail find (`agentState`, and a linked machine's child as its
- * machine relays its tasks). On screen it is **not** running: it shows as waiting, with the background dot on its mark,
- * and is not counted in the sidebar's working number: the project's name line counts it in a chip of its own (`foldSummary`, `background`); the person found "running" confusing (2026-11-10).
- * A turn that failed, was cut short (`interruption`) or hit a limit is shown as that, not as paused. The work is `workTasks`: the timers a
- * tool holds (`/loop`) and ambient tasks are not work.
+ * Its turn ended while its own work (`workTasks`: background commands or the tool's background subagents, not `/loop`
+ * timers) still runs; a failed, cut-short or limited turn is shown as that instead. Shown as waiting with a background
+ * dot (product-spec.md, the sidebar; #2146).
  */
 export function pausedOnBackground(s: { state: unknown; backgroundTasks?: readonly BackgroundTask[]; interruption?: unknown }): boolean {
   return (s.state === 'waiting_input' || s.state === 'idle') && !s.interruption && workTasks(s.backgroundTasks ?? []).length > 0
 }
 
-/** The facts a card is read from: an approval card, or a question card the session asked */
 type CardFacts = { state: unknown; pendingApproval?: unknown; pendingQuestions?: { readonly length: number } }
 
 /**
- * Whether the session is waiting on an answer from the person: an approval card, or a question card it asked. The
- * sidebar's marks, the look of a panel, the mail receiver and every busy check ask this, so they cannot disagree (#428,
- * #2158). An error or a finished turn is not one: it needs a look, not an answer. `waiting_approval` with no card listed is
- * one too: the state says a card stands even where the card itself is not carried (a linked machine's row, a summary).
+ * An approval or question card is open; every busy check and mark asks this so they agree. `waiting_approval` with no
+ * card listed counts: a linked machine's row or a summary does not carry the card.
  */
 export function needsAnswer(s: CardFacts): boolean {
   return s.state === 'waiting_approval' || !!s.pendingApproval || (s.pendingQuestions?.length ?? 0) > 0
 }
 
 /**
- * **At rest** (#2158, owner decision 2026-11-10): the one busy rule. A session is busy when it is in a turn, has a card open
- * (`needsAnswer`), or has its own background work running; at rest otherwise. The work is what counts as activity
- * (`liveBackgroundTasks`): a timer the tool holds ends with its process, so a delete or a host stop would lose it. A check
- * that may end a timer on purpose passes the tasks it counts (worktree cleanup passes `workTasks`, #718).
- * Trash, delete, handoff, worktree cleanup, the host's idle rule (`sessionBusy`, idle.ts) and the directory read this.
+ * The one busy rule (#2158, docs/agent-host/delegation/start-agent.md). A tool's timer counts as busy because it ends
+ * with its process; a check that may end one on purpose passes the tasks it counts (worktree cleanup: `workTasks`).
  */
 export function atRest(s: CardFacts & { backgroundTasks?: readonly BackgroundTask[] }): boolean {
   return busyWith(s) === null
 }
 
-/** Why a session is not at rest (`busyWith`) */
 export type BusyReason = 'approval' | 'question' | 'turn' | 'background'
 
-/**
- * Why a session is not at rest, or null when it is: the one place `atRest` is written out, so a check that says why it
- * refuses (a handoff, the restart on a new CLI) names the same parts it tests. A card first (`needsAnswer`): `question`
- * when only questions are open, `approval` otherwise (an approval card, or one the state says stands though it is not
- * carried); then a turn; then its own background work (`liveBackgroundTasks`).
- */
+/** `atRest` written out once, so a check that says why it refuses names the part it tested */
 export function busyWith(s: CardFacts & { backgroundTasks?: readonly BackgroundTask[] }): BusyReason | null {
   return cardOrTurn(s) ?? (liveBackgroundTasks(s.backgroundTasks ?? []).length > 0 ? 'background' : null)
 }
 
 /**
- * `busyWith` without the session's own background work: a card, then a turn. For the checks that work does not stop: mail is
- * taken while it runs (the message starts the next turn, and the work goes on), and `stop` of a child's resting work (#718)
- * is how that work is ended, so it cannot be what keeps the stop out
+ * `busyWith` without background work, for checks that work does not hold off: mail starts the next turn while it
+ * runs, and `stop` of a child's resting work (#718) is how that work ends
  */
 export function cardOrTurn(s: CardFacts): Exclude<BusyReason, 'background'> | null {
   if (needsAnswer(s)) return (s.pendingQuestions?.length ?? 0) > 0 && !s.pendingApproval ? 'question' : 'approval'
   return isInTurn(s.state) ? 'turn' : null
 }
 
-/**
- * Where a session stands, in one word an agent reads (#2158): agent_session list, a linked child's row, the directory's
- * search and a handoff's children. `waiting` on the person's card; `working` in a turn; `paused` on its own background work
- * (`pausedOnBackground`); `stopped` short (an error, a limit, an interruption), which is resumed, not deleted; `finished`.
- */
+/** A session's state in the one word an agent reads (#2158); `stopped` is resumed, not deleted */
 export type AgentLook = 'waiting' | 'working' | 'paused' | 'stopped' | 'finished'
 
 export function agentLook(s: CardFacts & { backgroundTasks?: readonly BackgroundTask[]; interruption?: unknown }): AgentLook {
@@ -104,11 +70,8 @@ export function agentLook(s: CardFacts & { backgroundTasks?: readonly Background
 }
 
 /**
- * A linked machine's session as a hub shows it while it cannot ask that machine (#1822): as last heard, but not working.
- * Nothing says whether that turn still runs, so it is not shown running; the machine's row says the link is down, and
- * the machine's resync brings the real state back. The hub's lists from its mirror and the window's rows read this.
- * Its background work is not heard either: none is listed, so the session is not read as paused on it
- * (`pausedOnBackground`, #2146 review), which would keep it shown as paused while the machine is away or gone.
+ * A linked machine's session while the hub cannot reach it (docs/state-management.md §7 "An away session is not
+ * working"). Its background work is dropped too, or it would stay shown as paused while the machine is gone.
  */
 export function unheard<T extends { state?: unknown; backgroundTasks?: unknown }>(row: T): T {
   const working = row.state === 'working'
@@ -117,20 +80,12 @@ export function unheard<T extends { state?: unknown; backgroundTasks?: unknown }
   return { ...row, ...(working ? { state: 'idle' } : {}), ...(tasks ? { backgroundTasks: [] } : {}) }
 }
 
-/** The legal transitions in the FR-12 table. Anything not here is illegal. */
+/** The FR-12 table (docs/domain-model.md §3); anything not here is illegal */
 const ALLOWED: Record<SessionState, readonly SessionState[]> = {
   idle: ['working', 'error'],
   working: ['waiting_approval', 'waiting_input', 'limited', 'error', 'idle'],
-  /*
-   * waiting_approval → waiting_input: the path where an interrupt ends the turn while approval is waiting.
-   * Without this transition, a session stopped with its approval card ignored is stuck in waiting_approval
-   * forever.
-   *
-   * waiting_approval → limited: a card the host raised between turns (#673) closes back into the rest the
-   * session had before it (`restAfterCard`, host-cards.ts), and limited is one of those rests. Refused, the
-   * card's own resolve then read as "back to work" and the session sat in working with nothing to end it.
-   * Only that statement takes this edge: a `limit_reached` does not (`transition` below).
-   */
+  // → waiting_input: an interrupt while a card waits, or the session stays stuck on it.
+  // → limited: only a host card raised between turns closing back into its rest (`restAfterCard`, #673).
   waiting_approval: ['working', 'waiting_input', 'limited', 'error', 'idle'],
   waiting_input: ['working', 'error', 'idle'],
   limited: ['working', 'idle', 'error'],
@@ -141,27 +96,17 @@ export function canTransition(from: SessionState, to: SessionState): boolean {
   return from === to || (ALLOWED[from] ?? []).includes(to)
 }
 
-/**
- * The next state an event implies. Null means no change of state.
- * A state_change event was sent explicitly by the adapter, so it is followed as is.
- */
+/** The next state an event implies; null means no change */
 export function nextStateFor(event: NormalizedEvent): SessionState | null {
   switch (event.type) {
     case 'state_change':
       return event.state
-    /*
-     * Not message_delta, tool_call or tool_result: output is content, and only a turn's start (an adapter's
-     * `state_change: working`) and its end move the state (#1830). Output arrives after a turn ended too — a late
-     * update from an agent, a background agent's card released when its process closes (claude `releaseAgents`), a
-     * result a set-aside handle still sends (manager `onEvent`) — and read as work it would move a session at rest
-     * into working with nothing left to end it: never idle again for the keeper, an update or sleep, and "stopped by quit"
-     * at the next start (#428). Late output is shown and the session stays at the rest its turn ended in.
-     */
+    // Output (message_delta, tool_call, tool_result) moves nothing: it also arrives after a turn ended, and read as
+    // work it would leave a session working with nothing to end it (docs/domain-model.md §3, #1830).
     case 'approval_request':
       return 'waiting_approval'
     case 'approval_resolved':
       return 'working'
-    /* A set of choices is waiting on the person too — the status light must not stay on 'running' */
     case 'question_request':
       return 'waiting_approval'
     case 'question_resolved':
@@ -179,40 +124,24 @@ export function nextStateFor(event: NormalizedEvent): SessionState | null {
 
 export type TransitionResult = {
   state: SessionState
-  /** Whether it was ignored as an illegal transition (a warning in dev, a log in prod) */
+  /** Ignored as illegal (a warning in dev, a log in prod) */
   illegal: boolean
 }
 
+// The exceptions to `ALLOWED`, as docs/domain-model.md §3 gives them: a request is a fact, applied in any state; a
+// resolve arrives late and moves only waiting_approval; a limit leaves a session on its card.
 export function transition(from: SessionState, event: NormalizedEvent): TransitionResult {
   const to = nextStateFor(event)
   if (to === null) return { state: from, illegal: false }
-  /*
-   * An approval or question request is not an inference but a fact the host actually sent.
-   * If the table swallowed a request that arrived in idle right after a resume, the inbox and the badge would
-   * never see it and the agent would be blocked forever — the table filters only inferred transitions such
-   * as state_change.
-   */
   if (event.type === 'approval_request' || event.type === 'question_request')
     return { state: to, illegal: false }
-  /*
-   * A resolve only means "back to work" for a session that was blocked on a card. The host sends resolves late:
-   * a handle being disposed (a swap, a crash) releases every request still in its map, and the manager passes
-   * those through even from a set-aside handle so the card comes down; a request the CLI itself cancelled stays
-   * in that map until then. Taken after the turn ended (waiting_input), an error or a return to idle, it would
-   * flip the session to working with nothing left to ever end it, and in error it would clear the banner.
-   * Outside waiting_approval it is not a state change, and not illegal either: the reducer still removes the card.
-   */
+  // Not illegal either: the reducer still removes the card
   if (
     (event.type === 'approval_resolved' || event.type === 'question_resolved') &&
     from !== 'waiting_approval'
   ) {
     return { state: from, illegal: false }
   }
-  /*
-   * A limit report does not take a session off a card it is blocked on. Codex reports its rate limits at any time
-   * (account/rateLimits/updated); taken as a transition, it would move an open-card session to limited, out of the
-   * inbox while it still waits on the person. The limit itself is still recorded (the reducer's switch).
-   */
   if (event.type === 'limit_reached' && from === 'waiting_approval') return { state: from, illegal: false }
   if (!canTransition(from, to)) return { state: from, illegal: true }
   return { state: to, illegal: false }
@@ -226,67 +155,39 @@ export type SessionStateFacts = {
   pendingQuestions: readonly { requestId: string }[]
 }
 
-/** What one event does to a session's state, and what that change takes down with it */
 export type SessionStateStep = {
   state: SessionState
   illegal: boolean
-  /** The state is different from before */
   changed: boolean
-  /** When the current wait began (what the inbox order and the elapsed time are based on); null when not waiting */
+  /** When the current wait began (the inbox order and elapsed time); null when not waiting */
   waitingSince: number | null
-  /** The session recovered: the limit and error banners come down */
+  /** Entering working or idle: the limit and error banners come down */
   recovered: boolean
-  /** The open approval and question cards died with this change */
+  /** The open cards' requests died with this change */
   cardsDead: boolean
 }
 
-/**
- * One event's effect on a session's state — the part of the reducer both sides run.
- * `now` is taken as an argument because recording when a wait started has to be testable.
- */
+/** One event's effect on a session's state: the part of the reducer both sides run */
 export function stepSessionState(
   s: SessionStateFacts,
   event: NormalizedEvent,
   now: number,
 ): SessionStateStep {
-  /*
-   * Answering one card while another is still open (an approval and a question, or two questions) leaves the agent
-   * blocked on the other: the session stays waiting_approval and keeps that card. Taken as a transition to working,
-   * the recovery rule below cleared every card, so an unanswered question vanished when an approval next to it was
-   * answered, and the agent sat waiting on a question nobody could see. The host does the same (manager.ts
-   * `respondApproval`: working again only when no card is left).
-   */
+  // Answering one card while another is open keeps waiting_approval and that card (the host's `respondApproval` too)
   const { state, illegal } = otherCardOpen(s, event)
     ? { state: s.state, illegal: false }
     : transition(s.state, event)
   const changed = state !== s.state
 
-  // Record when the wait began (what the inbox order and the elapsed time are based on)
   const waitingSince = isWaiting(state)
     ? isWaiting(s.state) && s.waitingSince != null
       ? s.waitingSince
       : now
     : null
 
-  /*
-   * When the session recovers, the banners come down with it.
-   *
-   * limit and lastError are what the "blocked right now" banner stands on. If they stayed after the limit
-   * lifted, or after the session came back from an error and started working again, the screen would go on
-   * claiming it is blocked, which is a lie — entering working or idle is itself recovery, so they are
-   * cleared at that moment.
-   */
   const recovered = !illegal && changed && (state === 'working' || state === 'idle')
-  /*
-   * Approval and question cards live **only while they can be answered**.
-   *
-   * error is not the only way a requestId dies: an interrupt while waiting for approval (turn_complete →
-   * waiting_input), a return to idle through resume, and working resuming all finish that request off too.
-   * Leave the card up and a click tries to answer a dead request and throws — the state (visibility) and the
-   * payload (whether it can be acted on) must not drift apart. If the request is still valid after recovery,
-   * the host sends it again, and `transition` lets an approval or question request through from any state, so
-   * the card comes back. A new request is set up again by the reducer's own switch, on top of this clearing.
-   */
+  // A card lives only while its request can be answered; one still valid is sent again by the host, which
+  // `transition` lets through from any state
   const cardsDead =
     !illegal &&
     changed &&
@@ -302,19 +203,9 @@ export function stepSessionState(
 }
 
 /**
- * The host's copy of a session's live state, for a reconnecting window and for the next host after a swap
- * (`SessionInfo`): the host's `applyStateHint` (agent-host sessions/manager.ts) and the mock's list run this. A hub's
- * copy of a linked machine's sessions (its headers mirror, #2288) runs it too, on the same fields.
- *
- * Authority over the live state belongs to the UI (the core reducer); the host records what it needs to restore
- * (M1.5) and nothing more. It runs **the same rules** (`stepSessionState`), not a table of its own: a hand-copied
- * table drifts (#428), and a window that reconnects is shown a state it was not showing live.
- *
- * The clearing follows the core reducer (docs/state-management.md §2): a kind of busy never outlives being busy,
- * recovering removes the limit banner, and a card for a requestId that has died (ended by an error, an interrupt, or
- * recovery) is torn down too, since clicking it would have nowhere to answer — a reconnect restore must never bring
- * a dead card back to life. The event's own facts (a new card, an activity, a limit) are set after that, as the
- * reducer's switch sets them on top of its clearing.
+ * The host's copy of a session's live state (`SessionInfo`) for a reconnecting window and the next host after a swap
+ * (docs/domain-model.md §3); a hub's mirror of a linked machine runs it too. Clears as the core reducer does, then sets
+ * the event's own facts on top.
  */
 export function applySessionState(m: LiveStateFields, e: NormalizedEvent, now: number): SessionStateStep {
   const step = stepSessionState(m, e, now)
@@ -336,7 +227,6 @@ export function applySessionState(m: LiveStateFields, e: NormalizedEvent, now: n
       if (m.pendingApproval?.requestId === e.requestId) m.pendingApproval = null
       break
     case 'question_request':
-      // The same id arriving again replaces its entry; otherwise it is added at the end (never overwritten)
       m.pendingQuestions = [
         ...m.pendingQuestions.filter((q) => q.requestId !== e.requestId),
         { requestId: e.requestId, questions: e.questions },
@@ -355,19 +245,13 @@ export function applySessionState(m: LiveStateFields, e: NormalizedEvent, now: n
   return step
 }
 
-/** How full a conversation's context is (`SessionInfo.context`); null when no reading has come yet */
+/** Null when no reading has come yet */
 export type ContextReading = SessionInfo['context']
 
 /**
- * The one way a session's context reading moves: the host's live facts, the UI's reducer and the mock all call this,
- * so the gauge a reconnect reads back is the one the window showed live.
- *
- * A `context_update` (the tool's reading at a turn's end) replaces it; a fresh conversation (#304) empties it until the
- * tool reports again. A compaction that says how big the conversation came out (Claude's `post_tokens`) sets that as an
- * estimate in the window already known (#1282): the tool's next exact reading only comes when a turn ends, and until
- * then the gauge kept the pre-compaction number (seen: "964k → 8.8k" on the marker, "Context 96%" in the composer,
- * for good when the next turn failed). With no reading yet the window is unknown, so it stays null; a failed
- * compaction shrank nothing, and one with no size (Codex's) leaves the reading for the tool's next one.
+ * The one way a context reading moves (host, UI reducer and mock), so a reconnect reads back the gauge shown live.
+ * A compaction with a size (Claude's `post_tokens`) sets an estimate at once: the tool's next exact reading comes only
+ * at a turn's end, and until then the gauge showed the pre-compaction share (#1282). Codex's compaction has no size.
  */
 export function nextContext(context: ContextReading, e: NormalizedEvent): ContextReading {
   switch (e.type) {
@@ -389,22 +273,19 @@ export function nextContext(context: ContextReading, e: NormalizedEvent): Contex
   }
 }
 
-/** What a context reading says about how full the conversation is (`contextShare`) */
 export type ContextShare = {
-  /** used / the window; not clamped, so a reading past the window shows */
+  /** Not clamped, so a reading past the window shows */
   fraction: number
   window: number
-  /** The window is a floor under the model's (the full one is not known), so `fraction` is a ceiling over the real share */
+  /** The window is a floor under the model's, so `fraction` is a ceiling over the real share */
   capped: boolean
-  /** Where the session's process compacts by itself; `fraction` is null when the window is only a floor */
+  /** Where the process compacts by itself; `fraction` is null when the window is only a floor */
   compactAt: { tokens: number; fraction: number | null } | null
 }
 
 /**
- * The one definition of a session's context share (#1553): used / the model's full context window, for Claude and Codex alike,
- * so 100% is the whole window (a 1M model: 1,000k) and the compaction point is a mark on it, not its end. The host says which
- * window that is (`context_update.window`, from `ModelWindows`); a screen or a text for an agent reads it here and does not
- * divide by anything else. Null with no reading, or a window of 0 (a model the host could not size).
+ * The one context share (#1553, docs/agent-host/context-compaction.md): used / the model's full window, so the compaction
+ * point is a mark on it. Null with no reading or a window of 0 (a model the host could not size).
  */
 export function contextShare(context: ContextReading): ContextShare | null {
   if (!context || !(context.window > 0)) return null
@@ -416,17 +297,13 @@ export function contextShare(context: ContextReading): ContextShare | null {
   return { fraction: context.used / context.window, window: context.window, capped, compactAt }
 }
 
-/**
- * Blocked on a question and nothing else. The state says waiting_approval for both kinds of card, as the window shows
- * them; a text read by an agent names the card (list_sessions, a busy session, a handover).
- */
+/** Blocked on a question only (the state says waiting_approval for both kinds), for a text that names the card */
 export function blockedOnQuestion(
   s: Pick<SessionInfo, 'state' | 'pendingApproval' | 'pendingQuestions'>,
 ): boolean {
   return s.state === 'waiting_approval' && !s.pendingApproval && s.pendingQuestions.length > 0
 }
 
-/** Whether a resolve leaves some other approval or question card of a waiting session still open */
 function otherCardOpen(s: SessionStateFacts, event: NormalizedEvent): boolean {
   if (s.state !== 'waiting_approval') return false
   if (event.type === 'approval_resolved') {

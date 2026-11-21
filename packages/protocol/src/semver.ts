@@ -36,8 +36,7 @@ export function isNewerVersion(a: string, b: string): boolean {
   if (preA === null && preB === null) return false
   if (preA === null) return true
   if (preB === null) return false
-  // Both prereleases: compare dot-separated identifiers, numeric ones as numbers
-  // (semver: numeric identifiers always rank below alphanumeric).
+  // SemVer: numeric identifiers compare as numbers and rank below alphanumeric ones
   const ia = preA.split('.')
   const ib = preB.split('.')
   for (let i = 0; i < Math.max(ia.length, ib.length); i++) {
@@ -60,11 +59,8 @@ export function isNewerVersion(a: string, b: string): boolean {
   return false
 }
 
-/*
- * Build metadata (`+sha`) is dropped first: semver ignores it for precedence, and left in, it turned `3+build5`
- * into NaN (and the `-` in `+build-5` into a prerelease). A leading `v` (`v1.2.3`, as a tag is written) is dropped
- * too, or the first slot is NaN. Either NaN ends the comparison as "not newer", the #42 failure again.
- */
+// Build metadata (`+sha`, ignored by semver for precedence) and a tag's leading `v` are dropped first: either left in
+// makes a NaN slot, which ends the comparison as "not newer" (#42); the `-` in `+build-5` would read as a prerelease.
 function split(raw: string): [number[], string | null] {
   let v = raw.trim().replace(/^v/i, '')
   const plus = v.indexOf('+')
@@ -78,18 +74,12 @@ function split(raw: string): [number[], string | null] {
 const LOCAL_BUILD =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*\.local\.[1-9]\d*$/
 
-/**
- * The oldest Centralu another one still works with (#1143): every window, host, launcher and linked machine in use runs it or
- * later, so the code that served a peer before it is gone. A linked machine below it does not connect where the hub can name
- * the update, and is offered it or follows the hub (`compareVersions` in agent-host's links/versions.ts); a window and a host
- * of two builds already meet the "another build" bar, and the launcher ships in one package with its host. What the update
- * from below it needs is kept. Raised when compatibility code for a release is removed.
- */
+/** The oldest peer this build works with (docs/protocol.md §4) */
 export const MIN_SUPPORTED_VERSION = '0.1.0-beta.45'
 
 /**
- * Whether a release (a local build counts as the one it was cut from) is at least `MIN_SUPPORTED_VERSION`. A build from
- * source (`0.0.0-dev`, `APP_VERSION` there) or a version that is no release is not judged: it is the current code.
+ * A local build counts as the release it was cut from. A build from source (`0.0.0-dev`) or a version that is no
+ * release is not judged: it is the current code.
  */
 export function isSupportedVersion(v: string): boolean {
   if (!/^\d+\.\d+\.\d+/.test(v) || v.startsWith('0.0.0')) return true
@@ -101,24 +91,15 @@ export function isLocalBuildVersion(v: string | null | undefined): boolean {
   return typeof v === 'string' && v.length <= 64 && LOCAL_BUILD.test(v)
 }
 
-/** The release a local build was cut from: `0.3.0-beta.7.local.2` is `0.3.0-beta.7`; any other version is itself (#689) */
+/** `0.3.0-beta.7.local.2` is `0.3.0-beta.7`; any other version is itself */
 export function releaseOf(v: string): string {
   return isLocalBuildVersion(v) ? v.slice(0, v.lastIndexOf('.local.')) : v
 }
 
 /**
- * Whether the copy `centralu install` made is kept rather than replaced by `target` (#645).
- *
- * npm is the source of truth for releases: any released version in the copy, even a higher one, is
- * replaced by the target, so a release pulled from `latest` (a dist-tag rollback) does not survive in
- * /Applications. The one exception is a maintainer's local build (`<base>.local.N`, `pnpm
- * local-update`, #610/#613) newer than the target: it waits there for "Apply now", and putting the
- * release it was cut from over it would undo it. The copy's version must be well-formed SemVer in
- * that exact shape; anything unreadable or malformed (`garbage`, `$(VERSION)`, an empty file) is
- * replaced, so a corrupt plist or version file can never block every later update.
- *
- * Mirrored in the launcher (`keepsInstalledCopy` in `packaging/npm/centralu/bin/semver.mjs`), where
- * `centralu install` applies the same rule by itself, and pinned to it by `tooling/launcher-semver.test.ts`.
+ * Whether `centralu install`'s copy is kept over `target` (#645): only a local build newer than it, waiting for
+ * "Apply now". Any release, even a higher one, is replaced (npm decides, so a dist-tag rollback lands), and so is a
+ * malformed version, so a corrupt version file never blocks updates. Mirrored in the launcher like `isNewerVersion`.
  */
 export function keepsInstalledCopy(target: string, copyVersion: string | null | undefined): boolean {
   return (

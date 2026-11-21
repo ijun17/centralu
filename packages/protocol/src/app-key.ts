@@ -1,24 +1,14 @@
 import { MACHINE_ID_RE } from './machines.js'
 
-/**
- * One app as a single string (#82, #288) — what the host stores an app's permissions, builder, origin port and grid
- * panel under, and what the UI keys its catalog, spans and drags by. An app is unique per (project, id): the `notes`
- * app of two projects is two apps. Copies written by hand drift (a null check against a truthiness check of the
- * project), so every place builds and reads it here.
- */
+// One app as a single string, stored by the host and keyed on by the UI. An app is unique per (project, id); copies
+// written by hand drifted (a null check against a truthiness check), so every place builds and reads it here (#288).
 
-/**
- * The scope name of a user-folder app — a key in memory and a stored key, and also one segment of the host's data
- * and log folders. It matches the UI's `externalAppKey`, and never collides with a project id (a UUID).
- */
+/** Also a segment of the host's data and log folders; never collides with a project id (a UUID) */
 export const USER_APP_SCOPE = '_user'
 
 /**
- * One app as a single string: `<project id | _user>/<app id>` — the UI's `externalAppKey`.
- *
- * A linked machine's user-folder app (#82) has no project to tell it from this computer's app of the same id, so its
- * key names the machine: `<machine>:_user/<app id>`. `machine` is ignored with a project, whose id already names it. A reference
- * (a row, a request, a runtime reference) is read as it is: its `machine`, if it has one, counts.
+ * `<project id | _user>/<app id>`. A linked machine's user-folder app has no project to tell it apart, so its key is
+ * `<machine>:_user/<app id>`; `machine` is ignored with a project, whose id names it already.
  */
 export function appKeyOf(ref: AppIdent): string
 export function appKeyOf(projectId: string | null | undefined, appId: string, machine?: string | null): string
@@ -29,11 +19,7 @@ export function appKeyOf(a: AppIdent | string | null | undefined, appId?: string
     : `${ref.projectId ?? USER_APP_SCOPE}/${ref.appId}`
 }
 
-/**
- * The (project, app) an app key stands for, with the machine of a linked machine's user-folder app, or null for a
- * string that is not one. Neither a project id nor an app id can contain `/`, so the first one splits it; a project
- * id never contains `:` (a UUID, or `<machine>.<uuid>`), so `<machine>:_user` is a machine's user folder.
- */
+/** Neither id can hold `/`, so the first splits it; a project id never holds `:` (a UUID, or `<machine>.<uuid>`) */
 export function parseAppKey(
   key: string,
 ): { projectId: string | null; appId: string; machine?: string } | null {
@@ -51,32 +37,20 @@ export function parseAppKey(
   return { projectId: scope === USER_APP_SCOPE ? null : scope, appId }
 }
 
-/** An app as a row, a request or a stored reference names it: `machine` is only the linked machine of a user-folder app (#82) */
+/** `machine`: only the linked machine of a user-folder app; absent or null is this computer */
 export type AppIdent = { projectId?: string | null; appId: string; machine?: string | null }
 
-/**
- * Whether two references name one app: an app is unique per (project, id), so both have to agree. Without a project it is a
- * user-folder app, which is also unique per machine (absent or null is this computer's, as `appKeyOf` reads it); a project's
- * id already names its machine. The one rule behind the host's lookups and the UI's `isApp`.
- */
 export function sameApp(a: AppIdent, b: AppIdent): boolean {
   if (a.appId !== b.appId || (a.projectId ?? null) !== (b.projectId ?? null)) return false
   return a.projectId != null || (a.machine ?? null) === (b.machine ?? null)
 }
 
-/**
- * An app as a person reads it in a log line or a check report: `user/<app id>` for the user folder, or the project
- * id's first eight characters — enough to tell projects apart, short enough for one line. Not a key: two projects can
- * share a prefix.
- */
+/** For a log line: not a key, as two projects can share the eight-character prefix */
 export function appLabel(ref: { projectId: string | null; appId: string }): string {
   return `${ref.projectId === null ? 'user' : ref.projectId.slice(0, 8)}/${ref.appId}`
 }
 
-/**
- * The refusal of an app that is not there, as the host and the mock both word it: the whole project id (or `user`),
- * so the person can tell which project's app was meant. Written out by hand in five places before.
- */
+/** The whole project id, so the person can tell which project's app was meant */
 export function noSuchAppText(ref: { projectId: string | null; appId: string }): string {
   return `There is no such app: ${ref.projectId ?? 'user'}/${ref.appId}`
 }

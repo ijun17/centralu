@@ -2,21 +2,9 @@ import { z } from 'zod'
 import { PermissionPreset, ToolName } from './ids.js'
 
 /**
- * Everything a screen needs to *present* a tool: its name, its mark, and the two
- * commands that fix a tool that isn't ready.
- *
- * Why the shape lives here. Both sides read it — the host names the tool in its "no
- * record of this conversation" message, and `@cc/agent-host` depends on this package and
- * not on `@cc/core`. This is the only shelf both sides can reach.
- *
- * **Why the values do not.** Each adapter carries its own descriptor (labels, glyphs, the
- * install and login commands), and they reach the UI through `agents.detect`: values here
- * would make adding a tool an edit to the shared protocol, the opposite of what an adapter
- * is for.
- *
- * This is presentation, not capability. What a tool can *do* is declared by its adapter
- * (`AdapterCapabilities`, `ModelOption`) and must never be listed here — that split is
- * what keeps a new knob from having to be taught to the UI twice.
+ * How a screen presents a tool. Here because both sides read it and agent-host does not depend on core; the values stay
+ * in each adapter and reach the UI through `agents.detect`, so a new tool is no protocol edit. Presentation only: what a
+ * tool can do is its adapter's (`AdapterCapabilities`, `ModelOption`; docs/agent-host/adapters/adding-a-tool.md).
  */
 export const ToolDescriptor = z.object({
   name: ToolName,
@@ -29,15 +17,11 @@ export const ToolDescriptor = z.object({
 export type ToolDescriptor = z.infer<typeof ToolDescriptor>
 
 /**
- * Where a tool stands on this machine, one shape for every tool (#59, owner 2026-10-27: the header shows an error
- * donut for each tool that is installed but signed out, and Antigravity's line offers Centralu's own install and
- * sign-in). Additive: a window that predates it reads `installed` and `loggedIn` as before.
- *
- * - `not_installed`: the tool is not found here (`install` says who can install it)
- * - `installing`: Centralu is downloading or unpacking it (`progress`), only where `install` is `centralu`
- * - `signed_out`: installed, and the tool says it is not signed in (or a session found so: `-32000` on ACP)
+ * Where a tool stands on this machine, one shape for every tool (#59). A window that predates it reads `installed` and
+ * `loggedIn`.
+ * - `installing`: Centralu downloads or unpacks it (`progress`), only where `install` is `centralu`
+ * - `signed_out`: the tool says it is not signed in (or a session found so: `-32000` on ACP)
  * - `signing_in`: Centralu's sign-in runs (the browser is open on that machine), only where `signIn` is `centralu`
- * - `ready`: installed and signed in
  * - `unknown`: installed, and its sign-in cannot be told without a session (OpenCode, whose providers each keep their own)
  */
 export const ToolSetupState = z.enum(['not_installed', 'installing', 'signed_out', 'signing_in', 'ready', 'unknown'])
@@ -59,21 +43,20 @@ export type ToolSetupFailureReason = z.infer<typeof ToolSetupFailureReason>
 
 export const ToolSetup = z.object({
   state: ToolSetupState,
-  /** Who installs it: `centralu` (an `agents.installTool` action), or the person from a terminal (`ToolDescriptor.install`) */
+  /** `centralu` (an `agents.installTool` action), or the person from a terminal (`ToolDescriptor.install`) */
   install: z.enum(['centralu', 'terminal']),
-  /** How the person signs in: Centralu's own action (`agents.signIn`, on the machine the host runs on), a terminal (`ToolDescriptor.login`), or not at all (none) */
+  /** Centralu's own action (`agents.signIn`, on the host's machine), a terminal (`ToolDescriptor.login`), or none */
   signIn: z.enum(['centralu', 'terminal', 'none']),
   /** While `installing`: bytes received of the archive, and its size when known */
   progress: z.object({ received: z.number().int().nonnegative(), total: z.number().int().nonnegative().nullable() }).optional(),
   /**
-   * The last install or sign-in that did not finish; cleared by the next start. `verifyUri`: with `ineligible`, the Google
-   * page where the person can verify the account (the agent's answer names it; always `https` on a Google host), for the
-   * screen to open in the person's browser. Kept out of `message`, host.log and the stores, like the sign-in address
+   * The last install or sign-in that did not finish; cleared by the next start. `verifyUri`, with `ineligible`: the
+   * Google page to verify the account (always `https` on a Google host), kept out of `message`, host.log and the stores
    */
   failure: z.object({ reason: ToolSetupFailureReason, message: z.string(), verifyUri: z.string().optional() }).optional(),
   /** The plan the tool said at its last sign-in (Antigravity's `_meta.antigravity.tier`), with its upgrade link when it gave one */
   plan: z.object({ name: z.string(), upgradeUri: z.string().optional() }).optional(),
-  /** While `not_installed`: the tool's own app is on that machine though Centralu's connection to it is not (Antigravity's line says so); absent otherwise */
+  /** While `not_installed`: the tool's own app is on that machine though Centralu's connection to it is not */
   appFound: z.literal(true).optional(),
 })
 export type ToolSetup = z.infer<typeof ToolSetup>
@@ -84,30 +67,24 @@ export function setupOfDetection(installed: boolean, loggedIn: boolean | null): 
   return { state, install: 'terminal', signIn: 'terminal' }
 }
 
-/**
- * A descriptor and whether that tool can actually be used on this machine right now.
- *
- * One type rather than two lists to join: the screens that draw a row per tool need both
- * halves at once, and a join done in a component is a join that can be done wrong.
- */
+/** A descriptor and whether the tool is usable here now: one type, since a join done in a component can be done wrong */
 export const ToolStatus = ToolDescriptor.extend({
   installed: z.boolean(),
   loggedIn: z.boolean(),
   detail: z.string(),
-  /** Additive (#59): the same in the one shape every tool reports, with Centralu's install and sign-in where it has them */
   setup: ToolSetup.optional(),
 })
 export type ToolStatus = z.infer<typeof ToolStatus>
 
 /**
- * How hard a job start_agent hands over is (#729): what a calling agent says instead of naming a model, so the
- * person's own choice of model per tool applies (`UiPreferences.agentModels`). Light: lookups, small fixes, reviews of
- * small changes. Heavy: design, security boundaries, data-loss risk, large refactors. Standard: the rest.
+ * How hard a job start_agent hands over is: said instead of a model, so the person's model per tool applies
+ * (`UiPreferences.agentModels`). Light: lookups, small fixes, small reviews. Heavy: design, security boundaries,
+ * data-loss risk, large refactors. Standard: the rest.
  */
 export const AgentDifficulty = z.enum(['light', 'standard', 'heavy'])
 export type AgentDifficulty = z.infer<typeof AgentDifficulty>
 
-/** One difficulty's model for one tool (#729). The effort belongs to the model, as a project's remembered one does (#107) */
+/** The effort belongs to the model, as a project's remembered one does */
 export const AgentModelChoice = z.object({
   model: z.string().min(1).max(200),
   effort: z.string().min(1).max(80).optional(),
@@ -126,14 +103,8 @@ export const AgentModels = z.record(
 export type AgentModels = z.infer<typeof AgentModels>
 
 /**
- * An adapter's capability declaration — the UI enables or disables features based on this
- * (product-spec §6.2).
- *
- * **Anything knowable from whether an optional method exists does not go here.** A flag and the
- * implementation can drift apart: a flag that says true for a method that does not exist does
- * nothing, silently. The answer to "can it do this?" has to
- * be single-sourced — if the method exists, it can. What remains here is only the properties a
- * method cannot express (whether approvals are supported, context accuracy, and so on).
+ * What the UI enables features by (docs/agent-host/adapters/contract.md). Nothing an optional method's presence already
+ * says goes here: a flag can drift from the method, and a true flag for a missing method silently does nothing.
  */
 export const AdapterCapabilities = z.object({
   approvals: z.boolean(),
@@ -142,85 +113,56 @@ export const AdapterCapabilities = z.object({
   autoTitle: z.boolean(),
   attachments: z.array(z.enum(['image', 'file'])).default([]),
   /**
-   * The response-length (verbosity) tiers. Empty means this tool has no such knob (#54).
-   *
-   * Why this is not attached to the model instead: codex's `model/list` does not report
-   * verbosity per model (that field is absent from generated/v2/Model.ts — measured). Attaching
-   * it to the model would mean inventing it ourselves, which breaks the rule against hardcoding
-   * the list. A per-tool property belongs in the adapter's capability declaration.
+   * Empty: no such knob. Per tool, not per model: Codex's `model/list` does not report verbosity per model (measured),
+   * and the list is never made up here.
    */
   verbosities: z.array(z.string()).default([]),
   /**
-   * The guarantee that while we hold the handle, **nobody else can write to this conversation**
-   * (2026-09-02).
-   *
-   * True for codex — the app-server puts a writer lock on the thread, and opening it a second
-   * time is rejected with "already has an active writer" (the adapter even translates that
-   * error). Not true for claude: its conversation file has no lock, so in principle something
-   * outside can write to it concurrently.
-   *
-   * Only on top of this guarantee does the manager stamp "the moment the handle is released
-   * equals everything up to here is something I already know" (the skip in
-   * syncImportedHistory). Stamping it on a tool without this guarantee would mean anything
-   * written from outside while the session was alive never gets pulled in — which is why the
-   * default is false.
+   * Nobody else can write to the conversation while we hold the handle. Codex: the app-server locks the thread ("already
+   * has an active writer"); Claude's file has no lock. Only with it may the manager read a release as "everything up to
+   * here is known" (the skip in syncImportedHistory); without it, outside writes would never be pulled in.
    */
   exclusiveWriter: z.boolean().default(false),
   /**
-   * Whether this tool reports its background work (#290, the `background_tasks` event). Not an optional method:
-   * reporting is a stream of events, and nothing else says whether silence means "none running" or "cannot see".
-   * The idle check (#297) needs that difference — a session whose background work is invisible is never called idle.
+   * It reports its background work (`background_tasks`). A flag, not a method: silence cannot say "none running" from
+   * "cannot see", and the idle check needs that (a session whose background work is invisible is never idle).
    */
   backgroundTasks: z.boolean().default(false),
   /** Whether send accepts input during a running turn without interrupting it (#592). Absent is unsupported. */
   midTurnInput: z.boolean().optional(),
   /**
-   * Whether the adapter can put every step of the CLI's own that is not a read to the host's card in a turn the host names, whatever the session's
-   * preset (#1447, a session's request to the Assistant). Claude: a `PreToolUse` hook, which sees every tool call in every permission mode
-   * (measured: a narrower mode alone leaves out the tools that need no permission). Absent is false: a session of the tool cannot be asked for by
-   * another session
+   * Every step of the CLI's own that is not a read can go to the host's card in a turn the host names, whatever the
+   * preset (#1447). Claude: a `PreToolUse` hook sees every call in every mode (measured: a narrower mode alone leaves out
+   * the tools that need no permission). Absent: false, and another session cannot ask for a session of this tool
    */
   gatesSteps: z.boolean().optional(),
-  /**
-   * Whether this tool can defer individual Centralu tool definitions until the model asks for
-   * them. This is a serving property, not a list of tool names: the host uses it when it counts
-   * the prefix a kept process was started with.
-   */
+  /** Can defer single Centralu tool definitions until the model asks; the host counts a kept process's prefix by it */
   toolDeferral: z.boolean().optional(),
-  /** Where Centralu's tool instructions reach the model. */
   instructionChannel: z.enum(['server', 'developer']).optional(),
-  /** How the adapter owns agent processes. A shared server may host several conversations. */
   processModel: z.enum(['per-session', 'shared-server']).optional(),
-  /** Whether the CLI has child agents whose events the adapter normalizes for the host. */
   builtInSubagents: z.boolean().optional(),
   /**
-   * What the model calls the CLI's own subagent tool (Claude `Agent`, Codex `spawn_agent`), for the one line in Centralu's
-   * tool instructions that sends long or watched work to `start_agent` instead of it (#1587). Absent: the CLI has none to name.
+   * The CLI's own subagent tool as the model calls it (Claude `Agent`, Codex `spawn_agent`), named in the instruction
+   * line that sends long or watched work to `start_agent` instead. Absent: the CLI has none.
    */
   subagentTool: z.string().optional(),
-  /** Whether the CLI has a direct peer-to-peer messaging path outside Centralu's own session tools. */
   peerMessaging: z.boolean().optional(),
   /**
-   * Whether an idle session of this tool may be put to sleep (#568): its process ended, the conversation resumed by
-   * the next message. True only where that was measured to lose nothing a person would notice. Claude: a resumed
-   * process reads the prompt cache as a live one does (~100% at 2, 6 and 10 minutes on the 1 h lifetime), for +0.7 s
-   * (p50) before the first token (#561). Absent is false: a tool whose resume is slow or untested keeps its process.
+   * An idle session may be put to sleep (process ended, resumed by the next message), only where measured to lose
+   * nothing. Claude: a resumed process reads the prompt cache as a live one does (~100% at 2, 6 and 10 minutes on the
+   * 1 h lifetime), for +0.7 s (p50) before the first token. Absent: false
    */
   sleep: z.boolean().optional(),
   /**
-   * The permission presets this tool can keep (docs/plans/acp-adapter.md §5.3). Absent: every preset. Cursor's ACP
-   * server has no switch that makes it ask before every change, so it does not list `safe`, and a session asked to run
-   * it under `safe` is refused (`launchRefusal`) rather than run under a promise it cannot keep.
+   * The presets it can keep (docs/plans/acp-adapter.md §5.3); absent: all. Cursor's ACP server cannot be made to ask
+   * before every change, so it lacks `safe`, and a `safe` session of it is refused (`launchRefusal`).
    */
   presets: z.array(PermissionPreset).optional(),
-  /**
-   * Whether the tool can be kept from reading the repository's own files (`.cursor/rules`, `AGENTS.md`, its config)
-   * when the project is not trusted (#92). Absent: true. False: it runs only in trusted projects.
-   */
+  /** Can be kept from the repository's own files (`.cursor/rules`, `AGENTS.md`) when untrusted. Absent: true; false: trusted only */
   keepsRepoFilesOut: z.boolean().optional(),
   /**
-   * Whether the tool takes Centralu's role text (`systemPromptAppend`). Absent: true. False: it cannot be a session that
-   * is given one (the Assistant, a coordinator, an app's agent), nor one that must read no setting files.
+   * Takes Centralu's role text (`systemPromptAppend`). Absent: true. False: it cannot run a session given one (the
+   * Assistant, a coordinator, an app's agent), nor one that must read no setting files.
    */
   roleText: z.boolean().optional(),
 })
@@ -232,7 +174,7 @@ export type LaunchDemands = {
   /** Absent means untrusted, as for the adapters (`CreateSessionOpts.projectTrusted`) */
   projectTrusted?: boolean
   noSettingFiles?: boolean
-  /** Whether the session is given role text (`systemPromptAppend`) */
+  /** Role text is `systemPromptAppend` */
   roleText?: boolean
 }
 
@@ -275,30 +217,19 @@ const PRESET_LABEL: Record<PermissionPreset, string> = {
 }
 
 /**
- * One selectable model.
- *
- * **We never write down this list ourselves.** It carries exactly what the tool reports through
- * its official API (Claude: `supportedModels()`, Codex: `model/list`). Hardcoding it would leave
- * this app silently falling behind every time a new model ships: a model missing from a hardcoded
- * list cannot be selected.
- *
- * Reasoning effort also arrives attached to the model, since which levels are supported differs
- * by model. Keeping it as a separate flag would give two different answers to "does this model
- * support this," and they could disagree.
+ * One model, exactly as the tool's official API reports it (Claude `supportedModels()`, Codex `model/list`), never a
+ * list of ours: a model missing from a hardcoded list cannot be picked. Efforts ride on the model, as they differ by model.
  */
 export const ModelOption = z.object({
   id: z.string(),
   label: z.string(),
   description: z.string().optional(),
-  /** The reasoning efforts this model supports. Empty means this model has no effort selection */
+  /** Empty: this model has no effort selection */
   efforts: z.array(z.string()),
   defaultEffort: z.string().nullable(),
   /**
-   * Response-speed tiers (codex's serviceTiers — measured: gpt-5.4+ has exactly one, "Fast, 1.5x
-   * speed, increased usage"). Unlike verbosity, model/list reports this **per model**, so it
-   * attaches to the model — putting it in the adapter's capability declaration would give two
-   * different answers to "can this model do this." The name and description are carried
-   * verbatim: the wording that usage costs more is codex's own, and it is accurate.
+   * Codex's serviceTiers, reported per model (measured: gpt-5.4+ has one, "Fast, 1.5x speed, increased usage"), so on
+   * the model, not the adapter. Name and description verbatim: the wording that usage costs more is Codex's own.
    */
   tiers: z.array(z.object({ id: z.string(), name: z.string(), description: z.string() })).default([]),
   /** The model's own id an alias entry (`opus`) names now (`claude-opus-5-5`), as the tool reports it; absent for a plain id */

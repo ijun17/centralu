@@ -27,79 +27,46 @@ import { MachineInfo } from './machines.js'
 import { HostHandover } from './host-logon.js'
 import { TurnContinues, TurnOrigin, TurnWho } from './turn-who.js'
 
-/**
- * Normalized events flowing adapter → app (docs/protocol.md §2).
- * Per-tool differences are absorbed by the adapter; the UI/core only ever knows this type.
- */
+/** Normalized events, adapter → app (docs/protocol.md §2); per-tool differences stop at the adapter */
 const base = { sessionId: z.string() }
 
 const endsTurn = { turn: TurnWho.optional() }
 
-/**
- * Events that do not belong to a session (`error`, `update_status`).
- *
- * `sessionId` is **kept, made optional, rather than removed.** Adding a branch that omits the
- * key entirely would turn `e.sessionId` into a type error across the whole union, forcing every
- * piece of code that only handles session events to be fixed too — too large a price for adding
- * one app-wide event, and every spot that fix touches is a chance for a mistake. Since the
- * receiving side already filters with `if (!sessionId) return`, this shape is enough to say a
- * missing value is missing.
- */
+// An event of no session keeps `sessionId`, optional: a branch without the key would make `e.sessionId` a type error
+// across the whole union, in every reader of session events
 const appScoped = { sessionId: z.string().optional() }
 
-/**
- * The **message number within the session** that the host assigns when it records this event
- * (the store's messages.seq).
- *
- * Unread tracking (lastSeq/lastReadSeq) must only ever use this number. The UI's render key is a
- * counter shared across all sessions, and if that value leaks into a per-session lastSeq,
- * viewing a large session inflates a small session's stored last_read_seq, **permanently turning
- * off its unread badge** (measured). This is only attached to events that get recorded (a
- * different number from the envelope's global broadcast seq).
- */
+// The session's message number, assigned when the host records the event (messages.seq), not the envelope's seq.
+// Unread tracking uses only this: the UI's render key leaking into lastSeq turned a session's unread badge off for good
+// (measured)
 const persistedSeq = { seq: z.number().optional() }
 
 /**
- * The number of app screens allowed to be alive at once in one conversation (M4 B-1, the plan's
- * "cap the number of recently live inline conversation screens"). Once the cap is exceeded, the
- * longest-alive screen collapses into a placeholder after teardown. The host (the instance and
- * the app it holds onto) and the UI (the frame it draws) both keep to this same number — if only
- * one side enforces it, it leaks on the other (the host must release the app even with no UI
- * present, and the UI must trim frames even when the host's notification is late).
+ * App screens alive at once in one conversation; past it the longest-alive collapses to a placeholder. Host and UI
+ * both keep to it: the host releases the app with no UI present, the UI trims frames when the host's word is late
  */
 export const APP_VIEWS_LIVE_PER_SESSION = 3
 
 /**
- * The `label` of the notice that says a Stop has not taken effect (#1060): the tool refused the interrupt or did not
- * confirm it in time, and the turn is still running. A notice rather than an error, since an error ends the turn on
- * screen. The UI's Stop button reads it to stop saying "Stopping…" and show why.
+ * The notice `label` for a Stop the tool refused or did not confirm in time, the turn still running: a notice, since an
+ * error ends the turn on screen. The Stop button reads it to stop saying "Stopping…"
  */
 export const STOP_NOT_CONFIRMED_LABEL = 'stop not confirmed'
 
-/** One message a mail delivery's line stands for (#2333): its id, and the chain it is in (`mail.thread`'s `threadId`, the chain's root) */
+/** One message a mail delivery's line stands for; `threadId` is its chain's root (`mail.thread`) */
 export const MailDelivered = z.object({ threadId: z.string(), messageId: z.string() })
 export type MailDelivered = z.infer<typeof MailDelivered>
 
 /**
- * The owner of the call that produced an external app's "changed" event (M4 B-5) — exactly the
- * shape of the host runtime's caller (`AppCaller`). If a screen made the call, that screen's
- * instance id is carried here. That screen never hears its own change again — it already
- * received it as the call's response.
- *
- * The shape is not narrowed tightly. If a new kind of caller is added later and this field
- * causes the event to fail validation, an open screen would never receive its update again. All
- * the receiving side actually reads is `view`'s `instanceId`.
+ * The caller (`AppCaller`) of the call behind an app's "changed" event: the screen that made it already has the change
+ * as its answer, and does not hear it again. Loose, so a new caller kind does not fail the event and leave open screens
+ * without updates; only `view`'s `instanceId` is read
  */
 export const AppChangeCause = z.looseObject({ kind: z.string(), instanceId: z.string().optional() })
 export type AppChangeCause = z.infer<typeof AppChangeCause>
 
-/**
- * A chunk of the assistant's reply. `messageId` names the message the chunk belongs to, where the tool says
- * so (codex: the agentMessage item id). The host keeps one open row per session and grows it with every
- * chunk until a recorded event closes it. A chunk whose `messageId` differs from the open row's starts a new
- * row, so two messages with nothing recorded between them stay two rows (#212). Absent means "the same
- * message as before".
- */
+// `messageId`, where the tool says it (codex: the agentMessage item id): a chunk of another message than the host's open
+// row starts a new row, so two messages with nothing recorded between them stay two. Absent: the same message
 const MessageDelta = z.object({
   ...base,
   ...persistedSeq,
@@ -109,18 +76,8 @@ const MessageDelta = z.object({
   messageId: z.string().optional(),
 })
 
-/**
- * Only as much of the model's reasoning as is actually visible (measured in #58, 2026-08-26).
- *
- * The two tools produce different things — which is why both fields are optional:
- *   codex: a summary **text** is streamed (item/reasoning/summaryTextDelta, but only if the
- *          thread config has model_reasoning_summary turned on) → text
- *   claude: the thinking body is encrypted as a whole, so there is no text — thinking_delta
- *          only ever carries estimated_tokens → estTokens (incremental)
- * Content that does not exist is never faked: if text is present, it is even kept in the
- * record (kind 'reasoning'); if only estTokens is present, it only lives as a "thinking ~N"
- * progress indicator and disappears once the turn ends.
- */
+// Only the reasoning a tool shows (measured): codex streams a summary `text` (with model_reasoning_summary on), which is
+// recorded; Claude's thinking is encrypted, so only `estTokens`, a "thinking ~N" that goes when the turn ends
 const ReasoningDelta = z.object({
   ...base,
   ...persistedSeq,
@@ -129,23 +86,8 @@ const ReasoningDelta = z.object({
   estTokens: z.number().optional(),
 })
 
-/**
- * A tool call and its result. `summary` is what the card shows; `input` and `output` are the whole record (#221).
- *
- *   input   the tool's raw input as the tool received it: a Bash command with its options, the full content of a
- *           Write, both sides of an Edit, the arguments of an MCP call, Codex's file changes with their diffs
- *   output  the whole text the tool answered, uncut. Images are not in it: they are kept as attachments (#40)
- *
- * The tools' own files do not last (Claude Code deletes a transcript after 30 days without activity), so the store
- * keeps the whole record. Rows stored before #221 have neither field: they hold the card's preview only, the first 300
- * characters of a result (Claude) or 2,000 (Codex), and only the path of a file edit.
- *
- * **Both are for the store only.** The host strips them from everything it sends (the live broadcast, the history
- * pages) and from every stored message it reads back unless the reader asks for them by name
- * (`Store.loadMessages`). Full tool output reaching another session's prompt is the privilege path #73 closed:
- * `read_session`, `recall`, the handoff record and the Assistant's memory read `summary` and nothing else. And
- * an agent `cat`-ing a large file would otherwise ride every page load. Neither field is in the search index.
- */
+// `summary` is the card; `input` and `output` are the record, for the store only: the host strips them from all it
+// sends (docs/protocol.md §2; why: docs/security-boundaries/untrusted-text.md "Tool output in the store")
 const ToolCall = z.object({
   ...base,
   ...persistedSeq,
@@ -165,80 +107,30 @@ const ToolResult = z.object({
   output: z.string().optional(),
 })
 
-/**
- * What a native subagent did, one step of it (#222): its text, its reasoning, a tool call it made, that call's result.
- * The shapes are the parent's own events, so the store keeps a subagent's step as it keeps the parent's and the screen
- * draws it the same way. Each step is whole: Claude forwards a subagent's text a block at a time, and Codex's child
- * items are read when they complete, so there are no chunks to join.
- */
+/** One whole step of a native subagent, in the parent's own shapes (docs/protocol.md §2) */
 export const SubagentStep = z.discriminatedUnion('type', [MessageDelta, ReasoningDelta, ToolCall, ToolResult])
 export type SubagentStep = z.infer<typeof SubagentStep>
 
-/**
- * The calls that launch a native subagent (#222): Claude Code's `Agent` tool (`Task` in older Claude Code) and Codex's
- * `spawnAgent` collab call. The card of such a call is where the subagent's steps are kept and shown.
- */
+/** Claude Code's `Agent` tool (`Task` in older Claude Code) and Codex's `spawnAgent` collab call */
 const SUBAGENT_LAUNCH_TOOLS: ReadonlySet<string> = new Set(['Agent', 'Task', 'spawnAgent'])
 export const launchesSubagent = (tool: string): boolean => SUBAGENT_LAUNCH_TOOLS.has(tool)
 
 export const NormalizedEvent = z.discriminatedUnion('type', [
   MessageDelta,
   ReasoningDelta,
-  /**
-   * The current state of a plan the agent set (measured in #58, codex turn/plan/updated; Claude Code's TodoWrite list or
-   * its TaskCreate/TaskUpdate task list, #843).
-   *
-   * **A full snapshot arrives every time** — not a delta, so the receiving side never needs to
-   * remember the prior state (the same reason as settings_changed). Measured: a plan never
-   * arrives as an item — discarding this notification would mean codex's plan-tool usage never
-   * shows up anywhere on screen.
-   *
-   * The absence of persistedSeq is a decision: this is a progress indicator, not an answer — it
-   * lives on screen only, with the same lifetime as activity, and disappears once the turn ends.
-   * (The only explanation ever measured was null, so it is not carried here — it can be added
-   * once one is actually observed.)
-   */
+  // A full snapshot each time, never a delta. No persistedSeq: a progress indicator that goes when the turn ends.
+  // Measured: codex's plan never arrives as an item, and its explanation was only ever null, so it is not carried
   z.object({
     ...base,
     type: z.literal('plan_update'),
     steps: z.array(z.object({ text: z.string(), status: z.enum(['pending', 'inProgress', 'completed']) })),
   }),
-  /**
-   * A chunk of output from a running tool (measured in #58, codex item/commandExecution/outputDelta).
-   *
-   * Not recorded, since the tool_result at completion time carries the whole thing again as
-   * aggregatedOutput — this is only a display-only chunk showing "what is coming out right now."
-   * (Measured: the first chunk can be consumed before the stream attaches — treat this as
-   * evidence that something is alive, not as a complete copy.)
-   *
-   * A sub-agent's steps also arrive through this path (#98): callId is the Agent call that
-   * spawned it, and text is one line per step. These are not queued into the parent's
-   * conversation — they attach only to that card. The receiving side must find the owner by
-   * callId (finding it by position would attach it to someone else's open card).
-   */
+  // Not recorded: the tool_result carries it all again, and the first chunk can be gone before the stream attaches
+  // (measured). A Claude subagent's steps come here too, one line each, on its launching call: find the card by callId,
+  // not by position, or it lands on someone else's open card
   z.object({ ...base, type: z.literal('tool_output_delta'), callId: z.string(), text: z.string() }),
-  /**
-   * A step a native subagent took (#222) — Claude Code's `Agent` tool, Codex's `spawn_agent` child thread.
-   *
-   * **One wrapper kind, not a flag on the parent's events.** With a flag that every reader of `tool_call` has to
-   * remember to check, the first reader that forgets puts a subagent's tool call in the parent's conversation as if
-   * the parent had made it (#98). A reader that does not know this kind skips it (§4 of
-   * docs/protocol.md: an unknown type is ignored), so the conversation, the state machine, unread and the turn logic
-   * stay the parent's without a line of code each.
-   *
-   *   parentCallId  the call that launched the subagent: Claude's `Agent` tool_use id (`parent_tool_use_id` on the
-   *                 subagent's messages), Codex's `spawnAgent` collab item id (whose `receiverThreadIds` names the
-   *                 child thread). A subagent that launches its own is tagged with its own launch call, a card inside
-   *                 the first one's steps
-   *   step          the step, in the parent's own event shapes (`SubagentStep`), `input` and `output` included until
-   *                 it leaves the host (`withoutToolRecord`)
-   *   stepSeq       its number among this launch's steps, set by the host when it stores the step. Not a session
-   *                 `seq`: a subagent's steps are not the conversation, and never count as unread
-   *
-   * The host keeps the steps apart from the conversation (`subagent_messages`, read only by asking for one launch
-   * card's steps) and out of the search index. The one-line-per-step progress on a running Claude agent's card is
-   * still `tool_output_delta`.
-   */
+  // A wrapper kind, not a flag on the parent's events (docs/protocol.md §2). `stepSeq` is its number among the launch's
+  // steps, not a session `seq`: the steps are not the conversation and never count as unread
   z.object({
     ...base,
     type: z.literal('subagent_event'),
@@ -246,75 +138,32 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     step: SubagentStep,
     stepSeq: z.number().optional(),
   }),
-  /**
-   * A person's message was added to the conversation.
-   *
-   * **The UI is not the only producer of user messages**: the Assistant's send_to_session adds
-   * them too, and a message that never passed through the UI appears on screen only through this
-   * event (without it, it is saved but never drawn).
-   *
-   * Why seq is sent along: the sending UI has already drawn the message optimistically, so it
-   * must not draw the same message twice. The receiving side needs a way to tell that apart.
-   */
+  // The UI is not the only producer: the Assistant's send_to_session adds messages it draws only from this event. The
+  // sending UI drew its own already and tells it apart by `seq`
   z.object({
     ...base,
     type: z.literal('user_message'),
     seq: z.number(),
     text: z.string(),
-    /*
-     * The origin (FR-11). Absent means the person typed it directly — which is why it is
-     * optional and stays compatible with old frames. Only two places fill it in: the
-     * Assistant's send_to_session, and a worker's completion report (reportBack).
-     * The screen uses this value to draw "a message that arrived via instruction" differently
-     * from the person's own words.
-     */
+    // Absent: the person typed it. Set only by the Assistant's send_to_session and a worker's reportBack
     from: z.object({ sessionId: z.string(), name: z.string() }).optional(),
-    /*
-     * A message sent by an inline conversation app screen (M4 B-1, B-4). A person read it and
-     * chose to send it, but **an app wrote it** — the screen uses this value to draw it
-     * differently from the person's own words. What reaches the agent is the shape the host
-     * wraps as "app text" (the same rule as #120: text from another party is marked wherever it
-     * is carried). Kept separate from `from` since this is not a session.
-     */
+    // A person chose to send it, but an app wrote it, so it is drawn as the app's and reaches the agent framed as app text
+    // (docs/security-boundaries/untrusted-text.md "Text an app sends")
     fromApp: z.object({ appId: z.string(), projectId: z.string().nullable(), name: z.string() }).optional(),
-    /*
-     * A first message a script wrote (#1347 slice 3, §8.1): a process holding the limited credential started the session with it. The
-     * person did not type it, and its text can carry outside words (a CI log, an issue title), so the screen draws it as the script's
-     * and not as the person's bubble. `credential` is what the connection called itself in its hello, cut to a plain label by the host
-     * (`scriptLabel`); written by the host from the connection, never from a field of the call. Additive: an older reader draws it as a message.
-     */
+    // A first message a script wrote with the limited credential: it can carry outside words, so it is drawn as the
+    // script's. `credential` comes from the connection's hello (`scriptLabel`), never from the call. An older reader
+    // draws it as a message
     fromScript: z.object({ credential: z.string() }).optional(),
-    /*
-     * Attachments carried along with it (M4 C-5). Not needed for text the UI sends, since the
-     * screen has already drawn it together with its attachments. For text inserted by the host,
-     * such as text from the composer under an app screen, this event is the only way it ever
-     * appears on screen — without it, a pasted screenshot would be missing from the message
-     * bubble until the record is reread. Only the path and name — the image bytes are loaded
-     * again by the host when the record is read.
-     */
+    // For text the host inserts (the composer under an app screen) this event is the only way on screen. Path and name
+    // only: the host loads the bytes again when the record is read
     attachments: z.array(Attachment).optional(),
   }),
   ToolCall,
   ToolResult,
-  /**
-   * An inline conversation app screen (M4 B-1) — a session's agent called an app tool **that has
-   * a screen attached**. The screen stands under that call's card (`callId`, the same id as the
-   * adapter's `tool_call`).
-   *
-   *   open       the host opened a screen instance. Carries `instanceId` and the tool input (`toolInput`)
-   *   result     the call finished. The app's own answer, unchanged (`toolResult`) — becomes the screen's tool-result
-   *   cancelled  it ended without an answer (cancelled, rejected, or the app failed to start). `reason` becomes the screen's tool-cancelled
-   *   rejected   the screen was never opened — the screen the tool declared does not belong to that app (blocking impersonation). Carries a reason
-   *   closed     the host closed the instance (the cap, the app disappearing, losing trust). The screen collapses into a placeholder after teardown
-   *
-   * `kept` is carried on result and cancelled: whether the host is holding the input and result
-   * so the screen can be reopened **without calling the tool again** (`apps.inlineReopen`). Not
-   * held if the result is too large.
-   *
-   * Only open and rejected are kept in the record (`seq`) — no body (input, result), only the
-   * fact that "some app's screen stood at this card." A freshly reopened UI uses that to plant a
-   * placeholder. The result body only ever lives in the host's memory.
-   */
+  // An app screen under a tool call's card (`callId`). Phases: open (`instanceId`, `toolInput`); result (the app's
+  // answer as is); cancelled (no answer, `reason`); rejected (the declared screen is not that app's: impersonation);
+  // closed (the cap, the app gone, trust lost). `kept`: the host holds input and result for `apps.inlineReopen`, unless
+  // too large. Only open and rejected are recorded, with no body: a reopened UI plants a placeholder from them
   z.object({
     ...base,
     ...persistedSeq,
@@ -344,13 +193,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     requestId: z.string(),
     decision: ApprovalDecision,
   }),
-  /*
-   * The agent presented a set of choices (AskUserQuestion).
-   *
-   * Why this is **a different event** from an approval: an approval is yes or no, while this is
-   * several questions times several options, and the answer has to go back to the model.
-   * Forcing this onto the approval card would break both.
-   */
+  // Not an approval: several questions of several options, and the answer goes back to the model
   z.object({
     ...base,
     type: z.literal('question_request'),
@@ -358,52 +201,26 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     questions: z.array(Question),
   }),
   z.object({ ...base, type: z.literal('question_resolved'), requestId: z.string() }),
-  /*
-   * The agent produced an image in the conversation (#40).
-   *
-   * Folds the two measured cases into one: Claude carries it as base64 inside tool_result (a
-   * screenshot, an image Read), while Codex carries **only a path** in an imageView item — for
-   * the path case, the adapter reads the file and fills in data before emitting it. The UI
-   * always draws the same single shape (a data URL).
-   *
-   * Recorded as a row of its own (#40: the bytes in an attachments file, the path in the row),
-   * and announced with that row's number (#868), as every
-   * recorded event is: a re-read of history matches the image by number, since the stored row holds
-   * a path and no bytes.
-   *
-   * If data is empty, note states why (too large, failed to read — a failure should be visible).
-   */
+  // Claude carries an image as base64 in tool_result; Codex only as a path, which the adapter reads. Recorded with the
+  // bytes in an attachments file, so a history re-read matches the image by seq. Empty `data`: `note` says why
   z.object({
     ...base,
     ...persistedSeq,
     type: z.literal('message_image'),
     mime: z.string(),
-    /** base64. Empty means display failed — see note */
+    /** base64 */
     data: z.string(),
-    /** If the image exists on disk, its source path (Codex imageView) */
+    /** Codex imageView's source path */
     path: z.string().optional(),
-    /** The file the agent viewed, as its path: `path` of a stored row is the host's own copy of it (#1464) */
+    /** The file the agent viewed: a stored row's `path` is the host's own copy of it */
     name: z.string().optional(),
     note: z.string().optional(),
   }),
-  /**
-   * The turn ended.
-   *
-   * `output` is only carried **when this turn answered against a schema** (M4 D-1, an app's
-   * requested agent's `schema`). Claude only ever gives structured output as the turn's outcome
-   * (`result.structured_output`), never as text in the conversation — measured (SDK 0.3.263, CLI
-   * 2.1.282): the model first answered in text with "Red and yellow.", and only after the CLI
-   * told it again to call the tool did it produce JSON via the `StructuredOutput` tool. So
-   * reading only the last piece of text never yields the answer. Codex is not carried here,
-   * since its last message is the JSON itself.
-   */
+  // `output`: only for a turn answered against a schema (an app's agent's `schema`). Claude gives it only as the turn's
+  // `result.structured_output`, never as conversation text (measured, SDK 0.3.263, CLI 2.1.282). Codex's last message is
+  // the JSON itself
   z.object({ ...base, ...endsTurn, type: z.literal('turn_complete'), output: z.unknown().optional() }),
-  /**
-   * Why the session's last turn did not run to its end changed (#698): set when a turn stops for a network failure, a
-   * quit or an interrupt nobody here asked for, or when the tool has been reconnecting for too long; `null` once the
-   * session works again. The host decides it and keeps it on `SessionInfo.interruption`; this event carries the change
-   * to windows already open. Not recorded: the conversation already has the error, or the host's marker for a quit.
-   */
+  // Not recorded: the conversation already has the error, or the host's marker for a quit
   z.object({ ...base, type: z.literal('interruption'), interruption: Interruption.nullable() }),
   z.object({
     ...base,
@@ -414,22 +231,12 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     origin: TurnOrigin.optional(),
     continues: TurnContinues.optional(),
   }),
-  /**
-   * Whether the session's agent process runs (`SessionInfo.live`) changed outside an answer to the screen's own call
-   * (#568): the host put an idle session to sleep (`reason: 'asleep'`, its process ended, the conversation stays and
-   * the next message resumes it), or a resume brought it back (`live: true`), whoever asked for it. Lists and the
-   * answer to the window that woke a session carry `live` too; this event is what reaches every other window, and a
-   * session woken by the assistant or an app.
-   */
+  // How every window but the caller's learns that `SessionInfo.live` changed
   z.object({
     ...base,
     type: z.literal('session_live'),
     live: z.boolean(),
-    /**
-     * Why the process went away, when `live` is false (#568, #648): `asleep` (an idle session put to sleep),
-     * `restart_failed` (the host replaced the process and the new one did not come up), `crashed` (the process ended
-     * on its own). Absent when `live` is true.
-     */
+    /** `restart_failed`: the host replaced the process and the new one did not come up */
     reason: z.enum(['asleep', 'restart_failed', 'crashed']).optional(),
   }),
   z.object({
@@ -437,9 +244,8 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     type: z.literal('usage_update'),
     tokens: TokenUsage,
     /**
-     * One model request's input, when this reading closes one (prompt cache accounting, docs/agent-host/prompt-cache.md).
-     * `tokens` is a running reading; this is the request alone, sent once per request. Absent on readings that do
-     * not close a request (Claude's turn result, a Codex repeat).
+     * One model request's input, once per request (docs/agent-host/prompt-cache.md); `tokens` is a running reading.
+     * Absent on readings that close no request (Claude's turn result, a Codex repeat)
      */
     request: RequestInput.optional(),
   }),
@@ -449,19 +255,12 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     used: z.number(),
     window: z.number(),
     exactness: z.enum(['exact', 'estimate']),
-    /**
-     * The model the tool resolved the session's model name to (Claude's CLI: an alias such as `haiku` or the project's default
-     * names a different model over time), when it says. With the window it is what `ModelWindows` keeps per model (#1376).
-     */
+    /** What the tool resolved the model name to: Claude's alias or the project's default names other models over time */
     model: z.string().optional(),
     /**
-     * (#1553) `window` is the model's full context window as the host says it, so the share is used / the model's window whatever
-     * the tool reported (Claude's CLI reports the smaller of the model's window and the compaction point it was started with).
-     * The host sets `window` and `capped`; `capped`: the full window is not known (an adopted process with no kept ceiling, a model
-     * name that moved to another model), so `window` is only the tool's own reading, a floor under the model's.
-     * `compactAt`: the size in tokens at which this session's process compacts by itself, said by the adapter of a process Centralu's
-     * control started (Claude: the CLI's own threshold from every reading; Codex: the limit it was started with). The host drops one
-     * that is not under `window`.
+     * `window` is the model's full window as the host says it: Claude's CLI reports the smaller of it and its compaction
+     * point. `capped`: not known, so `window` is the tool's reading, a floor. `compactAt`: where this process compacts by
+     * itself (Claude: the CLI's threshold; Codex: its start limit); the host drops one not under `window`
      */
     capped: z.boolean().optional(),
     compactAt: z.number().optional(),
@@ -470,90 +269,48 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     ...base,
     ...endsTurn,
     type: z.literal('limit_reached'),
-    /** ISO8601. The tool's reported expected reset time (FR-9) */
+    /** ISO8601, the tool's expected reset */
     resumeAt: z.string().optional(),
-    /** Provided by Codex (confirmed at M0) */
+    /** Codex only */
     usedPercent: z.number().optional(),
     windowMins: z.number().optional(),
-    /** A limit on credits or spend (Codex), which no time resets: never continued by itself (#1415) */
+    /** A limit on credits or spend (Codex), which no time resets: never continued by itself */
     credits: z.boolean().optional(),
   }),
-  /**
-   * A session's name changed.
-   *
-   * **Who set it travels along with the change.** A receiver that decides from its own state
-   * alone ("is this session's name currently automatic") applies a person's first edit and
-   * **silently drops every later one**: the first edit turns autoNamed off.
-   *
-   * auto=false means "a person set this," and an automatic name never overwrites it again
-   * (FR-18). Omitted means it is an automatic name, which is how a frame from an older host
-   * reads.
-   */
+  // Who set the name travels with it: a receiver judging from its own autoNamed state drops every edit after a person's
+  // first. `auto` false: a person's, never overwritten (FR-18); absent, as from an older host: automatic
   z.object({ ...base, type: z.literal('session_title'), title: z.string(), auto: z.boolean().default(true) }),
-  /** For detecting concurrent-session conflicts and highlighting recently modified files (FR-2, FR-5) */
   z.object({ ...base, type: z.literal('files_touched'), paths: z.array(z.string()) }),
-  /** What it is busy doing right now — null means an ordinary wait for a reply */
+  // Null: an ordinary wait for a reply
   z.object({ ...base, type: z.literal('activity'), activity: SessionActivity.nullable() }),
-  /** Context compaction happened — leaves a marker in the conversation (FR-14) */
   z.object({
     ...base,
     ...persistedSeq,
     type: z.literal('compaction'),
-    /**
-     * A failure is also recorded as a marker. Passing over it silently would let the
-     * conversation continue uncompacted while the person has no way to know why the context
-     * never shrank (measured: "Not enough messages to compact.").
-     */
+    /** Recorded too, or the person cannot tell why the context never shrank (measured: "Not enough messages to compact.") */
     failed: z.boolean().default(false),
     reason: z.string().optional(),
-    /** How much it shrank. Only when the tool reports it (Claude compact_metadata) */
+    /** Only when the tool reports it (Claude compact_metadata) */
     before: z.number().optional(),
     after: z.number().optional(),
     /**
-     * Who started it, when the tool says (Claude's `compact_metadata.trigger`): `manual` is a `/compact` (the person's or
-     * Centralu's, #1451), `auto` the tool's own at its threshold. Centralu does not take an `auto` one for its own. Codex does
-     * not say why; its adapter says `manual` for a compaction inside the compact turn the session started, `auto` otherwise (#1500).
+     * Claude's `compact_metadata.trigger`: `manual` is a `/compact` (the person's or Centralu's), `auto` the tool's at its
+     * threshold, never taken as Centralu's. Codex does not say; its adapter says `manual` inside the session's compact turn
      */
     trigger: z.enum(['manual', 'auto']).optional(),
   }),
-  /**
-   * The tool started a fresh conversation inside this session (#304): Claude Code's `/clear`, measured
-   * (`conversation_reset {new_conversation_id, trigger: 'clear'}`, then an `init` with a new `session_id`). The SDK
-   * says plan-mode exit and other fresh-session flows send it too, with another `trigger`.
-   *
-   * Recorded as a marker, like compaction: our record keeps everything above it, but the model no longer knows any of
-   * it, and nothing on screen said so. The context gauge empties with it (the tool reports the new, smaller number when
-   * the command's turn ends).
-   */
+  // Claude Code's `/clear` (measured: this, then an `init` with a new `session_id`); per the SDK, plan-mode exit and other
+  // fresh-session flows too, with another `trigger`. A marker (docs/protocol.md §2)
   z.object({
     ...base,
     ...persistedSeq,
     type: z.literal('conversation_reset'),
-    /** The tool's word for what caused it — `clear` for `/clear`; absent when the tool did not say */
     trigger: z.string().optional(),
   }),
-  /**
-   * Text the agent tool wants the person to read (#304), one line in the conversation.
-   *
-   *   Claude    `system/informational` (a hook's block reason, say) and `system/notification`; the refusal pair
-   *             (`model_refusal_fallback`, `model_refusal_no_fallback` when its turn did not fail)
-   *   Codex     `warning`, `configWarning`, `deprecationNotice`, `guardianWarning`, `model/rerouted`, an MCP server
-   *             that failed to start (`mcpServer/startupStatus/updated`), and a thread whose settings another client
-   *             changed
-   *
-   * `text` is the tool's own sentence where it has one: rewording it into ours would lose the cause, the same rule as an
-   * error marker. `level` is the tool's urgency folded into three words; an unknown word from a newer host reads as
-   * `info` rather than failing the event.
-   *
-   * `oncePerSession` is for text that repeats every time the tool starts but says the same thing each time: Codex's
-   * configuration warnings arrive on every app-server start and every thread start or resume (measured, codex-cli
-   * 0.160.0: an unknown `config.toml` key sent `configWarning` and `warning` with the same text). The host stores and
-   * sends such a notice only if the session has no stored notice with the same text yet.
-   *
-   * The fields below `oncePerSession` make the line readable (#342): who is speaking, what kind of notice it is, who
-   * has to act, and for a notice the host recognizes, a plain explanation first with the tool's own words on demand.
-   * All are optional: a notice stored before #342, or one the host cannot place, is drawn from `text` alone.
-   */
+  // Text the tool wants the person to read, one line (docs/protocol.md §2). From Claude: `system/informational`,
+  // `system/notification`, `model_refusal_fallback` and `model_refusal_no_fallback` when its turn did not fail. From
+  // Codex: `warning`, `configWarning`, `deprecationNotice`, `guardianWarning`, `model/rerouted`, an MCP server that
+  // failed to start, a thread another client changed. `oncePerSession` measured with codex-cli 0.160.0
   z.object({
     ...base,
     ...persistedSeq,
@@ -561,243 +318,105 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     level: z.enum(['info', 'warning', 'error']).catch('info'),
     text: z.string(),
     oncePerSession: z.boolean().optional(),
-    /** Who is speaking, as the person knows the tool: `Codex`, `Claude Code` */
     from: z.string().optional(),
-    /** What kind of notice, in a few words: `config warning`, `deprecation`, `warning`; for Centralu's own lines, what happened (`next step after compaction`) */
     label: z.string().optional(),
-    /**
-     * Who has to act. `you`: the person's own setup (their `config.toml`, an MCP server they added). `centralu`: how
-     * Centralu uses the tool, which the person cannot change. Absent when the host cannot tell; an unknown word from a
-     * newer host reads as absent.
-     */
     audience: z.enum(['you', 'centralu']).optional().catch(undefined),
-    /** A plain one-line explanation in Centralu's words. When present, `text` is shown only on demand */
     summary: z.string().optional(),
     /** What the explanation names, one per line (the settings Codex ignored) */
     items: z.array(z.string()).optional(),
-    /** What would make the notice go away, or that nothing needs doing */
     hint: z.string().optional(),
-    /**
-     * A mail delivery's line (`label: 'mail'`, #2333): the messages it delivered, each with the chain it is in (`mail.thread`'s `threadId`), so the
-     * window can fold the line open to show them. Absent from an older host, from a row stored before it and from the mailbox's other lines: the line
-     * then does not fold. Malformed, it reads as absent
-     */
     mail: z.array(MailDelivered).optional().catch(undefined),
   }),
-  /**
-   * This session was born from a handoff, and the predecessor's note is pinned here (#102).
-   *
-   * **A record is needed for the same reason as the compaction marker**: the first message
-   * carries only the note's path, not its text. A note the agent wrote cannot be recreated once
-   * its author is gone, so it is kept somewhere that outlives the file.
-   *
-   * `note` being optional is deliberate — **it is never carried in a broadcast.** A note can run
-   * to megabytes, and all that ever gets drawn on screen is a one-line marker. The raw text
-   * lives only in the stored payload.
-   */
+  // The predecessor's note, pinned in a session born from a handoff: the first message carries only the note's path, and
+  // a note cannot be made again once its author is gone. `note` is never broadcast (it can run to megabytes)
   z.object({
     ...base,
     ...persistedSeq,
     type: z.literal('handoff'),
-    /** The predecessor session's name — the only value written into the marker */
+    /** The only value written into the marker */
     from: z.string(),
     note: z.string().optional(),
-    /**
-     * The predecessor session's id (#106) — only carried in the stored marker. This is the only
-     * way to know whose name the note file this session inherited is filed under, and it is the
-     * basis for orphan cleanup at startup.
-     */
+    /** Stored marker only: whose name the inherited note file is under, for orphan cleanup at startup */
     fromSessionId: z.string().optional(),
   }),
-  /** Caught up on a conversation continued from outside — the signal for the UI to reread the record */
-  /**
-   * The Assistant changed this session's settings (#30).
-   *
-   * A change a person made on screen returns as the RPC response, so no event is needed for
-   * that — this path exists for a change made by **a hand other than the person's own**. A
-   * settings change with no trace is exactly the silent-action problem this codebase has fixed
-   * over and over, so it is broadcast along with the values and left as a toast. All three are
-   * snapshots (the full new value) — a delta would force the receiving side to remember the
-   * prior value.
-   */
+  // Another hand than the person's (the Assistant, the tool, another client): a change with no trace is the silent
+  // action this codebase keeps fixing. Values are snapshots
   z.object({
     ...base,
     type: z.literal('settings_changed'),
     model: z.string().nullable(),
     effort: z.string().nullable(),
     verbosity: z.string().nullable(),
-    /** Response speed. Follows the same snapshot rule as the three above — optional since old frames lack it */
+    /** Response speed; absent from an older host */
     serviceTier: z.string().nullable().optional(),
-    /**
-     * The permission preset after the change (#659). A snapshot like the four above; absent on frames that
-     * predate it and on a tool's own switch, which never touches it. The receiving side keeps its value then.
-     */
+    /** Absent from an older host and on a tool's own switch, which never touches it: the receiver keeps its value */
     permissionPreset: PermissionPreset.optional(),
-    /**
-     * Whose hand it was (#304). Absent means the Assistant, as from a host that predates this field.
-     *
-     * `tool` means the agent tool switched by itself, mid-session: Claude Code falling back to another model after a
-     * refusal (`model_refusal_fallback`), another Codex client changing the thread's settings
-     * (`thread/settings/updated`). The process already runs with the new value, so the host records it without a
-     * restart and the screen updates the model shown without a toast: a `notice` in the conversation says why.
-     * From an adapter, the snapshot is the adapter's own view; the host applies only the fields that differ from what
-     * the process was launched with, and re-sends its full snapshot.
-     */
+    /** Absent: the Assistant. `tool`: the tool switched by itself (docs/protocol.md §2) */
     // `assistant`: the same as `orchestrator`, under the role's new name, which a host of a later release sends (#2133)
     by: z.enum(['orchestrator', 'tool', 'assistant']).optional(),
-    /**
-     * A client changed it through `agents.updateSettings` (#659). The caller already has the answer, but every other
-     * window, linked machine and the person's own window (when an agent made the call) only learns it from this event.
-     * It updates the values shown without the "Assistant changed" toast: nobody else's hand was involved, and the
-     * caller's own toast states what it did.
-     *
-     * **A separate flag, not a third `by` word**: a build from before it parses this frame against a `by` enum without
-     * the new word, and a frame that fails to parse is dropped whole. As a flag it is stripped as an unknown key, and
-     * that build still updates the values (and raises one toast, as it did for any change not made by a tool).
-     */
+    /** A client's `agents.updateSettings`: no toast. A flag, not a `by` word, which an older build fails to parse (§2) */
     person: z.boolean().optional(),
   }),
+  // Caught up on a conversation continued from outside — the signal for the UI to reread the record
   z.object({ ...base, type: z.literal('history_synced'), added: z.number() }),
-  /** The session was deleted — the list must stay correct in other windows and after a reconnect too */
   z.object({ ...base, type: z.literal('session_deleted') }),
-  /**
-   * A session was created **on the host side** (#69).
-   *
-   * A session the UI creates directly is known through the RPC response; this event announces one
-   * the host creates on its own — the manager a worktree-orphan adoption stands up, or the
-   * Assistant's create_session. An event for an unknown session waits in a holding area
-   * (pendingEvents) until the session is registered, so without this event it waits forever, and
-   * the session shows only via listSessions after a reconnect, against the create_session tool's
-   * own description, which says it appears in the list right away.
-   */
+  // A session the host made itself (an adopted worktree orphan's manager, create_session); a UI's own comes in its RPC
+  // answer. Events of a session not yet registered wait in pendingEvents until this arrives
   z.object({ ...base, type: z.literal('session_created'), session: z.unknown() }),
-  /**
-   * Who a session belongs to changed (#693): a handoff moved the original's children to the session that took
-   * over, so the sidebar hangs them under it. Carries the session's `askedBy` and `parentSessionId` as they are now.
-   */
+  // A handoff moved the original's children to the session that took over
   z.object({
     ...base,
     type: z.literal('session_owner'),
     askedBy: z.string().nullable(),
     parentSessionId: z.string().nullable(),
   }),
-  /**
-   * A worktree branch's work has fully landed in the project trunk (#69). Detection is done by
-   * the host (at startup, and on a project git refresh), and the screen turns on a badge.
-   * Cleanup (removing the tree) is done by the person, through the delete conversation — this
-   * event only announces the fact; it is not an action.
-   */
+  // The branch's work landed in the trunk, found by the host (at startup, on a git refresh). A fact for the badge, not an
+  // action: the person removes the tree
   z.object({ ...base, type: z.literal('worktree_merged') }),
-  /**
-   * The PR status for a worktree branch became known (#76 stage 3). An announcement measured
-   * through gh — the same shape as worktree_merged: it announces a fact, not an action. If the
-   * PR is merged (including a squash merge), worktree_merged follows — this event is only the
-   * basis for the badge (number, state, link).
-   */
+  // Read through gh; a merged PR (a squash too) is followed by `worktree_merged`
   z.object({
     ...base,
     type: z.literal('worktree_pr'),
     pr: z.object({ number: z.number(), state: z.enum(['open', 'merged', 'closed']), url: z.string() }),
   }),
-  /**
-   * A goal status announcement (2026-09-07). Null means it was cleared (including by being
-   * achieved) — the tool makes the judgment; we only carry it. Codex announces it
-   * (thread/goal/updated|cleared). Claude's CLI does not announce it to a headless session
-   * (2026-10-03), so its adapter reads it from the CLI's own replies to /goal, its Stop hook
-   * feedback, and the end of a turn the goal drove (adapters/claude `ClaudeGoalTracker`). This is a
-   * live-only fact: after a restart, codex re-asks via thread/goal/get; a Claude process swapped
-   * inside one host run is handed the goal the host knew, and after a host restart Claude's badge
-   * comes back once the person sends `/goal` (the CLI restores the goal itself, silently).
-   */
+  // Null: cleared or achieved, as the tool judges. Codex announces it; Claude's CLI does not to a headless session
+  // (measured), so its adapter reads the /goal replies, Stop hook feedback and goal-driven turn ends
+  // (`ClaudeGoalTracker`). Live-only: codex re-asks after a restart; a swapped Claude process is handed the goal, and
+  // after a host restart Claude's shows once the person sends `/goal` (the CLI restores it silently)
   z.object({ ...base, type: z.literal('goal'), goal: SessionGoal.nullable() }),
-  /**
-   * The session's background work changed (#290). A level, not an edge: `live` is every running task after the
-   * change and replaces the previous set, so a missed message cannot leave a task "running" forever. `ended` carries
-   * the tasks that just left, with how they ended (completed, failed, stopped) — they stay listed with that status.
-   * `clearEnded` is the host's own: the person cleared the ended ones. Apply it with `applyBackgroundTasks`.
-   *
-   * Live-only, like `goal`: never stored, and a new tool process starts from an empty set (Claude's level is
-   * per-process; a process that goes away takes its tasks with it, measured).
-   */
+  // A level, not an edge (docs/protocol.md §2): `live` replaces the set. `clearEnded` is the host's own. Live-only: a
+  // Claude process that goes takes its tasks with it (measured)
   z.object({
     ...base,
     type: z.literal('background_tasks'),
     live: z.array(BackgroundTask),
     ended: z.array(BackgroundTask).optional(),
     clearEnded: z.boolean().optional(),
-    /**
-     * `live` is the tool's own full list of what runs in the process (#648): Claude's `background_tasks_changed`. Only
-     * such a list settles what a process adopted from a previous host holds; a level built from what this host saw
-     * (an ending, a `/loop` timer) does not.
-     */
+    /** The tool's own full list (Claude's `background_tasks_changed`), the only one that settles an adopted process's */
     snapshot: z.boolean().optional(),
   }),
-  /**
-   * The watches a session keeps changed (#1324, docs/plans/mailbox.md §18.8): one was set, fired, ended or cancelled. A signal, not
-   * the list: the header asks `watches.list` again. Live-only and never stored
-   */
+  // A signal, not the list (docs/plans/mailbox.md §18.8): the header asks `watches.list` again. Live-only
   z.object({ ...base, type: z.literal('watches_changed') }),
-  /**
-   * The version of the agent CLI this session's process runs (#297): Claude's init message (`claude_code_version`), the
-   * Codex app-server's `initialize` answer (its `userAgent`). Sent once per process. Live-only and never stored, like
-   * `goal`; the host keeps the latest on `SessionInfo.agentVersion` so a reconnecting window reads it back.
-   */
+  // Claude's init `claude_code_version`, Codex's `initialize` `userAgent`. Once per process, live-only
   z.object({ ...base, type: z.literal('agent_version'), version: z.string() }),
-  /**
-   * The installed agent CLIs or the "move idle sessions" setting changed (#297). App-wide, like `update_status`: the
-   * host reads the installed versions on its own schedule, and a finding that lands with no RPC to answer still has
-   * to reach the session headers.
-   */
+  // App-wide: the host reads the installed versions on its own schedule, with no RPC to answer
   z.object({ ...appScoped, type: z.literal('agent_versions'), status: AgentVersions }),
-  /**
-   * A tool's setup changed on this host (#59): an install's progress and end, a sign-in's start and end, or a session
-   * that found the tool signed out (`-32000` on ACP). App-wide like `agent_versions`: the tool lines and the header's
-   * donut read it without asking `agents.detect` again. Carries no secret: never the sign-in address
-   */
+  // Signed out shows as `-32000` on ACP. Never carries the sign-in address
   z.object({ ...appScoped, type: z.literal('tool_setup'), tool: ToolName, setup: ToolSetup }),
-  /**
-   * The update picture changed (issue #43).
-   *
-   * **The only event here that belongs to no session** — `error` already proved the
-   * union can carry one (its `sessionId` is optional), so this rides the same rails
-   * instead of growing a second stream. Everything downstream that keys off
-   * `sessionId` already guards for its absence.
-   *
-   * It exists because the host checks on a schedule of its own: a check that lands
-   * six hours into a running window has no RPC reply to ride home on, and without
-   * this the answer would sit in the host until the next launch — which is exactly
-   * the long-running window the schedule was for.
-   */
+  // App-wide: the host checks on its own schedule, and a check hours into a running window has no RPC answer to ride
   z.object({ ...appScoped, type: z.literal('update_status'), status: UpdateStatus }),
-  /**
-   * A thread of the mailbox changed (#1347, docs/plans/mailbox.md §10.1): a message, a state, a party, a receipt the person acts
-   * on. App-wide like `update_status`: the Inbox reads its list again, or the open thread. It names the thread and nothing of
-   * its content, which the person's screen asks for (`mail.thread`); `toPerson` says the person has something to read in it.
-   */
+  // Names the thread and nothing of its content, which the screen asks for (`mail.thread`; docs/plans/mailbox.md §10.1)
   z.object({
     ...appScoped,
     type: z.literal('mail_changed'),
     threadId: z.string(),
     toPerson: z.boolean().default(false),
-    /**
-     * A new message the person can read, from anyone but the person (#1630): what the window raises an OS notification for, once per
-     * message. Absent for any other change, and from a host before it
-     */
+    /** A new message the person can read, not their own: an OS notification, once per message */
     arrived: z.object({ messageId: z.string(), from: MailParty, kind: z.string(), preview: z.string() }).optional(),
   }),
-  /**
-   * An agent asked to apply the installed update (#665, `update_centralu` action "apply"): each window that hears this
-   * makes the checks its "Apply now" makes and answers with `updates.answerApply`. Nothing relaunches yet; a window
-   * the host picks is told so by `update_apply_go`. A replay of this event after the host stopped asking is answered
-   * with no ticket, so it starts nothing.
-   */
+  // A replay after the host stopped asking is answered with no ticket, so it starts nothing
   z.object({ ...appScoped, type: z.literal('update_apply_request'), requestId: z.string() }),
-  /**
-   * The one window holding `ticket` (from its `updates.answerApply`) relaunches now, through the same path as its
-   * "Apply now" button, and reports with `updates.reportApply`. Every other window ignores it: only one relaunches.
-   * `unasked` (additive, #1509): no card stood between the agent and this relaunch, because Automatic updates are on and the
-   * host is idle, so the window also waits out someone typing, as its own automatic apply does. A window that predates it ignores it
-   */
+  // `unasked`: no card stood before it (Automatic updates on, host idle), so the window also waits out typing
   z.object({
     ...appScoped,
     type: z.literal('update_apply_go'),
@@ -805,20 +424,9 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     ticket: z.string(),
     unasked: z.boolean().optional(),
   }),
-  /**
-   * An external app's tool call finished (M4 A-4). Deliberately coarse: it never carries what
-   * changed, only that the receiving side should refetch. An external app's state lives inside the
-   * app process, so "refetch" means calling that app's state tool again (on screen this is surfaced
-   * as `centralu/notifications/changed`, B-5). An app is unique per (project, id), so the project is
-   * carried too — null means a user-folder app. This does not arrive for a call that never reached
-   * the app (rejected), or a call to a read-only tool (`readOnlyHint: true`): nothing changed. The
-   * host batches these per app over 250ms (up to 4 per second for one app). `cause` is only carried
-   * when every batched call shares a single owner — mixed owners means it is dropped (and everyone
-   * listens).
-   *
-   * A host from before #372 may still send `app_state_changed`; a receiver drops it as an unknown
-   * type (docs/protocol.md §3.2).
-   */
+  // Only that the receiver refetches the app's state tool (a screen hears `centralu/notifications/changed`); null
+  // `projectId`: a user-folder app. Not sent for a rejected call or a read-only tool's. Batched per app over 250 ms (up
+  // to 4 a second); `cause` only when every batched call has one owner
   z.object({
     ...appScoped,
     type: z.literal('external_app_state_changed'),
@@ -826,112 +434,46 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     projectId: z.string().nullable(),
     cause: AppChangeCause.optional(),
   }),
-  /**
-   * A row visible in an external app's run history panel started or finished (M4 D-6) — that
-   * app's own row, or a row in the chain below it (another app it called, an agent it
-   * requested). The same coarseness: the receiving side refetches `apps.runs`. The host batches
-   * these per app over 250ms.
-   *
-   * Why this is split from `external_app_state_changed`: that one is a signal for an open
-   * **screen** to refetch, so it never fires for a read-only tool's call (#190 — firing it would
-   * create a loop of the screen refetching). But a read-only tool can also stand up a multi-minute
-   * agent chain. This event is heard only by the run history panel.
-   */
+  // For the run history panel alone. Apart from `external_app_state_changed`, which a read-only tool does not fire (it
+  // would loop a screen's refetch, #190), though one can stand up a long agent chain. Batched per app over 250 ms
   z.object({
     ...appScoped,
     type: z.literal('external_app_runs_changed'),
     appId: AppId,
     projectId: z.string().nullable(),
   }),
-  /**
-   * The external app list changed (M4 A-8) — an app was created, removed or edited, a project's
-   * trust changed, or an app started, stopped or failed. The same coarseness: this carries
-   * nothing, and the receiving side refetches `apps.list`. The sidebar's app row and the pinned
-   * screen's "starting, stopped, reason" follow this.
-   *
-   * Why this is split from `external_app_state_changed`: that one means **a value inside the
-   * app** changed, so an open screen refetches; this one means **the app's slot or status**
-   * changed, so the list refetches. There is no reason for the list to refetch on every single
-   * tool call.
-   */
+  // An app's slot or status changed, not a value inside it: the list refetches `apps.list`, not on every tool call
   z.object({ ...appScoped, type: z.literal('external_apps_changed') }),
-  /**
-   * A file in the themes folder changed (#312) — saved from Settings, edited by hand or by an
-   * agent. As coarse as the others: the screen refetches `themes.list`.
-   */
+  // Saved from Settings, by hand or by an agent: refetch `themes.list`
   z.object({ ...appScoped, type: z.literal('themes_changed') }),
-  /**
-   * The screen preferences changed (#1306): a window saved a setting, or the Assistant did. As coarse as the others:
-   * it carries nothing, and the receiving side reads `prefs.get` again. A window from before it keeps what it loaded
-   * until it reloads.
-   */
+  // A window or the Assistant saved one: read `prefs.get` again
   z.object({ ...appScoped, type: z.literal('prefs_changed') }),
-  /**
-   * A call made with the limited credential waits for the person (#1405, `HostRequest`): a window that shows host
-   * requests shows the card and answers with `requests.answer`. A window that missed it reads `requests.list` after a
-   * reconnect. A window from before it drops the event (and said nothing in its hello, so the host never counts on it).
-   */
+  // A limited caller's call waits for the person (docs/protocol.md §1); a window that missed it reads `requests.list`
   z.object({ ...appScoped, type: z.literal('host_request'), request: HostRequest }),
-  /** A host request ended: answered, withdrawn by the program that asked, or past its time (#1405) */
   z.object({
     ...appScoped,
     type: z.literal('host_request_resolved'),
     requestId: z.string(),
     outcome: HostRequestOutcome,
   }),
-  /**
-   * A capability question from a chain that started from a screen was raised or closed (M4 D-4).
-   * The same coarseness: this carries nothing, and the receiving side refetches
-   * `apps.questions`. A question from a chain that started from a session arrives as that
-   * session's own `approval_request` instead.
-   */
+  // Refetch `apps.questions`. A chain that started from a session raises that session's `approval_request` instead
   z.object({ ...appScoped, type: z.literal('external_app_questions_changed') }),
-  /**
-   * The Assistant's MCP-server or skill proposal list changed (#703): a proposal was saved, approved or dismissed.
-   * Sent by the place that writes the list, after the write. The same coarseness: this carries nothing, and the
-   * receiving side refetches `agents.mcpProposals` and `agents.skillProposals`. A screen must not guess the moment
-   * from the Assistant's `tool_call`, which arrives before the host has saved anything.
-   */
+  // Sent after the write: a screen must not guess the moment from the Assistant's `tool_call`, which comes before the
+  // save. Refetch `agents.mcpProposals` and `agents.skillProposals`
   z.object({ ...appScoped, type: z.literal('orchestrator_proposals_changed') }),
   // The same event under the role's new name, which a host of a later release sends (#2133 step 4); this build sends the old one
   z.object({ ...appScoped, type: z.literal('assistant_proposals_changed') }),
-  /**
-   * A remembered cross-project consent was added or revoked (#371). The same coarseness: this carries nothing, and
-   * Settings refetches `projectConsents.list`.
-   */
+  // Settings refetches `projectConsents.list`
   z.object({ ...appScoped, type: z.literal('project_consents_changed') }),
-  /**
-   * A project changed on the host without this window asking (#515, #719): the host made one of its own accord (the
-   * Assistant's create_project, once the person approved it, or `projects.create` from another window), or a
-   * setting of a project was saved: trust, saved commands, worktree setup, worktree trunk, the default tool, or the
-   * model and effort last chosen for a tool. Carries nothing; the list is re-read, new projects join it and a listed
-   * project takes the host's value of those settings. Sent when the saved value changed, not on every write.
-   *
-   * `added` (#1220, additive): a folder the person just allowed the Assistant to add as a project (add_project). A
-   * window asks about its trust once, as when the person adds a folder from the sidebar; an older window re-reads the
-   * list only.
-   */
+  // A project changed without this window asking (docs/protocol.md §2): the list is re-read. `added`: a folder the person
+  // let the Assistant add, whose trust a window asks about once; an older window only re-reads
   z.object({ ...appScoped, type: z.literal('projects_changed'), added: z.string().optional() }),
-  /**
-   * A linked machine's link changed state (#82, docs/plans/remote-hub.md): connecting, connected,
-   * unreachable, waiting on a version decision. Carries the whole record, the same shape
-   * `machines.list` answers, so the receiving side replaces its row rather than patching it.
-   */
+  // The whole record, so the receiver replaces its row (docs/protocol.md §6)
   z.object({ ...appScoped, type: z.literal('machine_status'), machine: MachineInfo }),
-  /**
-   * This host's hand-over into the person's Windows sign-in changed (#1224, `host.handover`): a hub linked to it keeps
-   * it on that machine's row (`MachineInfo.handover`) and passes it on to no one. Null: no hand-over is pending
-   */
+  // A hub keeps it on `MachineInfo.handover` and passes it on to no one. Null: none pending
   z.object({ ...appScoped, type: z.literal('host_handover'), handover: HostHandover.nullable() }),
-  /**
-   * A full credential other than the hub's own was just used to say hello to this host (#1712, `centralu serve`'s
-   * `serve.json`), sent at once to the hubs linked to it, so a use withdrawn before their next `host.credentials` read
-   * still shows on the machine's row. The host has kept the record in a file of its own before the socket got its
-   * rights. `nonce` and `check` let a hub tell its own credential from one that only reuses its id
-   * (`credentialCheck(verifier, nonce)`, never the verifier). A key entry (#1711) carries its `publicKey` instead, which a
-   * hub compares with its own; an older hub that finds no `check` drops the event (the next `host.credentials` read lists
-   * the use). A hub that does not know this event drops it. Additive
-   */
+  // A full credential other than the hub's own said hello here (docs/protocol.md §3 `host.credentials`); the host has
+  // recorded it in its file before the socket got its rights
   z.object({
     ...appScoped,
     type: z.literal('host_credential_used'),
@@ -940,57 +482,32 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
       label: z.string().max(80),
       created: z.number(),
       replaced: z.boolean().catch(false).default(false),
-      /* A verifier credential: a `nonce` of the host's and the `check` of it. A key entry (#1711) has neither: it carries its `publicKey`, which is not secret */
+      // A verifier's `nonce` and `check`, or a key entry's `publicKey`, which is not secret
       nonce: z.string().min(8).max(64).optional(),
       check: z.string().max(64).optional(),
       publicKey: z.string().max(64).optional(),
     }),
   }),
-  /**
-   * What the UI holds about one linked machine has to be read again (#82): the link (re)connected,
-   * the remote host restarted, or the machine was removed. The UI re-reads `sessions.list` and
-   * `projects.list` and runs its reconnect recovery for that machine's sessions alone: a session it
-   * held as live that the fresh list says is not is woken, the others are left as they are. The
-   * events of the gap are not replayed through the hub; the conversations are read again.
-   */
+  // Re-read what the UI holds about that machine (docs/protocol.md §6); the gap's events are not replayed
   z.object({ ...appScoped, type: z.literal('machine_resync'), machineId: z.string() }),
-  /**
-   * Something changed in a watched directory (#34 — Finder, a terminal, an agent, regardless of
-   * source).
-   *
-   * Rides the same path as `update_status` (appScoped) since this is a **project** event, not a
-   * session one. dirs only ever states **which directories need to be reread** — it never
-   * carries what changed or how. Precision differs by platform for this kind of event (macOS
-   * collapses renames), and carrying that detail would only be accurate on one of the three
-   * platforms. Rereading is just one listDir call either way.
-   */
+  // Only which directories to re-read, never what changed: macOS collapses renames, so the detail would be right on one
+  // platform of three
   z.object({ ...appScoped, type: z.literal('fs_changed'), projectId: z.string(), dirs: z.array(z.string()) }),
-  /**
-   * An error — if it belongs to a session, the host records it as a marker row (#107), so it
-   * carries `persistedSeq` (#161): without it zod strips `seq`, a session that ended in error
-   * leaves the screen's `lastSeq` one behind, and reopening it shows an unread dot on a session
-   * that was already viewed.
-   */
+  // A session's error is recorded as a marker row, so it carries `persistedSeq`: without it zod strips `seq`, and the
+  // session shows an unread dot after it was viewed
   z.object({ ...appScoped, ...persistedSeq, ...endsTurn, type: z.literal('error'), error: ProtocolError }),
 ])
 export type NormalizedEvent = z.infer<typeof NormalizedEvent>
 
 export type NormalizedEventType = NormalizedEvent['type']
 
-/**
- * Ignores an unknown event type (docs/protocol.md §4 — adding one never breaks version
- * compatibility). Call this only at the receiving boundary.
- */
+/** Drops an unknown event type (docs/protocol.md §4). Only at the receiving boundary */
 export function parseEventLenient(raw: unknown): NormalizedEvent | null {
   const r = NormalizedEvent.safeParse(raw)
   return r.success ? r.data : null
 }
 
-/**
- * The event as it may leave the host: a tool call without its `input`, a tool result without its `output` (#221), and
- * the same for a tool call or result a subagent made (#222). Everything else, `turn_complete`'s `output` included, is
- * returned as it is.
- */
+/** The event as it may leave the host: tool calls and results, a subagent's too, without `input` and `output` */
 export function withoutToolRecord(e: NormalizedEvent): NormalizedEvent {
   if (e.type === 'subagent_event') {
     const step = withoutStepRecord(e.step)
@@ -1000,7 +517,6 @@ export function withoutToolRecord(e: NormalizedEvent): NormalizedEvent {
   return e
 }
 
-/** A subagent's step without a call's `input` or a result's `output`; any other step as it is */
 function withoutStepRecord(step: SubagentStep): SubagentStep {
   if (step.type === 'tool_call' && 'input' in step) {
     const { input: _input, ...card } = step

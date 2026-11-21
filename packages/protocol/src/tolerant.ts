@@ -1,17 +1,8 @@
 import type { z } from 'zod'
 
 /**
- * Reads a payload another build sent, so that **its defaults apply** and **one value this build
- * does not understand costs only that value**: the rules and their reasons are docs/protocol.md §4
- * (a field added to a host payload has a default the client applies; the read is tolerant).
- *
- * When the whole parse fails, the payload is read again piece by piece: objects field by field,
- * arrays element by element, and a value that still fails on its own is kept as it came. Fields
- * the schema does not know are dropped, as a successful parse drops them, unless the object is
- * declared loose.
- *
- * Not a validator. Nothing here rejects; the host's own answers are trusted, and this only fills
- * in what an older one could not have known to send.
+ * Reads another build's payload so its defaults apply and a value this build cannot read costs only that value
+ * (docs/protocol.md §4). Not a validator: nothing here rejects, as the host's own answers are trusted.
  */
 export function parseTolerant<S extends z.ZodType>(schema: S, raw: unknown): z.output<S>
 // What was salvaged is the payload as it came, not a parse: declaring it as the schema's output is the point of the
@@ -22,7 +13,6 @@ export function parseTolerant(schema: z.ZodType, raw: unknown): unknown {
   return parsed.success ? parsed.data : salvage(schema, raw)
 }
 
-/** The parts of a schema's definition the piecewise read walks through */
 type Def = {
   type: string
   innerType?: z.ZodType
@@ -35,7 +25,7 @@ type Def = {
   discriminator?: string
 }
 
-/** A JSON object (not an array, not null): what the tolerant reader and the schema test helpers walk into */
+/** Not an array, not null */
 export const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v)
 
@@ -44,7 +34,7 @@ const isSchema = (v: unknown): v is z.ZodType =>
 const isFunction = (v: unknown): v is () => unknown => typeof v === 'function'
 const schemaOrUndefined = (v: unknown): z.ZodType | undefined => (isSchema(v) ? v : undefined)
 
-/** What a schema's definition holds of the parts above; zod's own types do not name them for every kind of schema */
+/** zod's own types do not name these parts for every kind of schema */
 function defOf(schema: z.ZodType): Def {
   const d: Record<string, unknown> = isRecord(schema.def) ? schema.def : {}
   const { shape, getter, options, discriminator } = d

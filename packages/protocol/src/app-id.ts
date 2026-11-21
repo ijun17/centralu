@@ -1,93 +1,45 @@
-/**
- * The rule for app ids (= the MCP server name attached to a session) (#93, M4 A-1, C-1) —
- * **there is exactly one copy of it.**
- *
- * The host uses it to judge manifests, proposed MCP servers and new apps; the UI uses it for
- * the "new app" window. The new-app window
- * derives an id from the name and shows it, and it has to say whether that id can be used before
- * the app is created, but the UI cannot import the host — this package is the only shelf both
- * halves can read. Writing the rule a second time in the UI would let the window pass an id the
- * host then rejects (the person hears the reason twice) or the other way around, and as learned
- * from #93, whichever copy is looser becomes the hole. So the **judgment** stays in this one
- * place, and the human-facing **wording** is attached separately where it belongs (the host
- * speaks to the agent and the logs, the UI speaks to the person in front of the window).
- *
- * Judgments this file does not make: whether an id already exists (only the host does
- * discovery), and trust (the store is the source of truth). Those are rejected by the host when
- * it creates something, and the window just displays that message as given.
- */
+// The one rule for app ids, which are MCP server names in a session (#93): the host and the new-app window both judge
+// with it, since whichever copy is looser becomes the hole. Wording stays with each side; existence and trust are the
+// host's to judge.
 
-/**
- * A name starting with this prefix belongs to Centralu itself — the name of the in-process
- * assistant server. If an approved server took this name, it would replace the built-in
- * server entirely (measured in #93).
- */
+/** Centralu's own in-process server: an approved server under this name would replace it (measured, #93) */
 export const RESERVED_NAME_PREFIX = 'centralu'
 
-/**
- * The prefix for the server name an external app is attached to a session under (M4 A-5) — the
- * app `notes` is `app-notes` inside a session. A newly **proposed** name (an MCP server pending
- * approval, or a new app) may not start with this prefix: an approved `app-notes` server would
- * land in the same slot as the proxy server for the `notes` app.
- */
+/** App `notes` is server `app-notes` in a session, so a proposed name may not take the prefix and land in its slot */
 export const APP_SERVER_PREFIX = 'app-'
 
-/** The server name app `appId` is attached to a session under */
 export const appServerName = (appId: string): string => `${APP_SERVER_PREFIX}${appId}`
 
 /**
- * App ids no external app may take (#97).
- *
- * `control` was the built-in control app (the rail, tasks and their foremen), removed in #372.
- * What it left behind is still there on purpose: its rows in app_settings (`app:control:*`) and
- * the coordinator sessions stamped `appId: 'control'`. An external app named `control` would
- * inherit both — those sessions would read as its own agents — so the name stays retired. The
- * host's discovery, import and new-app paths and the UI's new-app window all read this one list.
+ * `control`: app_settings rows (`app:control:*`) and coordinator sessions stamped `appId: 'control'` remain, and an
+ * external app of that id would inherit them as its own (#97, #372)
  */
 export const RESERVED_APP_IDS: readonly string[] = ['control']
 
-/**
- * The length limit for one id slot — the same number as the character rule below. This is where
- * an id derived from a name gets truncated.
- */
+/** Matches `NAME_SHAPE`; an id derived from a name is cut here */
 export const APP_ID_MAX_LENGTH = 32
 
 /**
- * Leaving out the underscore is the important part: MCP tool names use `__` as a separator, so
- * allowing underscores would let one server append an extra segment behind someone else's name
- * (`centralu__pw` produced `mcp__centralu__pw__*`, which passed the prefix check, #93).
+ * No underscore: MCP tool names use `__` as a separator, so `centralu__pw` gave `mcp__centralu__pw__*`, past the prefix
+ * check (#93)
  */
 const NAME_SHAPE = /^[a-z0-9][a-z0-9-]{0,31}$/
 
-/** The reason a server name or app id failed the rule they share */
 export type ServerNameProblem = 'reserved' | 'shape'
 
-/**
- * The rule an MCP server name and an app id both follow (#93). Returns null when the name is fine.
- *
- * The reserved-word check runs **first** — so that even if the character rule is loosened later,
- * this judgment still holds. The reserved word is checked case-insensitively and after trimming
- * (`CENTRALU` can read as the same name in some places too).
- */
+/** The reserved check runs first, trimmed and case-insensitive, so it holds whatever the shape rule allows */
 export function serverNameProblem(name: string): ServerNameProblem | null {
   if (name.trim().toLowerCase().startsWith(RESERVED_NAME_PREFIX)) return 'reserved'
   if (!NAME_SHAPE.test(name)) return 'shape'
   return null
 }
 
-/** The reason a newly created app's id was rejected */
 export type NewAppIdProblem = ServerNameProblem | 'server-prefix' | 'builtin'
 
 /**
- * The judgment for a newly **proposed** name — the rule above, plus a ban on the `app-` prefix,
- * plus the reserved ids (`RESERVED_APP_IDS` unless the caller passes its own list). Returns null
- * when the name is fine. The problem is called `'builtin'` (it covers every reserved id, not only
- * built-in apps); the UI's wording keys off it.
- *
- * The `app-` prefix is not blocked during discovery (a hand-made `app-store` app is attached as
- * `app-app-store`, so it does not collide). What is blocked is the point where a new name comes
- * in — a new app has no reason to have the server name `app-app-notes`, and if an approved
- * server took that slot, it could skip approval under the app's read-only annotation.
+ * For a newly proposed name. `app-` is refused only here, not in discovery (a hand-made `app-store` attaches as
+ * `app-app-store`): an approved server in an app's slot could skip approval under the app's read-only annotation.
+ * `builtin` covers every reserved id.
  */
 export function newAppIdProblem(
   id: string,
@@ -100,11 +52,7 @@ export function newAppIdProblem(
   return null
 }
 
-/**
- * Why an id cannot be an app id, worded once for every door that takes one (a manifest, a new app, an import, the Assistant's
- * proposal, the mock): `"x" cannot be an app id: <why>. Pick another.`, and for a reserved id `"x" is reserved. Pick another app id.`
- * The judgment is `newAppIdProblem` (the new-app dialog words the same result its own way).
- */
+/** Worded once for every door that takes an id; the new-app dialog words it its own way */
 export function appIdProblemText(id: string, problem: NewAppIdProblem): string {
   if (problem === 'builtin') return `"${id}" is reserved. Pick another app id.`
   const why: Record<Exclude<NewAppIdProblem, 'builtin'>, string> = {

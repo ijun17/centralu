@@ -13,43 +13,16 @@ export const SessionState = z.enum([
 export type SessionState = z.infer<typeof SessionState>
 
 /**
- * **What** a session is doing while it is busy. A different axis from SessionState.
- *
- * The state remains 'working' even while compacting — since nothing is waiting on us, there is
- * no reason to change it, and adding a new state would silently break every piece of code that
- * checks `state === 'working'`. But looking at the screen alone, it is indistinguishable from
- * generating a reply: both just blink a dot. Measured: one manual compaction took 39 seconds,
- * and during that time there was no way to tell whether it was stuck or working.
- */
-/**
- * The kind of busy. compacting comes from either tool, reviewing comes from codex's /review (a
- * dedicated RPC). retrying is codex reconnecting on its own after a dropped stream (an `error`
- * notification with `willRetry`, #168): the turn is still alive, so it is not a failure, but a
- * wait of several attempts should not look like an ordinary one.
+ * What a busy session is doing, beside its state, which stays 'working' (code checks `state === 'working'`). It tells a
+ * compaction (measured: one took 39 s) from a stuck reply. `reviewing` is Codex's /review; `retrying` is Codex
+ * reconnecting after a dropped stream (`error` with `willRetry`): the turn is alive, not failed.
  */
 export const SessionActivity = z.enum(['compacting', 'reviewing', 'retrying'])
 
 /**
- * Why a session's turn did not run to its end, when nobody here chose to stop it (#698). A session in this state
- * looks like any other at rest (`error`, `idle`, `waiting_input`), and on 2026-10-15 several child sessions sat in
- * `error` for most of a day after the internet dropped twice, with neither the person nor the Assistant told.
- *
- *   network       the turn failed because the model's API could not be reached (ECONNREFUSED, ENOTFOUND, no
- *                 response, the computer slept), after the tool's own retries
- *   limit         the turn ended on the account's usage limit (five-hour or weekly, #1415): the tool's limit event,
- *                 or an error its words call one
- *   quit         Centralu quit or restarted while the turn ran, and the process went with it: a start
- *                 found the session `working` with no process left and reset it to `idle`
- *   shutdown      the computer shut down, restarted or signed out while the turn ran (#1397): the last host was told
- *                 the system was ending and recorded it as it went; the next start found the session in that turn, or
- *                 ended by `adapter_crashed` about then, and reset it to `idle`. Not a crash, and continued as `quit` is
- *   interrupted   the tool interrupted the turn, and neither the person nor Centralu asked it to (Codex's
- *                 `turn/completed` with `interrupted` that no Stop of ours preceded)
- *   reconnecting  still `working`, but the tool has been reconnecting to its API for longer than the host's bound
- *                 (`retrying` past it). Live only: the turn may still go on by itself
- *
- * The person's own Stop is none of these: they know. Cleared when the session works again. An unknown word from a
- * newer host reads as `interrupted`, which still says "this turn did not finish".
+ * Why a turn did not run to its end when nobody here chose to stop it; the person's own Stop is none of these. Each
+ * reason, set and cleared: docs/agent-host/lifecycle/turn-endings-and-mail.md. `reconnecting` is live only: the turn
+ * may still go on. An unknown word from a newer host reads as `interrupted`, which still says the turn did not finish.
  */
 export const InterruptionReason = z
   .enum(['network', 'limit', 'quit', 'shutdown', 'interrupted', 'reconnecting'])
@@ -57,15 +30,14 @@ export const InterruptionReason = z
 export type InterruptionReason = z.infer<typeof InterruptionReason>
 
 /**
- * What a `shutdown` says happened, in the same words wherever it is said (#1397): the label, the note above the composer, the line in
- * the conversation, the Assistant's list and the report to the caller. After a colon, so it starts in lower case
+ * What a `shutdown` says happened, in the same words everywhere it is said (label, composer note, conversation line, the
+ * Assistant's list, the report). After a colon, so it starts in lower case
  */
 export const SHUTDOWN_WORDS = 'the computer shut down, restarted or signed out'
 
 /**
- * What going on with a stopped turn asks of the agent (#698): the person's Continue sends it as their message, and each continue
- * note of Centralu's ends with it (#1618, #1693, #1415). Short, since the agent still has its conversation; the second sentence
- * because a cut turn may have done part of a step already
+ * What going on with a stopped turn asks: the person's Continue sends it, and each of Centralu's continue notes ends
+ * with it. Short, as the agent still has its conversation; the second sentence because a cut turn may have done part of a step
  */
 export const CONTINUE_WORDS = 'Continue where you stopped. Check what already happened before repeating a step.'
 
@@ -76,27 +48,18 @@ export const Interruption = z.object({
   /** The tool's own words, where it gave some (the error's message) */
   detail: z.string().optional(),
   /**
-   * Centralu continues the turn by itself once its cause clears (#1415, #2238; docs/agent-host/lifecycle/auto-continue.md). The host
-   * decides it and says it here, so a window shows the wait without working it out. `at`: when (ms), a usage limit's reset; absent
-   * for the network, which continues once the tool's API answers again. `tries`: the continues already made for this run of stops.
-   * Absent: nothing continues it by itself (the setting is off, the person said Don't continue, the tries ran out, or the cause
-   * does not clear with time). An older host never sets it, and an older window drops it
+   * Centralu continues the turn once its cause clears (docs/agent-host/lifecycle/auto-continue.md); the host decides, so
+   * a window shows the wait without working it out. `at`: when (ms), a usage limit's reset; absent for the network.
+   * `tries`: continues made in this run of stops. Absent: nothing continues it by itself, or an older host
    */
   autoContinue: z.object({ at: z.number().optional(), tries: z.number().int().min(0) }).optional(),
 })
 export type Interruption = z.infer<typeof Interruption>
 
 /**
- * The goal set on a session (2026-09-07 — claude's `/goal`, and codex's thread/goal/*).
- *
- * This is the union of both tools: objective/status are shared, iterations/reason are claude's
- * (the number of laps and the reason it fell short, judged each time the Stop hook runs — read
- * from the CLI's Stop hook feedback, since its `active_goal` does not reach a headless session), and
- * tokenBudget/tokensUsed are codex's. status carries the tool's own vocabulary as-is — claude
- * only ever has 'active' while a goal is set (achieving it arrives as a null notification), while
- * codex has active, paused, blocked, usageLimited, budgetLimited, complete. Why this is not
- * tightened into an enum: if the protocol broke every time a tool added a new word, that would
- * cost far more than the value of a single badge.
+ * The union of Claude's `/goal` and Codex's thread/goal/*. `iterations` and `reason` are Claude's, read from the CLI's
+ * Stop hook feedback (its `active_goal` does not reach a headless session); the token fields are Codex's. `status` is
+ * the tool's own word (Claude only says 'active', a reached goal arrives as null), not an enum, so a new word breaks nothing.
  */
 export const SessionGoal = z.object({
   objective: z.string(),
@@ -110,23 +73,9 @@ export type SessionGoal = z.infer<typeof SessionGoal>
 export type SessionActivity = z.infer<typeof SessionActivity>
 
 /**
- * One piece of work an agent runs in the background of a session (#290): a subagent, a backgrounded shell command,
- * an MCP task. The adapter maps its tool's own report onto this — Claude's `background_tasks_changed` and task
- * messages, Codex's child threads — and an adapter that cannot see its background work reports nothing rather than
- * guessing.
- *
- *   kind           what it is. A tool's kind that fits none of the first three is `other`; an unknown word from a
- *                  newer host reads as `other` too, instead of failing the whole event
- *   parentCallId   the tool call that started it, when known: Claude's `Agent` or `Bash` tool_use id, Codex's
- *                  `spawnAgent` collab item. For an agent this is also the key of its recorded steps (#222)
- *   ambient        housekeeping the tool itself says is not activity (Claude's flag). Listed, never counted
- *   stopsWithTurn  what interrupting the session's turn does to it, as measured per tool: true stops it, false
- *                  leaves it running, absent means not measured. Claude: a subagent stops, a shell continues;
- *                  Codex: a child agent continues (probe-background-tasks.mts, probe-codex-background.mts)
- *   stoppable      it can be stopped on its own (`agents.stopBackgroundTask`)
- *   timer          a timer the tool holds rather than work it runs: Claude's `ScheduleWakeup` (`/loop`) and `CronCreate`
- *                  (#721). It keeps the process awake like any task, but a report is not held for it
- *   status         running while it is in the live set; an ended task keeps how it ended
+ * Background work in a session: a subagent, a backgrounded shell, an MCP task. The fields: docs/protocol.md §2; what each
+ * tool reports and the measured `stopsWithTurn`: docs/agent-host/adapters/contract.md. An adapter that cannot see its
+ * background work reports nothing rather than guessing. An unknown `kind` reads as `other`.
  */
 export const BackgroundTaskKind = z.enum(['agent', 'shell', 'mcp', 'other'])
 export type BackgroundTaskKind = z.infer<typeof BackgroundTaskKind>
@@ -151,14 +100,10 @@ export type BackgroundTask = z.infer<typeof BackgroundTask>
 export const BACKGROUND_ENDED_KEPT = 10
 
 /**
- * The one way a session's task list moves (#290) — the host's manager, the UI's reducer and the mock all call this,
- * so the three cannot drift apart.
- *
- * `live` replaces every running entry (REPLACE semantics: a missed edge cannot leave a stale "running"). `ended`
- * adds tasks that just left, with their status; an ended task stays listed until `clearEnded`, until it is pushed
- * out by newer ones (`BACKGROUND_ENDED_KEPT`), or until the next burst starts: work that begins while nothing ran
- * (`liveBackgroundTasks`) opens a list of its own, and the tasks that ended before it are in the conversation (#2230). A task that leaves the live set with no `ended` entry simply
- * disappears — the adapter did not say how it ended, and nothing here guesses.
+ * The one way a session's task list moves: the host's manager, the UI's reducer and the mock all call it. `live`
+ * replaces every running entry (a missed edge cannot leave a stale "running"); `ended` adds tasks that left. An ended
+ * task stays until `clearEnded`, `BACKGROUND_ENDED_KEPT`, or the next burst (work starting while none ran, #2230). A
+ * task that leaves with no `ended` entry disappears: nothing guesses how it ended.
  */
 export function applyBackgroundTasks(
   prev: readonly BackgroundTask[],
@@ -181,19 +126,16 @@ export function liveBackgroundTasks(tasks: readonly BackgroundTask[]): Backgroun
 }
 
 /**
- * A session's own work: what it runs and waits for (a paused report waits for it, a reminder waits for it) — the live tasks without the timers a
- * tool holds (`/loop`, `CronCreate`). A timer keeps a process awake but is not work: counting it would hold a report or a reminder for good
+ * What a paused report or a reminder waits for: the live tasks without a tool's timers (`/loop`, `CronCreate`). A timer
+ * keeps a process awake but is not work: counting it would hold a report or a reminder for good
  */
 export function workTasks(tasks: readonly BackgroundTask[]): BackgroundTask[] {
   return liveBackgroundTasks(tasks).filter((t) => !t.timer)
 }
 
 /**
- * Choices an agent presents to a person (AskUserQuestion).
- *
- * **Never truncated.** Cut partway (measured, while flowing through as raw JSON), the call loses
- * every option after the cut, and with them the means of answering. Unlike an approval (ApprovalDetail), this does not carry
- * a preview — it carries **everything needed to answer**.
+ * Choices an agent presents to a person (AskUserQuestion). Never truncated: cut (measured), the call loses every option
+ * after the cut and the means of answering. Unlike an approval, it carries everything needed to answer, not a preview.
  */
 export const QuestionOption = z.object({
   label: z.string(),
@@ -210,7 +152,7 @@ export const Question = z.object({
 })
 export type Question = z.infer<typeof Question>
 
-/** The answer to one question — the chosen labels (several if multiSelect, or the typed text for free input) */
+/** The chosen labels (several if multiSelect), or the typed text for free input */
 export const QuestionAnswer = z.object({
   question: z.string(),
   answers: z.array(z.string()),
@@ -219,21 +161,15 @@ export type QuestionAnswer = z.infer<typeof QuestionAnswer>
 
 export const ToolSummary = z.object({
   tool: z.string(),
-  /** A one-line summary (the full command, a file path, etc.) */
+  /** One line (the full command, a file path, etc.) */
   title: z.string(),
-  /**
-   * Not set or read (#428): every card folds (core/approval.ts). Kept, optional, so events and stored records from
-   * older builds still parse.
-   */
+  /** Not set or read: every card folds (core/approval.ts). Kept so older builds' events and stored records parse */
   readOnly: z.boolean().optional(),
   paths: z.array(z.string()).default([]),
   /**
-   * A call to one of Centralu's own tools (#730): the `centralu` server's, or an app's (`app-<id>`, `app` its id). The
-   * points where an agent reaches other sessions, projects, machines or apps, which the card draws apart from an
-   * ordinary call. The adapter knows it from the server, which only Claude's name carries in the tool name: Codex
-   * names the server apart, so the screen cannot read it from `tool`. `tool` is the bare tool name here
-   * (`start_agent`), `label` what the call does in words ("Started an agent"), `sessionId` the session the call names
-   * when it names one. Absent from an older host's records, where the screen reads Claude's `mcp__centralu__…` name.
+   * A call to one of Centralu's own tools (the `centralu` server's, or an app's: `app` its id), drawn apart on the card.
+   * Set by the adapter: only Claude's tool name carries the server. `tool` bare (`start_agent`), `label` in words, and
+   * `sessionId` the session the call names. Absent from older records, where the screen reads `mcp__centralu__…`
    */
   centralu: z
     .object({
@@ -247,9 +183,8 @@ export const ToolSummary = z.object({
 export type ToolSummary = z.infer<typeof ToolSummary>
 
 /**
- * An attachment (FR-13).
- * An image is never put into messages.payload as base64 — it would bloat the database and
- * pollute FTS. The host saves it as a file and only the path is exchanged (m2-plan decision D-1).
+ * An attachment (FR-13). An image is never base64 in messages.payload (it would bloat the database and pollute FTS):
+ * the host saves it as a file and only the path is exchanged.
  */
 export const Attachment = z.object({
   kind: z.enum(['image', 'file']),
@@ -262,12 +197,8 @@ export const Attachment = z.object({
 export type Attachment = z.infer<typeof Attachment>
 
 /**
- * A prior session the tool itself keeps (outside Centralu — including one created in a terminal).
- *
- * Both the list and the body are read **only through each tool's official API**.
- * ~/.claude/projects/**.jsonl and ~/.codex/sessions/**.jsonl are never parsed directly: that file
- * format is not a documented contract, so it breaks silently when the tool is upgraded. The
- * official API absorbs its own version's storage format differences on its own.
+ * A prior session the tool itself keeps (one started in a terminal too), listed and read only through the tool's
+ * official API, never its files (docs/agent-host/importing-sessions.md).
  */
 export const ExternalSession = z.object({
   externalId: z.string(),
@@ -276,14 +207,11 @@ export const ExternalSession = z.object({
   updatedAt: z.number(),
   createdAt: z.number().nullable().default(null),
   branch: z.string().nullable().default(null),
-  /** A session already imported into Centralu — keeps the same conversation from being opened twice */
+  /** Keeps the same conversation from being opened twice */
   imported: z.boolean().default(false),
   /**
-   * **The id of that session**, if it is already open.
-   *
-   * A label alone is not enough: a row that only says "already imported" while the click still
-   * goes through opens the same conversation twice in the list (measured). If this value is present, the UI takes
-   * the person to that session instead of creating a new one.
+   * The open session's id: the UI goes there instead of making a new one (measured: a label alone still let the click
+   * through, and the conversation opened twice)
    */
   importedAs: z.string().nullable().default(null),
 })

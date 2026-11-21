@@ -1,22 +1,6 @@
-/**
- * The app link `centralu://app?url=<address of a folder or zip>` (M4 E-4) — clicking it opens the
- * import confirmation window (E-3) already filled in with that source.
- *
- * A link is **text written by someone else**. Clicking a link in an email, a chat or a web page
- * hands it to this app through the OS. So this file only narrows the shape, and opening only
- * happens after the person clicks Review in the confirmation window (the window never reads or
- * downloads anything up front). The host judges the received source once more by its own rules
- * (`apps/external/imports.ts` `classifySource`) — this file only decides which links the screen
- * is allowed to raise into the window at all.
- *
- * Accepted: exactly one `centralu://app?url=`, whose value is either `https:` (not an address
- * carrying credentials) or a `file:` on this machine. A bare path, http, or any other scheme is
- * rejected. Two `url` values are rejected too, since it would be ambiguous which one to open.
- * Any other, unknown field is not read (a later revision may add to them).
- *
- * This lives here so the screen (UI) and the host can share it — this package is the only shelf
- * both can reach.
- */
+// `centralu://app?url=…` opens the import dialog (docs/apps/handing-over.md "App links"). A link is someone else's
+// text: this only decides which links may raise the dialog; the host judges the source again (`classifySource`).
+// Two `url`s are ambiguous and refused; other fields are not read, so a later build may add some.
 
 export const APP_LINK_MAX_CHARS = 4096
 

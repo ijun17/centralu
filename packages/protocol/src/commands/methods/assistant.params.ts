@@ -1,40 +1,31 @@
 import { z } from 'zod'
 import { SessionId, ToolName } from '../../entities.js'
 
-/** The parameters of the `assistant` methods, which the host validates (docs/protocol.md §3). Their results: ./assistant.results.ts */
+/** Params of the `assistant` methods, parsed by the host (docs/protocol.md §3). Results: ./assistant.results.ts */
 export const assistantParams = {
-  /**
-   * The app's single assistant. **Calling this creates one if it does not exist.**
-   * Creating it ahead of time would leave a session nobody uses holding onto a tool process.
-   */
+  /** Creates the Assistant if missing: made ahead, an unused session would hold a tool process */
   'orchestrator.get': z.object({}),
   /**
-   * Returns it if it exists, and **does not create one if it does not** (#63).
-   *
-   * Onboarding shows the Assistant screen first, so "opening the screen" and "creating the
-   * process" are separate steps — the screen only asks via this, and creation
-   * happens through `orchestrator.get` at the moment the person actually asks their first
-   * question. Creating it any earlier would leave a tool process running for a person who never
-   * even asked (the lazy-startup principle).
+   * Never creates it: onboarding shows the Assistant screen first, and the process starts through `orchestrator.get`
+   * only when the person asks their first question.
    */
   'orchestrator.peek': z.object({}),
-  /**
-   * Which tool the Assistant will **run on top of** (#63, the card chosen on the
-   * intro screen). This setting is only for before a session exists — once one does, switching
-   * the Agent in session settings takes over.
-   */
+  /** The tool it will run on, before it exists; after that, the session settings' Agent switch decides */
   'orchestrator.configure': z.object({ tool: ToolName }),
-  /** If sessionId is given, filters to that session's tool set (a manager under #69 gets a subset) — used by the bridge */
+  /** With `sessionId`, that session's tool set (a manager gets a subset); the bridge asks this */
   'orchestrator.tools': z.object({ sessionId: SessionId.optional() }),
+  /**
+   * The Codex bridge's way back into the host: Codex attaches only a stdio server, through its per-thread config (HTTP
+   * did not work, measured); Claude attaches in-process. The bridge passes a name and arguments; every rule is the host's.
+   */
   'orchestrator.tool': z.object({
     sessionId: SessionId,
     name: z.string(),
     args: z.record(z.string(), z.unknown()),
   }),
   /*
-   * #2133 step 3: the same five under the role's new name, answered as the old ones are. The Codex bridge calls these
-   * (step 4); the window keeps the old ones, since it can reach a host older than step 3, and so does a hub of another release
-   * calling a linked machine (docs/plans/assistant-rename.md §3.3)
+   * The same five under the role's new name. The Codex bridge calls these; the window, and a hub calling a linked machine
+   * of another release, keep the old ones, which a host older than these answers too (docs/plans/assistant-rename.md §3.3)
    */
   'assistant.get': z.object({}),
   'assistant.peek': z.object({}),

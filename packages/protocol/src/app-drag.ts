@@ -1,27 +1,17 @@
 import { z } from 'zod'
 
-/**
- * An item dragged out of an app view into a session's composer (#308).
- *
- * The browser does not hand a drag from a view to the page around it (agent-host
- * views/drag-relay.ts has the measurement), so the host adds a relay to every view that posts the
- * drag's link and text when it starts and the point where it ended. Both halves read this one
- * description: the host writes the relay, the UI's bridge reads its messages.
- */
+// An item dragged out of an app view into a composer (#308). The browser does not hand a drag from a view to the page
+// around it (measured in agent-host views/drag-relay.ts), so the host adds a relay to every view; the UI reads it here.
 
-/** The notification the relay posts through the view's bridge. Outside the standard, like `centralu/notifications/changed` */
+/** Outside the standard, like `centralu/notifications/changed` */
 export const APP_DRAG_NOTIFICATION = 'centralu/notifications/drag'
 
-/** The longest `text/uri-list` or `text/plain` the relay passes on: a link and its title, not a document */
+/** A link and its title, not a document */
 export const APP_DRAG_TEXT_MAX = 4096
 
 /**
- * What the relay posts. The view sends it, so the UI reads it as the app's words: the shape is
- * checked here, and nothing in it is trusted beyond being a link and a title for a draft.
- *
- *   start  the drag's `text/uri-list` and `text/plain`, read at `dragstart`
- *   end    where that drag ended, in the view's own coordinates (`clientX`/`clientY` of its
- *          `dragend`), with the view's size, so the UI can place it whatever the frame's scale
+ * The app's words: trusted only as a link and a title for a draft. `end` is the `dragend` point in the view's own
+ * coordinates, with its size, so the UI can place it whatever the frame's scale
  */
 export const AppDragMessage = z.discriminatedUnion('phase', [
   z.object({
@@ -40,20 +30,10 @@ export const AppDragMessage = z.discriminatedUnion('phase', [
 export type AppDragMessage = z.infer<typeof AppDragMessage>
 
 /**
- * Whether a session can use one app's tools right now (`apps.reach`, #308), and if not, why — so the
- * composer can say what would fix it when an item from that app is dropped on it.
- *
- *   other-project   the app is not one this session is given: another project's app, a user-folder
- *                   app outside the Assistant, or a session stood up by an app (apps/attaching.md "Which session gets which apps")
- *   untrusted       the app's project, which is this session's, is not trusted
- *   app-unusable    the app cannot be attached: its manifest is invalid, it is not turned on yet
- *                   (`unconfirmed`), or it stopped after repeated failures (`failed`); `status` says which
- *   restart         a Codex thread started before the app was attached: Codex does not take new
- *                   servers into a running thread, so the session has to restart
- *   bridge-failed   the app's bridge for this session failed to start (Codex reported it)
- *                   (restart and bridge-failed come only from a host before #2231: every app is reached through
- *                   the `app` tool, so nothing else produces them; kept for an older host, protocol.md §4)
- *   unavailable     the host has no apps, or the app is gone
+ * Why a session cannot use an app's tools, so the composer can say what would fix it when the app's item is dropped.
+ * `other-project`: not given to this session (apps/attaching.md "Which session gets which apps"). `app-unusable`:
+ * `status` says why. `restart` and `bridge-failed` come only from a host older than #2231 (Codex takes no new servers
+ * into a running thread); kept for it (docs/protocol.md §4).
  */
 export const AppReach = z.discriminatedUnion('reachable', [
   z.object({ reachable: z.literal(true) }),

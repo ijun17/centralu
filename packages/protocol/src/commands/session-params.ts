@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { PermissionPreset, ProjectId, SessionId, ToolName } from '../entities.js'
 
-/** What the host validates when a session is created or its settings change. A client only builds them, so the UI's bundle leaves them out (#1648). */
+/** What the host validates when a session is created or its settings change; a client only builds them, so the UI's bundle leaves them out. */
 
 export const CreateSessionParams = z.object({
   projectId: ProjectId,
@@ -9,117 +9,52 @@ export const CreateSessionParams = z.object({
   tool: ToolName,
   model: z.string().optional(),
   effort: z.string().optional(),
-  /** Response length (codex's model_verbosity). Which tiers are supported is stated by the adapter's capability declaration (#54) */
+  /** codex's model_verbosity; the adapter's capability declaration names the tiers */
   verbosity: z.string().optional(),
-  /** Response speed (codex's service_tier). Which tiers are supported is stated by the model list (ModelOption.tiers) */
+  /** codex's service_tier; the model list (ModelOption.tiers) names the tiers */
   serviceTier: z.string().optional(),
   permissionPreset: PermissionPreset.default('normal'),
   initialPrompt: z.string().optional(),
-  /**
-   * The handoff note this session inherited (#102) — enters as a **record**, not as the first
-   * message.
-   *
-   * A note the agent wrote is the one piece of material that cannot be recreated once its
-   * author is gone. The first message carries only a path, so the text has no place in the
-   * conversation and is pinned as a marker on the session instead (the file is then a pure
-   * derivative and can be deleted at any time).
-   */
+  /** Pinned as a marker, not sent as the first message (which carries its path): it is lost once its author is gone */
   handoff: z
     .object({
       from: z.string(),
       note: z.string(),
-      /**
-       * The id of the predecessor session (#106). Despite the name, this is **the name of a
-       * file** — the note lives at `<data>/handoff/<project id>/<predecessor session id>.md`
-       * (#142), and the host needs this value to tell a "note that still has an owner" apart
-       * from an orphan, and to open that folder for the successor to read. It is optional for
-       * old frames and for calls made outside a handoff: without it, the note is claimed by
-       * nobody.
-       */
+      /** The predecessor's id, which names the note's file: by it the host tells an owned note from an orphan */
       fromSessionId: SessionId.optional(),
-      /**
-       * The window removes the predecessor right after this session is created (when the person leaves its delete box checked, #738). The
-       * host then moves all of the predecessor's unsettled mail too, and an app the predecessor was allowed only once comes along: the
-       * copy is in effect a move. Without it (a handoff that keeps the predecessor, or an old frame) every child still moves, settled ones
-       * included (#1475), but only the mail of those children does, and a one-time app answer stays with the predecessor (#1638). What the
-       * predecessor starts after the handoff follows later if it is removed after all.
-       */
+      /** The window then removes the predecessor, so its unsettled mail and once-allowed apps move too (docs/protocol.md §3.3) */
       removesOriginal: z.boolean().optional(),
     })
     .optional(),
   resumeExternalId: z.string().optional(),
-  /** When resuming, also restore the prior conversation on screen (used together with resumeExternalId) */
+  /** With resumeExternalId: also restore the prior conversation on screen */
   importHistory: z.boolean().optional(),
-  /**
-   * Run only this session **in a git worktree** (FR-2's lower-priority option).
-   *
-   * The default is to work directly in the original directory — a worktree is never forced.
-   * Only someone who wants to eliminate file conflicts outright, when several sessions share a
-   * directory, turns this on.
-   */
   worktree: z.boolean().optional(),
-  /**
-   * The worktree branch name (#69). If omitted, an automatic name is used
-   * (`centralu/<first 8 characters of the id>`).
-   *
-   * The branch name doubles as the session name and the worktree directory name — since it is
-   * effectively permanent (changing it later means recreating the tree), the person has to be
-   * able to choose it here. Validation is done by the host (`git check-ref-format` — we do not
-   * re-implement that rule ourselves).
-   */
+  /** Omitted: `centralu/<id's first 8>`. Also the session's and folder's lasting name; `git check-ref-format` checks it */
   worktreeBranch: z.string().optional(),
-  /**
-   * Where to branch off from (the person pointed this out on 2026-09-07: "when creating a
-   * worker, there is no way to pick which branch to pull from").
-   *
-   * If omitted, this is the project's trunk (the baseBranch the manager set), and if that is
-   * also missing, the current HEAD. Even someone who has set a trunk sometimes needs "just this
-   * one time, from that other branch," and if the only workaround were swapping branches in the
-   * original folder, there would be no reason left to use a worktree.
-   */
+  /** Where the worktree branches off; omitted: the project's trunk (the manager's baseBranch), else the current HEAD */
   worktreeBase: z.string().optional(),
-  /**
-   * How deep below a session the person started this one is (#867), when another machine's session starts it (#1038:
-   * start_agent on a linked machine). Kept as the new session's own depth, so it starts agents and asks projects here
-   * only as far as the setting allows; it can only make the session deeper, never shallower, so a caller that sends it
-   * gains nothing. Absent: a session the person started.
-   */
+  /** Depth below a person-started session, from another machine's caller; it can only deepen, so sending it gains nothing */
   agentDepth: z.number().int().min(1).max(100).optional(),
   /**
-   * A session on another computer, linked to this one as its hub, starts this one (#1273: start_agent with a machine):
-   * the preset the hub carries from that session. The new session runs under `auto` only when `callerPreset` is `auto`
-   * and this host's "Allow auto from a linked computer" switch is on (`UiPreferences.hubAuto`); otherwise under
-   * `permissionPreset`, `normal` at most. The session is marked as started from a linked computer
-   * (`SessionInfo.startedFromHub`). A host from before this field drops it, and the session runs under
-   * `permissionPreset`, which a hub sends as `normal` at most.
+   * From a session on a computer this host is hub to: `auto` only when `callerPreset` is and `UiPreferences.hubAuto` is
+   * on, else `permissionPreset` (a hub sends `normal` at most), as an older host does. Sets `startedFromHub`.
    */
   fromHub: z.object({ callerPreset: PermissionPreset }).optional(),
 })
 export type CreateSessionParams = z.infer<typeof CreateSessionParams>
-/**
- * Change a session's settings. **The reason this has its own name** is so the port can use this
- * exact type too.
- *
- * A copy declared by hand drifts without an error: when the store passes the params as a
- * **variable**, TypeScript does not check for excess properties, so a field the copy leaves out
- * still flows through.
- */
+/** Named so the port uses it: a hand copy drifts, as excess properties go unchecked on params passed as a variable */
 export const UpdateSettingsParams = z.object({
   sessionId: SessionId,
   model: z.string().nullable().optional(),
-  /** Reasoning effort. Carried as a raw string since supported tiers differ by model */
+  /** effort, verbosity and serviceTier are raw strings: the supported tiers differ by model */
   effort: z.string().nullable().optional(),
-  /** Response length. Carried as a raw string under the same rule as effort (#54) */
   verbosity: z.string().nullable().optional(),
-  /** Response speed. Same rule — which tiers are supported is stated by the model list */
   serviceTier: z.string().nullable().optional(),
   permissionPreset: PermissionPreset.optional(),
   /**
-   * Whose hand makes the call (#659). Absent means a person's client, which is announced without a toast. The
-   * Assistant's settings tool on a linked machine sends `orchestrator` (the wire value keeps its old name,
-   * docs/plans/assistant-rename.md), so the machine broadcasts the change as the Assistant's and the window still
-   * toasts it. A host from before this field strips it, and then says nothing. `assistant` is the same hand under the
-   * role's new name, which a hub of a later release sends (#2133 step 4); this build accepts both and sends the old one.
+   * Absent: a person's client, no toast. A linked machine's Assistant tool sends `orchestrator` (later `assistant`,
+   * docs/plans/assistant-rename.md), toasted as the Assistant's; an older host strips it. This build sends the first.
    */
   by: z.enum(['orchestrator', 'assistant']).optional(),
 })

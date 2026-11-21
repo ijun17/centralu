@@ -1,46 +1,20 @@
-/**
- * Frames for text handed to an agent — text the app wrote, text a person wrote from inside an
- * app, and an app's error (#120, M4 B-4, C-5, C-6).
- *
- * The host is what builds the frames. The reason they live here is single — the mock the e2e
- * suite runs against (platform/mock) has to put its text into sessions built with **the same
- * frame**, or the screen looks like the real thing. If the mock imitated the frame with a second
- * copy, screen tests would go green while looking at text the host never actually builds. This
- * package is the only shelf both halves can import (the same reason as app-id.ts).
- *
- * The frame's rule is exactly the one from #120: the header is one line starting with
- * `[Centralu]`, and any other party's string spliced into that line (an app name, a tool name,
- * an error the app supplied) goes through the one-line field (frameField) — so a single newline
- * cannot draw a fake field inside the frame.
- */
+// Frames for text handed to an agent from an app (docs/security-boundaries/untrusted-text.md "Text an app sends").
+// Here, not in the host, so the e2e mock builds the same frame: a copy would let screen tests pass on text the host
+// never builds.
 
-/**
- * Splices another party's string into the frame's one-line field (#120).
- *
- * A session name is attached automatically from the first message, and the project name is not
- * our own text either. An app name is text written by whoever wrote the manifest. A single
- * newline could turn a `Session: …` line into several lines and draw a fake field such as
- * `Person:` inside the frame. Control characters and format characters are collapsed to a single
- * space, and long values are truncated — the frame's shape is kept by whoever uses it.
- */
+/** A party's string in a frame's one-line header (#120): a newline in it could draw a fake `Person:` field */
 export function frameField(value: string): string {
   return oneLineText(value, 120)
 }
 
-/**
- * What `oneLineText` takes out: white space (U+2028 and U+2029 included), control characters (NEL included), the bidi
- * controls (marks, embeddings, overrides, isolates), the zero-width space and word joiner, and the tag characters,
- * which hide text a reader does not see. The other format characters stay: ZWJ in an emoji, ZWNJ in Persian, a soft
- * hyphen are part of a name.
- */
+// The set is untrusted-text.md's: the tag characters hide text from a reader; ZWJ, ZWNJ and a soft hyphen are part of
+// a name and stay
 const NOT_ON_ONE_LINE =
   /[\s\p{Cc}\u061c\u200b\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\u{e0000}-\u{e007f}]+/gu
 
 /**
- * Any text on one line (#428): every run of what `NOT_ON_ONE_LINE` names becomes one space; past `max` characters it is
- * cut, with an ellipsis. The one reduction for a name, a task line or a label: a narrower copy with its own character
- * set lets a bidi override or a NEL through. Not for a path, whose spaces are its own.
- * A number or a boolean is written out; an object, an array or a function is no text (not `[object Object]`).
+ * The one reduction of a name, a task line or a label to one line: a narrower copy lets a bidi override or a NEL
+ * through. Not for a path, whose spaces are its own. An object is no text (not `[object Object]`)
  */
 export function oneLineText(value: unknown, max = Infinity): string {
   const text =
@@ -53,7 +27,7 @@ export function oneLineText(value: unknown, max = Infinity): string {
   return flat.length > max ? flat.slice(0, max) + '…' : flat
 }
 
-/** How one run of the app ended — the header only states the outcome, not that it succeeded */
+/** A run that did not succeed: the header never states success */
 export type BuilderRunFact = {
   tool: string
   callerKind: 'view' | 'session' | 'app'
@@ -61,21 +35,16 @@ export type BuilderRunFact = {
   error: string | null
 }
 
-/**
- * Facts attached to the "fix this" message (C-5) — which app, which screen, and the app's
- * current state. The host fills this in from its own records (the app list, the screen
- * instance, run history). It never carries facts the caller (UI) wrote and sent in: what the
- * header states has to be something the host itself knows, so the building agent can trust it.
- */
+/** From the host's own records, never from what the caller sent, so the building agent can trust the header */
 export type BuilderRequestFacts = {
   app: { appId: string; name: string }
-  /** The screen the person was looking at — the pinned screen is whatever the home tool opened. Null if unknown. */
+  /** The pinned screen is whatever the home tool opened */
   screen: { tool: string; resourceUri: string } | null
-  /** The app is stopped — either it crashed, or it failed repeatedly and halted. Only the first line of the reason is kept. */
+  /** `failed`: it failed repeatedly and was halted */
   stopped: { status: 'crashed' | 'failed'; reason: string | null } | null
-  /** The app's latest run did not succeed — null when it did (the closest evidence when the person says "this does not work") */
+  /** The closest evidence when the person says "this does not work"; null when the run succeeded */
   latestRun: BuilderRunFact | null
-  /** A script the person set up sent it over the limited credential, not the person (#1468): the header does not say the person wrote it */
+  /** Sent over the limited credential by a script the person set up: the header does not say the person wrote it */
   byScript?: boolean
 }
 
@@ -92,15 +61,8 @@ const ENDED: Record<BuilderRunFact['status'], string> = {
 }
 
 /**
- * The shape of text a person wrote in the composer under an app's screen, handed to that app's
- * building session (M4 C-5).
- *
- * Unlike text the app itself sent (`appMessageFrame`), **a person wrote this** — the body is an
- * instruction, so it is not wrapped in quotes. The header states where the message came from:
- * which app, which screen the person was looking at, and, if the app is currently stopped or its
- * latest run failed, that fact. A message like "this button does not work" has to arrive together
- * with that failure, or the building agent starts by trying to reproduce it from scratch. The
- * header is one line — everything after the first line is the person's own words.
+ * What a person wrote under an app's screen, for its builder (docs/apps/build-loop.md "Fix it here"). A person wrote it,
+ * so unlike `appMessageFrame` it is not quoted; a failure rides along, or the builder starts by reproducing it
  */
 export function builderRequestFrame(facts: BuilderRequestFacts, text: string): string {
   let head = `[Centralu] ${facts.byScript ? 'A script the person set up sent this for' : 'The person wrote this in'} the app "${frameField(facts.app.name)}" (app-${frameField(facts.app.appId)}) that you build`
@@ -118,28 +80,22 @@ const CALLERS = ['view', 'session', 'app'] as const satisfies readonly BuilderRu
 const NOT_OK = ['running', 'error', 'cancelled', 'rejected'] as const satisfies readonly BuilderRunFact['status'][]
 const oneOf = <T extends string>(all: readonly T[], v: string): T | undefined => all.find((x) => x === v)
 
-/** What the header reads of an app's entry in the app list (`ExternalAppInfo`) */
+/** What the header reads of `ExternalAppInfo` */
 export type BuilderInputApp = { appId: string; name?: string | null; status: string; error?: string | null; home?: string | null }
-/** One entry of the app's run history, the way a store hands it back (as text) */
+/** One run as a store hands it back, as text */
 export type BuilderInputRun = { tool: string; callerKind: string; status: string; error: string | null }
 
-/**
- * Everything the "fix this" request (C-5) is decided from, read by the caller from its own records. The host and the mock
- * each look these up their own way; what is made of them is one function, so both refuse with the same words and build
- * the same header.
- */
+/** The host and the mock each look these up their own way; one function makes the refusal and the header of them */
 export type BuilderRequestInput<B> = {
   text: string
   hasAttachments: boolean
-  /** The app's entry in the app list; undefined if it is gone */
+  /** Undefined: the app is gone */
   app: BuilderInputApp | undefined
-  /** The app's builder session; null if it has none (handed back with the frame, whatever the caller calls it) */
+  /** The app's builder session, handed back with the frame */
   builder: B | null
   /** The fixed view the person asked from: undefined when none was named, null when it is not open for this app */
   view: { uri: string } | null | undefined
-  /** The app's latest run, whatever it ended as */
   latestRun: BuilderInputRun | undefined
-  /** Sent by a script, not typed by the person (`BuilderRequestFacts.byScript`) */
   byScript?: boolean
 }
 
@@ -154,7 +110,6 @@ export function builderRequestOf<B>(ask: BuilderRequestInput<B>): { frame: strin
     app: { appId: app.appId, name: app.name ?? app.appId },
     screen: null,
     stopped: app.status === 'crashed' || app.status === 'failed' ? { status: app.status, reason: app.error ?? null } : null,
-    // Carried only if the latest run was not a success — a successful run is not evidence for "this does not work"
     latestRun: notOk(ask.latestRun),
     ...(ask.byScript ? { byScript: true } : {}),
   }
@@ -166,19 +121,14 @@ export function builderRequestOf<B>(ask: BuilderRequestInput<B>): { frame: strin
   return { frame: builderRequestFrame(facts, text), builder: ask.builder }
 }
 
-/** One run record → a header fact. null if it succeeded or the shape is unrecognized */
+/** null for a run that succeeded or a shape not recognized */
 function notOk(run: BuilderInputRun | undefined): BuilderRunFact | null {
   const callerKind = oneOf(CALLERS, run?.callerKind ?? '')
   const status = oneOf(NOT_OK, run?.status ?? '')
   return run && callerKind && status ? { tool: run.tool, callerKind, status, error: run.error } : null
 }
 
-/**
- * The one-line reason — only the first non-empty line. For most errors the first line is the
- * reason and the rest is the stack trace. The stack trace is not carried by the header; the
- * error report bundle (C-6) carries it. Some errors start with an empty line ("\nError: …"), so
- * empty lines are skipped. Nothing is written if there is no non-empty line at all.
- */
+/** The first non-empty line: the rest is usually the stack, which the error report carries. Some start "\nError: …" */
 function because(reason: string | null): string {
   const line = (reason ?? '')
     .split(/\r\n|[\n\r\u0085\u2028\u2029]/)
@@ -189,14 +139,8 @@ function because(reason: string | null): string {
 }
 
 /**
- * The shape of an app's error report bundle handed to that app's building session (M4 C-6) —
- * used only after the person clicks "Send to builder".
- *
- * The host writes the bundle's text, but the body is **what the app itself printed** (the
- * reason, the last lines of standard error). An app's standard error can carry outside data the
- * app brought in verbatim — so, as with text the app sent (`appMessageFrame`), `> ` is prefixed
- * to **every line** of the body to keep it inside a quote. The header states who sent it (the
- * person chose to send it) and what it is (a report Centralu built from the app's output).
+ * An app's error report, sent to its builder only by the person's "Send to builder". Its stderr can carry outside text,
+ * so every line is quoted, as in `appMessageFrame` (untrusted-text.md)
  */
 export function builderErrorFrame(app: { appId: string; name: string }, report: string): string {
   const body = report

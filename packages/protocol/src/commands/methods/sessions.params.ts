@@ -13,7 +13,7 @@ import { machineParam } from '../machine-fields.js'
 import { CreateSessionParams, UpdateSettingsParams } from '../session-params.js'
 import { SUBAGENT_STEPS_PAGE } from '../sessions.js'
 
-/** The parameters of the `sessions` methods, which the host validates (docs/protocol.md §3). Their results: ./sessions.results.ts */
+/** Params of the `sessions` methods, parsed by the host (docs/protocol.md §3). Results: ./sessions.results.ts */
 export const sessionsParams = {
   'agents.createSession': CreateSessionParams,
   'agents.send': z.object({
@@ -26,16 +26,12 @@ export const sessionsParams = {
     requestId: z.string(),
     decision: ApprovalDecision,
     scope: ApprovalScope.optional(),
-    /** The target pattern for "always allow." Computed by the core and sent by the UI */
+    /** The "always allow" pattern, computed by the core and sent by the UI */
     matcher: z.string().optional(),
   }),
   /**
-   * Answers a set of choices (AskUserQuestion). The answer returns to the model as that tool's
-   * result.
-   *
-   * Kept separate from approval because what goes back is different — an approval is whether to
-   * run at all, while this is **content**. If there are several questions, several answers
-   * arrive together.
+   * AskUserQuestion: the answers (all of them, when there are several questions) go back to the model as the tool's
+   * result. Not an approval: what returns is content, not whether to run.
    */
   'agents.answerQuestion': z.object({
     sessionId: SessionId,
@@ -43,161 +39,102 @@ export const sessionsParams = {
     answers: z.array(QuestionAnswer),
   }),
   'agents.interrupt': z.object({ sessionId: SessionId }),
-  /**
-   * Stops one background task of the session (#290) — only one the adapter marked `stoppable`. Claude stops it with
-   * `stopTask`, Codex by interrupting the child thread's own turn. The task leaves the live set through the session's
-   * next `background_tasks` event, with its ending, as for any other ending; this only asks.
-   */
+  /** Only asks (docs/protocol.md §3): the task leaves the live set through the next `background_tasks` event */
   'agents.stopBackgroundTask': z.object({ sessionId: SessionId, taskId: z.string() }),
-  /** Takes the ended tasks off the session's list (#290). Running ones stay; they are the tool's to end */
+  /** Running tasks stay: they are the tool's to end */
   'agents.clearBackgroundTasks': z.object({ sessionId: SessionId }),
   /**
-   * Moves a session to the trash (#204). Nothing is destroyed here: the rows, the attachments, the handoff note, the
-   * tool's conversation file and the worktree all stay until the person deletes it for good in Settings
-   * (`trash.purge` / `trash.empty`). The two flags only record what that later step removes.
-   *
-   * The trash has its ways out (list, read, restore): a place with a way in and no way out reads to the person as
-   * deletion.
+   * Moves the session to the archive (#204). Nothing is destroyed until `trash.purge` / `trash.empty`; the two flags
+   * record what that step removes.
    */
   'agents.deleteSession': z.object({
     sessionId: SessionId,
     /**
-     * Only meaningful for a worktree session. **The default is to keep it** — hours of an
-     * agent's work can live there, and deleting it silently leaves no way back. The UI asks
-     * first via `agents.worktreeStatus`, and sends whatever the person decided here.
-     * The worktree stays in place while the session is in the trash; this marks it for removal when it is purged.
+     * Kept by default: hours of an agent's work can live there, and a silent delete has no way back. The UI asks first
+     * via `agents.worktreeStatus`. The worktree is removed at purge.
      */
     deleteWorktree: z.boolean().default(false),
     /**
-     * Also delete the tool-side conversation itself (measured
-     * at 550MB for a codex rollout, plus claude JSONL). The default is to keep it here too:
-     * that file belongs to the tool, and keeping it around is the last way back into that tool
-     * if the deletion is regretted. Only turned on when the person explicitly checks the box.
-     * If deleting the original fails, our own deletion stops too — because answering "deleted"
-     * while the original still exists would be the worst outcome.
-     * The file is deleted when the session is purged from the trash (#204), not here; the rule above holds there.
+     * The tool's own conversation file (measured 550MB for a codex rollout), deleted at purge. Kept by default: it is the
+     * tool's, and the last way back into it. If deleting it fails, our deletion stops too: answering "deleted" while
+     * the original exists is the worst outcome.
      */
     deleteExternal: z.boolean().default(false),
   }),
   /**
-   * The archive the window offers for a session that looks idle (#1512), decided by the host at the last moment: it moves the
-   * session (as `agents.deleteSession` with the worktree and the tool's file kept) only when nothing it holds would be lost,
-   * the same rule as the Assistant's `delete_session` (reports owed to or by it, waits and cards on it, what the person
-   * allowed it, unfinished mail threads) and it is at rest in the step that moves it. Otherwise nothing moves and `asks` says
-   * what would be lost, for the window's dialog (empty when the session was only busy, or is gone). A build from before it
-   * answers "Unknown method", and the window asks first as it always did.
+   * Archives as `agents.deleteSession` (worktree and tool file kept) only when the session is at rest and nothing it holds
+   * would be lost (the Assistant's `delete_session` rule); otherwise nothing moves and `asks` says what would be lost
+   * (empty when it was only busy, or is gone). An older host answers "Unknown method", and the window asks first.
    */
   'agents.archiveIfAtRest': z.object({
     sessionId: SessionId,
-    /** As `agents.deleteSession`'s: the tool's conversation file goes when the session is deleted for good (the dialog's default); ignored for a tool that cannot delete it */
+    /** As `agents.deleteSession`'s; ignored for a tool that cannot delete its file */
     deleteExternal: z.boolean().default(false),
   }),
   /**
-   * What archiving the session would lose that restoring does not bring back (#1595), read only: the lines `agents.archiveIfAtRest`
-   * would answer in `asks` (`SessionTrash.lossesOf`), so the archive dialog can show them whichever way the worktree box is
-   * ticked, also when the session leaves with its worktree, which `archiveIfAtRest` never does. Empty for a session with none,
-   * and for one that is gone. A build from before it answers "Unknown method", and the dialog goes on as it did before.
+   * Read only: the losses `agents.archiveIfAtRest` would answer in `asks` (`SessionTrash.lossesOf`), so the dialog shows
+   * them however the worktree box is ticked. Empty for none, or a session that is gone.
    */
   'agents.archiveLosses': z.object({ sessionId: SessionId }),
   /**
-   * agent_session delete of a child a hub's session started here with a worktree (#1161 item 3): the session goes to the
-   * trash, and the worktree Centralu made for it on `worktreeBranch` goes too when nothing would be lost (nothing
-   * uncommitted, every commit of its own on a remote or the trunk). `kept` says why it stayed; `none`, the session had
-   * no worktree. A build from before it answers "Unknown method", and the hub deletes the session as `agents.deleteSession`.
+   * agent_session delete of a child a hub's session started here with a worktree: its worktree on `worktreeBranch` goes
+   * too when nothing would be lost (nothing uncommitted, every own commit on a remote or the trunk). `kept` says why it
+   * stayed; `none`, no worktree. An older host answers "Unknown method", and the hub uses `agents.deleteSession`.
    */
   'agents.deleteAgentChild': z.object({ sessionId: SessionId, worktreeBranch: z.string().min(1) }),
-  /**
-   * The material needed to judge whether a worktree can be deleted. The UI asks this right
-   * before deleting. `null` means this is not a worktree session — there is nothing to ask.
-   */
-  /**
-   * The Assistant's MCP server proposal flow (propose_mcp_server, then the person's one-click
-   * approval, then the app registers it and restarts the Assistant). The proposal list is
-   * fetched by query, and the answer goes through resolve.
-   */
+  /** The Assistant's MCP server proposals; approving one registers it and restarts the Assistant */
   'agents.mcpProposals': z.object({}),
   'agents.resolveMcpProposal': z.object({ name: z.string(), approve: z.boolean() }),
-  /**
-   * Assistant skills (#71) — fetching and answering proposals, plus listing and deleting
-   * approved skills. The reason deletion exists: a skill that can only be added and never
-   * removed is worse than not having one at all (the decision recorded on the issue).
-   */
+  /** Assistant skills: deleting exists because a skill that can only be added is worse than none (#71) */
   'agents.skillProposals': z.object({}),
   'agents.resolveSkillProposal': z.object({ name: z.string(), approve: z.boolean() }),
   'agents.orchestratorSkills': z.object({}),
   'agents.deleteOrchestratorSkill': z.object({ name: z.string() }),
   /*
-   * #2133 step 4: the same two under the role's new name, answered as the old ones are. The window keeps calling the old
-   * ones: it can stay attached to a host of the release before this one (#280), which lacks these
-   * (docs/plans/assistant-rename.md §3.2)
+   * The same two under the role's new name. The window calls the old ones: it may be attached to an older host that
+   * lacks these (docs/plans/assistant-rename.md §3.2)
    */
   'agents.assistantSkills': z.object({}),
   'agents.deleteAssistantSkill': z.object({ name: z.string() }),
   /**
-   * The handoff transcript for a dead agent (#78). Built by the host from the raw store data
-   * (plus a compact summary of a codex rollout) without calling that session's tool.
-   *
-   * **The result is a file** (#102): the host writes it to the note's spot in the data folder
-   * (`<data>/handoff/<project id>/<session id>.md`, #142) and returns its absolute path — the
-   * **same spot** used by the mode that receives a note from the agent
-   * (`agents.exportHandoffNote`), so the first message the successor receives has the same
-   * shape either way. text is also returned so the caller can pull out a short preview to put in
-   * the first message. Nothing is ever written into the user's own repository.
+   * An ended agent's handoff transcript, built from the store (plus a codex rollout's summary) without its tool. Written to
+   * `<data>/handoff/<project id>/<session id>.md`, as `agents.exportHandoffNote`, and the path returned; `text` is for a
+   * preview. Never written into the user's repository.
    */
   'agents.exportHandoffRecord': z.object({
     sessionId: SessionId,
-    /** The tool that will be the successor — used for the transcript header's `codex → claude`. Omit if unknown. */
+    /** The successor's tool, for the transcript header's `codex → claude` */
     toTool: ToolName.optional(),
   }),
   /**
-   * The note from a live handoff (#142) — the host places the note the agent wrote **as its
-   * reply** at the same spot as the transcript mode.
-   *
-   * The agent does not write the file itself: since the note's spot is outside the repository,
-   * letting it write directly would mean granting both tools more permission than they need.
-   * afterSeq is the last seq right before the request was sent — the first person message after
-   * it is the request, and the last reply before the next person message after that is the note.
-   * **Null means "not yet"**: either the turn is still running, or there is no reply yet. The
-   * caller waits and asks again.
+   * The agent's reply as its handoff note, placed by the host where `agents.exportHandoffRecord` writes: outside the
+   * repository, which the agent could write only with more permission. The note is the last reply before the next person
+   * message after the request, the first after `afterSeq`. Null: not yet (turn running or no reply), ask again.
    */
   'agents.exportHandoffNote': z.object({ sessionId: SessionId, afterSeq: z.number().int().nonnegative() }),
   /**
-   * Where this session's agent will compact by itself the next time its process starts (#1376), as the host that runs the
-   * session decides it: its setting, over the model's window. `tokens` is null when nothing will be passed (the control is
-   * off, or the model's window has not been read yet). A linked machine answers for itself; one from before this answers
-   * "Unknown method", which a window reads as "not set by Centralu there".
+   * Where the agent will compact itself at its next start, as its host decides (its setting, over the model's window).
+   * `tokens` null: nothing passed (off, or the window not read yet). An older host's "Unknown method" reads as not set.
    */
   'agents.autoCompact': z.object({ sessionId: SessionId }),
+  /** Asked right before deleting a worktree. Null: not a worktree session */
   'agents.worktreeStatus': z.object({ sessionId: SessionId }),
-  /**
-   * Restarts only the agent attached to the session (the conversation history stays untouched).
-   * A way to swap out only the process when a tool acts up, without creating a whole new session.
-   */
+  /** Restarts only the agent's process; the conversation stays */
   'agents.restartSession': z.object({ sessionId: SessionId }),
   'agents.resumeSession': z.object({ sessionId: SessionId }),
   /**
-   * **Forks away** from a locked conversation and continues on this session instead.
-   *
-   * For a tool (codex) where only one place can hold write access to a conversation, this is the
-   * only way to keep going without closing the other app. The original is left untouched; a copy
-   * is made and this session is pointed at the copy.
+   * Continues a locked conversation on a copy (codex lets one place write a conversation), without closing the other
+   * app. The original is untouched.
    */
   'agents.forkConversation': z.object({ sessionId: SessionId }),
   /**
-   * Switches a session's agent (claude, codex).
-   *
-   * **Why it is kept separate** from updateSettings: model and permissions change while the same
-   * conversation continues, but switching tools means the conversation does not continue
-   * (externalId is a tool-specific id, so it has to be cut off). Calling two different-outcome
-   * operations through the same door would let a caller use it without knowing the difference.
+   * Not part of `agents.updateSettings`: a settings change keeps the conversation, a tool switch cuts it (externalId is
+   * per tool).
    */
   'agents.switchTool': z.object({ sessionId: SessionId, tool: ToolName }),
-  /** Changes the model and permissions mid-conversation (takes effect from the next turn) */
+  /** Takes effect from the next turn */
   'agents.updateSettings': UpdateSettingsParams,
-  /**
-   * Prior sessions the tool has stored for this project directory (an extension of FR-10).
-   * If supported=false, a reason comes with it — "new session" still works even on an older tool.
-   */
+  /** The tool's own stored sessions for this project folder; `supported: false` comes with a reason */
   'agents.listExternalSessions': z.object({
     projectId: ProjectId,
     tool: ToolName,
@@ -206,78 +143,51 @@ export const sessionsParams = {
   'agents.capabilities': z.object({ tool: ToolName, ...machineParam }),
   'agents.detect': z.object({ ...machineParam }),
   /**
-   * Installs a tool Centralu manages itself (#59: Antigravity's agent, `ToolSetup.install: centralu`) on the machine named:
-   * the version this build pins, its archive checked against the pinned sha256 before it is unpacked, put in place whole or
-   * not at all. Answers at once with the setup as it stands (`installing`); progress and the end come as `tool_setup`
-   * events. A second call while one runs joins it. Never started by the host on its own (no download at startup)
+   * docs/protocol.md §3 "tool setup". A second call while one runs joins it; the host never starts one itself (no
+   * download at startup).
    */
   'agents.installTool': z.object({ tool: ToolName, ...machineParam }),
-  /** Stops an install that runs; what it had downloaded is removed. Answers the setup as it stands after */
+  /** What it had downloaded is removed */
   'agents.cancelInstallTool': z.object({ tool: ToolName, ...machineParam }),
   /**
-   * Starts a tool's sign-in inside Centralu (`ToolSetup.signIn: centralu`): the host opens the browser on the machine it
-   * runs on and waits for the tool (Antigravity: ACP `authenticate`, up to 5 minutes). Answers at once (`signing_in`); the
-   * end comes as a `tool_setup` event. **This host's machine only**: there is no `machine` parameter, since the tool's
-   * redirect goes to the loopback of the machine it runs on (a linked machine's line says to sign in there)
+   * This host's machine only (docs/protocol.md §3 "tool setup"): the tool's redirect goes to the loopback of the machine
+   * it runs on. Antigravity: ACP `authenticate`, waited up to 5 minutes.
    */
   'agents.signIn': z.object({ tool: ToolName }),
-  /** Ends a sign-in that waits (its process, and with it the one-shot listener). Answers the setup as it stands after */
+  /** Ends its process, and with it the one-shot listener */
   'agents.cancelSignIn': z.object({ tool: ToolName }),
-  /**
-   * The agent CLIs installed now (#297). `force: false` (the window gaining focus) answers with what is known when it
-   * was read moments ago; `force: true` reads again. Reading costs no process where the CLI came from npm (its
-   * `package.json` says the version), so this is cheap either way.
-   */
+  /** Cheap either way: an npm CLI's version is read from its `package.json`, no process */
   'agents.versions': z.object({ force: z.boolean().default(false), ...machineParam }),
-  /** "Move idle sessions to a newly installed agent CLI" on or off (#297). On by default */
   'agents.setAutoApplyVersions': z.object({ enabled: z.boolean(), ...machineParam }),
   /**
-   * Restarts every session that runs an older CLI than the one installed and is fully idle, on the installed one
-   * (#297) — the session header's one app-wide action. A session that is working, waiting on the person, or running
-   * background tasks is left as it is and listed in `busy`; with `autoApply` on it moves once it is idle.
-   *
-   * `keepQuiet` (additive, #1219): also leave a session that said something within the last minute, as the automatic move
-   * does, so a restart does not land the moment someone reads an answer and starts typing the next message. The person's own
-   * button asks for none of that wait (it is absent); the Assistant's `apply_agent_versions` is not the person's own.
+   * `keepQuiet`: also leave a session that spoke within the last minute, as the automatic move does, so a restart does
+   * not land as someone reads an answer. The person's button omits it; the Assistant's `apply_agent_versions` sends it.
    */
   'agents.applyVersions': z.object({ ...machineParam, keepQuiet: z.boolean().optional() }),
-  /** When idle sessions go to sleep (#568): this host's setting */
   'agents.sleepPolicy': z.object({ ...machineParam }),
-  /** "Put idle sessions to sleep after" (#568). `afterMinutes: null` never; 15 by default */
   'agents.setSleepPolicy': z.object({
     afterMinutes: z.number().int().positive().nullable(),
     ...machineParam,
   }),
   /**
-   * A local image an agent wrote into a reply as Markdown (`![alt](/path/to/shot.png)`). The window cannot load
-   * a file path itself (its origin is the app, and its CSP takes images from `data:` and `blob:` only), so the host
-   * reads it: wherever it is on that machine, but only a path that appears in one of this session's own replies, only
-   * PNG, JPEG, GIF or WebP by their bytes, and at most `IMAGE_PREVIEW_MAX_BYTES` (docs/security-boundaries/desktop.md,
-   * "Images a reply names"). `path` is the string as the reply wrote it: `~`, a path relative to the session's folder
-   * and a `file://` URL are resolved by the host.
+   * The host reads it: the window cannot load a file path (docs/security-boundaries/desktop.md "Images a reply names").
+   * `path` as the reply wrote it; the host resolves `~`, a path relative to the session's folder and a `file://` URL.
    */
   'messages.image': z.object({ sessionId: SessionId, path: z.string().min(1).max(4096) }),
   'messages.search': z.object({ query: z.string(), limit: z.number().optional() }),
   'sessions.reorder': z.object({ projectId: ProjectId, orderedIds: z.array(z.string()) }),
   'sessions.list': z.object({}),
   'sessions.rename': z.object({ sessionId: SessionId, name: z.string() }),
-  /*
-   * `sessions.setKind` (#13) is retired and its name is not reused (docs/protocol.md §4): there is one Assistant per
-   * app, and the role that directs sessions inside a project comes from the relationship (#69), not a choice.
-   */
+  // The name `sessions.setKind` is not reused (docs/protocol.md §4)
   'sessions.markRead': z.object({ sessionId: SessionId, seq: z.number() }),
   /**
-   * Done on a session in `error` (#1549): it moves to `idle` and what the person saw is read, so the sidebar's mark and the
-   * inbox row go. `seq` is the newest row the window had: the error is cleared only when nothing newer exists (a later error
-   * the person has not seen stays), and rows up to `seq` are read either way. `cleared` says whether the state moved, `newer` that it stayed `error` because a newer row exists. A session
-   * not in `error` keeps its state (its rows up to `seq` are read). Nothing is stopped, retried or continued, and the error
-   * line stays in the conversation. The person's alone (the window): an agent's script may not hide a failure.
+   * Done on a session in `error`: rows up to `seq` are read, and it moves to `idle` (`cleared`) unless a newer row exists
+   * (`newer`). Nothing is stopped or retried; the error line stays. The person's alone: an agent may not hide a failure.
    */
   'sessions.clearError': z.object({ sessionId: SessionId, seq: z.number() }),
   /**
-   * Don't continue (#1415): the stopped turn Centralu was going to continue by itself (`Interruption.autoContinue`) is left for the
-   * person. The stop stays, with its Continue. `stopped` is false when nothing was waiting (it continued or was already left).
-   * Routed to the session's machine, whose host holds the wait. The person's alone (the window), like Done
+   * Don't continue: leaves the stopped turn Centralu would continue (`Interruption.autoContinue`) to the person; `stopped`
+   * false when nothing waited. Routed to the session's machine, which holds the wait. The person's alone.
    */
   'sessions.stopContinue': z.object({ sessionId: SessionId }),
   'messages.load': z.object({
@@ -285,54 +195,19 @@ export const sessionsParams = {
     limit: z.number().default(200),
     beforeSeq: z.number().optional(),
   }),
-  /**
-   * The steps of the native subagent one card launched (#222), oldest first, `afterSeq` paging forward. `seq` here is
-   * the step's number within that launch, not a conversation number.
-   *
-   * Only asked for when the person opens that card's steps: they are not in `messages.load`, and nothing else reads
-   * them. Tool calls and results come as their cards (`summary`), the same as a history page (#221).
-   */
+  /** Read only when the person opens the card; `seq` is the step's number within that launch */
   'messages.subagent': z.object({
     sessionId: SessionId,
     parentCallId: z.string(),
     afterSeq: z.number().optional(),
     limit: z.number().default(SUBAGENT_STEPS_PAGE),
   }),
-  /**
-   * How many of one launch card's steps are in the trash (#418), so the card says they were moved there rather than
-   * that none were recorded. Asked with the first page of `messages.subagent`; an older host does not know it.
-   */
   'messages.subagentTrashed': z.object({ sessionId: SessionId, parentCallId: z.string() }),
-  /**
-   * A project's terminal list.
-   *
-   * **A terminal's identity is its cwd** — not a session.
-   * So switching sessions within the same project keeps the same terminals continuing, and
-   * once a git worktree session exists later, it has its own terminals since its cwd differs.
-   */
-  /**
-   * The slash commands (skills) available in this session.
-   *
-   * ready=false means **the tool is not ready yet**, not that there are none — right after a
-   * session is created, the CLI is still starting up and cannot be asked yet.
-   * The UI distinguishes this, showing "none" and "loading" differently.
-   */
+  /** `ready: false` means the CLI is still starting, not that there are none */
   'agents.commands': z.object({ sessionId: SessionId }),
-  /**
-   * Account usage and limits (FR-9). Only covers subscription limits.
-   * If supported=false, a reason comes with it — distinguishing what the tool cannot give from
-   * what we failed to read.
-   */
-  /**
-   * The list of selectable models. Carries exactly what the tool reports through its official
-   * API. An older tool may not know this, so it comes back as supported=false plus a reason.
-   */
+  /** What the tool reports through its official API; an older tool answers `supported: false` with a reason */
   'agents.models': z.object({ tool: ToolName, ...machineParam }),
-  /**
-   * Limit readings and tokens over time, as this host stored them (docs/agent-host/usage.md "Usage over time"): each window's percent per
-   * tool and account, and the hourly token buckets summed by day or hour and by session, project, model or tool.
-   * Read-only. The hub asks a linked machine with `machine`; each host keeps its own record.
-   */
+  /** docs/agent-host/usage.md "Usage over time". Each host keeps its own record */
   'usage.history': z.object({
     /** ISO8601, inclusive */
     from: z.string(),
@@ -340,101 +215,51 @@ export const sessionsParams = {
     to: z.string(),
     groupBy: z.enum(['day', 'hour']),
     by: UsageHistoryBy,
-    /** Only this tool's readings and requests; absent: every tool */
+    /** Absent: every tool */
     tool: ToolName.optional(),
     ...machineParam,
   }),
   'agents.usage': z.object({
     tool: ToolName,
-    /**
-     * `false`: answer the prompt cache figures only and do not read the account's limits (#726). The hub asks a
-     * linked machine this when it shows its own limits for it (same account), so that machine does not start a
-     * reading of limits nobody will look at. Absent: read them.
-     */
+    /** `false`: cache figures only, so a linked machine on the hub's account starts no reading nobody looks at */
     limits: z.boolean().optional(),
-    /**
-     * `true`: when a read of the tool's own command is in flight (an answer marked `provisional`), wait for it instead of
-     * answering at once (#1623). The screen asks once more with this when the first answer was provisional, so it
-     * receives the result when the command finishes and does not poll. Absent: answer at once.
-     */
+    /** `true`: wait for a read in flight (a `provisional` answer) instead of answering at once, so the screen need not poll */
     settle: z.boolean().optional(),
     ...machineParam,
   }),
   /**
-   * Which account a tool is logged in to on this host, as an opaque fingerprint (#726). The hub compares its own with a
-   * linked machine's to know the two share one account's limits. Nothing readable leaves the host: not the email, not
-   * the organisation id. `fingerprint` is null when the tool is not logged in with an account, or does not say which.
-   * `loggedIn` is null when the tool cannot tell.
+   * Nothing readable leaves the host (no email, no organization id). `fingerprint` null: not logged in with an account,
+   * or it does not say which; `loggedIn` null: the tool cannot tell.
    */
   'agents.account': z.object({ tool: ToolName, ...machineParam }),
   /**
-   * The session archive (#204; the method names keep the word "trash", #1404, because the protocol only grows).
-   * The person reaches these: the RPC is the UI's channel, and the Assistant's trash
-   * commands make the same calls (#1219), its deletes for good only after the person's card. No other agent tool and
-   * not the apps' broker has a trash or purge verb. `agents.deleteSession` is the way in.
-   *
-   * `bytes` is the total of every session's `bytes` — shown because nothing deletes the archive on its own. `runs` are
-   * the records of deleted app-agent sessions (#378), which `bytes` counts too, each on the machine its app ran on
-   * (`machine`, as a session's); a host older than #378 sends none.
-   * `unreached`: the linked machines whose trash could not be read this time (#841 item 4), so the list says it is
-   * not the whole trash. Absent when every machine answered, and from a host before it.
+   * docs/protocol.md §3 "trash". The Assistant's trash commands make these calls too, a purge only after the person's
+   * card. `bytes` is shown because nothing deletes the archive itself. `unreached`: machines not read this time.
    */
   'trash.list': z.object({}),
-  /**
-   * An app-agent run's record (#378), read-only: the request and the answer as the app's run saw them, the structured
-   * output when the app gave a schema, and a page of the conversation in the same shape as `trash.read`. `machine` is
-   * the record's, as `trash.list` gave it: a linked machine's record is read there
-   */
+  /** `machine` as `trash.list` gave it: a linked machine's record is read there */
   'trash.readRun': z.object({
     runId: z.string(),
     limit: z.number().default(200),
     beforeSeq: z.number().optional(),
     ...machineParam,
   }),
-  /**
-   * Deletes app-agent run records for good (#378): one, every record of one app, or every one listed, all of one
-   * machine (`machine`, as `trash.readRun`); the window sends one call per machine.
-   */
+  /** All of one machine; the window sends one call per machine */
   'trash.purgeRuns': z.object({ runIds: z.array(z.string()).min(1), ...machineParam }),
-  /** A trashed conversation, read-only — the same page shape as `messages.load` */
   'trash.read': z.object({
     sessionId: SessionId,
     limit: z.number().default(200),
     beforeSeq: z.number().optional(),
   }),
-  /**
-   * Brings a session back as it was. `project` is set when its project had been deleted and restoring registered
-   * the folder again — the screen has not heard of that project yet.
-   */
+  /** `project` is set when restoring registered a deleted project's folder again, which the screen has not heard of */
   'trash.restore': z.object({ sessionId: SessionId }),
-  /** Deletes one session in the trash for good, with what the person chose to remove with it */
   'trash.purge': z.object({ sessionId: SessionId }),
-  /**
-   * The subagent steps each live session holds (#418), largest first; a session with none is not listed, and one in
-   * the trash is counted in its own trash entry. Settings shows them beside the trash, where what the store holds is said.
-   * `unreached` as in `trash.list`.
-   */
   'subagents.usage': z.object({}),
-  /**
-   * Moves a live session's subagent steps to the trash (#418); the conversation and its launch cards stay. A subagent
-   * still running goes on writing its new steps under its card. Answers what was moved.
-   */
+  /** A subagent still running goes on writing its new steps under its card */
   'subagents.trash': z.object({ sessionId: SessionId }),
-  /** Puts a session's trashed subagent steps back under their cards (#418) */
   'trash.restoreSubagentSteps': z.object({ sessionId: SessionId }),
-  /**
-   * Deletes a session's trashed subagent steps for good (#418); the session and its steps not in the trash stay.
-   *
-   * `upTo` is the entry's `deletedAt` as the window listed it: only steps moved to the trash at or before it go, so steps
-   * moved there after the list was read (from another window, or while a machine was not reached) are not deleted
-   * unseen. Moves of one session are stamped strictly later than the one before, so the bound is exact.
-   */
+  /** `upTo` (docs/protocol.md §3) is exact: one session's moves are stamped strictly later than the one before */
   'trash.purgeSubagentSteps': z.object({ sessionId: SessionId, upTo: z.number() }),
-  /**
-   * Deletes every session in the trash for good. One that fails stays in the trash and is reported; the rest go on.
-   * The app-agent run records (#378) are not touched: the window deletes the ones it listed with `trash.purgeRuns`, so
-   * emptying across linked machines never takes records nobody was shown. Nor are the subagent steps in the trash (#418),
-   * for the same reason: the window deletes each one it listed with `trash.purgeSubagentSteps` and its `upTo`.
-   */
+  /** One that fails stays and is reported. Run records and subagent steps are left to the window (docs/protocol.md §3) */
   'trash.empty': z.object({}),
 } as const

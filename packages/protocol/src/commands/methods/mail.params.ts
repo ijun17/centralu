@@ -1,58 +1,48 @@
 import { z } from 'zod'
 
-/** The parameters of the `mail` methods, which the host validates (docs/protocol.md §3). Their results: ./mail.results.ts */
+/** Params of the `mail` methods, parsed by the host (docs/protocol.md §3 "mailbox"). Results: ./mail.results.ts */
 export const mailParams = {
-  /** The threads the person is in, unread first, the mail held for them, and how many sleeping sessions wait for their word */
   'mail.list': z.object({}),
-  /** The open and recently settled work on this host (#1577): the newest 200 messages that wait for a reply, one row per recipient, for the Inbox's Tasks. An older host answers `unknown_method`, and Tasks lists nothing */
   'mail.tasks': z.object({}),
-  /** One thread with its messages after `after` (from where the person last read by default), marked read for the person */
   'mail.thread': z.object({
     threadId: z.string(),
     after: z.number().int().min(0).optional(),
     all: z.boolean().optional(),
-    /** The last this many messages (at most 100), and the thread is read to its end; with `before`, the last this many before that `seq`, read already */
+    /** The last this many, the thread then read to its end; with `before`, the last this many before that `seq`, already read */
     tail: z.number().int().min(1).max(100).optional(),
     before: z.number().int().min(1).optional(),
-    /**
-     * Read it as a look in (#2268): nothing in it is read for anyone. A hub sends it for a linked machine's chain it opens from its Tasks, which it shows
-     * read-only. Absent: false. A host from before it drops it and reads what is the person's there for them, as before
-     */
+    /** Nothing in it is read for anyone: a hub's look at a linked machine's chain from its Tasks. An older host drops it */
     lookIn: z.boolean().default(false),
   }),
-  /** The person writes in a thread: their words, whatever the thread's other parties are (§7.1) */
+  /** The person's words, whatever the thread's other parties are (docs/plans/mailbox.md §7.1) */
   'mail.reply': z.object({
     threadId: z.string(),
     text: z.string().min(1).max(16_000),
     kind: z.enum(['note', 'answer', 'question']).optional(),
-    /** The id of the question in this thread that `text` answers (#1630, #2191): a pick of one of its choices, or the person's own words. The answer goes to that question, not to the newest open one, and a question already answered refuses it (`answered`). An older host takes only a choice of the question, and refuses other words */
+    /** The question `text` answers, by a choice or in the person's words. An older host takes only a choice, refusing other words */
     answers: z.string().optional(),
   }),
-  /** The person closes a thread */
   'mail.close': z.object({
     threadId: z.string(),
     outcome: z.enum(['finished', 'failed', 'stopped', 'dropped']).optional(),
   }),
-  /** The person sends held mail now (`release`: Release / Resend / Retry) or lets it go undelivered (`dismiss`) */
+  /** `release`: Release / Resend / Retry; `dismiss`: let it go undelivered */
   'mail.held': z.object({
     action: z.enum(['release', 'dismiss']),
     recipient: z.string(),
     messageIds: z.array(z.string()).min(1).max(500),
   }),
-  /**
-   * The person resumes mail paused for a thread's turns (§7.9). `sessionId`, the Resume of a session's budget (a hold no build sets, #2247),
-   * is still accepted from an older window and resumes nothing. Exactly one of the two
-   */
+  /** Exactly one of the two; `sessionId`, sent by an older window, resumes nothing */
   'mail.resume': z
     .object({ sessionId: z.string().optional(), threadId: z.string().optional() })
     .refine(
       (p) => (p.sessionId === undefined) !== (p.threadId === undefined),
       'sessionId or threadId, not both',
     ),
-  /** The person's answer to "N sessions have mail from while Centralu was off": wake them, or leave them for their next turn (§7.9) */
+  /** "N sessions have mail from while Centralu was off": wake them, or leave them for their next turn */
   'mail.wake': z.object({ wake: z.boolean() }),
-  /** The watches a session keeps (#1324, docs/plans/mailbox.md §18.8): what its header's badge lists. An older host answers `unknown_method`, and the window shows no badge */
+  /** What a session's header badge lists (docs/plans/mailbox.md §18.8). An older host answers `unknown_method`: no badge */
   'watches.list': z.object({ sessionId: z.string() }),
-  /** The person cancels a watch: it ends, its firing not given yet is taken back, and its session gets one quiet notice saying so */
+  /** Its firing not given yet is taken back, and its session gets one quiet notice */
   'watches.cancel': z.object({ id: z.string() }),
 } as const

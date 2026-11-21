@@ -1,23 +1,9 @@
-/**
- * The words of a handoff (#78, #102, #142) that both its starters use: the window's session menu
- * (`handoffSession` in the UI's store) and the Assistant's handoff_session (#694, the host). Text only, no IO.
- */
+// The words of a handoff, shared by the window's session menu and the Assistant's handoff_session (#694).
 
 /**
- * The handoff prompt: the language the person is using carries over. Only the dying session has the full context, so
- * it is the one that writes the note.
- *
- * **The note is received as the reply, and the host places the file** (#142). The note lives
- * outside the user's repository (in the data folder), and writing it there directly would mean
- * granting both tools more permissions — so the agent only replies, and after that turn ends the
- * host takes **the reply as recorded in the store** and places it as a file
- * (`agents.exportHandoffNote`). A reply scraped from the on-screen conversation mixes in streaming
- * chunks and leftover output from the previous turn, so it is read from the host's record, not the
- * screen, only the reply to this specific request, and only after the turn ends.
- *
- * Exported because the e2e tests identify the handoff message by this wording. Here rather than in the window's store
- * since the Assistant's handoff_session asks for the note too (#694): one wording for both, and the host does not
- * import the UI.
+ * The note comes back as the reply, and the host files it from its record after the turn ends (#142): writing to the
+ * data folder would need more tool permissions, and the screen's copy mixes in stream chunks and the previous turn.
+ * The e2e tests find the handoff message by this wording.
  */
 export function handoffPrompt(): string {
   return `You are about to be replaced by a fresh session that starts with no memory of this conversation. Write a handoff note for your successor. Your final message in this turn is the note: the app saves that message to a file and hands the file to your successor. Do not write the note to a file yourself, and do not add a preamble or a closing line around it — whatever your final message says is the note.
@@ -35,11 +21,11 @@ Cover, in this order:
 Write the note itself in the language the user has mostly used in this conversation.`
 }
 
-/** The number of lines and characters carried in the preview — just enough to tell what happened, not enough to carry the note itself */
+/** Enough to tell what happened, not enough to carry the note itself */
 const PREVIEW_LINES = 10
 const PREVIEW_CHARS = 700
 
-/** The note's opening lines — blank lines are skipped (markdown notes commonly start with one) */
+/** Leading blank lines are skipped: markdown notes often start with one */
 function notePreview(note: string): string {
   const lines: string[] = []
   for (const line of note.split('\n')) {
@@ -51,7 +37,7 @@ function notePreview(note: string): string {
   return head.length < note.trim().length ? `${head.trimEnd()}\n…` : head
 }
 
-/** A name as one JSON string on one line: JSON escapes control characters, and U+2028/U+2029 are escaped too */
+/** One line: JSON escapes control characters but not U+2028/U+2029 */
 function quotedName(name: string): string {
   return JSON.stringify(name)
     .replace(/\u2028/g, '\\u2028')
@@ -59,33 +45,20 @@ function quotedName(name: string): string {
 }
 
 /**
- * The successor's first message (#102) — **hands over the note's location, not the note itself.**
- *
- * The prompt above tells the predecessor "it is a file, so length is not a constraint", so a note
- * can be long, and a long note sent as the first message breaks the successor (measured: handing a
- * long session off to codex produced an error the moment it arrived). The file is already sitting
- * where the host placed it, so the first message only points at the path — only then is length
- * not a constraint in fact, not merely by declaration. That location is outside the
- * project (the data folder, #142), so the path is absolute. The host opens that folder so the
- * successor can read it without asking (Claude's additional working folder — Codex does not block
- * reading it).
- *
- * Why the preview rides along too: someone who only reads the conversation record still needs to
- * know what happened. Why it **explicitly** says reading in pieces or grepping is fine: without that
- * line, the agent reads the whole file and recreates the problem the path avoids: one message too large.
+ * The successor's first message gives the note's path, not the note (#102): a long note as a first message broke Codex
+ * (measured). The preview is for whoever reads only the conversation; "read it in pieces" stops the agent pulling in
+ * the whole file again. The host opens the data folder to the successor (Claude: an added working folder; Codex
+ * does not block reading it).
  */
 export function handoffOpening(
   predecessor: string,
   note: string,
   path: string,
-  /**
-   * Words for the successor from whoever started the handoff, when it is not the person (#694: the Assistant's
-   * handoff_session). Said as theirs, after the note's opening, so the successor reads the note first.
-   */
+  /** From whoever started the handoff when not the person (#694), placed after the opening so the note is read first */
   extra?: { from: string; text: string },
 ): string {
   return [
-    // The name is JSON-quoted on one line: a person or an agent can put a newline in it (#797)
+    // A person or an agent can put a newline in a name (#797)
     `You are taking over from a session named ${quotedName(predecessor)}. It wrote a handoff note for you and it is on disk, outside the project folder: \`${path}\`. Read it before anything else.`,
     '',
     'The note can be long. Read it in pieces (head, tail, byte offsets) or grep it for what you need — you do not have to pull the whole file into one turn.',

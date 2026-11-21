@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { CommandRunInfo, TerminalInfo } from '../projects.js'
 
-/** The results of the `terminal` methods, which a client reads through `parseRpcResult`. Their parameters, and what each method is for: ./terminal.params.ts */
+/** Results of the `terminal` methods, read through `parseRpcResult`. Params and what each method does: ./terminal.params.ts */
 export const terminalResults = {
   'processes.strays': z.array(z.object({ pid: z.number(), command: z.string(), cwd: z.string() })),
   'processes.stop': z.object({ stopped: z.number() }),
