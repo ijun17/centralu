@@ -100,11 +100,9 @@ describe('the host log file', () => {
   })
 
   /*
-   * If a rollover fails during the rename after close, the **closed fd number** used to be kept
-   * around as is. The OS soon reissues that number to a different file (SQLite WAL, a pty), so the
-   * next writeSync silently corrupted someone else's file with log lines. Even on the failure path,
-   * the fd is cleared and reopened, and this checks that subsequent lines **still** end up in this
-   * log file.
+   * A rollover whose rename fails after close must not keep the closed fd number: the OS soon reissues it to another file
+   * (SQLite WAL, a pty), and the next writeSync would silently corrupt that file with log lines. The fd is cleared and
+   * reopened, and later lines still end up in this log file.
    */
   it('does not hold onto a dead fd when the rollover fails, and keeps writing to the same file', () => {
     const dir = tmp()
@@ -126,11 +124,7 @@ describe('the host log file', () => {
     expect(readFileSync(path, 'utf8')).toContain('after-failed-roll')
   })
 
-  /*
-   * "Which commit was the running app built from" used to have to be answered by matching the
-   * binary's mtime against commit timestamps. If the log states it outright, that whole guessing
-   * game disappears.
-   */
+  // The log states which commit the running app was built from, so no one matches the binary's mtime against commit times
   it('the startup banner states the build, DB, and pid on its own', () => {
     const b = startupBanner({ build: 'abc1234', db: '/x/store.db', pid: 42 })
     expect(b).toContain('abc1234')

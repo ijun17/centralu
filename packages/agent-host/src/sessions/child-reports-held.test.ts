@@ -6,7 +6,7 @@ import { managerWorld } from './manager.test-helpers.js'
 
 /*
  * A notice a session could not be woken for is kept and goes in with its next message (#1186). One for a session that
- * was deleted goes with it (#1186 review): a restore from the session archive brings the same id back, and the notice with it.
+ * is deleted goes with it: a restore from the session archive brings the same id back, and the notice with it.
  */
 describe('notices kept for a session that could not be woken', () => {
   const world = (deliver: ChildReportsHost['deliver']) => {

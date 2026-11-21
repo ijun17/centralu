@@ -8,40 +8,15 @@ import type { WaitEnd } from '../mail/stop-notices.js'
 import { UPDATE_CONTINUE_LINE, UPDATE_TASKS_LINE } from './interruptions.js'
 
 /**
- * The one owner of "continue a stopped turn once its cause clears" (#1693, #1415, #2238; docs/agent-host/lifecycle/auto-continue.md).
- * Each cause is a row of `CAUSES`; what differs between them is when the cause has cleared, not how the turn goes on: always
- * through Centralu's own channel (a note, never a message of the person's), as an update's continue goes (#1618).
- *
- * **Overloaded (#1693, owner 2026-10-28: as built).** Codex ends the turn with `serverOverloaded` (`adapters/overloaded.ts`) after
- * its own attempts. Claude Code retries a 529 itself, ten times, and its turn that ends with "API Error: 529" ended after those, so
- * no retry is stacked on it. The error does not end the turn (`hold`): the session stays `working`, so nobody who gave it the turn
- * is told it failed, and a notice says when the next try is. The wait grows (`DELAYS_MS`): the turns that ended this way had run 14
- * to 44 minutes, so a tight loop would only repeat the same refusal. Once the work is done (it finishes, or the person takes over)
- * the count starts over; output in between does not. When the tries are spent the error ends the turn, saying how often it was retried.
- * The host leaving ends a held turn with its error now (`stopAll`): no later host would hear that error again. Nothing is stored.
- *
- * **Network and usage limit (#1415, #2238, owner 2026-10-26 and 2026-11-13).** The turn ends as it does (`error` or `limited`, its
- * `interruption` says why), and the interruption gains `autoContinue` (`armAfter`): the screen shows the wait, and the wait is
- * stored with the session, so a host that starts later takes it up again (`restore`). A usage limit continues at its reset plus
- * `RESET_MARGIN_MS`; the network once a cheap request to the tool's API host gets any answer (`reachable`), tried at
- * `PROBE_STEPS_MS`, at once after the computer woke (a tick that came late), and at once when another turn of the same tool
- * finishes. Several sessions of a tool that clear together go `STAGGER_MS` apart. A continue that ends the same way counts: after
- * `MAX_TRIES` of the cause in a row the stop is left for the person. Never continued: a Codex credits limit, a compaction turn, a
- * stop the setting is off for.
- *
- * **Update (#1618, #1902, #1913).** A host an update stopped lists the turns it cut and the background work it ended (lifecycle/update-resume.ts);
- * the host that starts hands them here (`wakeAfterUpdate`). A cut turn is continued, and a session at rest whose tasks the stop ended is woken
- * for the note alone, once each, with no setting (Centralu cut it, the person did not stop it). They wake `UPDATE_WAKES_AT_ONCE` at a time, cut
- * turns first: a slot is held from the send until the woken session's first answer (or any end of its wake), since the burst is each session's
- * first request re-reading its whole context. The list file is the stored record: what is not settled when a host leaves is the next host's.
- * Who is told is #1966's (`HostTenure.updateStep`), not a wait's. The person's Stop ends a cut turn's wait; a message sends the note at once.
- *
- * **What cancels it.** The person's Stop (`cancel`), a message into the session (`deliver` calls `supersede`: it carries the work on
- * itself; the person's Continue is told as the work going on, once it went in: `personContinues`), a turn that starts any other way (mail the
- * mailbox delivers: `observe` sees `working`), Don't continue (`stopContinue`), the cause's setting going off (`settingsChanged`, and the
- * send's gate reads it), the session going to the trash (`forget`) or being deleted. A held turn also goes with
- * any other end of the turn (`observe`). Each is honoured until the note is handed to the tool: the send is gated on the wait
- * still standing (`live`). Once handed, the tool runs a turn of its own and the session is in an ordinary turn.
+ * The one owner of "continue a stopped turn once its cause clears" (#1693, #1415, #2238, #1618; docs/agent-host/lifecycle/auto-continue.md holds
+ * each cause, when it clears, its tries and what cancels a wait). Each cause is a row of `CAUSES`; only when it clears differs, never how the
+ * turn goes on: through Centralu's own channel (a note, never a message of the person's). Overloaded (#1693, owner 2026-10-28: as built): Codex
+ * ends the turn with `serverOverloaded` (`adapters/overloaded.ts`) after its own attempts; Claude Code retries a 529 itself, ten times, so no retry
+ * is stacked on its "API Error: 529". The error is held (`hold`): the session stays `working`, so nobody who gave it the turn is told it failed.
+ * The delays grow since the turns that ended this way had run 14 to 44 minutes: a tight loop would only repeat the same refusal. The count starts
+ * over once the work is done (it finishes, or the person takes over), not on output in between; spent tries end the turn with the error, saying
+ * how often it was retried. A leaving host ends a held turn with its error (`stopAll`): no later host would hear it. Update (#1618, #1902, #1913):
+ * a slot is held from the send until the woken session's first answer, since the burst is each session's first request re-reading its context.
  */
 
 /** The wait before each retry of an overloaded turn, in order: how many retries there are is how many entries there are */
@@ -270,10 +245,10 @@ export class TurnContinue {
     if (e.type === 'turn_complete' || e.type === 'error' || e.type === 'limit_reached' || e.type === 'session_deleted' || (e.type === 'state_change' && e.state !== 'working')) this.cancelHeld(id)
     if (e.type === 'session_deleted') this.dropStop(id, false)
     // A turn starts that is not this engine's continue (that one's wait went when it was handed): mail the mailbox gave, a wake. It carries
-    // the work on, so the wait goes, and who the stop's notice was held from hears it now (#2239 re-check). Before the interruption is
+    // the work on, so the wait goes, and who the stop's notice was held from hears it now (#2239). Before the interruption is
     // cleared (`trackInterruption` runs after this), so the stored wait is still there to say it
     if (e.type === 'state_change' && e.state === 'working' && this.stops.has(id)) this.dropStop(id, 'went on')
-    // Codex says a credits limit when it likes, also after the turn it ended (#1415 review): a wait armed on the error's words goes
+    // Codex says a credits limit when it likes, also after the turn it ended (#1415): a wait armed on the error's words goes
     if (e.type === 'limit_reached' && e.credits && this.stops.get(id)?.cause === 'limit') this.stopContinue(id)
     if (e.type !== 'turn_complete') return
     this.stopTries.delete(id)
@@ -356,7 +331,7 @@ export class TurnContinue {
 
   /**
    * The person's settings changed (`UiPreferenceStore.setUiPreferences`): a wait whose setting is off now ends at once, told once, rather than
-   * standing on screen until its time comes (#2239 re-check)
+   * standing on screen until its time comes (#2239)
    */
   settingsChanged(): void {
     const on = this.host.settings()
@@ -512,7 +487,7 @@ export class TurnContinue {
       })
     } catch (err) {
       const words = `Centralu could not continue this turn: ${errorMessage(err)}`
-      // Handed and then refused by the tool: the wait went at the hand-off, so who the stop's notice was held from is told here (#2239 re-check)
+      // Handed and then refused by the tool: the wait went at the hand-off, so who the stop's notice was held from is told here (#2239)
       if (handed) {
         this.stopTries.delete(id)
         this.host.note({ type: 'notice', sessionId: id, level: 'warning', from: 'Centralu', label: 'continue', text: words })
@@ -536,7 +511,7 @@ export class TurnContinue {
   }
 
   /**
-   * The wakes whose note went in and that have not answered yet (#2264 review): a stop for an update now lists them again (`cutTurns`). Their entry
+   * The wakes whose note went in and that have not answered yet (#2264): a stop for an update lists them again (`cutTurns`). Their entry
    * left the list at the send, and the resumed process reads at rest until its request streams (its own turn end comes first). One silent for
    * `UPDATE_SLOT_MS` gave its slot up and is not among them: a stop after that does not list it again (accepted, as a request that hangs that long)
    */

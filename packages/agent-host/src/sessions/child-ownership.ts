@@ -71,7 +71,7 @@ function entryOf(row: StoredMessage): Entry | undefined {
   }
 }
 /**
- * Whose a turn is, as the mailbox is told it (`TurnStart`): `cli`, it ran for no message (a mail wake, a compact, the CLI on its own); `from`, the
+ * Whose a turn is, as the mailbox is told it (`TurnStart`): `cli`, it ran for no message (a mail wake, a compact, background tasks ended); `from`, the
  * session whose message of the work it ran for
  */
 type Decided = { turn: TurnStarter; cli: boolean; source: TurnSource; from?: string; unowned?: true }
@@ -85,13 +85,12 @@ function starterFor(ran: readonly Entry[]): Decided {
   return { turn: { by: 'work', ...(ran.some((e) => e.by === 'person') ? { wrote: true as const } : {}) }, cli: false, source: work.source, ...(work.from ? { from: work.from } : {}), ...(work.unowned ? { unowned: true as const } : {}) }
 }
 /**
- * Where the turns of a session a hub gives messages began (#1604), in `turn_span:<session>`, kept in the store because a hub
- * reads a turn's words after the turn: by then the next one may have begun, and a host that takes the session over after a
- * swap must know where the running turn began. `latest`: the row the last turn that began began after, and whether it has
- * ended; `previous`: the same for the turn before it. `starts` (#1812): the rows the last turns began after, oldest first, up to
- * `TURN_STARTS_KEPT`, so a turn a hub reads after more than one turn has followed it ends where the next began. Kept beside
- * `latest` and `previous`, which a build before it reads; a list that does not end at `latest` (that build wrote the span
- * since) is not read
+ * Where the turns of a session a hub gives messages began (#1604), in `turn_span:<session>`, kept in the store because a hub reads a turn's words
+ * after the turn: by then the next one may have begun, and a host that takes the session over after a swap must know where the running turn began.
+ * `latest`: the row the last turn that began began after, and whether it has ended; `previous`: the same for the turn before it. `starts` (#1812):
+ * the rows the last turns began after, oldest first, up to `TURN_STARTS_KEPT`, so a turn a hub reads after more than one turn has followed it ends
+ * where the next began. Kept beside `latest` and `previous`, which a build before it reads; a list that does not end at `latest` (that build wrote
+ * the span since) is not read
  */
 const turnSpanKey = (sessionId: string) => `turn_span:${sessionId}`
 const TURN_STARTS_KEPT = 8
@@ -130,10 +129,9 @@ type OwnershipStore = Pick<Store, 'children' | 'settings' | 'mailbox' | 'message
 /**
  * Who owns a child session's work (#428): the delegations and start requests a session made, and what a handoff gave away. What a session
  * owes the sessions that gave it work is the mailbox's open tasks (`openTasks`, docs/plans/mailbox.md §10.6.3). Each change that has a store
- * mirror writes it here, so memory and store do not drift apart; reads go through the read-only maps.
- *
- * A handoff's move of what only memory holds is one operation (`moveOwner`); the stored move is the mail's (`MessageService.handOver`) with the
- * parent link and the start requests in one transaction (`Store.moveChildren`, docs/plans/mailbox.md §10.6.5).
+ * mirror writes it here, so memory and store do not drift apart; reads go through the read-only maps. A handoff's move of what only memory
+ * holds is one operation (`moveOwner`); the stored move is the mail's (`MessageService.handOver`) with the parent link and the start
+ * requests in one transaction (`Store.moveChildren`, docs/plans/mailbox.md §10.6.5).
  */
 export class ChildOwnership {
   /**
@@ -153,11 +151,10 @@ export class ChildOwnership {
   private readonly runs = new Map<string, Delegation>()
   readonly delegations: ReadonlyMap<string, Delegation> = this.runs
   /**
-   * start_agent requests whose card stands or stood (#673) — request id -> the request. A card is no longer withdrawn
-   * when the call's bound passes: the call answers "pending" with the request id as a handle, the card stays until the
-   * person answers, and an approval starts the child then. Mirrored in the store's `agent_start_requests` while it
-   * stands, so the next host raises it again (`resumeAgentStart`). Kept after it ends, for agent_session on the handle,
-   * until the caller goes.
+   * start_agent requests whose card stands or stood (#673) — request id -> the request. A card outlives the call's bound: the call answers
+   * "pending" with the request id as a handle, the card stays until the person answers, and an approval starts the child then. Mirrored in
+   * the store's `agent_start_requests` while it stands, so the next host raises it again (`resumeAgentStart`). Kept after it ends, for
+   * agent_session on the handle, until the caller goes.
    */
   private readonly starts = new Map<string, AgentStartRecord>()
   readonly agentStarts: ReadonlyMap<string, AgentStartRecord> = this.starts
@@ -184,8 +181,7 @@ export class ChildOwnership {
 
   /**
    * The sessions with a task open between them and `sessionId` (delivered, not settled, not released): the senders of its tasks (`to`, whom it
-   * owes an answer; `PERSON` for the person's own work), or the receivers of its own (`from`, whose answer it waits for). None with no mailbox.
-   * Never throws
+   * owes an answer; `PERSON` for the person's own work), or the receivers of its own (`from`, whose answer it waits for). None with no mailbox. Never throws
    */
   openTasks(sessionId: string, side: 'to' | 'from'): string[] {
     try {
@@ -221,7 +217,6 @@ export class ChildOwnership {
     }
   }
 
-  /** A call into the mailbox's person work, none without a mailbox; a failure is logged */
   private personCall(what: string, sessionId: string, call: (w: NonNullable<ChildOwnership['personWork']>) => void): void {
     try {
       if (this.personWork) call(this.personWork)
@@ -253,10 +248,9 @@ export class ChildOwnership {
   }
 
   /**
-   * A call of `callerId` returned what `childId` answered (`how`: it finished with this text, or its turn failed with this reason), or
-   * read where it stands without one: the reports the mailbox holds for the caller are settled, and the thread is reported on by the call.
-   * Returns false when that turn does not answer the task the call waited on (`taskId`, else the caller's newest): it joined the turn and is given
-   * again (#2369). Never throws
+   * A call of `callerId` returned what `childId` answered (`how`: it finished with this text, or its turn failed with this reason), or read where it
+   * stands without one: the reports the mailbox holds for the caller are settled, and the thread is reported on by the call. Returns false when that
+   * turn does not answer the task the call waited on (`taskId`, else the caller's newest): it joined the turn and is given again (#2369). Never throws
    */
   answered(callerId: string, childId: string, how?: AnswerGiven, taskId?: string): boolean {
     if (callerId === childId || !this.answeredHook) return true
@@ -326,12 +320,11 @@ export class ChildOwnership {
     })
   }
   /**
-   * The rows of the last turn that ended, when this session's turns were seen to begin (#1604): the latest when it has ended,
-   * else the one before it up to where the latest began (a hub reads a turn's end after the next one has begun). A turn that
-   * ended with nothing to say has no words, and never the turn before's. None recorded (a turn from before this build, a
-   * session no hub gives messages): undefined. `since` (#1812): the turn that began after that row, the one a hub was told
-   * ended, up to where the next began. A row that is not a start kept (one more than `TURN_STARTS_KEPT` turns ago, or a span a
-   * build before it wrote) reads as with none: the last turn that ended
+   * The rows of the last turn that ended, when this session's turns were seen to begin (#1604): the latest when it has ended, else the one before
+   * it up to where the latest began (a hub reads a turn's end after the next one has begun). A turn that ended with nothing to say has no words,
+   * and never the turn before's. None recorded (a turn from before this build, a session no hub gives messages): undefined. `since` (#1812): the
+   * turn that began after that row, the one a hub was told ended, up to where the next began. A row that is not a start kept (one more than
+   * `TURN_STARTS_KEPT` turns ago, or a span a build before it wrote) reads as with none: the last turn that ended
    */
   turnRows(sessionId: string, since?: number): { after: number; through?: number } | undefined {
     const span = readTurnSpan(this.store.settings.appSetting(turnSpanKey(sessionId)))
@@ -354,11 +347,10 @@ export class ChildOwnership {
     this.store.settings.setAppSetting(questionAnsweredKey(sessionId), String(this.store.messages.nextSeq(sessionId) - 1))
   }
   /**
-   * Who gave each thing that may have entered the session's latest turn (#1948): every user row stored since the turn before it began (every
-   * row, with no turn before), as the session id that sent it, or null for one no session sent (the person, an app, a script, a relayed report,
-   * words read back from the tool's own record), and a null for a question card answered since. The turn before's own rows count too. Mail
-   * given in leaves no user row (the mailbox has those) but a delegated task's, which names its sender (`SessionEvents.deliverMail`). No turn seen
-   * to begin: one null
+   * Who gave each thing that may have entered the session's latest turn (#1948): every user row stored since the turn before it began (every row,
+   * with no turn before), as the session id that sent it, or null for one no session sent (the person, an app, a script, a relayed report, words
+   * read back from the tool's own record), and a null for a question card answered since. The turn before's own rows count too. Mail given in
+   * leaves no user row (the mailbox has those) but a delegated task's, which names its sender (`SessionEvents.deliverMail`). No turn seen to begin: one null
    */
   latestTurnInputs(sessionId: string): (string | null)[] {
     const span = readTurnSpan(this.store.settings.appSetting(turnSpanKey(sessionId)))
@@ -379,10 +371,7 @@ export class ChildOwnership {
     this.turnStartedHook = hook
   }
 
-  /**
-   * Whose a turn is is read from the store's user rows (#1639, docs/plans/turn-starter.md "After #1948 step 3"): each message given the tool is a
-   * user row with its input id. These are the session's entries after row `after`, or, with `inputs`, the ones among them the tool named
-   */
+  /** Whose a turn is is read from the store's user rows (#1639, docs/plans/turn-starter.md "After #1948 step 3"): the session's entries after row `after` */
   private entries(sessionId: string, after: number, inputs?: readonly string[]): Entry[] {
     return this.store.messages.loadUserRowsFrom(sessionId, after).flatMap((row) => {
       const e = entryOf(row)
@@ -398,10 +387,7 @@ export class ChildOwnership {
     return this.entries(sessionId, kept.length < TURN_STARTS_KEPT ? 0 : (kept[0] ?? 0), inputs)
   }
 
-  /**
-   * A turn starts (#1377): a first guess until the tool names its inputs (`turnNamed`). The message the newest row is, when it is one (given at
-   * rest, after every row the turns before wrote), else the CLI's own (a mail wake, a compact, the work's background tasks ended)
-   */
+  /** A turn starts (#1377): a first guess until the tool names its inputs (`turnNamed`); docs/plans/turn-starter.md "After #1948 step 3" */
   turnStarted(sessionId: string): void {
     this.named.delete(sessionId)
     this.decide(sessionId, starterFor(this.entries(sessionId, this.store.messages.nextSeq(sessionId) - 2)), false)
@@ -424,8 +410,7 @@ export class ChildOwnership {
     if (again && was && was.turn.by === decided.turn.by && !!was.turn.wrote === !!decided.turn.wrote && was.cli === decided.cli) return
     this.starters.set(sessionId, decided)
     if (!this.turnStartedHook) return
-    // The session whose request the turn runs for: the message it opened with names it, else a delegation still running there gave it (its first prompt).
-    // A message from no session (`unowned`) opened it: no session's
+    // Whose request the turn runs for: the session its opening message names, else a delegation still running there (its first prompt); `unowned`: none
     const ownerId = decided.unowned ? undefined : (decided.from ?? [...this.runs.values()].find((d) => d.sessionId === sessionId && !d.settled)?.callerId)
     try {
       this.turnStartedHook(sessionId, {
@@ -437,10 +422,9 @@ export class ChildOwnership {
     }
   }
   /**
-   * The turn ends (#1377): whose it was, kept nowhere after. `taken`: the inputs the tool says the turn took in (`SessionHandle.turnInputs`);
-   * undefined when it takes in every message sent to a running turn, null when it cannot tell. A turn whose opening was not named (a card was
-   * up, the tool answered without a stream, or this host did not see it begin) is decided by them. `wrote`: a person's message went into the
-   * work's turn, one the tool names as taken, or with `taken` undefined, one given after the turn began
+   * The turn ends (#1377): whose it was, kept nowhere after. `taken`: the inputs the tool says the turn took in (`SessionHandle.turnInputs`); undefined
+   * when it takes in every message sent to a running turn, null when it cannot tell. A turn whose opening was not named (a card was up, the tool
+   * answered without a stream, or this host did not see it begin) is decided by them; `wrote` as docs/plans/turn-starter.md "After #1948 step 3" says
    */
   turnEnded(sessionId: string, taken?: readonly string[] | null): TurnStarter {
     if (!this.named.has(sessionId) && taken?.length) this.turnNamed(sessionId, taken)
@@ -466,7 +450,6 @@ export class ChildOwnership {
   setDelegation(key: string, d: Delegation): void {
     this.runs.set(key, d)
   }
-  /** Drops the delegation under `key`; with `only`, only while that one is still there */
   dropDelegation(key: string, only?: Delegation): void {
     if (only && this.runs.get(key) !== only) return
     this.runs.delete(key)
@@ -483,19 +466,15 @@ export class ChildOwnership {
   recordHandedOver(id: string, from: string, to: string): void {
     this.given.set(id, { from, to })
   }
-  /** What a handoff gave away from the session, or to it, or the given work itself */
   forgetHandedOver(sessionId: string): void {
     for (const [id, h] of [...this.given]) if (id === sessionId || h.from === sessionId || h.to === sessionId) this.given.delete(id)
   }
 
   /**
-   * Moves what `from` owns of the given children to `to`, in memory (#693, #738): its delegations and observer notes on them (their keys
-   * name the caller) and the start requests that made
-   * them. `moveCards` runs next, for the cards that stand for the moving `starts`; then what moved is recorded as
-   * handed over, and the original's calls still waiting on it are ended.
-   *
-   * The caller has already moved what is stored (`Store.moveChildren`) and the sessions' own `askedBy` and
-   * `parentSessionId`. Nothing here awaits, so no event lands in the middle.
+   * Moves what `from` owns of the given children to `to`, in memory (#693, #738): its delegations and observer notes on them (their keys name the
+   * caller) and the start requests that made them. `moveCards` runs next, for the cards that stand for the moving `starts`; then what moved is
+   * recorded as handed over, and the original's calls still waiting on it are ended. The caller has already moved what is stored
+   * (`Store.moveChildren`) and the sessions' own `askedBy` and `parentSessionId`. Nothing here awaits, so no event lands in the middle.
    */
   moveOwner(from: string, to: string, move: OwnerMove, moveCards: () => void): void {
     const { sessions, starts } = move
@@ -510,11 +489,8 @@ export class ChildOwnership {
     // A start that already made its child: its handle follows the child
     for (const r of this.starts.values()) if (r.req.callerId === from && r.ended && 'childId' in r.ended && moving.has(r.ended.childId)) r.req.callerId = to
     moveCards()
-    /*
-     * The original learns what it no longer follows (#693 review): a handoff can keep it, and its next agent_session or
-     * ask_project about one of these says where it went. Its calls still waiting on one of them end now, with that
-     * answer, so the result is read once, by the new session.
-     */
+    // The original learns what it no longer follows (#693): a handoff can keep it, and its next agent_session or ask_project about one of these says
+    // where it went. Its calls still waiting on one of them end now, with that answer, so the result is read once, by the new session.
     for (const id of [...sessions, ...starts.map((r) => r.req.requestId)]) this.given.set(id, { from, to })
     for (const r of starts) r.detached = true
     for (const d of this.runs.values()) if (d.callerId === to && moving.has(d.sessionId)) for (const leave of [...(d.leaving ?? [])]) leave()

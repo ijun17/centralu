@@ -2685,12 +2685,12 @@ the host on messages with a window that lists no mail (N8). M4 of round 1 is dro
   and `starter_id` lines. `schema-doc.test.ts` checks them.
 - `docs/stored-shapes.md`: the `mail.facts` keys (§5.4).
 
-**Types** (in `mailbox.ts`)
+**Types** (built in `store/mailbox.ts`, except `RELEASE_WHY`, `ReleaseWhy` and `MailFacts`, which live in `store/mail-facts.ts`; `SETTLED` is private to `mailbox.ts`)
 
 ```ts
 export const MAIL_KINDS = ['message', 'task', 'report', 'notice'] as const
 export type MailKind = (typeof MAIL_KINDS)[number]
-export const SETTLED = ['answered', 'done', 'withdrawn', 'reported', 'gone', 'legacy'] as const
+const SETTLED = ['answered', 'done', 'withdrawn', 'reported', 'gone', 'legacy'] as const
 export type Settled = (typeof SETTLED)[number]
 export const RELEASE_WHY = ['reminders', 'waited', 'working', 'waiting', 'stopped', 'error', 'gone', 'lost', 'limit', 'network', 'interrupted', 'quit', 'shutdown', 'uncontinued'] as const
 export type ReleaseWhy = (typeof RELEASE_WHY)[number]

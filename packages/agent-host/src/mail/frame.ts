@@ -265,7 +265,7 @@ export function deliveryLine(messages: number, relations: ReadonlySet<string>): 
 export type ListedMail = MailDelivered & { relation: string }
 
 /**
- * A delivery's line and the messages it opens to (#2333), from one list so the two never differ (#2333 review): what the line counts is what
+ * A delivery's line and the messages it opens to (#2333), from one list so the two never differ: what the line counts is what
  * it opens to. `leaveOut`: the message the conversation shows as its sender's message instead (a delegated task), which is in neither; a
  * delivery of that message alone leaves no line
  */

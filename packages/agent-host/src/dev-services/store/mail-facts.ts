@@ -1,16 +1,13 @@
 import { z } from 'zod'
 
-/* The shapes of `facts`, what only Centralu writes about a message (mailbox.ts, docs/plans/mailbox.md §5.4), and the release reasons one names */
-
 /**
- * Why Centralu stopped watching a row. `stopped` to `uncontinued` after `waiting` are the stops of a session (docs/plans/turn-owned-by-no-one.md §4.1):
- * the person's Stop, an error, a usage limit, the network, the tool's own interrupt, a quit or a shutdown, and a cut turn Centralu could not continue.
- * A build that does not know a word reads it as null
+ * Why Centralu stopped watching a row; a build that does not know a word reads it as null. `stopped` to `uncontinued` after `waiting` are the
+ * stops of a session: the person's Stop, an error, a usage limit, and the rest of docs/plans/turn-owned-by-no-one.md §4.1's table.
  */
 export const RELEASE_WHY = ['reminders', 'waited', 'working', 'waiting', 'stopped', 'error', 'gone', 'lost', 'limit', 'network', 'interrupted', 'quit', 'shutdown', 'uncontinued'] as const
 export type ReleaseWhy = (typeof RELEASE_WHY)[number]
 
-/** What only Centralu writes about a message (§5.4). Every key optional; a key a newer build added is kept */
+/** `facts`: what only Centralu writes about a message (mailbox.ts, docs/plans/mailbox.md §5.4). Every key optional; a key a newer build added is kept */
 export const MailFacts = z.looseObject({
   outcome: z.enum(['finished', 'failed', 'stopped', 'paused', 'waiting']).optional(),
   about: z.object({ session: z.string() }).optional(),
@@ -35,10 +32,8 @@ export const MailFacts = z.looseObject({
   compactCycles: z.object({ session: z.string(), count: z.number() }).optional(),
   /** On Centralu's warning to the person (#1324): the session whose watches woke it more times in the hour than it warns at, and how many */
   watchWakes: z.object({ session: z.string(), count: z.number() }).optional(),
-  /**
-   * On a watch's notice to the session that set it (docs/plans/mailbox.md §18.5): the watch, what it waits for, what changed (`turn_ended`, `asked`,
-   * `stopped`, `gone`, a time's slot `due`, or its end: `expired`, `cancelled`) and whether the host fired it late
-   */
+  /** On a watch's notice to the session that set it (docs/plans/mailbox.md §18.5): the watch, what it waits for, what changed (`turn_ended`, `asked`,
+   * `stopped`, `gone`, a time's slot `due`, or its end: `expired`, `cancelled`) and whether the host fired it late */
   watch: z.object({ id: z.string(), source: z.string(), change: z.string(), late: z.boolean().optional() }).optional(),
   /** On Centralu's warning to the person (#1684): a send a guard refused (`repeat`, `rate_limited`, `ask_rate`), and whose */
   guardRefused: z.object({ sender: z.string(), reason: z.string() }).optional(),
@@ -72,10 +67,8 @@ export const MailFacts = z.looseObject({
   hubAssistant: z.literal(true).optional(),
   /** On a task from another computer's session (#838, #1948 step 6): the agent depth the session here counts while it works on it; on the giver's copy, the depth it went with */
   agentDepth: z.number().int().min(1).max(64).optional(),
-  /**
-   * On a session's message that needs a reply: its sender marked it as a question (the mail tool's `kind: "question"`, or `choices`). A question to a
-   * session that gave it work, still unanswered, holds the report a turn's end owes that giver until it is answered or handled (#2348, `answerAtRest`)
-   */
+  /** On a session's message that needs a reply: its sender marked it as a question (the mail tool's `kind: "question"`, or `choices`). A question to a
+   * session that gave it work, still unanswered, holds the report a turn's end owes that giver until it is answered or handled (#2348, `answerAtRest`) */
   question: z.literal(true).optional(),
   /** On the person's answer to a session's question (#1630): it is one of the choices the question offered, pressed in the window; the host decides it, so a session reads it as Centralu's word */
   picked: z.boolean().optional(),

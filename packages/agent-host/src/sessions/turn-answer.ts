@@ -9,27 +9,14 @@ function isNote(m: StoredMessage): boolean {
 }
 
 /**
- * The final answer of a turn — the agent's text standing after the last tool call at the end of
- * the conversation record.
- *
- * Why it is "the text after the last tool call" and not simply "the last piece of text": an agent
- * writes text, calls a tool, and writes again. Text before a tool call is a plan, not an answer.
- * A reasoning summary (`reasoning`) is skipped since it is not an answer, and so is a tool's result after the answer's
- * last text: its call came before that text, and some tools say a call finished after the text that ended the turn
- * (Antigravity 1.4.3's recordings; an ACP turn's end closes the calls still open, #2351). The scan stops the moment it
- * meets a tool call, a tool's result before that text, an approval, a marker or something a person said.
- * If there is no text at the end (the turn ended on a tool call), the answer is empty — an
- * earlier plan is never handed back pretending to be the answer.
- *
- * `afterSeq`: only rows after it are this turn's (#428). A queued turn has no user row of its own between it and the
- * turn before (its input was recorded before that answer), so without it two turns' texts read as one answer.
- *
- * `acrossNotes` (#1604): a message a sender sent into the turn (a caller's note: its row says who sent it) is a row among the
- * turn's text and does not end the answer, so the text before the note and the text after it are one answer. A message with
- * no sender is the person's, and ends it as it always did: what the agent said before it was another exchange.
- *
- * The one rule for "the turn's answer" (#428): a delegation's and a child's answer, an app's agent's, the report's
- * preview (`lastResponse`) and the session list's (`previewOf`) all read it here; they used to keep four.
+ * The final answer of a turn, its one rule (#428, docs/agent-host/delegation/start-agent.md): the agent's text after the last tool call at
+ * the end of the record. Text before a tool call is a plan, not an answer, so a turn that ended on a tool call answers empty rather than hand
+ * back an earlier plan. Skipped: a reasoning summary, and a tool's result after the answer's last text (some tools say a call finished after
+ * the text that ended the turn: Antigravity 1.4.3's recordings; an ACP turn's end closes the calls still open, #2351). The scan stops at a tool
+ * call, a tool's result before that text, an approval, a marker or something a person said.
+ * `afterSeq`: only rows after it are this turn's (#428): a queued turn has no user row between it and the turn before (its input
+ * was recorded before that answer), so without it two turns' texts would read as one. `acrossNotes` (#1604): a message a sender sent into the turn (its
+ * row says who) is a row among the turn's text, not its end; one with no sender is the person's and ends it: what came before was another exchange.
  */
 export function turnAnswer(messages: readonly StoredMessage[], opts: AnswerOpts = {}): string {
   return answerRows(messages, opts)
@@ -38,10 +25,8 @@ export function turnAnswer(messages: readonly StoredMessage[], opts: AnswerOpts 
     .trim()
 }
 
-/**
- * The seq of the first message of `turnAnswer`'s answer in the same rows, or null when the turn has no final text
- * (#1186): read_session finds the answer there (`around`), read from an offset to its end
- */
+/** The seq of the first message of `turnAnswer`'s answer in the same rows, or null when the turn has no final text (#1186): read_session
+ * finds the answer there (`around`), read from an offset to its end */
 export function turnAnswerSeq(messages: readonly StoredMessage[], opts: AnswerOpts = {}): number | null {
   return answerRows(messages, opts)[0]?.seq ?? null
 }
@@ -76,21 +61,16 @@ function responseRows(messages: readonly StoredMessage[], turn: TurnRows | undef
   return rows.slice(0, end)
 }
 
-/**
- * Where `lastResponse` starts (#1186): the seq of its first message, or null when the session has said nothing.
- * `turn`: the same for one turn's rows (#1604)
- */
+/** Where `lastResponse` starts (#1186): the seq of its first message, or null when the session has said nothing. `turn`: in one turn's rows (#1604) */
 export function lastResponseSeq(messages: readonly StoredMessage[], turn?: TurnRows): number | null {
   return turnAnswerSeq(responseRows(messages, turn), turn === undefined ? {} : { acrossNotes: true })
 }
 
 /**
- * The session's last response, as a preview reads it: `turnAnswer` at the last text the agent wrote, past whatever came
- * after it (a tool call still running, the person's next message). Not an answer to hand a caller: it can be a plan.
- *
- * `turn` (#1604): the response of that turn's rows, and of no turn before it: a turn that said nothing has no response, where
- * it would have read the one before. A caller's note in the turn is a row among its text (`acrossNotes`), so a turn the notes
- * split reads whole
+ * The session's last response, as a preview reads it: `turnAnswer` at the last text the agent wrote, past whatever came after it (a tool
+ * call still running, the person's next message). Not an answer to hand a caller: it can be a plan. `turn` (#1604): that turn's rows and no
+ * turn before it, so a turn that said nothing has no response rather than the one before's. A caller's note in the turn is a row among its
+ * text (`acrossNotes`), so a turn the notes split reads whole
  */
 export function lastResponse(messages: readonly StoredMessage[], turn?: TurnRows): string {
   return turnAnswer(responseRows(messages, turn), turn === undefined ? {} : { acrossNotes: true })

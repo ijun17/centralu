@@ -102,17 +102,10 @@ export class SessionEvents {
   onEvent(raw: NormalizedEvent, from: SessionHandle | null = null): void {
     let e = raw.type === 'files_touched' ? this.projectRelative(raw) : raw
     /*
-     * **A message from a handle that has already been set aside is never accepted** (#157) — anything
-     * not from the handle currently registered for that session is dropped. It never enters the crash
-     * branch (does not close the new handle), and does not record either the text from the turn that
-     * was winding down or its turn_complete.
-     *
-     * The only exception is a message that closes something showing on screen — the approval and
-     * question cards, and the agent card, that a handle releases as it closes. Dropping those too
-     * would leave the card stuck forever (see the comment on dispose). The manager calls the dispose
-     * that produces that message **before** removing the handle, so a different message issued during
-     * close (notice of a message that could not be sent) still arrives as a message from the
-     * registered handle.
+     * A message from a handle already set aside is dropped (#157): it never enters the crash branch (does not close the new handle), and records
+     * neither the text of the turn that was winding down nor its turn_complete. Except what closes something on screen, the approval, question and
+     * agent cards a handle releases as it closes: dropping those leaves the card stuck forever (see the comment on dispose). The manager calls that
+     * dispose before removing the handle, so another message issued during close (an unsent message's notice) still comes from the registered handle.
      */
     if (
       from &&
@@ -125,10 +118,8 @@ export class SessionEvents {
     ) {
       return
     }
-    /*
-     * A set-aside handle's background work (#290) — only its endings are its to say. Its tasks went with its process,
-     * and the live set belongs to the handle now registered, which a late empty set from the old one must not wipe.
-     */
+    // A set-aside handle's background work (#290): only its endings are its to say. Its tasks went with its process, and the live set is the
+    // registered handle's, which a late empty set from the old one must not wipe
     if (from && e.type === 'background_tasks' && this.host.handles.get(e.sessionId) !== from) {
       const m = this.host.meta.get(e.sessionId)
       if (!m || !e.ended?.length) return
@@ -187,12 +178,6 @@ export class SessionEvents {
         this.host.turnContinue.armAfter(e, m, wasBusy && !inTurn(m.state))
         // Heard from: an unknown background state is bounded by quiet, not by age (#648, `backgroundKnown`)
         if (this.host.restartPolicy.backgroundUnknown.has(m.id)) this.host.restartPolicy.backgroundUnknown.set(m.id, Date.now())
-        /*
-         * A builder session's turn ended (M4 C-4) — this is the moment to relaunch that app from its
-         * files. It happens once, right here, rather than every time the app's folder changes: an app
-         * mid-turn is code that is only half fixed. The runtime itself decides whether it actually
-         * changed or whether a call is still in flight.
-         */
         // A turn starts (#1377): a first guess at whose it is, from the message it started with, else the CLI's own
         if (!wasBusy && inTurn(m.state)) {
           continues = this.host.selfCompaction.stepOpens(m.id)
@@ -203,12 +188,9 @@ export class SessionEvents {
           // Its own text is every row after the last one stored now (#1604): what a hub reads of it is that, not the turn before's
           this.host.children.noteTurnStart(m.id, m.lastSeq)
         }
-        /*
-         * The message the tool ran this turn for, when a sender gave it (#1604): said on the event that opens the turn. Not
-         * only when this host saw the session go from rest to work: a message given at rest has the session working already
-         * when the tool opens the turn it runs for an earlier one (a note sent into the turn before, which that turn did not
-         * read). The tool names the input only on the event that opens the turn, so no other event says one
-         */
+        // The message the tool ran this turn for, when a sender gave it (#1604), said on the event that opens the turn: the tool names its input
+        // there only. Not only when this host saw rest turn to work: a message given at rest finds the session working already when the tool opens
+        // the turn it runs for an earlier one (a note sent into the turn before, which that turn did not read)
         if (e.type === 'state_change' && e.state === 'working') {
           const named = handle?.turnStartInputs?.()
           // Whose the turn is, decided by the inputs the tool names it opened from (#1639); and the hub's message it ran for
@@ -216,6 +198,8 @@ export class SessionEvents {
           // Mail a turn before did not take and this one opens for is this turn's (docs/plans/mailbox.md §10.6.3)
           if (named?.length) this.host.mailTurnInputs(m.id, { opened: named })
         }
+        // A builder session's turn ended (M4 C-4): its app is relaunched from its files once, here, not on every change of its folder (an app
+        // mid-turn is code only half fixed). The runtime decides whether it actually changed or a call is still in flight
         if (wasBusy && !inTurn(m.state)) {
           endedTurn = true
           const ref = this.host.appSessions.builderRefOf(m)
@@ -227,19 +211,9 @@ export class SessionEvents {
         if (e.type === 'tool_call' || e.type === 'tool_result') this.observeCommit(e, m)
         this.host.store.sessions.upsertSession(m)
       }
-      /*
-       * **A dead process's handle is removed right on the spot.**
-       *
-       * Raising adapter_crashed while leaving the handle in place means send() would only check
-       * handles.has, push onto an already-dead queue, and **the next message would silently
-       * disappear** (until an explicit restart). Removing it means send()'s "resume if missing" path
-       * becomes automatic recovery on its own.
-       */
-      /*
-       * An adapter whose process went while its session was idle says so with `session_live` (false, asleep) instead of an
-       * error (#1397): the handle is retired the same way, since nothing is behind it, and the next message resumes. Only
-       * from the handle registered now: a set-aside handle's last word is not this session's.
-       */
+      // An adapter whose process went while its session was idle says so with `session_live` (false, asleep) instead of an error (#1397): the
+      // handle is retired as a crashed one is, since nothing is behind it, and the next message resumes. Only from the handle registered now: a
+      // set-aside handle's last word is not this session's
       if (e.type === 'session_live' && !e.live && e.reason === 'asleep' && from && this.host.handles.get(e.sessionId) === from) {
         void from.dispose().catch(() => {})
         this.host.handles.delete(e.sessionId)
@@ -250,6 +224,8 @@ export class SessionEvents {
         const hostCard = !!m?.pendingApproval && this.host.hostCards.hostAsks.has(m.pendingApproval.requestId)
         if (m && inTurn(m.state) && !hostCard) this.onEvent({ type: 'state_change', sessionId: e.sessionId, state: 'waiting_input' })
       }
+      // A dead process's handle is removed at once: left in place, send() checks only handles.has, pushes onto a dead queue, and the next message
+      // silently disappears until an explicit restart; removed, send()'s "resume if missing" path recovers by itself.
       // A lock error after a lazy resume handed the handle out (#168, item 5) leaves a handle with no thread — the same as a crash
       if (e.type === 'error' && (e.error.code === 'adapter_crashed' || e.error.code === 'conversation_locked')) {
         const dead = this.host.handles.get(e.sessionId)
@@ -268,31 +244,25 @@ export class SessionEvents {
     const run = e.sessionId ? this.host.agentRuns.get(e.sessionId) : undefined
     // A wait still reading this turn is owed its end (#698); one that settled earlier is left from a turn before
     const runOpen = !!run && !run.finished
-    /*
-     * A delegation nobody is waiting on now (ask_project or start_agent past its bound) owes its caller nothing until
-     * it asks again; that caller is who hears of a stop. A call still waiting reads the stop itself.
-     */
+    // A delegation nobody is waiting on now (ask_project or start_agent past its bound) owes its caller nothing until it asks again; that caller
+    // is who hears of a stop. A call still waiting reads the stop itself
     const delegation = runOpen ? [...this.host.children.delegations.values()].find((d) => d.wait === run) : undefined
     const waited = runOpen && (!delegation || (delegation.waiters ?? 0) > 0)
     // The process went with the turn (a crash, a lost conversation): it runs none of the messages given it after. Any other error or limit leaves it, and a message it holds queued can still run (#1604)
     const processWent = e.type === 'error' && (e.error.code === 'adapter_crashed' || e.error.code === 'conversation_locked')
     const taken = endedTurn && e.sessionId ? this.host.handles.get(e.sessionId)?.turnInputs?.() : undefined
-    /*
-     * A turn the tool ran on its own (it names none of the inputs given it) while an input given it still waits to run (#2318): Claude Code's turn for
-     * a background task's notification, run before the input that came with it, or its end of its own as it resumes after an update (#2312). Not the
-     * work's end: that input's turn carries the work on, and its end answers. Read as the end, it answered a task, or a call waiting on the turn, with
-     * the notification's words, and the real end found it settled
-     */
+    // A turn the tool ran on its own (it names none of the inputs given it) while an input given it still waits to run (#2318): Claude Code's turn
+    // for a background task's notification, run before the input that came with it, or its end of its own as it resumes after an update (#2312).
+    // Not the work's end: that input's turn carries the work on, and its end answers. Read as the end, it would answer a task, or a call waiting
+    // on the turn, with the notification's words, and the real end would find it settled
     const ownTurn = endedTurn && e.type === 'turn_complete' && !!e.sessionId && Array.isArray(taken) && taken.length === 0 && (this.host.handles.get(e.sessionId)?.queuedInputs?.() ?? 0) > 0
     // A call waiting on the turn reads its end from the input's turn, not this one
     if (!ownTurn) {
       run?.onEvent(e)
       if (e.sessionId) for (const observer of this.host.turnObservers.get(e.sessionId) ?? []) observer.onEvent(e)
     }
-    /*
-     * Whose the turn was (#1377), read once as it ends, from the rows of what the tool says it took in: said on the event that ends
-     * it, so a hub that follows this host reads it rather than guessing (`LinkedReports`). The person's own turn is reported to nobody
-     */
+    // Whose the turn was (#1377), read once as it ends, from the rows of what the tool says it took in: said on the event that ends it, so a hub
+    // that follows this host reads it rather than guessing (`LinkedReports`). The person's own turn is reported to nobody
     const owned = endedTurn && e.sessionId ? this.host.children.turnEnded(e.sessionId, taken) : undefined
     if (ownTurn && e.sessionId) {
       console.error(`[agent-host] ${e.sessionId.slice(0, 8)}: its tool ended a turn of its own while an input waits to run: not the work's end (#2318)`)
@@ -322,11 +292,9 @@ export class SessionEvents {
     if (e.sessionId && interruptionBefore !== undefined && nowInterrupted !== interruptionBefore) {
       this.host.emit({ type: 'interruption', sessionId: e.sessionId, interruption: nowInterrupted })
     }
-    /*
-     * A turn that ends without finishing leaves the questions delivered into it unanswered: their senders are told once (docs/plans/turn-owned-by-no-one.md
-     * §4.1). Not the turn Centralu started to compact the conversation, and not a turn Centralu is continuing (an update's cut, #1975): that end is not the work's.
-     * Told so no matter how the turn ends (#166): two adapters emit no turn_complete for a failed turn
-     */
+    // A turn that ends without finishing leaves the questions delivered into it unanswered: their senders are told once (docs/plans/turn-owned-by-no-one.md
+    // §4.1), however it ends (#166: two adapters emit no turn_complete for a failed turn). Not the turn Centralu started to compact the conversation,
+    // and not a turn Centralu is continuing (an update's cut, #1975): that end is not the work's
     const workEnded = endedTurn && !ownTurn && !!e.sessionId && !this.host.selfCompaction.compactTurn(e.sessionId)
     // The end of a turn an update cut, before its Continue is in, is not the work's stop: the continued turn's end answers
     const continuing = !!e.sessionId && this.host.restartPolicy.continuingTurns.has(e.sessionId)
@@ -354,16 +322,12 @@ export class SessionEvents {
     // The card slot is now empty — if a capability question was waiting, it is raised (D-4). Either the
     // adapter's card just closed, or a card that had been hiding ours just closed
     if (e.type === 'approval_resolved' && e.sessionId) this.host.hostCards.raiseHostAsks(e.sessionId)
-    /*
-     * A card still standing when the turn ends is raised again (#673): a start_agent request that answered "pending"
-     * outlives the call, and the turn's own events cleared the slot meanwhile. An error is left showing; the card
-     * comes back at the next turn's end
-     */
+    // A card still standing when the turn ends is raised again (#673): a start_agent request that answered "pending" outlives the call, and the
+    // turn's own events cleared the slot meanwhile. An error is left showing; the card comes back at the next turn's end
     if (endedTurn && e.sessionId && this.host.meta.get(e.sessionId)?.state !== 'error') this.host.hostCards.raiseHostAsks(e.sessionId)
-    // Applies a setting that changed mid-turn now (#164) — if it was reverted in between there is no drift,
-    // so nothing happens
     // A commit call still unanswered when its turn ends never will be: interrupted, or its process gone (#392)
     if (endedTurn && e.sessionId) this.forgetCommits(e.sessionId)
+    // A setting that changed mid-turn applies now (#164); one reverted in between is no drift, and nothing happens
     if (endedTurn && e.sessionId) this.host.restartPolicy.applyDeferredRestart(e.sessionId)
     // A turn ended, a card was answered or a state was stated: the mail it was holding may go (#1347)
     // Counted before anything is poked: a delivery it lets go must see the turn that just ended
@@ -380,12 +344,6 @@ export class SessionEvents {
     if (e.type === 'background_tasks' && e.sessionId) this.host.reports.settleAtRest(e.sessionId)
   }
 
-  /**
-   * The tool's reading of the context, as the rest of the host and the screens see it (#1553): `window` is the model's full window
-   * (`ModelWindows.shareWindow`), `capped` says it is not known, `compactAt` is where the adapter says the session's process compacts. The reading
-   * itself is what `ModelWindows` learns the model's window from, so it is noted first, against the window the tool reported. An
-   * estimate from a request (#1492) is no reading of the model's window and carries what the last reading did (`ContextMeter`).
-   */
   /** Who already knows of this stop: a call still waiting, which read the end itself (`told`); and the session that gave the turn or started it */
   private stopTold(id: string, waited: boolean, caller: string | undefined): StopTold {
     const asker = caller ?? this.host.meta.get(id)?.askedBy ?? undefined
@@ -402,6 +360,12 @@ export class SessionEvents {
     this.host.mailStopped(sessionId, 'error', this.stopTold(sessionId, false, undefined))
   }
 
+  /**
+   * The tool's reading of the context, as the rest of the host and the screens see it (#1553): `window` is the model's full window
+   * (`ModelWindows.shareWindow`), `capped` says it is not known, `compactAt` is where the adapter says the session's process compacts. The
+   * reading itself is what `ModelWindows` learns the model's window from, so it is noted first, against the window the tool reported. An
+   * estimate from a request (#1492) is no reading of the model's window and carries what the last reading did (`ContextMeter`).
+   */
   private shareOf(e: Extract<NormalizedEvent, { type: 'context_update' }>): NormalizedEvent {
     const m = this.host.meta.get(e.sessionId)
     if (!m) return e
@@ -413,10 +377,9 @@ export class SessionEvents {
     return { ...rest, window, ...(capped ? { capped: true } : {}), ...(compactAt !== null ? { compactAt } : {}) }
   }
 
-  /** A state hint, for storage: the core reducer's rules on the host's copy (`applySessionState`, protocol session-state.ts) */
   /**
-   * Work from another computer's session ends with its turn, and the depth it gave the session with it (#838): taken down at every end of a turn, here
-   * and by a turn the host ends itself (`HostTenure.turnLostInSwap`, #2020). Not while the task's own input is tracked: its end is
+   * Work from another computer's session ends with its turn, and the depth it gave the session with it (#838): taken down at every end of a
+   * turn, here and by a turn the host ends itself (`HostTenure.turnLostInSwap`, #2020). Not while the task's own input is tracked: its end is
    * the one that takes the mark (`LinkedHost.sendFromHub`)
    */
   endHubAsk(sessionId: string): void {
@@ -424,6 +387,7 @@ export class SessionEvents {
     if (!this.host.hubAskTurns.has(sessionId) && this.host.store.settings.appSetting(key) !== null) this.host.store.settings.deleteAppSetting(key)
   }
 
+  /** A state hint, for storage: the core reducer's rules on the host's copy (`applySessionState`, protocol session-state.ts) */
   applyStateHint(e: NormalizedEvent, m: SessionInfo): void {
     const from = m.state
     // An illegal transition is ignored and logged, as the window does (docs/state-management.md §2)
@@ -445,9 +409,8 @@ export class SessionEvents {
   }
 
   /**
-   * A state the host itself states (a resume, a tool change, a card's rest): through the same rules as an event, so the
-   * stored copy is what the window makes of the same `state_change` (#428), then stored and broadcast. Not `onEvent`:
-   * no turn ended.
+   * A state the host itself states (a resume, a tool change, a card's rest): through the same rules as an event, so the stored copy is what
+   * the window makes of the same `state_change` (#428), then stored and broadcast. Not `onEvent`: no turn ended.
    */
   settleState(m: SessionInfo, change: Extract<NormalizedEvent, { type: 'state_change' }>): void {
     // The host has said what the state is: no card rest or asked-for turn of before stands over it
@@ -459,14 +422,10 @@ export class SessionEvents {
   }
 
   /**
-   * Records the **live facts** in metadata that a reconnected UI needs to pick back up.
-   *
-   * While SessionInfo had none of these fields, a UI that disconnected and came back received only
-   * state=waiting_approval, and **had no payload to draw the approval card with** — with no requestId
-   * either, it could not even respond. These are never put in the DB (upsert does not know these
-   * fields) — if the host restarts, they really are gone. The context reading is the exception (#48,
-   * store v17). The cards, the activity and the limit are set with the
-   * state they belong to (`applySessionState`, protocol session-state.ts); these are the rest.
+   * Records the live facts in metadata that a reconnected UI needs to pick back up: with state=waiting_approval alone it has no payload to
+   * draw the approval card with, nor a requestId to answer it. Never put in the DB (upsert does not know these fields), so a host restart
+   * loses them; the context reading is the exception (#48, store v17). The cards, the activity and the limit are set with the state they
+   * belong to (`applySessionState`, protocol session-state.ts); these are the rest.
    */
   private trackLiveFacts(e: NormalizedEvent, m: SessionInfo): void {
     switch (e.type) {
@@ -484,7 +443,7 @@ export class SessionEvents {
         m.context = nextContext(m.context, e)
         break
       case 'conversation_reset':
-        // The old conversation's reading no longer describes anything (#304); the tool reports the new one when the turn ends
+        // The old conversation's reading describes nothing (#304); the tool reports the new one when the turn ends
         m.context = nextContext(m.context, e)
         this.host.cacheLedger.note(m.id, 'compaction')
         break
@@ -495,18 +454,15 @@ export class SessionEvents {
         this.host.cacheLedger.note(m.id, 'compaction')
         break
       case 'goal':
-        // The goal (2026-09-07) is a live field too — after a restart, the tool tells us again (codex fetches
-        // it on resume)
+        // The goal (2026-09-07) is a live field too: after a restart the tool tells us again (codex fetches it on resume)
         m.goal = e.goal
         break
       case 'background_tasks':
         // The same merge the UI's reducer and the mock run (#290), so a reconnect reads back what the screen showed
         m.backgroundTasks = applyBackgroundTasks(m.backgroundTasks, e)
-        /*
-         * Kept for the host that may adopt this process (#648). Only the tool's own full list settles what an adopted
-         * process holds: a level built from an ending or a `/loop` timer says nothing of a shell this host never saw,
-         * and recording it would hand the next host a list it takes as complete.
-         */
+        // Kept for the host that may adopt this process (#648). Only the tool's own full list settles what an adopted process holds: a level
+        // built from an ending or a `/loop` timer says nothing of a shell this host never saw, and recording it would hand the next host a list
+        // it takes as complete
         if (e.snapshot) this.host.restartPolicy.backgroundUnknown.delete(m.id)
         if (!this.host.restartPolicy.backgroundUnknown.has(m.id)) this.host.launches.rememberBackgroundTasks(m)
         break
@@ -525,9 +481,8 @@ export class SessionEvents {
   }
 
   /**
-   * Commit attribution with no hooks involved (#50). An agent's commit happens through a tool call,
-   * and its output already sits in this stream — the hash is picked up from the `[branch abc1234]`
-   * line, and if the output got truncated, the current HEAD is that commit. Nothing is written to the
+   * Commit attribution with no hooks involved (#50): an agent commits through a tool call whose output is in this stream, so the hash is
+   * picked up from the `[branch abc1234]` line, or, when the output got truncated, the current HEAD is that commit. Nothing is written to the
    * repository itself (decided 2026-08-23).
    */
   observeCommit(e: Extract<NormalizedEvent, { type: 'tool_call' | 'tool_result' }>, m: SessionInfo): void {
@@ -552,8 +507,9 @@ export class SessionEvents {
 
   /**
    * What goes into a session's conversation (`deliverNow`), after a continue waiting for its cause to clear (turn-continue.ts: an overloaded
-   * provider, the network, a usage limit) is taken away: a message into the session carries the work on itself, and wins over a retry note on its way (a restart waited out
-   * while it is sent). Taken away first, before any wait: the retry's own send checks it right before it hands the note to the tool.
+   * provider, the network, a usage limit) is taken away: a message into the session carries the work on itself, and wins over a retry note on
+   * its way (a restart waited out while it is sent). Taken away first, before any wait: the retry's own send checks it right before it hands
+   * the note to the tool.
    * If the message is then refused, the turn it was meant to carry on is over, and the error the retry stood in for ends it.
    */
   async deliver(...args: Parameters<SessionEvents['deliverNow']>): Promise<void> {
@@ -572,67 +528,46 @@ export class SessionEvents {
   }
 
   /**
-   * The body of send() — takes one more flag for **whether this is an instruction or a relay** (#120).
-   *
-   * While the gate only looked at the sender's profile, a report from a manager or coordinator just
-   * passed straight through. That is because what a profile answers is "can this message be trusted
-   * as an instruction", not "is this someone else's words". A report **is someone else's words no
-   * matter who relays it**, so it is flagged right where the relaying happens. This flag is never
-   * exposed on send(), which anything else can call — a boundary that can be flipped on by accident
-   * is not a boundary.
+   * The body of send(), with one more flag: whether this is an instruction or a relay (#120). A sender's profile answers "can this message be
+   * trusted as an instruction", not "is this someone else's words", so a gate on the profile alone lets a manager's or coordinator's report
+   * through. A report is someone else's words no matter who relays it, so it is flagged right where the relaying happens. The flag is never
+   * exposed on send(), which anything else can call: a boundary that can be flipped on by accident is not a boundary.
    */
   async deliverNow(
     sessionId: string,
     text: string,
     attachments: Attachment[] | undefined,
     from: { sessionId: string; name: string } | undefined,
-    /** Is this a body carrying over someone else's conversation (the report path)? An instruction is false —
-     * it must be the original text */
+    /** Is this a body carrying over someone else's conversation (the report path)? An instruction is false: it must be the original text */
     relayed: boolean,
-    /** If this message came from an inline app view, that app (M4 B-1). Reaches the agent wrapped as the
-     * app's text */
+    /** If this message came from an inline app view, that app (M4 B-1). Reaches the agent wrapped as the app's text */
     fromApp?: AppMessageSource,
-    /**
-     * Which route the app's text came through — an inline view's message (B-1), a pinned view's
-     * message (it came from outside the conversation, B-4), or work the app asked for (D-1) each get
-     * a different header (`appMessageFrame`)
-     */
+    /** Which route the app's text came through, each with a different header (`appMessageFrame`): an inline view's message (B-1), a pinned
+     * view's message (it came from outside the conversation, B-4), or work the app asked for (D-1) */
     fromAppVia: AppMessageVia = 'inline',
     /** `inputId`: the name this message goes in under when it joins a running turn, for the tool to name it back (`turnInputs`, `turnStartInputs`) */
     sendInput?: (handle: SessionHandle, text: string, inputId?: string) => void,
-    /**
-     * What the message rests on, read once the session is awake and before anything is written: a reason refuses it.
-     * A wake or a restart waited out here takes seconds, and the trust a task was let through on can go meanwhile.
-     */
+    /** What the message rests on, read once the session is awake and before anything is written: a reason refuses it. A wake or a restart
+     * waited out here takes seconds, and the trust a task was let through on can go meanwhile */
     stillAllowed?: () => string | null,
-    /**
-     * For a relayed message, what the agent reads instead of the bare wake (#1186): the words Centralu wrote about the
-     * other session, never that session's own (`ChildReports.tellSession`'s `forModel`). The rest of the input, a
-     * line Centralu adds once (`rootAppsNotice`), goes with it as with any other text
-     */
+    /** For a relayed message, what the agent reads instead of the bare wake (#1186): the words Centralu wrote about the other session, never
+     * that session's own (`ChildReports.tellSession`'s `forModel`). A line Centralu adds once (`rootAppsNotice`) goes with it as with any text */
     relayedText?: string,
-    /**
-     * The person typed this themselves (the composer, a slash command, Continue): the tool is told so. Never set for a
-     * message that has a source, or for words Centralu framed (a report, an app's notice, a builder request). Not stamped
-     * either when Centralu puts a line of its own in front of it (`rootAppsNotice`, once).
-     */
+    /** The person typed this themselves (the composer, a slash command, Continue): the tool is told so. Never set for a message that has a
+     * source, or for words Centralu framed (a report, an app's notice, a builder request). Not stamped either when Centralu puts a line of its
+     * own in front of it (`rootAppsNotice`, once) */
     fromPerson = false,
-    /**
-     * A script wrote this (a call with the limited credential, `label` from the connection, §8.1): stored and shown as the script's, handed to
-     * the session under Centralu's header (`scriptMessageFrame`), never stamped as the person's and never naming the session. Set by the
-     * host from the connection, not from a field of the call
-     */
+    /** A script wrote this (a call with the limited credential, `label` from the connection, §8.1): stored and shown as the script's, handed to
+     * the session under Centralu's header (`scriptMessageFrame`), never stamped as the person's and never naming the session. Set by the host
+     * from the connection, not from a field of the call */
     fromScript?: { credential: string },
   ): Promise<void> {
     const restarting = this.host.restartPolicy.deferredRestarts.get(sessionId)
     if (restarting) await restarting
     const m = this.host.openSession(sessionId)
 
-    /*
-     * A wake in progress is waited out, through the same call as the send that woke it (#839): its process is registered
-     * before the catch-up, and the message that woke it goes in only after that. Going straight to the process, a second
-     * send overtook it.
-     */
+    // A wake in progress is waited out, through the same call as the send that woke it (#839): its process is registered before the catch-up,
+    // and the message that woke it goes in only after that. A second send going straight to the process would overtake it
     if (this.host.resuming.has(sessionId) && this.host.handles.has(sessionId)) await this.host.resumeSession(sessionId)
     if (!this.host.handles.has(sessionId)) {
       const r = await this.host.resumeSession(sessionId)
@@ -645,8 +580,7 @@ export class SessionEvents {
 
     this.host.notBeingRemoved(sessionId)
     const h = this.host.requireHandle(sessionId)
-    // A message from the person is always a message boundary — continuing after an interrupt means everything
-    // before it is one chunk (#66)
+    // A message from the person is always a message boundary: continuing after an interrupt, everything before it is one chunk (#66)
     this.host.record.closeStream(sessionId)
     const seq = this.host.store.messages.nextSeq(sessionId)
     // Every message goes in named, so the tool says which turn runs it (#1639, `turnStartInputs`, `turnInputs`), with Centralu's mark as every
@@ -658,8 +592,7 @@ export class SessionEvents {
         seq,
         role: 'user',
         kind: 'text',
-        // An attachment is part of the message too — only its path is kept (D-1), and loadMessages loads the
-        // image bytes back in
+        // An attachment is part of the message too: only its path is kept (D-1), and loadMessages loads the image bytes back in.
         // The input id it goes in under and whether it is a report (#1639): the record of whose a turn it starts is.
         // `byPerson`: sent from the window (the composer, or the handoff prompt and Continue text the person's click sends), the one mark a request's citation accepts (docs/plans/cited-requests.md §3)
         payload: { text, ...(from ? { from } : {}), ...(fromApp ? { fromApp } : {}), ...(fromScript ? { fromScript } : {}), ...(fromPerson ? { byPerson: true } : {}), ...(attachments?.length ? { attachments } : {}), inputId, ...(relayed ? { relayed: true } : {}) },
@@ -675,13 +608,8 @@ export class SessionEvents {
       this.host.emit({ type: 'session_title', sessionId, title: m.name, auto: true })
     }
     this.host.store.sessions.upsertSession(m)
-    /*
-     * **Announces that a message was added.**
-     *
-     * This never used to be announced. The UI was the only place that ever produced a user message,
-     * so the UI drawing its own was enough. That assumption broke once the Assistant became a
-     * second producer — an injected message was saved, but it never showed up on screen at all.
-     */
+    // Announces that a message was added: the UI draws its own, but the Assistant produces user messages too, and one injected without this
+    // event is saved and never shows on screen
     this.host.emit({
       type: 'user_message',
       sessionId,
@@ -690,18 +618,15 @@ export class SessionEvents {
       ...(from ? { from } : {}),
       ...(fromApp ? { fromApp } : {}),
       ...(fromScript ? { fromScript } : {}),
-      // A message the host injected (an app's composer, C-5) only ever surfaces on screen through this event
-      // — attachments have to ride along too, or the bubble is incomplete
+      // A message the host injected (an app's composer, C-5) only surfaces on screen through this event: without its attachments the bubble is incomplete
       ...(attachments?.length ? { attachments } : {}),
     })
     /*
-     * The one place that swaps a vendor adapter's input for a sourceSessionId wake — there are two branches.
+     * The one place that swaps a vendor adapter's input for a sourceSessionId wake, in two branches:
      *  - A relayed body: someone else's words no matter who sent them. Swapped unconditionally.
-     *  - A lower-privilege instruction with a known source: swapped only when it is going to a target
-     *    that has tools. An instruction between tool profiles, and an ordinary worker instruction, must
-     *    stay the original text (#90).
-     * Raw provenance stays in the store/UI, and the relayed body is only ever read as observation data via
-     * read_session.
+     *  - A lower-privilege instruction with a known source: swapped only when it is going to a target that has tools. An instruction between
+     *    tool profiles, and an ordinary worker instruction, must stay the original text (#90).
+     * Raw provenance stays in the store/UI, and the relayed body is only ever read as observation data via read_session.
      */
     const adapterText =
       fromApp ? appMessageFrame(fromApp, text, fromAppVia)
@@ -774,22 +699,19 @@ export class SessionEvents {
       if (took === 'counted' && taking.ownTurn && !inTurn(this.host.meta.get(sessionId)?.state ?? 'working')) this.inputLost(sessionId)
     }
     /*
-     * A Continue the tool took as a second update's stop began (#1626 review) is left to the host after it: that stop lists
-     * the turn again and the host after continues it with a note and a line of its own, so the conversation shows one
-     * Continue. Only for that stop: a person's quit or a swap lists nothing, so its line is the row that carries the
-     * conversation past the mark of the list still standing, and it is written. Only for the update's note: a mail the tool
-     * took stays recorded by its line, which is its only trace
+     * A Continue the tool took as a second update's stop began (#1626) is left to the host after it: that stop lists the turn again and the
+     * host after continues it with a note and a line of its own, so the conversation shows one Continue. Only for that stop: a person's quit or
+     * a swap lists nothing, so its line is the row that carries the conversation past the mark of the list still standing, and it is written.
+     * Only for the update's note: a mail the tool took stays recorded by its line, which is its only trace
      */
     if (input.skipLine?.()) return
     // After the tool took it, so neither is about a delivery that did not happen; before the answer it starts. A delegated task shows as its
-    // sender's message, as its direct send does (owner, #1948 option B), and a card's notice as from its session, as before mail (§10.6.4); the line
-    // stays for the rest of the mail
+    // sender's message, as its direct send does (owner, #1948 option B), and a card's notice as from its session (§10.6.4); the line stays for
+    // the rest of the mail
     const shown = !input.quiet && input.shown !== undefined && this.showSent(sessionId, input.shown)
-    /*
-     * A delivery's line counts the messages it opens to, so the window can fold it open to them (#2333), one list for both (`mailLine`): not the
-     * one just shown as its sender's message, which would be counted and opened a second time; a delivery of that alone leaves no line (#2333
-     * review). An update's or a compaction's line stands for no messages
-     */
+    // A delivery's line counts the messages it opens to, so the window can fold it open to them (#2333), one list for both (`mailLine`): not the
+    // one just shown as its sender's message, which would be counted and opened a second time; a delivery of that alone leaves no line. An
+    // update's or a compaction's line stands for no messages
     const { line, mail } = input.listed ? mailLine(input.listed, shown ? input.shown?.messageId : undefined) : { line: input.line, mail: [] }
     if (line) this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: input.label ?? 'mail', ...(input.audience ? { audience: input.audience } : {}), text: line, ...(mail.length ? { mail } : {}) })
   }
@@ -834,14 +756,10 @@ export class SessionEvents {
   }
 
   /**
-   * Turns a touched file into a path relative to the project (#185).
-   *
-   * The tool gives an absolute path (Claude's `file_path`, Codex's `fileChange`). Entries in the file
-   * tree use paths relative to the project, so left as-is the "edited by agent" indicator never
-   * matched anything at all. Anything that already came as a relative path is read relative to the
-   * folder the session runs in. A path outside the project (a worktree session's own files, a
-   * settings file in the home directory) is discarded — that file does not exist in the project tree,
-   * and marking a different file that happens to share the same relative path would be a lie.
+   * Turns a touched file into a path relative to the project (#185): the tool gives an absolute path (Claude's `file_path`, Codex's
+   * `fileChange`), and the file tree's entries, which the "edited by agent" indicator matches, are relative to the project. A relative path
+   * is read relative to the folder the session runs in. A path outside the project (a worktree session's own files, a settings file in the
+   * home directory) is discarded: it is not in the project tree, and marking another file that shares the same relative path would be a lie.
    */
   private projectRelative(e: Extract<NormalizedEvent, { type: 'files_touched' }>): NormalizedEvent {
     const m = this.host.meta.get(e.sessionId)
