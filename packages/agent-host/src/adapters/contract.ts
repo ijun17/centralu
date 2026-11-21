@@ -177,6 +177,11 @@ export type CreateSessionOpts = {
    * goal would leave the badge up. Absent after a host restart, since the goal is live-only.
    */
   knownGoal?: SessionGoal
+  /**
+   * The tool's version the process runs as the host knows it before the process says (`SessionInfo.agentVersion`: what is installed when it
+   * starts, #297), so what that version does can be counted on from the first input. Absent when unknown; the process's own word wins
+   */
+  agentVersion?: string
   /** If given, this session receives Centralu's own tools — each adapter attaches them its own way */
   centraluTools?: CentraluTools
   /**

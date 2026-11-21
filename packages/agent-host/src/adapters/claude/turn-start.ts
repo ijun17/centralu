@@ -16,18 +16,20 @@ type CliMessage = { type?: string; subtype?: string; command_uuid?: unknown; cla
  * on 2.1.296: no receipt, no turn, no result): past `TURN_START_MS` with no receipt for an input written since the wait began, `lapsed`
  * gives the input back, so the session does not read as working on a turn the CLI never opened.
  *
- * Only a CLI whose init said it sends the receipt (`receiptsInputs`) is waited for. Input given before its first init, or to an older CLI,
- * is not: given back, an input such a CLI did read would run twice. A wake it never takes is counted delivered by the mailbox after
- * `MAIL_ACCEPT_MS`, and the session reads as working until a Stop
+ * Only a CLI known to send the receipt (`receiptsInputs`) is waited for: from its first input by the version the host started (`version`), and
+ * by what each init says once one came, which wins. One of an older or unknown version is not: given back, an input such a CLI did read would
+ * run twice. A wake it never takes is counted delivered by the mailbox after `MAIL_ACCEPT_MS`, and the session reads as working until a Stop
  */
 export class TurnStartWait {
   private timer: ReturnType<typeof setTimeout> | null = null
   /** The ids input went to the CLI under since the wait began */
   private readonly written = new Set<string>()
-  /** Whether the CLI's init said it sends the receipt; undefined until its first init */
-  private receipts: boolean | undefined
+  /** Whether the CLI is known to send the receipt */
+  private receipts: boolean
 
-  constructor(private readonly lapsed: () => void) {}
+  constructor(private readonly lapsed: () => void, version: string | undefined) {
+    this.receipts = receiptsInputs({ claude_code_version: version })
+  }
 
   /** Input is about to go to the CLI with no turn running. A wait already running is kept */
   expect(): void {
@@ -46,7 +48,7 @@ export class TurnStartWait {
 
   /** A message of the CLI's: the receipt for an input written since the wait began ends it */
   saw(m: CliMessage): void {
-    if (m.type === 'system' && m.subtype === 'init') this.receipts ??= receiptsInputs(m)
+    if (m.type === 'system' && m.subtype === 'init') this.receipts = receiptsInputs(m)
     if (m.type === 'command_lifecycle' && typeof m.command_uuid === 'string' && this.written.has(m.command_uuid)) this.stop()
   }
 

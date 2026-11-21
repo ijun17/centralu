@@ -59,10 +59,12 @@ const { TURN_START_MS } = await import('./turn-start.js')
 
 const RACE = 'Failed to refresh OAuth token: another Claude Code process is refreshing it or exited mid-refresh.'
 
-async function session(id: string) {
+/** `agentVersion`: the version the host knows the process runs before it says (`CreateSessionOpts.agentVersion`) */
+async function session(id: string, agentVersion?: string) {
   cli.read.length = 0
   const events: NormalizedEvent[] = []
-  const handle = await new ClaudeAdapter({ retryDelay: () => 10 }).createSession({ sessionId: id, cwd: '/tmp', permissionPreset: 'auto' }, (e) => events.push(e))
+  const opts = { sessionId: id, cwd: '/tmp', permissionPreset: 'auto' as const, ...(agentVersion ? { agentVersion } : {}) }
+  const handle = await new ClaudeAdapter({ retryDelay: () => 10 }).createSession(opts, (e) => events.push(e))
   return { handle, events }
 }
 
@@ -184,6 +186,29 @@ describe('input the CLI starts no turn for (#2377)', () => {
 })
 
 describe('the first input of a new process (#2377)', () => {
+  it('a resumed process of a version known to send the receipt, which drops its first input, has it given back after the wait', async () => {
+    vi.useFakeTimers()
+    const { handle, events } = await session('resumed-dropped', cli.version)
+    cli.answer = () => {}
+    const sent = handle.sendTracked!('the wake')
+    const failed = expect(sent).rejects.toThrow(/started no turn/)
+    await vi.advanceTimersByTimeAsync(TURN_START_MS)
+    await failed
+    expect(events.at(-1)).toMatchObject({ type: 'error', error: { retryable: true } })
+    expect(handle.queuedInputs!()).toBe(0)
+    await handle.dispose()
+  })
+
+  it('one of an unknown version is not waited for before its init says', async () => {
+    vi.useFakeTimers()
+    const { handle, events } = await session('unknown-version')
+    cli.answer = () => {}
+    handle.send('hello', { origin: { kind: 'human' } })
+    await vi.advanceTimersByTimeAsync(TURN_START_MS * 2)
+    expect(events.some((e) => e.type === 'error')).toBe(false)
+    await handle.dispose()
+  })
+
   it('is tracked before the CLI’s first init: taken when a turn names it, not when written', async () => {
     const { handle } = await session('first')
     let taken = false

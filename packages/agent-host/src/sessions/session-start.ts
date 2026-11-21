@@ -595,6 +595,7 @@ export class SessionStarts {
       resumeExternalId: o.resumeExternalId,
       runningCost: this.host.launches.runningCostFor(m.id, !!o.resumeExternalId),
       ...(o.knownGoal ? { knownGoal: o.knownGoal } : {}),
+      ...(m.agentVersion ? { agentVersion: m.agentVersion } : {}),
       // Which settings files reach this session (decision 3, #92, #152) — what the session is,
       // and the trust at this exact moment of launch. If this is a builder session, the
       // directory above already points at this session (setBuilder)

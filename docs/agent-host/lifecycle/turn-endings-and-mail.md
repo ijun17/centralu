@@ -53,8 +53,10 @@ whether it can name its inputs, and sends that only when it starts a turn, so th
 (an older CLI took it when written). A Claude Code at rest that sends no receipt for the wake in 60 s fails it, and the mailbox sends
 it again (`TURN_START_MS`, `adapters/claude/turn-start.ts`). Measured on 2.1.288 to 2.1.316: it says `command_lifecycle` "queued" with
 the input's id within a second, also while its `init` waits 90 s on a slow MCP server, and it drops an input whose id it has already read
-without a word (#2377), which is why a turn that lost the sign-in race goes again under a new id. Only a CLI whose init says 2.1.288 or
-newer is waited for (`receiptsInputs`): giving back an input an older CLI did read would run it twice. A tool silent
+without a word (#2377), which is why a turn that lost the sign-in race goes again under a new id. Only a CLI of 2.1.288 or newer is
+waited for (`receiptsInputs`): from its first input by the version the host starts (`CreateSessionOpts.agentVersion`, what is installed),
+and by what each init says once one came. One of an older or unknown version is not: giving back an input it did read would run it
+twice. A tool silent
 for 90 s counts as having taken it: a wake given while a turn runs waits behind it until a turn takes it, and sending it again could run the
 work twice. If that tool then **fails** the input (a session closed with it
 queued, a rejected `turn/start`), the delivery makes the mail unread and undelivered again and holds it `failed` for the person (Inbox:

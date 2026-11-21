@@ -89,7 +89,7 @@ export class ClaudeSession implements SessionHandle {
     return receipt.done
   }
   /** The wait for the CLI to say it read input given it at rest (`TurnStartWait`) */
-  private readonly turnStart = new TurnStartWait(() => this.notStarted())
+  private readonly turnStart: TurnStartWait
   /** The CLI version this process last reported (#297) */
   private reportedVersion: string | null = null
   /** The init message's command list was compared with the adapter's limitations (#270): once per process */
@@ -150,6 +150,7 @@ export class ClaudeSession implements SessionHandle {
     private launch: ClaudeLaunch,
   ) {
     this.livePreset = opts.permissionPreset
+    this.turnStart = new TurnStartWait(() => this.notStarted(), opts.agentVersion)
     this.ended = new Promise<void>((resolve) => (this.markEnded = resolve))
     // An app's mark only for an app attached here (#730 review): a repository's own server may be named `app-<x>`
     const sink = emit
