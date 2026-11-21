@@ -1,9 +1,9 @@
 /**
  * `pnpm e2e --affected` (#2373): the UI scenarios a branch changed, in the engines the config runs in (its
- * `metadata.e2eBrowser`, read from Playwright's listing: readListing), one after the other under one e2e lock (tooling/with-e2e-lock.ts). A spec is affected when it, or a file it imports
- * through the repository's own files at any depth, differs from where the branch left main, uncommitted and untracked
- * files included (specsReaching); every spec is when the change reaches the config or a file it names (configReached).
- * Not followed, as they name no file TypeScript resolves: a file read without an import (a JSON fixture read from disk),
+ * `metadata.e2eBrowser`, read from Playwright's listing: readListing), one after the other under one e2e lock
+ * (tooling/with-e2e-lock.ts). A spec is affected when it, or a file it imports through the repository's own files at any
+ * depth, differs from where the branch left main, uncommitted and untracked files included (specsReaching); every spec
+ * is when the change reaches the config or a file it names (configReached). Not followed, as they name no file TypeScript resolves: a file read without an import (a JSON fixture read from disk),
  * an imported asset (`import url from './a.png'`), a module loaded through `createRequire`, and an `import()` of a path
  * built at run time (a template string). Each engine's specs are the ones Playwright lists for it, so a `-webkit.spec.ts`
  * twin, which a one-engine run leaves out (playwright.config.ts), is left out here too. A spec drives a browser: it

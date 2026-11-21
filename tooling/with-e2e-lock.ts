@@ -7,8 +7,8 @@
  *   tsx tooling/with-e2e-lock.ts node --import tsx e2e/perf-memory.mts [its arguments]
  *
  * `playwright` is Playwright's own command line started with this Node (no shell, so no `.cmd` shim), `node` is this Node.
- * `--affected` runs the specs the branch changed in each engine (tooling/e2e-affected.ts), one run after the other, under
- * the one lock. The exit code is the command's own; of several runs, the first failing one's. A run that waits says who
+ * `--affected` runs the specs the branch changed in each engine the config names (tooling/e2e-affected.ts), one run after
+ * the other, under the one lock. The exit code is the command's own; of several runs, the first failing one's. A run that waits says who
  * holds the lock. A SIGINT (Ctrl-C) or SIGTERM that reaches this process:
  *  - while it waits: ends it with 130 or 143, having taken nothing;
  *  - while the command runs: is passed on to the command, no further run starts, and the lock is given back when the

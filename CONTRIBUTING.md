@@ -251,7 +251,7 @@ something in WebKit goes in the shared fixture and skips itself in other engines
 `CI=1 pnpm e2e --affected` runs the specs a branch changed under one lock (#2373), in the engines the config says a run
 is in (its `metadata.e2eBrowser`): for `pnpm e2e` the one `E2E_BROWSER` names, else Chromium alone on Windows (WebKit
 there fails the scenarios that drag, #2022, above), else Chromium and then WebKit; for `pnpm ux --affected` its one
-engine. Each engine keeps its results in `e2e/test-results/<engine>`. A spec is picked when it, or a file
+engine. Each engine keeps its results in `test-results/<engine>` beside the config. A spec is picked when it, or a file
 it imports through the repository's own files at any depth (its fixture, a helper, a package's source), differs from where
 the branch left main, uncommitted and untracked files included. Not followed: a file read without an import (a JSON
 fixture), an imported asset (a `.png`), a module loaded through `createRequire`, and an `import()` of a path built at run

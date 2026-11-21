@@ -37,6 +37,8 @@ describe('the affected specs', () => {
   it.each([
     ['e2e', 'darwin', undefined, ['chromium', 'webkit']],
     ['e2e', 'linux', undefined, ['chromium', 'webkit']],
+    // A name that is no engine is not one: the mixed run
+    ['e2e', 'darwin', 'firefox', ['chromium', 'webkit']],
     // Playwright's WebKit on Windows cannot drag (#2022), so an unset run there is Chromium's (e2e/engine.ts)
     ['e2e', 'win32', undefined, ['chromium']],
     ['e2e', 'darwin', 'chromium', ['chromium']],
