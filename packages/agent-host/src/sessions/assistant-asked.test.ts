@@ -204,8 +204,8 @@ describe('in the turn a request starts, the Assistant’s steps run as in the pe
   })
 })
 
-describe('a turn that is not a session’s request carries no judgement of one', () => {
-  it('work the person gave the Assistant: its steps are the person’s, and reading it shows no request’s header', async () => {
+describe('a turn that is not a session’s request is as it was', () => {
+  it('work the person gave the Assistant: its steps are the person’s', async () => {
     const acme = await project('Acme', true)
     const other = await sessionIn(acme)
     const task = m.service.task(PERSON, addressOf(orc.id), { text: 'rename it', origin: 'person', delivered: false })
