@@ -58,6 +58,8 @@ export type LinkedTasks = {
    * prints it (`MailReach.shownId`: a linked machine's `<machine>.<id>`, a hub's `<label>.<id>`), its address and its name
    */
   asks(callerId: string): { taskId: string; sessionId: string; to: string; name: string }[]
+  /** A session's address as this host prints it, as `asks` does */
+  shown(address: string): string
   /** Why work cannot go to a linked machine's session now (`MailAcross.taskRefusal`), or null */
   refusal(childId: string): string | null
   /** On a machine: the copy of the task a hub wrote for the caller's ask (`HubAskResult.taskId`) to its session `to`, so the report it sends answers it */
@@ -128,6 +130,7 @@ export function linkedTasksOf(mail: MessageService, records: MailboxRecords, acr
       ]
       return found.filter((a, i) => found.findIndex((b) => b.taskId === a.taskId) === i).sort((a, b) => b.at - a.at).map(({ at: _at, ...a }) => a)
     },
+    shown: (address) => mail.shownId(address),
     refusal: (childId) => across.taskRefusal(mail.sessionAddress(childId))?.text ?? null,
     keep: (callerId, to, taskId, text) => across.keepAsk(mail.sessionAddress(callerId), to, taskId, text),
     holdReports: (taskId) => across.holdReports(taskId),

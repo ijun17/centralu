@@ -92,11 +92,14 @@ machine it runs on.
      the kept offer and its stored machines at each read, never stored itself. Text that hub writes
      for it still says `studio.<id>`, which reads here as its own machine's session, where there is
      none: refused. Another machine of that hub goes under the label too when one of its own
-     machines has that machine's id. A machine added later with the id of such a label moves the
-     label, and the ids shown before it are refused from then on.
+     machines has that machine's id. A machine added or removed later with the id of such a label
+     moves the label (`studio-2` back to `studio`), and the ids shown before are refused from then
+     on. A suffixed label can be the one another hub offered: both answer to it, refused as
+     ambiguous.
    - **A label changes with the hub's name or machines.** A hub writes for its machines under its
-     label now, and a machine reads by the label of the hub's last offer: between a change and the
-     next offer, what the hub writes is refused there, never misdelivered.
+     label now, and a machine reads by the label of the hub's last offer. A hub offers at each
+     connect and when the asks switch turns, not on a rename: until then, what the hub writes is
+     refused there, never misdelivered.
    - **Text for the other side.** A notice or an answer written on one computer for a session on
      the other names sessions as that session's tools print them (`SessionRefs.shown` with the
      reader): a machine writes its own as `<its id there>.<id>`, a hub its own as `<its label>.<id>`

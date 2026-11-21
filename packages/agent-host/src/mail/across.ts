@@ -553,7 +553,7 @@ export class MailAcross extends AcrossReceipts {
     if (from === CENTRALU || isPerson(from)) return { ok: false, why: 'not_allowed', text: `${hub.name} gives work here only from its sessions.` }
     // Never to this host's Assistant or a coordinator, which a hub is not shown and may not direct (remote-hub.md §3.4, as `LinkedHost.directedFromHub`)
     const role = this.d.ownEntries().find((e) => e.address === to)?.role
-    if (role === 'assistant' || role === 'coordinator') return { ok: false, why: 'not_allowed', text: `Not a session this machine shares: ${this.label(to, from)}` }
+    if (role === 'assistant' || role === 'coordinator') return { ok: false, why: 'not_allowed', text: `Not a session this machine shares: ${this.label(to)}` }
     if (p.id === undefined || !FOREIGN_ID.test(p.id) || p.id.startsWith(`${this.d.hostId}.`)) return { ok: false, why: 'bad_value', text: 'a task from another computer comes with the id it gave it.' }
     if (this.lacked.get(hub.id)?.has(p.id)) return { ok: false, why: 'not_allowed', text: `${this.selfName()} told ${hub.name} when the link came back that this task never arrived, so it was not written now. Give it again.` }
     const had = this.d.records.message(p.id)
@@ -561,7 +561,7 @@ export class MailAcross extends AcrossReceipts {
     if (this.d.reach.mayWrite(from, to) === 'gone') return { ok: false, why: 'gone', text: `${this.label(to, from)} is gone from ${this.selfName()}: it is in the session archive there or deleted, so nothing was written.` }
     try {
       const m = this.d.service.task(from, to, { text: p.text, origin: p.task.origin, delivered: false, ...(p.task.note ? { note: true as const } : {}), across: { id: p.id, ...(p.task.forPerson ? { forPerson: true as const } : {}) }, ...(p.task.depth ? { depth: p.task.depth } : {}) })
-      return { ok: true, messageId: m.id, to: this.label(to, from), address: to }
+      return { ok: true, messageId: m.id, to: this.label(to), address: to }
     } catch (e) {
       return { ok: false, why: refusalReason(e) ?? 'failed', text: oneLineText(errorMessage(e), 4000) }
     }
@@ -621,10 +621,10 @@ export class MailAcross extends AcrossReceipts {
         return { ok: true, messageId: m?.id ?? 'notice', to: this.d.reach.labelOf(to), address: to }
       }
       if (p.notice && !this.d.records.sentToward(to, sideOf(from))) {
-        return { ok: false, why: 'not_allowed', text: `${oneLineText(this.nameOf(from, from), 200)} may send a notice only to a session that mailed it, and ${this.label(to, from)} did not, so nothing was written.` }
+        return { ok: false, why: 'not_allowed', text: `${oneLineText(this.nameOf(from), 200)} may send a notice only to a session that mailed it, and ${this.label(to, from)} did not, so nothing was written.` }
       }
       const sent = this.d.service.send(from, { to: [to], text: p.text, needsReply: p.notice ? false : (p.needsReply ?? true), ...(p.urgent && !p.notice ? { urgent: true } : {}), ...(p.replyTo && !p.notice ? { replyTo: p.replyTo } : {}), ...(p.id ? { id: p.id } : {}), ...(p.subject ? { subject: p.subject } : {}), ...(p.choices ? { choices: p.choices } : {}) })
-      return { ok: true, messageId: sent.message.id, to: this.label(to, from), address: to }
+      return { ok: true, messageId: sent.message.id, to: this.label(to), address: to }
     } catch (e) {
       const why = refusalReason(e)
       // A reply to a message this side never kept: one that arrived there while the link failed during its send
@@ -643,11 +643,11 @@ export class MailAcross extends AcrossReceipts {
     }
   }
 
-  /** A session by its name, here or on the other side, as a refusal to `reader` names it; an address that is no session, quoted */
-  private nameOf(address: string, reader?: string): string {
+  /** A session by its name, here or on the other side, as a refusal names it; an address that is no session, quoted */
+  private nameOf(address: string): string {
     const r = this.route(address)
     if (!r) return JSON.stringify(oneLineText(address, 200))
-    return r.kind === 'here' ? this.label(address, reader) : (this.foreignName(address)?.name ?? this.d.reach.shownId(address, reader))
+    return r.kind === 'here' ? this.label(address) : (this.foreignName(address)?.name ?? this.d.reach.shownId(address))
   }
 
   // ── Finding ──
