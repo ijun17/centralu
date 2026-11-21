@@ -26,7 +26,7 @@ export { CREDENTIAL_ID_RE, CREDENTIAL_LABEL_RE }
 const VERIFIER_RE = /^[0-9a-f]{64}$/
 
 /** Whether one entry of the file is a full credential this host takes (`CREDENTIAL_ID_RE`) */
-export function isListedEntry(f: Record<string, unknown>): f is Record<string, unknown> & { id: string; label: string; verifier: string } {
+function isListedEntry(f: Record<string, unknown>): f is Record<string, unknown> & { id: string; label: string; verifier: string } {
   return (
     typeof f.id === 'string' && CREDENTIAL_ID_RE.test(f.id) &&
     typeof f.label === 'string' && CREDENTIAL_LABEL_RE.test(f.label) &&
@@ -39,7 +39,7 @@ export function isListedEntry(f: Record<string, unknown>): f is Record<string, u
  * and a public key `parseLinkPublicKey` takes. A refused one (small-order, non-canonical) is absent: it makes no socket full
  * and is not listed (§4.1)
  */
-export function isKeyEntry(f: Record<string, unknown>): f is Record<string, unknown> & { id: string; label: string; publicKey: string } {
+function isKeyEntry(f: Record<string, unknown>): f is Record<string, unknown> & { id: string; label: string; publicKey: string } {
   return (
     typeof f.id === 'string' && CREDENTIAL_ID_RE.test(f.id) &&
     typeof f.label === 'string' && CREDENTIAL_LABEL_RE.test(f.label) &&

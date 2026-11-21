@@ -52,7 +52,7 @@ export function tarGz(top: string, files: Record<string, FakeFile>): Buffer {
  * worker's loop for each, back to back, and on a loaded Windows machine that passed the 60 s vitest waits for a worker's
  * messages ("Timeout calling onTaskUpdate"), which failed the file with none of its tests run
  */
-export async function tarGzAsync(top: string, files: Record<string, FakeFile>): Promise<Buffer> {
+async function tarGzAsync(top: string, files: Record<string, FakeFile>): Promise<Buffer> {
   const dir = tarFolder(top, files)
   try {
     await promisify(execFile)('tar', TAR_ARGS(top), { cwd: dir })

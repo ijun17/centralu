@@ -6,7 +6,7 @@ import { lineSplitter } from '../stream-text.js'
  * only, never with `readline`: it also ends a line at U+2028 and U+2029, which JSON leaves raw in a string (Node 26: a `compacted` rollout
  * line holding one came out as two non-JSON lines) and it cut codex's 23,244,422-byte `thread/resume` answer (`codex/client.ts`)
  */
-export { lineSplitter, type LineSplitter } from '../stream-text.js'
+export { lineSplitter } from '../stream-text.js'
 
 export async function* readLines(stream: Readable): AsyncGenerator<string> {
   const ready: string[] = []

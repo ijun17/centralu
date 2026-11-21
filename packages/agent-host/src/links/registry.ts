@@ -9,7 +9,7 @@ import { isLocalBuildVersion, isNewerVersion, releaseOf } from '@cc/protocol'
  * with the file.
  */
 
-export const NPM_REGISTRY = 'https://registry.npmjs.org'
+const NPM_REGISTRY = 'https://registry.npmjs.org'
 
 /** One package version as the remote fetches and checks it */
 export type VerifiedPackage = { name: string; version: string; tarball: string; integrity: string }

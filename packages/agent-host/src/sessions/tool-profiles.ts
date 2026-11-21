@@ -78,7 +78,7 @@ export type CodeIntelligenceFacts = Pick<ToolProfileFacts, 'kind' | 'appId' | 'b
  * Is this a child session: one an agent or an app started, not the person (#686)? A start_agent child (`askedBy`), a
  * fork of a busy session (`forkedFrom`), and an agent an app asked for (`isAppAgent`).
  */
-export function isChildSession(f: CodeIntelligenceFacts): boolean {
+function isChildSession(f: CodeIntelligenceFacts): boolean {
   return !!f.askedBy || !!f.forkedFrom || isAppAgent(f)
 }
 

@@ -156,7 +156,7 @@ export class SecretStore {
  * environment variable, a larger cap would enlarge the entire environment the app's command line
  * starts with.
  */
-export const SECRET_VALUE_MAX_CHARS = 16 * 1024
+const SECRET_VALUE_MAX_CHARS = 16 * 1024
 
 /**
  * The problem with a value someone wants to set — null if there is none. **Never carries the value
@@ -183,7 +183,7 @@ export function secretValueProblem(value: string): string | null {
  * whole record into confetti, and a value that short is not meaningful as a secret anyway.
  */
 /** The shortest line of a multi-line secret masked on its own: a PEM line is 64, a JSON key's line longer */
-export const SECRET_LINE_MIN_CHARS = 16
+const SECRET_LINE_MIN_CHARS = 16
 
 /**
  * What `redactor` returns. `reach` is the length of the longest text it masks: a reader that has to cut a stream

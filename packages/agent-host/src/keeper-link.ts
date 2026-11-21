@@ -38,7 +38,7 @@ export function hostBuild(commit: string, sourceJson: string | undefined): HostB
 export { hostBusy, type ActivitySnapshot } from './idle.js'
 
 /** How often the host looks. The keeper's idle limit is 30 minutes, so seconds of lag cost nothing */
-export const ACTIVITY_POLL_MS = 5_000
+const ACTIVITY_POLL_MS = 5_000
 
 /**
  * Reports `{"activity":{"busy":…}}` once at start and again whenever it changes, for the keeper's

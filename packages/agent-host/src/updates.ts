@@ -52,14 +52,14 @@ const NPM_RETRY_WINDOW_MS = 10 * 60 * 1000
 export type LatestResult = { ok: true; version: string } | { ok: false; reason: string }
 
 /** What a source tree's version carriers hold until a build stamps them: the same as `scripts/app-version.mjs` PLACEHOLDER */
-export const UNSTAMPED_VERSION = '0.0.0-dev'
+const UNSTAMPED_VERSION = '0.0.0-dev'
 
 /**
  * Whether this build may install a release by itself (#1501): never a host run from source (`build` `dev`) nor one with the placeholder version.
  * Every release is newer than `0.0.0-dev`, so a stored "Automatic updates" on would run `npm i -g centralu@<latest>` on the machine of whoever runs
  * `pnpm host` against their own data folder. The update line still shows the release; a click installs it
  */
-export function installsByItself(build: string | undefined, current: string): boolean {
+function installsByItself(build: string | undefined, current: string): boolean {
   return build !== 'dev' && current !== UNSTAMPED_VERSION
 }
 

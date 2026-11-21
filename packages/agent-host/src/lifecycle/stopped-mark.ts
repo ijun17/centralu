@@ -13,7 +13,7 @@ import { writeFileWhole } from '../os/write-file-whole.js'
  * for good). `serve --connection` reports it while no host runs. Every host that starts in the folder removes it
  * (`clearStoppedMark`): a start, by whoever, is the person's again
  */
-export const STOPPED_MARK_FILE = 'stopped.json'
+const STOPPED_MARK_FILE = 'stopped.json'
 
 /** Removes the mark, once this host holds the folder's lock. Never fatal: a mark left behind only waits for a Start */
 export function clearStoppedMark(dataDir: string): void {

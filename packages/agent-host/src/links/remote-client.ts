@@ -37,7 +37,7 @@ export type RemoteHello = {
 }
 
 /** `proving`: refused the `prove` itself (#838), as a host from before the proof, still running, does */
-export type RemoteRefusal = { code: 4001 | 4002; reason: string; error?: ProtocolError; proving?: boolean }
+type RemoteRefusal = { code: 4001 | 4002; reason: string; error?: ProtocolError; proving?: boolean }
 
 export type RemoteClientOptions = {
   url: string

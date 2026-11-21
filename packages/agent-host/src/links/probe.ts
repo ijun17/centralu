@@ -16,7 +16,7 @@ import { rpcError } from '../rpc-error.js'
  * `DefaultDistribution` marks the default). That avoids `wsl.exe -l`'s UTF-16 output and does not start the WSL service.
  */
 
-export const PROBE_MARK = 'CENTRALU-PROBE'
+const PROBE_MARK = 'CENTRALU-PROBE'
 
 const PROBE_PS = [
   "$ErrorActionPreference = 'SilentlyContinue'",

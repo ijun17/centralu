@@ -196,7 +196,7 @@ export class UsageRecords {
  * Claude derives a window's reset time from a relative one, so it moves by a few hundred ms on every read of an unchanged
  * window. A reset time that differs by less than this is the same one.
  */
-export const RESET_TOLERANCE_MS = 60_000
+const RESET_TOLERANCE_MS = 60_000
 
 function sameReset(a: number | null, b: number | null): boolean {
   return a === null || b === null ? a === b : Math.abs(a - b) < RESET_TOLERANCE_MS

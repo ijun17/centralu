@@ -130,14 +130,14 @@ export type SwitchState = {
 }
 
 /** What the handover command prints when neither version has `serve --switch` */
-export const NO_SWITCH = 'CENTRALU-NO-SWITCH'
+const NO_SWITCH = 'CENTRALU-NO-SWITCH'
 
 /**
  * The handover (plan §10.5a step 3): the first of `runners` whose package has `serve --switch` runs it, on its own Node,
  * naming itself in `CENTRALU_SWITCH_RUNNER`; it writes that to `switch.runner`, which `switchStatusCommand` reads it
  * through, once it takes the switch. `NO_SWITCH` when none has
  */
-export function switchCommand(spec: RemoteSpec, runners: InstalledVersion[], params: SwitchParams): RemoteCommand {
+function switchCommand(spec: RemoteSpec, runners: InstalledVersion[], params: SwitchParams): RemoteCommand {
   const raw = Buffer.from(JSON.stringify(params), 'utf8').toString('base64url')
   const tries = runners.filter((v) => VERSION_WORD.test(v.version) && VERSION_WORD.test(v.node))
   const sh = `${DATA_SH}
@@ -337,7 +337,7 @@ try {
 `
 
 /** `<data>/remote/` removed there, in its shell's terms; the data folder's other files stay */
-export function uninstallCommand(spec: RemoteSpec): RemoteCommand {
+function uninstallCommand(spec: RemoteSpec): RemoteCommand {
   return remoteScript(spec, { sh: UNINSTALL_SH, ps: UNINSTALL_PS })
 }
 

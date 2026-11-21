@@ -50,7 +50,7 @@ export type LaunchEnv = {
 }
 
 /** Where a `centralu serve` was asked for from (`LaunchEnv.serveFrom`) */
-export type ServeFrom = { hub?: string; ssh?: string }
+type ServeFrom = { hub?: string; ssh?: string }
 
 /**
  * The variables `takeLaunchEnv` reads or removes. Nothing the host spawns may see them: `CC_HOST_URL` and `CC_HOST_CREDENTIAL`
@@ -74,7 +74,7 @@ export const LAUNCH_VARIABLES = [
 const NAME_RE = /^[A-Za-z0-9._:-]{1,64}$/
 
 /** `CC_SERVE_FROM`, field by field; a field of the wrong shape is left out, never trusted */
-export function parseServeFrom(raw: string | undefined): ServeFrom | null {
+function parseServeFrom(raw: string | undefined): ServeFrom | null {
   if (!raw) return null
   const v = tryParseJson(raw)
   const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>
