@@ -58,7 +58,7 @@ const GOAL_ID = 'goal'
  *   (codex-cli 0.160.0), so after an interrupted turn it is unlisted until `thread/goal/updated` or a turn starts (#2248).
  * - A child's first notification can come before the `spawnAgent` `item/completed` that names it, so its state is kept and it
  *   is listed once named. It ends with `{idle}` and `turn/completed` in either order (`{systemError}` is a failure); stoppable
- *   only while its turn id is known. Nested children are listed alike; one from a resumed thread is never named here: not listed.
+ *   only while its turn id is known. Nested children are linked by that call and listed alike; a resumed thread's never is.
  */
 export class CodexChildTracker {
   private readonly threads = new Map<string, { active: boolean; turnId: string | null }>()
