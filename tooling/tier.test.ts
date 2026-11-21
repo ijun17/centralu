@@ -22,6 +22,16 @@ const RULES: Rules = parseRules(readFileSync(join(ROOT, RULES_FILE), 'utf8'))
 const without = (id: string): Rules => ({ ...RULES, rules: RULES.rules.filter((r) => r.id !== id) })
 const tierOf = (paths: string[], rules = RULES): Result => classify(paths, rules)
 
+/** A glob with each {a,b} list of names spelled out, one glob per name. A list in a name with a wildcard (`*.{md,txt}`) is a set of kinds, not of files, and stays */
+function alternatives(glob: string): string[] {
+  for (const m of glob.matchAll(/\{([^}]*)\}/g)) {
+    const end = glob.indexOf('/', m.index)
+    if (/[*?]/.test(glob.slice(glob.lastIndexOf('/', m.index) + 1, end < 0 ? undefined : end))) continue
+    return m[1]!.split(',').flatMap((name) => alternatives(glob.slice(0, m.index) + name + glob.slice(m.index + m[0].length)))
+  }
+  return [glob]
+}
+
 /** `rule`: the rule the case stands on; null when it is light because no rule matches */
 const CASES: { name: string; paths: string[]; tier: string; rule: string | null; because?: string[] }[] = [
   { name: 'documents only', paths: ['docs/apps/README.md', 'README.md', 'docs/generated/schema.md'], tier: 'auto', rule: 'docs' },
@@ -193,10 +203,15 @@ describe('the repository\'s tier rules', () => {
     expect(tierLine(tierOf(['AGENTS.md']), RULES)).toBe('Tier: light, from `AGENTS.md` (no rule matches: light).')
   })
 
-  it('matches every glob against at least one file in the repository, so a rename cannot drop a path silently', () => {
+  it('matches every glob, and every name of its {a,b} lists, against a file in the repository, so a rename cannot drop a path silently', () => {
     const files = execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' }).split('\n').filter(Boolean)
     const raw = JSON.parse(readFileSync(join(ROOT, RULES_FILE), 'utf8')) as { rules: { id: string; paths: string[]; except?: string[] }[] }
-    const dead = raw.rules.flatMap((r) => [...r.paths, ...(r.except ?? [])].filter((g) => !files.some((f) => globToRegExp(g).test(f))).map((g) => `${r.id}: ${g}`))
+    const dead = raw.rules.flatMap((r) =>
+      [...r.paths, ...(r.except ?? [])]
+        .flatMap(alternatives)
+        .filter((g) => !files.some((f) => globToRegExp(g).test(f)))
+        .map((g) => `${r.id}: ${g}`),
+    )
     expect(dead).toEqual([])
   })
 })
