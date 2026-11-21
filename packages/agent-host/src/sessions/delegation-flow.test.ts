@@ -245,9 +245,9 @@ describe("a child's turn and the call waiting on it", () => {
 
   it('a turn the task only joined does not answer it: the call reads as working, and the turn the task starts answers it (#2369)', async () => {
     givenAgain = true
-    const flow = flowWith()
-    const d = flow.startDelegation('caller>child', 'caller', 'child', target(), true)
-    d.taskId = 't2'
+    children.onDelegated(() => ({ taskId: 't2', withdraw: () => {} }))
+    const flow = flowWith({ deliver: async () => {} })
+    const { d } = flow.delegate({ key: 'caller>child', callerId: 'caller', sessionId: 'child', target: target(), agent: true, via: 'mail', task: 'Do it.', frame: 'Do it.' })
     finishes('Done with the work the turn began with.')
     expect(await flow.awaitAgent('caller>child', d)).toMatchObject({ ok: true, state: 'working', reported: true })
     expect(readGrants.size).toBe(0)
