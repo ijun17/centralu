@@ -149,6 +149,8 @@ describe('the mail tool of an ordinary session', () => {
     const worker = await create()
     const empty = await w.mgr.runCentraluTool(worker.id, 'mail', { action: 'inbox' })
     expect(empty).toEqual({ text: 'Your mailbox is empty.' })
+    // In a turn, so the task waits for its end and the inbox lists it: at rest it goes in at once, and read
+    handleOf(worker.id).send('working')
     const task = personTask(worker.id, 'please')
     const listed = await w.mgr.runCentraluTool(worker.id, 'mail', { action: 'inbox' })
     expect(listed.isError).toBeUndefined()
@@ -161,6 +163,8 @@ describe('the mail tool of an ordinary session', () => {
 describe('the mail tool of the Assistant', () => {
   it('is a command behind centralu_run, answered by the real tool bundle; called bare it is refused naming centralu_run', async () => {
     const orc = await w.mgr.createSession({ projectId: null, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal', kind: 'orchestrator' })
+    // In a turn, so the task waits for its end and the inbox lists it
+    handleOf(orc.id).send('working')
     const task = personTask(orc.id, 'tell me when it lands')
     const run = (args: Record<string, unknown>) => w.mgr.runCentraluTool(orc.id, 'centralu_run', { command: 'mail', args })
     expect((await run({ action: 'inbox' })).text).toContain(task.id)

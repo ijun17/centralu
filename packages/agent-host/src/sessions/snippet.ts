@@ -1,14 +1,9 @@
 /**
- * **Cuts out the area around** a found word.
- *
- * This used to be left to SQLite's `snippet(..., 12)`, but that 12 counts tokens, not characters,
- * and since the tokenizer is trigram-based it actually cut off after around 15 characters. What
- * reached the Assistant was a fragment like `"은하수 색이 이미 정책 목…"` ("the color of the
- * Milky Way is already poli…"), and from that fragment **there was no way to tell whether it was
- * the passage being searched for.**
- *
- * Cutting here buys two things: as much surrounding context as wanted can be given, and the cut
- * point can be marked honestly with an ellipsis.
+ * **Cuts out the area around** a found word. Not left to SQLite's `snippet(..., 12)`: that 12 counts tokens, not characters,
+ * and with a trigram tokenizer it cuts off after around 15 characters. What reaches the Assistant is a fragment like `"은하수 색이
+ * 이미 정책 목…"` ("the color of the Milky Way is already poli…"), and from that fragment **there is no way to tell whether it is
+ * the passage being searched for.** Cutting here buys two things: as much surrounding context as wanted can be given, and the
+ * cut point can be marked honestly with an ellipsis.
  */
 export function windowAround(body: string, query: string, radius: number): string {
   const text = body.replace(/\s+/g, ' ').trim()

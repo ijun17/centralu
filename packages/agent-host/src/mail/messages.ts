@@ -720,7 +720,7 @@ export class MessageService {
       if (message.kind === 'message' && message.needsReply) needsReply = true
       const relation = this.relation(recipient, message)
       given.push({ threadId: message.rootId, messageId: message.id, relation })
-      items.push(this.frameItem(recipient, message, relation, down && row.deliveredAt === null, row.lastError === 'maybe_repeated'))
+      items.push(this.frameItem(recipient, message, relation, down && row.deliveredAt === null, row))
     }
     const frame = buildMessageFrame(items, this.opts.calls?.(recipient))
     // What this delivery gives: the messages the frame names (one folded over its budget waits for the next), which the line counts and opens to
@@ -1237,7 +1237,7 @@ export class MessageService {
     return { message: stub, row: null, relation: '', phantom: 'gone' }
   }
 
-  private frameItem(recipient: string, m: MailRow, relation: string, inline: boolean, maybeRepeated: boolean): MessageFrameItem {
+  private frameItem(recipient: string, m: MailRow, relation: string, inline: boolean, row: Pick<RecipientRow, 'lastError' | 'givenAgainAt'>): MessageFrameItem {
     const about = asObj(m.facts.about).session
     const answered = m.replyTo === null ? undefined : this.records.message(m.replyTo)
     return {
@@ -1257,7 +1257,8 @@ export class MessageService {
       ...(m.facts.waitingOn !== undefined && m.facts.waitingOn > 0 ? { waitingOn: m.facts.waitingOn } : {}),
       ...(m.facts.personNote === true ? { personNote: true } : {}),
       ...(this.forPerson(m) ? { forPerson: this.forPerson(m) } : {}),
-      ...(maybeRepeated ? { maybeRepeated: true } : {}),
+      ...(row.lastError === 'maybe_repeated' ? { maybeRepeated: true } : {}),
+      ...(row.givenAgainAt !== null ? { givenAgain: true } : {}),
       ...(inline ? { inline: m.body } : {}),
     }
   }

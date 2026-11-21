@@ -301,7 +301,7 @@ describe('reading a linked machine for the hub’s assistant', () => {
     expect((await linkedSessions(() => [current]).read('m1.w1')).lines).toEqual(['{"note":"n"}', lines[0]])
   })
 
-  // #1480 review: a hub from this build asked for the passage `recall` found; the machine centred its window on it, and the hub kept the newest lines
+  // #1480: asked for the passage `recall` found, a machine from before the budget centres its window on it; the hub still keeps the lines nearest the spot
   it('keeps the lines nearest the spot of a read around it from a machine from before the budget', async () => {
     const line = (i: number) => JSON.stringify({ ts: '2026-10-21 09:30', role: 'assistant', text: `${i}`.padEnd(1500, 'x') })
     // A machine's window of 40 lines centred on the spot: it is the 20th
@@ -318,7 +318,7 @@ describe('reading a linked machine for the hub’s assistant', () => {
     expect(plain.lines!.at(-1)).toBe(window.at(-1))
   })
 
-  // #1480 review: a machine that says it held the budget is still bounded here, and its "no tools" held
+  // #1480: a machine that says it held the budget is still bounded here, and its "no tools" held
   it('bounds the answer of a machine that echoes its budget too, and drops its tool lines for "none"', async () => {
     const line = (i: number) => JSON.stringify({ ts: '2026-10-21 09:30', role: 'assistant', text: `${i}`.padEnd(1500, 'x') })
     const tool = JSON.stringify({ ts: '2026-10-21 09:30', role: 'tool', tool: 'Bash', title: 'ls' })
@@ -333,7 +333,7 @@ describe('reading a linked machine for the hub’s assistant', () => {
     expect((await linkedSessions(() => [right]).read('m1.w1')).lines).toEqual(kept)
   })
 
-  // #1480 review: the reads a budget's notes name go to the machine, and an older one that would answer the plain read is said, not shown again
+  // #1480: the reads a budget's notes name go to the machine, and an older one that would answer the plain read is said, not shown again
   it('passes before and from on to a machine', async () => {
     const asked: unknown[] = []
     const current = machine({})
@@ -350,7 +350,7 @@ describe('reading a linked machine for the hub’s assistant', () => {
     ])
   })
 
-  // #1186 review: a long line read on from an offset is the machine's answer, passed on
+  // #1186: a long line read on from an offset is the machine's answer, passed on
   it('gives the line a machine read from an offset as it answered', async () => {
     const line = JSON.stringify({ role: 'assistant', text: 'x'.repeat(1000), shown: 'characters 2000-3000 of 3000' })
     const current = machine({ 'host.readSession': { state: 'idle', lines: [line] } })
@@ -562,8 +562,8 @@ describe('the projects of linked machines, for ask_project (#700)', () => {
 })
 
 /*
- * #1532 review: a lookup that tried every down machine made an act wait on machines it had nothing to do with, and on
- * an attempt to one for as long as that attempt took. Only the machine the act needs is tried.
+ * #1532: a lookup that tries every down machine makes an act wait on machines it has nothing to do with, and on an attempt to
+ * one for as long as that attempt takes. Only the machine the act needs is tried.
  */
 describe('a project lookup connects only the machine the act needs (#1532)', () => {
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))

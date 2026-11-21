@@ -24,13 +24,13 @@ export class MergeChecks {
   constructor(private readonly host: MergeChecksHost) {}
 
   /**
-   * **The merge checks nobody awaits, so `disposeAll` can end them** (#368). Started at startup and on every project
-   * refresh, each runs git, and gh where it is installed, in the project's folder. They used to outlive the manager:
-   * a test that disposed a manager and removed its temporary project right away met a gh still running in that folder,
-   * which Windows refuses to remove (EPERM on windows-2022, #368). `disposeAll` aborts the checks and
-   * waits for them: an aborted `gitBranchPr` ends gh with the processes it started and returns once gh has exited,
-   * and a check stops at its next session once it has begun, so what is left to wait for is at most one git read
-   * (its own 10 s limit). A `prLookup` swapped in by a test is waited for as it is.
+   * **The merge checks nobody awaits, so `disposeAll` can end them** (#368). Started at startup and on every project refresh,
+   * each runs git, and gh where it is installed, in the project's folder. They must not outlive the manager: a test that
+   * disposes a manager and removes its temporary project right away would meet a gh still running in that folder, which Windows
+   * refuses to remove (EPERM on windows-2022, #368). `disposeAll` aborts the checks and waits for them: an aborted
+   * `gitBranchPr` ends gh with the processes it started and returns once gh has exited, and a check stops at its next session
+   * once it has begun, so what is left to wait for is at most one git read (its own 10 s limit). A `prLookup` swapped in by a
+   * test is waited for as it is.
    */
   readonly mergeChecks = new Set<Promise<void>>()
   readonly mergeChecksStop = new AbortController()
@@ -92,8 +92,7 @@ export class MergeChecks {
           } else if (pr) {
             // Keep the protocol's chip shape; the lookup's headOid is not a UI field.
             const chip = { number: pr.number, state: pr.state, url: pr.url }
-            // Never written if it was deleted while this was waiting (#163) — this used to resurrect an
-            // id-less row back into meta
+            // Never written if it was deleted while this was waiting (#163) — it would resurrect an id-less row in meta
             if (this.host.meta.get(m.id) === m && JSON.stringify(chip) !== JSON.stringify(m.worktreePr)) {
               m.worktreePr = chip
               this.host.emit({ type: 'worktree_pr', sessionId: m.id, pr: chip })

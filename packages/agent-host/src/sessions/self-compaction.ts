@@ -4,57 +4,16 @@ import { inTurn, type SessionIdle } from '../idle.js'
 import { thenTurn, type StoredThen, type ThenKeep, type ThenStage } from './then-keep.js'
 
 /**
- * Compacting at the turn's end (#1451). The CLI's own auto compact (`auto-compact.ts`, #1376) fires in the middle of work,
- * at 60% of the window; a long-lived session also pays a cache rewrite of its whole context after every long wait. So a
- * session compacts at the breaks that cost nothing instead, in two ways, and the CLI's own point stays as the backstop:
- *
- *  - **`compact_self`**: the agent asks Centralu to compact it once its current turn ends (`request`), with an optional
- *    focus line for the summary. Never mid-turn: the request waits for the turn's end and the compact goes in as the
- *    tool's own command (Claude `/compact [focus]`; Codex's compact request, `thread/compact/start`, which its slash handling
- *    routes from the bare `/compact` and which takes no focus). One request is pending per session; asking again only
- *    replaces the focus. The floor is checked when the turn has ended and the tool has read the size of the context, not at
- *    the call: the size known during a turn is the one from the turn before, so a turn that grew past the floor was refused
- *    (deep review of #1478). A context under the floor then drops the request: nothing is compacted for nothing.
- *  - **A session at rest** for `IDLE_COMPACT_MINUTES` whose context is over `AutoCompact.idleShare` of the model's window
- *    is compacted before its next turn (`sweep`). At rest is `sessionIdle`, the rule the sleep sweep reads: no turn, card,
- *    question or background work, and a process; the ten minutes count from the moment all of that holds. Off with
- *    `AutoCompact.controlled`.
- *
- * **The person's turn first.** A request waits for a turn's end, so a message the person sent into that turn is part of
- * it, and one queued behind it is already ahead of the compact in the tool's own queue: the person's turn runs first
- * and the conversation is compacted after it. A turn the person interrupts drops the request (they took control).
- * **A turn Centralu starts to compact is marked** (`compactTurn`, said on its ending event as `turn.compaction`, once the tool has
- * reported the compaction in it): the window
- * raises no "done" notice or sound for it, and it is not a turn of the session's own.
- * **Only a tool that can.** A tool with no compact command (`SelfCompactionHost.command` is null: an ACP agent that advertises none)
- * is never sent one, and `compact_self` answers that it cannot: the bare `/compact` would be an ordinary prompt to its model.
- * **One compaction per rest.** What a compaction leaves is not always read back (Codex reports no size), so a session
- * Centralu compacted is not compacted again until it has had a turn of its own.
- * **Going on after it (#2024).** `compact_self` may carry `then`, the agent's own next step. Once the compact turn Centralu started has
- * ended (the tool reported the compaction in it), `then` goes in as an ordinary turn of the session's own, in Centralu's channel and with no
- * user row. **Only to a session at rest, after what was queued has gone first**: the host looks at what waits (`queued`: the inputs the tool holds, mail
- * waiting for the session); with nothing it goes at once, else it follows the end of that turn with a line saying the message came first, and it goes only when the
- * session can take a turn (`SelfCompactionHost.ready`); else the end of the turn that runs, or the sweep, tries again. **A request that is refused** (under the
- * floor, no size read since the last compaction, the tool refused the compact or never reported it) still sends `then`, as a turn that says it did not
- * compact and why: nothing is left stalled with the agent told to end its turn. That turn counts as a cycle. Asked again at the same size (`refusedAt`) it is
- * answered in the tool result and no turn is made. **The person's interrupt sends nothing**: of the
- * turn that asked, the compact turn (before or after the tool reported the compaction), or the turn that ran first; the session is told so, quietly,
- * with the text of its `then` (`tell`). A compaction the tool reported as failed leaves the context as it was, so `then` still goes. A tool whose
- * compact takes no focus (Codex) gets the focus line at the head of the `then` turn; with no `then` the tool's answer says the focus was not applied.
- * **One compaction in flight per session**: a second request while one is on its way (its command sent, queued or running) asks for no second command; it
- * only replaces the `then` (or drops it, with none), and its answer says so.
- * **Across a host swap or restart.** A `then` is kept in the store from the request on (`ThenKeep`, the setting `compact_then:<session>`, a key an older build
- * ignores), with its `stage` and the time of its last move: `asked` (the turn runs), `sent` (the compact command went), `compacted` (the tool reported the
- * compaction), `refused` (the request did not compact; `why`), `sending`. The step from `compacted` or `refused` to `sending` is one transaction (`claim`): of the
- * old host and the new, only the one that makes it sends, so a `then` goes at most once, and **from the claim on the record never goes back**: a host that leaves with
- * the delivery in the air leaves it `sending`, and the next one only tells the session. A host that starts (`recover`) sends a `compacted` or `refused` one,
- * waking the session if it has no process; for any other stage it cannot tell how far things came, so the session is **woken with a turn** that says Centralu
- * changed hosts, with the text of its `then` (a quiet note when it is in a turn; kept for its next input when the tool takes none), and the conversation line says
- * which of these happened. A record older than `THEN_KEEP_MS` is not sent (a rollback to an older build left it), and the deletion of the session clears it and the
- * notes (a session restored from the trash must not get an old step). A note the tool cannot take yet is kept in the store too (`compact_notes:<session>`).
- * **No loop guard but the floor.** A `then` turn that asks again at once finds a context far under the floor and is dropped, so nothing
- * loops; a context that grew back over it did real work. After a compaction only a size read since it counts for the floor (`unread`):
- * Codex reports none, and the reading kept from before would let a small context pass.
+ * Compacting at the turn's end (#1451; rules and measured runs: docs/agent-host/context-compaction.md). The CLI's own auto
+ * compact (`auto-compact.ts`, #1376) fires in the middle of work, so a session compacts at breaks that cost nothing: on
+ * **`compact_self`** (once its current turn ends; the floor is checked then, not at the call, as the size known during a turn
+ * is the one from the turn before) or **at rest** for `IDLE_COMPACT_MINUTES` over `AutoCompact.idleShare` (`sweep`). **The
+ * person's turn first:** a message they sent into the turn is part of it, one queued behind it is ahead of the compact in the
+ * tool's queue; a turn they interrupt drops the request. A tool with no compact command (`SelfCompactionHost.command` null) is
+ * sent none: a bare `/compact` would be an ordinary prompt. **One compaction per rest:** Codex reports no size afterwards.
+ * `then` (#2024) goes at most once, and from the claim on its record never goes back (`claim`). **No loop guard but the
+ * floor:** a `then` turn that asks again at once finds a context far under the floor and is dropped; after a compaction only a
+ * size read since it counts (`unread`), as the reading kept from before would let a small context pass.
  */
 
 /**
@@ -104,7 +63,7 @@ export const THEN_QUEUE_MAX_MS = 60_000
 /** How often, and how many times, a step looks again while the session's state has not caught up with the end of the turn (see `settleThen`) */
 const THEN_LOOK_MS = 250
 const THEN_LOOKS = 12
-/** A `then` asked again with the context within this many tokens of where the last refusal found it is answered in the tool result, with no turn (#2036 review) */
+/** A `then` asked again with the context within this many tokens of where the last refusal found it is answered in the tool result, with no turn (#2036) */
 export const REFUSED_AGAIN_TOKENS = 2_000
 /**
  * A kept `then` older than this is not sent by the host that finds it. A compact is stale after `COMPACT_STALE_MS`, and a swap or a restart

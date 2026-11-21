@@ -34,7 +34,7 @@ export function agentState(host: OwnAgentsHost, s: SessionInfo): AgentListRow['s
 }
 
 /**
- * Whether an answer about `child` may tell `callerId` to delete it (#690 review): only its own child (under `auto`,
+ * Whether an answer about `child` may tell `callerId` to delete it (#690): only its own child (under `auto`,
  * agent_session also reads the person's sessions and siblings), and only one whose work is over. A turn the network,
  * a quit or a limit cut short is resumed, not deleted; a report still owed over its own background work (`notice`)
  * is not over.

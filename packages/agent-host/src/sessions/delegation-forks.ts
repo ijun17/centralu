@@ -8,7 +8,7 @@ import { agentFrame, canMailParent, lowestPreset, presetWithin } from './start-a
 import type { AgentStartFlow, StartAgentDelegations } from './start-agent-flow.js'
 import { labelOf } from './transcript-view.js'
 
-/** A session with no project (the Assistant's child, #853) has no repository to fork from (#994 review) */
+/** A session with no project (the Assistant's child, #853) has no repository to fork from */
 const NO_PROJECT = 'it works outside any project, so there is nothing to fork it from; send to it once its turn ends, or start a new session'
 
 /** A fork's refusal, `No fork of "<name>": <why>.`, for a clause or a whole sentence */
@@ -18,9 +18,8 @@ const noFork = (target: SessionInfo, why: string) => `No fork of "${target.name}
 export type ForkDelegations = Pick<StartAgentDelegations, 'delegate'> & { readonly starts: AgentStartFlow }
 
 /**
- * A sub-session forked from a busy session's conversation for a requester (`ifBusy: "fork"`), behind start_agent's
- * gates. Moved out of `DelegationFlow` as it was (#428); what it reaches of the rest of the flow is `ForkDelegations`,
- * of the manager `DelegationHost`.
+ * A sub-session forked from a busy session's conversation for a requester (`ifBusy: "fork"`), behind start_agent's gates. What
+ * it reaches of the rest of the flow is `ForkDelegations`, of the manager `DelegationHost`.
  */
 export class DelegationForks {
   constructor(
@@ -50,7 +49,7 @@ export class DelegationForks {
     return this.host.trustGate(callerId, target.projectId, 'forking a session', quiet)
   }
 
-  /** Why `target` cannot be forked for `callerId` now, or null. Its project is said first, whatever its CLI can do (#994 review) */
+  /** Why `target` cannot be forked for `callerId` now, or null. Its project is said first, whatever its CLI can do */
   private forkWhy(callerId: string, target: SessionInfo): string | null {
     const adapter = this.host.adapters.get(target.tool)
     if (!target.projectId) return NO_PROJECT
@@ -142,7 +141,7 @@ export class DelegationForks {
       } catch (e) {
         return { ok: false, error: `Could not start the fork of "${target.name}": ${(e as Error).message}` }
       }
-      // Its depth stays even when the requester is deleted later (#897 review)
+      // Its depth stays even when the requester is deleted later (#897)
       recordAgentDepth(this.host, child.id, callerId)
       // Copying and making the session took a while: the gates are read again, with no wait before the delegation
       const lateGate = this.forkTrustError(callerId, target, true)

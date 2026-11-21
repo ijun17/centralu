@@ -147,16 +147,25 @@ describe('the allowlist', () => {
   const text = readFileSync(join(ROOT, layer.OS_ALLOWLIST), 'utf8').replace(/\r\n/g, '\n')
 
   it('is sorted, one path per line, none in the layer and all in the checked code', () => {
-    expect(allowlist).toEqual([...new Set(allowlist)].sort())
-    expect(allowlist.filter((f) => layer.inOsLayer(f) || !layer.isChecked(f))).toEqual([])
-    expect(text.endsWith('\n')).toBe(true)
+    const sorted = [...new Set(allowlist)].sort()
+    const misplaced = allowlist.filter((f, i) => f !== sorted[i])
+    expect(allowlist, `${layer.OS_ALLOWLIST} is not sorted, or lists a path twice; out of place: ${misplaced.join(', ')}`).toEqual(sorted)
+    const wrong = allowlist.filter((f) => layer.inOsLayer(f) || !layer.isChecked(f))
+    expect(wrong, `${layer.OS_ALLOWLIST} lists files in the OS layer or outside the checked code: ${wrong.join(', ')}`).toEqual([])
+    expect(text.endsWith('\n'), `${layer.OS_ALLOWLIST} does not end with a line break`).toBe(true)
   })
 
   it(
     'says no more than is true: every listed file exists and still touches the OS, and every such file is listed',
     async () => {
       // A file that moved behind the layer takes its line out in the same change; one that is gone does too
-      expect(await osSelector().offenders(repoFiles()), `${layer.OS_ALLOWLIST} as \`tsx tooling/os-tests.ts --offenders\` prints it`).toEqual(allowlist)
+      const offenders = await osSelector().offenders(repoFiles())
+      const extra = allowlist.filter((f) => !offenders.includes(f))
+      const missing = offenders.filter((f) => !allowlist.includes(f))
+      expect(
+        { extra, missing },
+        `${layer.OS_ALLOWLIST} is not what \`tsx tooling/os-tests.ts --offenders\` prints. Listed, but gone or no longer touching the OS: ${extra.join(', ') || 'none'}. Touching the OS, not listed: ${missing.join(', ') || 'none'}`,
+      ).toEqual({ extra: [], missing: [] })
     },
     120_000 * SLOW,
   )
@@ -181,10 +190,8 @@ describe('the allowlist', () => {
       }
       const renames = renamesSince(ROOT, base)
       expect(renames, `the renames since ${base}`).not.toBeNull()
-      expect(
-        grown(main, allowlist, renames ?? [], splitFilesAt(base)),
-        `${layer.OS_ALLOWLIST} lists more than main's: put the new code behind the OS layer instead (docs/plans/os-layer.md)`,
-      ).toEqual([])
+      const added = grown(main, allowlist, renames ?? [], splitFilesAt(base))
+      expect(added, `${layer.OS_ALLOWLIST} lists more than main's (${added.join(', ')}): put the new code behind the OS layer instead (docs/plans/os-layer.md)`).toEqual([])
     },
     60_000 * SLOW,
   )

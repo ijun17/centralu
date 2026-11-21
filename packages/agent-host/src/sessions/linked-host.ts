@@ -37,9 +37,8 @@ export type LinkedHostHost = Pick<DelegationHost, 'meta' | 'store' | 'children' 
   }
 
 /**
- * This host as a linked machine's hub and as a hub's linked machine (#82, #1038): the events a linked machine's
- * sessions send, and what a hub's Assistant reads of and sends to this host's sessions.
- * Moved out of the session manager as it was (#1143); what it reaches of the manager is `LinkedHostHost`.
+ * This host as a linked machine's hub and as a hub's linked machine (#82, #1038): the events a linked machine's sessions send,
+ * and what a hub's Assistant reads of and sends to this host's sessions. What it reaches of the manager is `LinkedHostHost`.
  */
 export class LinkedHost {
   constructor(private readonly host: LinkedHostHost) {}

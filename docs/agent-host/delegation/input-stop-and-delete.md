@@ -26,7 +26,8 @@ notes during compact/review can share a later turn. Claude stamps input UUIDs an
 UUIDs: a sign-in-race retry can reorder delivery, and a capped list never proves an omitted input was consumed. At initialization, the adapter
 requires the verified CLI protocol (2.1.289 or newer, compared as semver, so a suffixed version such as
 `2.1.290-beta.1` counts) and its `interrupt_receipt_v1` and
-`interrupt_cancel_queued_v1` capabilities before exposing `sendTracked`. Older or unknown producers keep the
+`interrupt_cancel_queued_v1` capabilities, read from the first turn's init; an input sent before that is tracked and, if the CLI
+turns out older, counts as taken when written, and `sendTracked` goes away. Older or unknown producers keep the
 mid-turn refusal: the single `user_message_uuid` names the turn's first input and cannot confirm a folded note.
 Results without input IDs belong to synthetic turns (including background-task notifications) and neither
 complete nor cancel a pending note. **A Stop is a stop** (#1640): on any Stop of a turn (the person's, or a caller's or an app's

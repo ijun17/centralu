@@ -7,20 +7,15 @@ import type { AppsPeer } from './linked-apps.js'
 import type { StartingHub } from '../sessions/hub-preset.js'
 
 /**
- * The hubs linked to this host that let its sessions ask their projects (#550, the reverse direction,
- * docs/plans/remote-hub.md §12.7, owner decision 2026-10-18). Each hub says so itself (`host.hubOffer`) on the
- * connection it opened to this host, and is called back on that connection only (`HostServer.call`), never on another
- * and never by an address of its own choosing.
- *
- *   - **Several hubs** appear to this host's sessions by their own names. A hub whose connection is gone stays listed
- *     as "not reachable right now", with the projects it last listed, until it says otherwise or this host restarts.
- *   - **A hub that never offered** (one from before this, or whose switch for this machine is off) is not listed: its
- *     projects cannot be named. One that offered and then said off is forgotten at once.
- *   - **What a hub answers is someone else's words**: names on one line, and an answer that does not read as one is a
- *     refusal, never passed on as it came.
- *   - **Mail** (#2067 item 1, docs/plans/linked-mail.md §3): a hub that says it takes mail is kept whatever its switch
- *     for asks says, and a session it started here mails its parent there through it (`mail`), through that hub only.
- *     Its projects are listed and asked only while that switch is on.
+ * The hubs linked to this host that let its sessions ask their projects (#550, docs/plans/remote-hub.md §12.7, owner decision
+ * 2026-10-18). Each hub says so itself (`host.hubOffer`) on the connection it opened, and is called back on that connection only
+ * (`HostServer.call`), never by an address of its own choosing.
+ *   - **Several hubs** appear to sessions by their own names. A hub whose connection is gone stays listed as "not reachable right
+ *     now", with the projects it last listed, until it says otherwise or this host restarts.
+ *   - **A hub that never offered**, or offered and then said off, is not listed: its projects cannot be named.
+ *   - **What a hub answers is someone else's words**: names on one line; an answer that does not read as one is a refusal, never passed on as it came.
+ *   - **Mail** (#2067, docs/plans/linked-mail.md §3): a hub that takes mail is kept whatever its asks switch says, and a session
+ *     it started mails its parent there through that hub only. Its projects are listed and asked only while that switch is on.
  */
 
 /** `asks`: the hub's switch for this machine is on. `mail`: it takes mail from the sessions it started here */
@@ -138,7 +133,7 @@ export class LinkedHubs {
     this.deps.settings?.setAppSetting(MAIL_HUBS_KEY, JSON.stringify(list))
   }
 
-  /** `fn` runs each time a hub offers mail here, at each connect: what crossed while it was away is told then (#2067 review) */
+  /** `fn` runs each time a hub offers mail here, at each connect: what crossed while it was away is told then (#2067) */
   onMailOffer(fn: (hubId: string) => void): void {
     this.mailOffered.add(fn)
   }

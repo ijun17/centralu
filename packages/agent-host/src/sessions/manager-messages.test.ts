@@ -255,10 +255,9 @@ describe('the path of a touched file (#185)', () => {
 })
 
 /*
- * The unit of storage changed from delta to **message** (#66).
- * A single sentence used to be nine rows — 84% of the DB was fragments, pagination lost meaning
- * by counting rows, and the trigram index could not index 1-2 character bodies, which killed
- * search.
+ * The unit of storage is the **message** (#66), not the delta: a single sentence as nine rows would make 84% of the DB
+ * fragments, pagination would lose meaning by counting rows, and the trigram index could not index 1-2 character bodies, which
+ * would kill search.
  */
 describe('a streaming message is stored as a single row (#66)', () => {
   const openSession = async () => {
@@ -663,12 +662,9 @@ describe("a subagent's steps are kept under its launch card and read by nothing 
 })
 
 /**
- * A failed turn **is recorded** (#107).
- *
- * An error used to only change state and pass through — with no row saved, a turn that died with
- * a 400 left an empty reply in its place, and reopening it gave no way to know why it was empty.
- * The shape of a real incident: the rollout had the full text, and the app had not one character
- * of it.
+ * A failed turn **is recorded** (#107). An error that only changed state and passed through would save no row: a turn that died
+ * with a 400 would leave an empty reply in its place, and reopening it would give no way to know why it was empty (the shape of
+ * a real incident: the rollout had the full text, and the app had not one character of it).
  */
 describe('a failed turn is recorded (#107)', () => {
   it('an error is stored as a marker row, and the session state becomes error', async () => {

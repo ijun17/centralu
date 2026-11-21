@@ -14,23 +14,14 @@ import { SessionManager } from './manager.js'
 import { plantOldCoordinator } from './old-coordinator.test-helpers.js'
 
 /**
- * The setting files a tool receives per session (M4 decision 3, #92/#152) — kind × project trust ×
- * preset, both when created and when woken up.
- *
- *   assistant, coordinating session          no files at all (Claude's `settingSources: []`, Codex
- *                                                turns off its store layer)
- *   worker, worktree agent, a project app's building    exactly that project's trust
- *   session, an agent a project app assigned (D-1)
- *   a user-folder app's building session         trusted — that folder is the user's own
- *   an agent a user-folder app assigned (D-1)    only the person's own settings — the text was
- *                                                written by the app, and the folder
- *                                                (assistantHome) can be written by a worker
- *
- * A real manager spins up a real adapter. Only the tool is mocked: for Claude, the SDK's `query`
- * records what it received, and for Codex, the app-server client does — what this test checks is
- * "what did the tool receive." What the CLI reads from that value is measured separately by
- * adapters/claude/project-trust.test.ts (the SDK's merge engine) and
- * scripts/probe-project-trust.mts (the real CLI).
+ * The setting files a tool receives per session (M4 decision 3, #92/#152) — kind × project trust × preset, both when created
+ * and when woken up. assistant, coordinating session: no files at all (Claude's `settingSources: []`, Codex turns off its store
+ * layer); worker, worktree agent, a project app's building session, an agent a project app assigned (D-1): exactly that
+ * project's trust; a user-folder app's building session: trusted, that folder is the user's own; an agent a user-folder app
+ * assigned (D-1): only the person's own settings, as the app wrote the text and a worker can write the folder (assistantHome).
+ * A real manager spins up a real adapter with only the tool mocked (Claude's SDK `query` and Codex's app-server client record
+ * what they received): the test checks what the tool received; what the CLI reads from it is measured by
+ * adapters/claude/project-trust.test.ts (the SDK's merge engine) and scripts/probe-project-trust.mts (the real CLI).
  */
 
 const state = vi.hoisted(() => ({

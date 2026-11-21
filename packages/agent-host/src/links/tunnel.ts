@@ -207,12 +207,12 @@ function othersOf(raw: unknown): { others?: RemoteCredential[] } {
 /**
  * A machine's full credentials as its connection line or `host.credentials` lists them (#1405), entry by entry: an id
  * `--revoke` takes, a label of one line with no format character, a date that is one; anything else is left out. Every
- * entry is read, however many (#1405 review): the row shows 32 and counts the rest, and a count cut at some bound would
+ * entry is read, however many (#1405): the row shows 32 and counts the rest, and a count cut at some bound would
  * hide what lies past it, which the host accepts all the same. The list is no longer than `serve.json`, which the host
  * reads whole at each hello anyway. Null for anything but a list
  */
 export function credentialsOf(raw: unknown): RemoteCredential[] | null {
-  // Also `host.credentials`' `usedUnderHubLabels` (#1405 review), whose entries are read the same way
+  // Also `host.credentials`' `usedUnderHubLabels` (#1405), whose entries are read the same way
   if (!Array.isArray(raw)) return null
   return raw.flatMap((e: unknown) => {
     const o = asObj(e)
@@ -291,7 +291,7 @@ export type DetachAnswer =
 
 /**
  * `serve --detach` started a host there and it never answered (`exited`, `timeout`): a host that crashes at boot
- * (#1143 review). The link counts it against its limit of starts, as one that answered and then stopped; a start where
+ * (#1143). The link counts it against its limit of starts, as one that answered and then stopped; a start where
  * nothing could be started (ssh, no Centralu there, WMI refusing) is not this
  */
 export class StartedNotServing extends Error {
@@ -366,19 +366,14 @@ export class DirectTunnel implements Tunnel {
 }
 
 /**
- * What runs a command on the other end of ssh. `ssh <target> <command>` hands the command to the
- * remote account's login shell, which differs by machine (measured on a Windows laptop, 2026-10-05):
- *
+ * What runs a command on the other end of ssh. `ssh <target> <command>` hands the command to the remote account's login shell,
+ * which differs by machine (measured on a Windows laptop, 2026-10-05):
  *   posix       a Unix shell (Linux, macOS)
  *   powershell  Windows OpenSSH, whose default shell is PowerShell 5.1 (or cmd.exe)
- *   wsl         a Linux distro inside WSL on that Windows machine. WSL2 forwards the distro's
- *               127.0.0.1 ports to Windows' 127.0.0.1, so the forward to the Windows side reaches a
- *               host listening on loopback inside WSL with no change
- *
- * Every layer between the hub and the remote command re-parses quotes its own way (PowerShell 5.1
- * mangles a double quote passed to a native program), so anything that is not a plain word travels
- * encoded: PowerShell's own `-EncodedCommand` (UTF-16LE base64), and for WSL a base64 script fed to
- * `bash -l` on stdin. Base64 is letters, digits, `+`, `/` and `=`, which no layer touches.
+ *   wsl         a Linux distro inside WSL on that Windows machine; WSL2 forwards the distro's 127.0.0.1 ports to Windows' 127.0.0.1,
+ *               so the forward to the Windows side reaches a host listening on loopback inside WSL
+ * Every layer re-parses quotes its own way (PowerShell 5.1 mangles a double quote passed to a native program), so anything that
+ * is not a plain word travels encoded: `-EncodedCommand` (UTF-16LE base64), and for WSL a base64 script fed to `bash -l` on stdin.
  */
 export type RemoteSpec = {
   shell: RemoteShell
@@ -444,18 +439,14 @@ function distroOf(spec: RemoteSpec): string {
 }
 
 /**
- * What every PowerShell script sent to a Windows remote starts with. The first line makes its output UTF-8.
- * The second gives it the machine's module path: a Windows PowerShell started from PowerShell 7 (pwsh)
- * inherits pwsh's `PSModulePath`, whose first folder holds 7.x copies of the built-in modules that 5.1
- * cannot load, and `Get-FileHash`, `ConvertTo-Json`, `Invoke-WebRequest` and `Expand-Archive` are then
- * "found in the module … but the module could not be loaded". That is every GitHub Windows runner, and a
- * Windows machine whose OpenSSH `DefaultShell` is pwsh.
- *
- * Only a path with a `\PowerShell\` folder in it (7's: `Program Files\PowerShell\7\Modules`, `Documents\PowerShell\Modules`;
- * Windows PowerShell's are all `\WindowsPowerShell\`) is replaced, by the two folders Windows PowerShell 5.1 has by
- * default. Not by `[Environment]::GetEnvironmentVariable('PSModulePath', 'Machine')`: a script that merely contained
- * that call made the installer's step that runs Node take 5 to 7 s instead of 1.2 s on a Windows 11 PC (measured
- * 2026-10-16, against five other one-line additions that all stayed at 1.2 s), and the same on every start after it.
+ * What every PowerShell script sent to a Windows remote starts with: the first line makes its output UTF-8; the second gives it
+ * the machine's module path. A Windows PowerShell started from pwsh inherits pwsh's `PSModulePath`, whose first folder holds
+ * 7.x copies of built-in modules that 5.1 cannot load (`Get-FileHash`, `ConvertTo-Json`, `Invoke-WebRequest` and
+ * `Expand-Archive` then fail "the module could not be loaded"): every GitHub Windows runner, and a machine whose OpenSSH
+ * `DefaultShell` is pwsh. Only a path with a `\PowerShell\` folder (7's; Windows PowerShell's are all `\WindowsPowerShell\`) is
+ * replaced, by the two folders 5.1 has by default. Not by `[Environment]::GetEnvironmentVariable('PSModulePath', 'Machine')`: a
+ * script that merely contained that call made the installer's Node step take 5 to 7 s instead of 1.2 s on a Windows 11 PC
+ * (measured 2026-10-16, against five other one-line additions that all stayed at 1.2 s), and the same on every start after it.
  */
 export const PS_PREAMBLE =
   "[Console]::OutputEncoding=[Text.Encoding]::UTF8\nif ($env:PSModulePath -match '\\x5cPowerShell\\x5c') { $env:PSModulePath=\"$env:ProgramFiles\\WindowsPowerShell\\Modules;$PSHOME\\Modules\" }\n"
@@ -485,24 +476,16 @@ export type RemoteCommand = string | { command: string; stdin: string; expect?: 
 export const WINDOWS_INLINE_MAX = 7_900
 
 /**
- * The framing of a script on a Windows remote's stdin (#1360): base64 of its UTF-8, then a line that holds one dot
- * (base64 has none, so no line of the script is that line). The reader stops at that line and does not wait for the end of
- * input.
- *
- * **Measured on a Windows 11 PC (OpenSSH 9.5, Windows PowerShell 5.1, 2026-10-20), a private sshd on loopback and the
- * installer's real command, 17,000 characters of stdin:** `[Console]::In.ReadToEnd()` never returned in 2 to 9 runs of
- * 30 one after another and in 13 to 18 of 30 ten at a time; `[Console]::In.ReadLine()` up to the dot line did not hang at
- * that size but did in 1 to 4 runs of 30 to 80 at 100,000 characters; a `StreamReader` over `OpenStandardInput()` hung in 5
- * of 6. The stream itself, read with `Read()` into a buffer until the dot line, did not hang in 200 of 200 runs at 17,000
- * and at 100,000 characters, five at a time, and read to its end it did not hang in 200 of 200 at 17,000. So the end of input
- * did arrive; the text readers of `[Console]::In` are what stalled, and the size of the script is not the cause (a run of
- * 70,000 characters passed and one of 17,000 hung). The bytes are read from the stream, and the end of input is not
- * needed.
- *
- * The reader prints `STDIN_READY` when it starts and `STDIN_ACK` once the whole script is read, before it runs the script: the
- * hub waits for both (`exec`), so a remote that never saw its input fails in seconds with that said, not after the step's 30
- * minutes, and a step is sent again only when PowerShell was up and the input did not arrive. A stream that ends before the
- * dot line (a cut input) runs nothing and says so.
+ * The framing of a script on a Windows remote's stdin (#1360): base64 of its UTF-8, then a line holding one dot (base64 has
+ * none). The reader stops at that line and does not wait for the end of input. **Measured on a Windows 11 PC (OpenSSH 9.5,
+ * Windows PowerShell 5.1, 2026-10-20), 17,000 characters of stdin:** `[Console]::In.ReadToEnd()` never returned in 2 to 9 of 30
+ * runs one after another and 13 to 18 of 30 ten at a time; `ReadLine()` up to the dot line did not hang at 17,000 but hung in 1
+ * to 4 of 30 to 80 runs at 100,000 characters; a `StreamReader` over `OpenStandardInput()` hung in 5 of 6. The stream read with
+ * `Read()` into a buffer until the dot line did not hang in 200 of 200 runs at 17,000 and 100,000 characters (five at a time),
+ * and read to its end at 17,000 too: the end of input did arrive, the text readers of `[Console]::In` stalled, and the script's
+ * size is not the cause (70,000 passed, 17,000 hung). The reader prints `STDIN_READY` when it starts and `STDIN_ACK` once the
+ * script is read, before it runs it: the hub waits for both (`exec`), so a remote that never saw its input fails in seconds,
+ * not after the step's 30 minutes, and a step is sent again only when PowerShell was up and the input did not arrive.
  */
 export const STDIN_END = '.'
 /** What the reader prints when it starts (see `STDIN_END`) */
@@ -510,7 +493,7 @@ export const STDIN_READY = 'CENTRALU-STDIN-READY'
 /** What the reader prints once the whole script is read (see `STDIN_END`) */
 export const STDIN_ACK = 'CENTRALU-STDIN-OK'
 /**
- * How long the reader waits, from the moment it says it runs, for the line with the dot (#1360 review). The hub's wait for the
+ * How long the reader waits, from the moment it says it runs, for the line with the dot (#1360). The hub's wait for the
  * confirmation (`SSH_STDIN_ACK_MS`) is longer, so when the hub gives up and sends the step again the first reader has already
  * ended on its own: it checks the time after every read and again before it confirms, so a reader that stalled and woke late
  * exits with 4 and runs nothing, and one that waits for input that never comes does not stay behind (the PowerShell, its
@@ -624,42 +607,26 @@ function noAnswer(err: Error, r: RemoteRun, remote: RemoteSpec): string {
 }
 
 /**
- * The remote command that prints the connection line (docs/agent-host/remote/serve.md), in the remote
- * shell's terms: the managed launcher the hub's installer wrote (`<data>/remote/bin/centralu`,
- * `centralu.cmd` on Windows; docs/plans/remote-hub.md §10.1), else `centralu` on the PATH an ssh
- * command gets, else the launcher `serve` keeps (`<data>/bin/centralu`), else `NOT_FOUND` on
- * stdout. The managed launcher comes first, so a machine with both an npm install and one the hub
- * made runs the version the hub installed. `<data>` is `CC_DATA_DIR` there, else `~/.centralu`:
- * the rule `serve` and the installer (install.ts) use.
- *
- * **The fallback is decided on the remote, in one command, and "not found" is said on stdout.**
- * Exit codes do not survive the way there (measured on a Windows laptop, 2026-10-05): Windows
- * OpenSSH runs the command under PowerShell, which turns any failing command into 1, so a 127 from
- * WSL or from PowerShell itself arrives as 1, and a missing command can even arrive as 0.
- *
- * **PowerShell runs the `.cmd` shim, never the bare name.** npm installs three shims, `centralu`,
- * `centralu.cmd` and `centralu.ps1`, and a bare `centralu` in PowerShell resolves to the `.ps1`, which
- * Windows' default `Restricted` execution policy refuses ("running scripts is disabled on this
- * system"; measured on Windows 11, 2026-10-15). `centralu.cmd` is a batch file, which no policy
- * blocks, so the lookup names it. The same goes for `npm` (`shimNames`).
- *
- * **A WSL distro does not look on Windows' drives.** WSL puts Windows' PATH after its own, and
- * Windows' npm folder holds a `centralu` shim: measured, `command -v centralu` in the distro named
- * `/mnt/c/Users/<me>/AppData/Roaming/npm/centralu`, the Windows install. Running that from the
- * distro is never what the person meant, so `/mnt/*` is taken off PATH for the lookup.
- *
- * A POSIX remote runs the lookup under `sh -c`, so a login shell that is not POSIX (fish) runs it
- * too. `command`, the person's own (`RemoteSpec.command`), runs as given, with no fallback.
+ * The remote command that prints the connection line (docs/agent-host/remote/serve.md), in the remote shell's terms: the managed
+ * launcher the installer wrote (`<data>/remote/bin/centralu`, `.cmd` on Windows; docs/plans/remote-hub.md §10.1), else `centralu`
+ * on the PATH an ssh command gets, else the launcher `serve` keeps (`<data>/bin/centralu`), else `NOT_FOUND` on stdout. The managed
+ * one comes first, so a machine with an npm install and a hub-made one runs the hub's.
+ * - **The fallback is decided on the remote, "not found" said on stdout:** exit codes do not survive (measured on a Windows
+ *   laptop, 2026-10-05): PowerShell turns any failure into 1, so a 127 arrives as 1 and a missing command can arrive as 0.
+ * - **PowerShell runs the `.cmd` shim, never the bare name:** a bare `centralu` resolves to npm's `.ps1`, which the default
+ *   `Restricted` execution policy refuses (measured on Windows 11, 2026-10-15); a batch file no policy blocks. Same for `npm` (`shimNames`).
+ * - **A WSL distro does not look on Windows' drives:** its PATH ends with Windows', whose npm folder holds a `centralu` shim
+ *   (measured), so `/mnt/*` is taken off PATH. A POSIX remote runs the lookup under `sh -c`, so fish runs it too.
  */
 export function connectionCommand(spec: RemoteSpec, pair: string | null = null): string {
   return remoteCommand(spec, pair ? `serve --connection --pair ${pair}` : 'serve --connection')
 }
 
 /**
- * A hub's key for its pair label (#1405, `SshTunnelOptions.hubKey`): the 8 hex characters of its own id
- * (`hubSelfId`, `hub-` and 4 random bytes, drawn once and kept in its store). Random, not its data folder's hash
- * (#1405 review): two hubs on computers of one name whose data folders sit at the same path took one label, and each
- * replaced the other's credential at each link
+ * A hub's key for its pair label (#1405, `SshTunnelOptions.hubKey`): the 8 hex characters of its own id (`hubSelfId`, `hub-`
+ * and 4 random bytes, drawn once and kept in its store). Random, not its data folder's hash (#1405): two hubs on computers of
+ * one name whose data folders sit at the same path would share one label, and each would replace the other's credential at each
+ * link
  */
 export function hubKeyOf(hubSelfId: string): string {
   return /^hub-([0-9a-f]{8})$/.exec(hubSelfId)?.[1] ?? createHash('sha256').update(hubSelfId).digest('hex').slice(0, 8)
@@ -684,16 +651,13 @@ export function detachCommand(spec: RemoteSpec, from: string | null = null): str
 }
 
 /**
- * `centralu serve --stop` there, found the same way (plan §10.4, S10): the running host stops in
- * order, asked over its own socket. The update, rollback and uninstall run it (update.ts).
- *
- * As the hub's own stop (`CENTRALU_STOP_BY=hub`, #1143): `serve --stop` then leaves no mark of the person's stop, and
- * the hub's next start (the update's) is not refused as one. An older serve ignores the variable and marks nothing
- * anyway. A command of the person's own runs as given, in a shell this cannot know, so it gets no variable; the hub
- * installs and updates nothing on such a machine.
- *
- * `forUpdate` (#1618): `CENTRALU_STOP_FOR=update` too, for a stop after which the hub starts a host there again (update.ts
- * `stopRemoteHost`): the host lists the turns it ends, which the next one continues. An older serve ignores it
+ * `centralu serve --stop` there, found the same way (plan §10.4, S10): the host stops in order, asked over its own socket. The
+ * update, rollback and uninstall run it (update.ts). It runs as the hub's own stop (`CENTRALU_STOP_BY=hub`, #1143): `serve
+ * --stop` then leaves no mark of the person's stop, so the hub's next start (the update's) is not refused as one; an older
+ * serve marks nothing anyway. A command of the person's own runs in a shell this cannot know, so it gets no variable (the hub
+ * installs and updates nothing there). `forUpdate` (#1618) adds `CENTRALU_STOP_FOR=update` for a stop after which the hub
+ * starts a host again (update.ts `stopRemoteHost`): the host lists the turns it ends and the next one continues them. An older
+ * serve ignores both.
  */
 export function stopCommand(spec: RemoteSpec, o: { forUpdate: boolean }): string {
   return remoteCommand(spec, 'serve --stop', o.forUpdate ? 'update' : 'stop')
@@ -827,30 +791,16 @@ export type SshTunnelOptions = {
 }
 
 /**
- * The person's own `ssh`, twice: once to ask the remote how to reach its host, and once, held open,
- * for the forward.
- *
- *   ssh -T -o BatchMode=yes <target> centralu serve --connection
- *   ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -L 127.0.0.1:<port>:127.0.0.1:<port> <target>
- *
- * - `BatchMode=yes` everywhere: a password or host-key prompt nobody can answer would hang the hub
- *   forever. The person's keys, agent and `~/.ssh/config` are used as they are.
- * - The first command falls back to `<data>/bin/centralu`, decided on the remote: an SSH shell is not
- *   interactive, and nvm, fnm, volta and `~/.npm-global` put npm's global folder on PATH only in
- *   interactive shells (agent-host/remote/serve.md, which is why `serve` keeps that launcher).
- * - The forward binds 127.0.0.1 on both ends, explicitly: never 0.0.0.0 and never `GatewayPorts`,
- *   so nothing on the hub's network can use the link.
- * - **The same port number on both ends** when it is free here, another one when it is taken
- *   (typically by a second linked machine on the default 17175). Nothing depends on it any more:
- *   app views of a linked machine are served by the hub on its own port (plan §11), never through
- *   this forward. Kept because the number reads the same in both machines' logs.
- * - **Closing ends every ssh it started**, the held forward and an asking one still in flight, also
- *   when `close()` comes in the middle of `open()` (a machine removed while it connects): `open()`
- *   then starts nothing more and fails.
- * - ssh stays in the host's process group, unlike an agent CLI (`adapters/local-process.ts`, #435):
- *   whatever supervises the host ends that group with it (`host_proc.rs`'s `kill_group`), and a
- *   forward, which reads no stdin, would otherwise outlive a host that died without `close()`. What
- *   ssh itself starts here (a `ProxyCommand`, `ProxyJump`'s second ssh) ssh ends on SIGTERM.
+ * The person's own `ssh`, twice: once to ask the remote how to reach its host, once, held open, for the forward.
+ * - `BatchMode=yes` everywhere: a prompt nobody can answer would hang the hub. The person's keys and `~/.ssh/config` apply.
+ * - The first command falls back to `<data>/bin/centralu`: nvm, fnm, volta and `~/.npm-global` put npm's global folder on PATH only in
+ *   interactive shells, which an SSH shell is not (agent-host/remote/serve.md).
+ * - The forward binds 127.0.0.1 on both ends, never 0.0.0.0 and never `GatewayPorts`, so nothing on the hub's network can use it.
+ * - The same port number on both ends when free here (it reads the same in both logs), else another; nothing depends on it (plan §11).
+ * - **Closing ends every ssh it started**, also in the middle of `open()` (a machine removed while it connects): `open()` then
+ *   starts nothing more and fails. ssh ends what it starts itself (a `ProxyCommand`, `ProxyJump`'s second ssh) on SIGTERM.
+ * - ssh stays in the host's process group (unlike an agent CLI, `adapters/local-process.ts`, #435): the supervisor ends the group
+ *   (`host_proc.rs` `kill_group`); a forward, which reads no stdin, would otherwise outlive a host that died without `close()`.
  */
 export class SshTunnel implements Tunnel {
   private child: OsChild | null = null
@@ -905,9 +855,8 @@ export class SshTunnel implements Tunnel {
   }
 
   /**
-   * Where Centralu runs, for a sentence: "on <target>", or "in WSL (<distro>) on <target>" (#482).
-   * A Windows laptop can be linked twice, as Windows and as a distro, and both rows used to say
-   * "on <target>" alike.
+   * Where Centralu runs, for a sentence: "on <target>", or "in WSL (<distro>) on <target>" (#482). A Windows laptop can be
+   * linked twice, as Windows and as a distro, and both rows would say "on <target>" alike.
    */
   private get where(): string {
     const remote = this.opts.remote
@@ -1080,7 +1029,7 @@ export class SshTunnel implements Tunnel {
     }
     /*
      * A remote updated since it refused `--pair` says it takes it now, and prints no token without it: asked again with
-     * it, once, rather than linking with no credential until this hub restarts (#1405 review)
+     * it, once, rather than linking with no credential until this hub restarts (#1405)
      */
     if (!this.pairs && r.code === 0 && /"takes":\[[^\]]*"pair"/.test(r.stdout) && !/"token":/.test(r.stdout)) {
       this.pairs = true
@@ -1095,7 +1044,7 @@ export class SshTunnel implements Tunnel {
     } catch (err) {
       // No line: say what the remote said on the way out, if anything
       const why = lastLine(r.stderr)
-      // Its serve.json may not be read there (#1405 review): the launcher's own advice, not a guess at an older Centralu
+      // Its serve.json may not be read there (#1405): the launcher's own advice, not a guess at an older Centralu
       if (r.code !== 0 && /cannot be read by this user \((EACCES|EPERM)\)/.test(why)) throw new Error(why.replace(/^centralu serve: /, ''))
       throw new Error(noAnswer(err as Error, r, remote))
     }
@@ -1188,7 +1137,7 @@ export const SSH_DETACH_TIMEOUT_MS = 120_000
  */
 export const SSH_EXEC_TIMEOUT_MS = 30 * 60_000
 /**
- * What ssh may spend connecting and logging in before it counts against a step's PowerShell (`SSH_STDIN_READY_MS`, #1360 review):
+ * What ssh may spend connecting and logging in before it counts against a step's PowerShell (`SSH_STDIN_READY_MS`, #1360):
  * `ConnectTimeout=15` is per address, and a name with several addresses or a ProxyJump chain tries them one after another.
  * Six attempts' worth; a connection that is slower than that is not one a step should wait for
  */
@@ -1260,14 +1209,12 @@ function plainPart(text: string): string {
 }
 
 /**
- * What a stderr says once PowerShell's CLIXML is read (#1081). Windows PowerShell writes its `#< CLIXML`
- * header before its first record, often a progress record ("Preparing modules for first use") at the
- * start, and the records as `<Objs>…</Objs>` blocks. What a command it runs writes to stderr itself
- * comes between the header and the blocks, and its own errors are the blocks' `<S S="Error">` records.
- * So the header and the progress go, the text around and between the blocks and the error records'
- * text are kept. A kept tail (`Tail`) can start in the middle of a block, and then only its tags and
- * escapes say what it is: from the start of the first line that shows either up to that block's end,
- * it is XML, and only the whole error records in it are read.
+ * What a stderr says once PowerShell's CLIXML is read (#1081). Windows PowerShell writes a `#< CLIXML` header, often a progress
+ * record ("Preparing modules for first use") first, then records as `<Objs>…</Objs>` blocks; what a command writes to stderr
+ * itself comes between the header and the blocks, and its errors are the blocks' `<S S="Error">` records. So the header and the
+ * progress go; the text around the blocks and the error records' text stay. A kept tail (`Tail`) can start in the middle of a
+ * block, then only its tags and escapes say what it is: from the first line that shows either up to that block's end it is XML,
+ * and only the whole error records in it are read.
  */
 function withoutClixml(s: string): string[] {
   let text = s.replace(/^#< CLIXML\r?$/gm, '')

@@ -26,9 +26,9 @@ export type AssistantSlotHost = Pick<DelegationHost, 'meta' | 'store' | 'emit' |
   }
 
 /**
- * The app's one Assistant: made on its first question, with the tool chosen for it before it exists; the
- * MCP-server and skill proposals it makes and the person answers; and the bridge's door to its tools (the Codex path).
- * Moved out of the session manager as it was (#1143); what it reaches of the manager is `AssistantSlotHost`.
+ * The app's one Assistant: made on its first question, with the tool chosen for it before it exists; the MCP-server and skill
+ * proposals it makes and the person answers; and the bridge's door to its tools (the Codex path). What it reaches of the
+ * manager is `AssistantSlotHost`.
  */
 export class AssistantSlot {
   /** The Assistant's MCP-server and skill proposals and its approved skills (#71, M4 A-7) */
@@ -115,12 +115,9 @@ export class AssistantSlot {
   }
 
   /**
-   * Returns it if it exists, and **never creates one** if it does not (#63).
-   *
-   * Once onboarding started showing the Assistant screen first, "opening the screen" stopped
-   * meaning "creating the process". This only ever asks — the actual creation happens inside
-   * assistant(), the moment the first question is sent. Creating it before that would spin up a
-   * tool process on behalf of someone who never even asked for it.
+   * Returns it if it exists, and **never creates one** if it does not (#63): opening the Assistant screen is not creating the
+   * process, which happens inside assistant() when the first question is sent. Creating it before that would spin up a tool
+   * process for someone who never asked for it.
    */
   assistantPeek(): SessionInfo | null {
     const known = this.host.store.sessions.assistantId()
@@ -128,16 +125,12 @@ export class AssistantSlot {
   }
 
   /**
-   * The tool the Assistant runs on (#63, the card choice on the onboarding screen).
-   *
-   * **Only settings for before a session exists.** Because there is a gap between choosing and
-   * actually creating it (clicking the card -> ... at some point later ... -> the first question),
-   * the choice has to be recorded somewhere, and since this is a property of the install itself,
-   * app_settings is the right place for it. Once it has actually been created, switching agents in the
-   * session's own settings takes over — this value is never read again after that.
+   * The tool the Assistant runs on (#63, the card choice on the onboarding screen). **Only for before a session exists:** the
+   * choice is made some time before the first question creates it, so it is recorded in app_settings, a property of the install
+   * itself. Once it is created, switching agents in the session's own settings takes over and this value is never read again.
    */
   configureAssistant(tool: ToolName): void {
-    // Refused as its launch would be (#1562 review): a choice saved here is the Assistant every window opens
+    // Refused as its launch would be (#1562): a choice saved here is the Assistant every window opens
     const refused = this.host.refusal(tool, ASSISTANT_DEMANDS)
     if (refused) throw unfitError(refused)
     this.host.store.settings.setAppSetting('orchestrator_tool', tool)
@@ -147,14 +140,10 @@ export class AssistantSlot {
   private assistantCreating: Promise<SessionInfo> | null = null
 
   /**
-   * The app's one and only assistant. Created on the spot if none exists.
-   *
-   * **Only comes into existence when called.** Creating it ahead of time when the app is turned on
-   * would leave a session nobody ever uses holding onto a tool process — too expensive a price just to
-   * turn on the control tower.
-   *
-   * Returned as-is even if its process is dead. Bringing it back to life is send()'s own job (FR-10),
-   * and reviving it here would mean a tool process comes up just from drawing the sidebar.
+   * The app's one and only assistant. Created on the spot if none exists. **Only comes into existence when called:** creating
+   * it when the app is turned on would leave a session nobody uses holding a tool process. Returned as-is even if its process
+   * is dead: bringing it back is send()'s job (FR-10), and reviving it here would start a tool process just from drawing the
+   * sidebar.
    */
   async assistant(): Promise<SessionInfo> {
     const known = this.host.store.sessions.assistantId()
@@ -193,10 +182,8 @@ export class AssistantSlot {
   private async createAssistant(): Promise<SessionInfo> {
 
     /*
-     * The tool follows the choice made on the onboarding screen (configureAssistant) — hardcoding
-     * 'claude' created a contradiction where someone with only Codex installed could pass through
-     * onboarding ("Codex is ready") and still be unable to open the Assistant (#63). The wiring on
-     * the Codex side (the stdio bridge) was already laid down and measured by the project assistant (#13).
+     * The tool follows the choice made on the onboarding screen (configureAssistant): hardcoding 'claude' let someone with only
+     * Codex installed pass onboarding ("Codex is ready") and still be unable to open the Assistant (#63).
      */
     const configured = this.host.store.settings.appSetting('orchestrator_tool')
     const info = await this.host.createSession({

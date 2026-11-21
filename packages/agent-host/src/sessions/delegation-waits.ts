@@ -172,18 +172,19 @@ export class DelegationWaits {
       case 'bound':
         return this.agentWorking(d, observing)
       case 'failed':
-        if (!observing) this.host.children.answered(d.callerId, d.sessionId, { ok: false, error: errorKindWord(r.error) })
+        if (!observing) this.host.children.answered(d.callerId, d.sessionId, { ok: false, error: errorKindWord(r.error) }, d.taskId)
         return { ok: false, error: `"${name()}" [${d.sessionId}] did not finish: ${r.error}. Tell the person, or give it a clearer task.` }
     }
     if (observing) return {
       ok: true, state: 'done', sessionId: d.sessionId, sessionName: name(),
       tool: this.host.meta.get(d.sessionId)?.tool ?? '', answer: this.clipped(d.sessionId, r.answer, name()), readable: [], outside: [],
     }
-    const { granted, outside } = this.grantReads(d.callerId, r.answer, d.target.path)
     const notice = this.pausedNotice(d.sessionId, d.callerId)
+    // The call returned the answer: it answers the task, unless the turn left the child's own background work running (its last response answers it once that work ends).
+    // A task that joined the turn is given again, and only a turn it starts answers it (#2369): the call reads as working, as past its bound
+    if (!this.host.children.answered(d.callerId, d.sessionId, notice ? undefined : { ok: true, text: r.answer }, d.taskId)) return this.agentWorking(d, observing)
+    const { granted, outside } = this.grantReads(d.callerId, r.answer, d.target.path)
     const child = this.host.meta.get(d.sessionId)
-    // The call returned the answer: it answers the task, unless the turn left the child's own background work running (its last response answers it once that work ends)
-    this.host.children.answered(d.callerId, d.sessionId, notice ? undefined : { ok: true, text: r.answer })
     return {
       ok: true,
       state: 'done',

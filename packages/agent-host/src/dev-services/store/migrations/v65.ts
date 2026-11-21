@@ -340,12 +340,6 @@ export class StepsV65 extends MigrationRange {
     this.db.prepare(`INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(HOST_ID_KEY, made)
     return made
   }
-
-  /** Adds a column the table lacks. A table that does not exist (a test's partial schema) is left alone */
-  private addColumn(table: string, column: string, type: string): void {
-    const cols = this.db.prepare<unknown[], { name: string }>(`PRAGMA table_info(${table})`).all()
-    if (cols.length > 0 && !cols.some((c) => c.name === column)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`)
-  }
 }
 
 /** The settings key of this host's id (`HUB_SELF_KEY` when step 74 was written) */

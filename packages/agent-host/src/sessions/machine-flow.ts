@@ -243,7 +243,7 @@ export class MachineFlow {
           const waited = ops.updateAnswerMs ?? UPDATE_ANSWER_MS
           const r = await raceTimeout(run, waited, null)
           if (!r) {
-            // Answered as still under way (#1399 review): how it ends is told to the caller in its conversation, a failure too
+            // Answered as still under way (#1399): how it ends is told to the caller in its conversation, a failure too
             void run.then(
               (ended) => this.tellEnd(sessionId, `[Centralu] The ${req.action} of ${plainQuoted(m.name)} you started has finished: Centralu ${ended.current.version} is there.${ended.note ? ` ${ended.note}` : ''}`),
               (e: unknown) => this.tellEnd(sessionId, `[Centralu] The ${req.action} of ${plainQuoted(m.name)} you started did not finish: ${errorMessage(e).slice(0, 600)}`),

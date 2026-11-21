@@ -4,54 +4,22 @@ import type { AgentLook, StoredMessage } from '@cc/protocol'
 import { trustedJsonText } from './centralu-tools.js'
 
 /**
- * The handoff record (#78) — **a handoff with no summarizer**, and its result **is a file**
- * (#102).
- *
- * The agent mode has the departing agent write its own note (written as its reply, and the host lands
- * it as a file, #142). That path is blocked when the service is interrupted, and since #694 it is not
- * the default either: the session being replaced is the one least likely to summarize itself. The raw
- * conversation is still fully present in our store with no compaction. This module materializes
- * that raw conversation into text a successor can read — deterministically, with no LLM.
- *
- * **It is no longer sized to fit one chat message** (#102). This file used to have a ladder: an
- * old reply got demoted to its first 500 characters, then the summary was shortened, and if it
- * still overflowed, material was dropped from the front. That ladder existed for exactly one
- * reason — the result used to be sent as a single initialPrompt. Now the host writes this text
- * into a note slot in the data folder (`<data>/handoff/<project id>/<session id>.md`, #142) and
- * the successor only receives the path. With no envelope to fit, there is no need for uniform
- * degradation either.
- *
- * **What actually takes up the space is measured** (#102): tool_result 45% + tool_call 43% = 88%.
- * What people said is only 8%. Each row is small (tool_result averages 0.6KB) and the problem is
- * **count**, so instead of trimming the body, **rows are collapsed** — in three tiers, most recent
- * first.
- *
- * **A contents section opens the note, and old results are cut** (#1481). A 2 MB note with no headings left a successor
- * reading the tail and guessing offsets. The note now starts with the reply that ended each of the predecessor's last turns, in full, the sessions
- * it started, its running background work and a table of the note's parts with line numbers, all built without a model.
- * The last 40 tool calls no longer carry their whole result either, only its first `RESULT_HEAD` characters and a marker:
- * every call keeps its input, and the note already tells the successor to re-run commands instead of trusting old output.
- *
- * **The boundary is stated explicitly.** Text degraded uniformly can look intact while it is not,
- * and the reader has no way to tell. So this fills from the most recent material up to the cap,
- * and the first line says how far it reaches. Cutting is justified because the raw material stays
- * intact in the store: this file is **a view, not a copy**, and a wider view can always be built
- * again.
- *
- * **The pivot is optional.** If there is a last compaction marker, material is filled from there
- * and the tool's own summary is placed above it. Measured: codex sessions used to have **zero**
- * compaction markers in our store — the marker came only from `thread/compacted`, which no measured
- * CLI sends (#303). Codex now leaves one from its `contextCompaction` item, but a session stored
- * before that, or a conversation imported from a tool whose record names no compaction, still has
- * none, so when there is none, only the recency cap is applied. Material is folded away only when
- * a summary exists, and a remote (encrypted) codex compaction has none (#267).
+ * The handoff record (#78): **a handoff with no summarizer**, and its result **is a file** (#102). The agent mode (the
+ * departing agent writes its own note, #142) is blocked when the service is interrupted and is not the default since #694: the
+ * session being replaced is the one least likely to summarize itself. The raw conversation is fully in our store, so this turns
+ * it into text a successor can read, deterministically, with no LLM, into a note slot in the data folder
+ * (`<data>/handoff/<project id>/<session id>.md`) of which the successor receives only the path. **What takes the space is
+ * measured** (#102): tool_result 45% + tool_call 43% = 88%, what people said 8%, each row small (tool_result averages 0.6KB),
+ * so the problem is **count**: **rows are collapsed** in three tiers, most recent first. **The boundary is stated explicitly:**
+ * degraded text can look intact while it is not, so this fills from the most recent material up to the cap and the first line
+ * says how far it reaches; the raw material stays in the store (a view, not a copy). **The pivot is optional:** from the last
+ * compaction marker with the tool's own summary above it, else only the recency cap (#303, #267).
  */
 
 /**
- * The byte cap on the record file. 2 MiB (read as "2.0 MB") is measured as the size that fits the most recent tens of
- * thousands of rows out of a 200,000-row transcript, and it is also a size a person can search
- * through with `rg` with no strain. It is a **file** cap, not a message-envelope cap, so it limits
- * only disk and read cost, not context.
+ * The byte cap on the record file: 2 MiB (read as "2.0 MB") is measured as the size that fits the most recent tens of thousands
+ * of rows out of a 200,000-row transcript, and a person can still search it with `rg` with no strain. A **file** cap, not a
+ * message-envelope cap: it limits only disk and read cost, not context.
  */
 export const RECORD_CAP = 2 * 1024 * 1024
 
@@ -61,9 +29,9 @@ export const RECORD_CAP = 2 * 1024 * 1024
  */
 const TOOLS_VERBATIM = 40
 /**
- * How much of one tool result is kept (#1481). It used to be the whole body of the last 40 calls; a long old result is
- * rarely worth reading, and the note tells the successor to re-run commands instead of trusting old output. The input of
- * every call stays in full (its title line); only the output is cut, and the cut says so.
+ * How much of one tool result is kept (#1481): a long old result is rarely worth reading, and the note tells the successor to
+ * re-run commands instead of trusting old output. The input of every call stays in full (its title line); only the output is
+ * cut, and the cut says so.
  */
 const RESULT_HEAD = 500
 /** How many of the predecessor's latest assistant reports the contents section repeats in full (#1481) */
@@ -73,9 +41,8 @@ const REPORT_MAX = 40_000
 /** How many children / background tasks the contents section lists before it says how many more there are */
 const LIST_MAX = 30
 /**
- * How many before that are kept as a one-line trace.
- * 1,000 ≈ a day's work. One line is ~70B, so even 1,000 lines is 70KB, 3% of the cap — at this
- * value, the chronicle of "what was done to which file" is almost never cut off.
+ * How many before that are kept as a one-line trace. 1,000 ≈ a day's work: one line is ~70B, so even 1,000 lines is 70KB, 3% of
+ * the cap, and the chronicle of "what was done to which file" is almost never cut off.
  */
 const TOOLS_LINE = 1_000
 /** The cap on how many file paths appear in the header/collapsed lines — a list that pushes out the body is not a list */
@@ -145,7 +112,7 @@ function toEntries(rows: StoredMessage[]): Entry[] {
 }
 
 /**
- * A user row as the successor reads it (#694 review). Only the person's own words are `[user]`: a row another session
+ * A user row as the successor reads it (#694). Only the person's own words are `[user]`: a row another session
  * sent (`from`: a child's report, an Assistant's or parent's instruction, a Centralu notice) or an app sent
  * (`fromApp`) says whose it is and carries its text as one JSON string, as read_session does (#120, #121), so a line in
  * it cannot pose as the person or as a line of this record.
@@ -322,7 +289,11 @@ export function buildHandoffRecord(opts: {
   summary: string | null
   /** **All** of the session's rows, in time order — handling before and after the pivot happens here */
   rows: StoredMessage[]
-  /** The seq of the last successful compaction marker. null means only the recency cap is applied, with no pivot */
+  /**
+   * The seq of the last successful compaction marker. null means only the recency cap is applied. A session has none when it
+   * was stored before Codex left one from its `contextCompaction` item (`thread/compacted` is sent by no measured CLI, #303),
+   * or was imported from a tool whose record names no compaction; a remote (encrypted) codex compaction has no summary (#267)
+   */
   pivotSeq: number | null
   cap?: number
   /** The note of the session the predecessor itself took over from (#1481), named in the header so the chain can be followed; never copied in */

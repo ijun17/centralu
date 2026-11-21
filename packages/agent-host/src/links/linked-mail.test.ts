@@ -64,9 +64,9 @@ describe('parent from a session a hub started on a linked machine (#2067 item 1)
     const { machine, hub } = await rig()
     expect(hub.machine().asks).toEqual({ on: false, note: null })
     const r = await send(machine, 'the build is green', { urgent: true })
-    // Its turn is on no task of the parent's: an ordinary message, which waits for a reply, with no word on asking a giver (#2349 review)
+    // Its turn is on no task of the parent's: an ordinary message, which waits for a reply, with no word on asking a giver (#2349)
     expect(r).toEqual({ text: expect.stringMatching(/^Sent \S+ to your parent "h1" on Hub mac\. It needs a reply, which reaches you as mail and wakes you if you are at rest\.$/) })
-    // A question asks for a reply there now that a reply reaches the machine (#2067 item 2)
+    // A question asks for a reply there, as a reply reaches the machine (#2067 item 2)
     expect(received(hub)).toEqual([{ body: 'the build is green', needsReply: true, row: expect.objectContaining({ recipient: at(hub, 'h1') }) }])
     // The id the child was told is the hub's message
     const id = /^Sent (\S+) /.exec(r.text)![1]!

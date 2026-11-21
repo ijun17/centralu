@@ -28,10 +28,9 @@ export type { RareTier } from './tool-seats.js'
 export { trustedJsonText } from './tool-answers.js'
 
 /*
- * The server name and the naming rule moved to the app runtime contract (M4 A-1) — an external
- * app's id follows the same rule (`app-<id>` becomes the server name attached to the session),
- * and the runtime cannot import this layer (sessions). The existing consumers (the two adapters
- * and the manager) still import it from here unchanged.
+ * The server name and the naming rule live in the app runtime contract (M4 A-1): an external app's id follows the same rule
+ * (`app-<id>` becomes the server name attached to the session), and the runtime cannot import this layer (sessions).
+ * Re-exported here for the two adapters and the manager.
  */
 export { CENTRALU_MCP_NAME, proposedMcpServerNameError } from '../apps/contract.js'
 
@@ -61,15 +60,11 @@ type ToolHandlers = { [N in keyof CentraluToolArgs]: (args: CentraluToolArgs[N],
 const SEATED: ReadonlySet<string> = new Set(['ask_project', 'start_agent', 'agent_session', 'find_apps', 'attach_app', 'detach_app', 'mail'])
 
 /**
- * Runs one tool and turns the result into **text for the model to read**.
- *
- * Why rendering happens here too: if each of the two paths composed its own sentence, the same
- * result would look different. The judgment (what to give) lives in CentraluTools, the
- * presentation (how it looks) lives here.
- *
- * The arguments are checked here, once, against the tool's schema in TOOL_ARGS (#850): Claude's in-process MCP checks
- * them against the definition it was shown, but Codex's bridge hands them over as the model wrote them, so without
- * this a wrong type reached the manager on one path and was refused on the other.
+ * Runs one tool and turns the result into **text for the model to read**. Rendering happens here too, so the same result does
+ * not look different on the two paths: the judgment (what to give) lives in CentraluTools, the presentation (how it looks)
+ * here. The arguments are checked here, once, against the tool's schema in TOOL_ARGS (#850): Claude's in-process MCP checks
+ * them against the definition it was shown, but Codex's bridge hands them over as the model wrote them, so without this a wrong
+ * type reaches the manager on one path and is refused on the other.
  */
 export async function runCentraluTool(
   tools: CentraluTools,
@@ -94,11 +89,10 @@ export async function runCentraluTool(
 }
 
 /**
- * What a model writes for an argument it means to leave out (#850 review): Codex models often send null for an optional
- * field, and a blank string stood for "none" in the runner before a schema read the arguments (start_agent's
- * `difficulty: ""`). Either is taken as left out where the field would refuse it but takes no value at all; a field
- * that takes null keeps it (update_session_settings: null is the tool's default). A string such as "false" or "5" for a
- * boolean or a number is not read as one: it is refused, as Claude's schema refuses it.
+ * What a model writes for an argument it means to leave out (#850): Codex models often send null for an optional field, and a
+ * blank string stands for "none" (start_agent's `difficulty: ""`). Either is taken as left out where the field would refuse it
+ * but takes no value at all; a field that takes null keeps it (update_session_settings: null is the tool's default). A string
+ * such as "false" or "5" for a boolean or a number is not read as one: it is refused, as Claude's schema refuses it.
  */
 function leftOut(schema: z.ZodObject<z.ZodRawShape>, args: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(

@@ -117,7 +117,7 @@ export function worktreeSetupNotice(problems: readonly string[]): string {
 
 /**
  * The same, for the agent's task (#841 item 3): Centralu's own words in its bracket, and what failed as quoted data
- * after them. A problem line carries file names from the project and the setup command's own output (#989 review),
+ * after them. A problem line carries file names from the project and the setup command's own output (#989),
  * which could otherwise read as Centralu speaking.
  */
 export function worktreeSetupFrame(problems: readonly string[]): string {
@@ -205,19 +205,14 @@ export class WorktreeSessions {
     }
     const branch = requested || `${APP_SLUG}/${id.slice(0, 8)}`
     /*
-     * Where it forks from (#76). Order: **what was asked for -> the project's trunk as the remote has it (#1484) -> the local trunk -> HEAD**.
-     *
-     * Why what was asked for comes first (user feedback, 2026-09-07: "there is no way to say
-     * where to fork a new worker from"): the trunk is the project's default, not the answer for
-     * every case. Without a way to say "just this one, from that branch", the only path left is
-     * swapping the branch in the original folder, which gives up the whole reason for using
-     * worktrees in the first place.
-     *
-     * If asked for something that does not exist, it is **rejected.** Silently falling back to
-     * HEAD would let the person think it forked from that branch, and the mistake would not show
-     * up until commits had already piled up. A trunk that has disappeared is a different case —
-     * that is stale configuration, not something asked for right now, so it falls back to the next
-     * place (`resolveForkBase`) and says so in the start answer.
+     * Where it forks from (#76). Order: **what was asked for -> the project's trunk as the remote has it (#1484) -> the local
+     * trunk -> HEAD**. What was asked for comes first (user feedback, 2026-09-07: "there is no way to say where to fork a new
+     * worker from"): the trunk is the project's default, not the answer for every case, and without a way to say "just this
+     * one, from that branch" the only path left is swapping the branch in the original folder, which gives up the whole reason
+     * for using worktrees. Asked for something that does not exist, it is **rejected:** silently falling back to HEAD would let
+     * the person think it forked from that branch, and the mistake would not show until commits had piled up. A trunk that has
+     * disappeared is stale configuration, not something asked for now, so it falls back to the next place (`resolveForkBase`)
+     * and says so in the start answer.
      */
     const asked = params.worktreeBase?.trim()
     const askedSha = asked ? await gitRevParse(params.cwd, asked) : null
@@ -440,24 +435,16 @@ export class WorktreeSessions {
   }
 
   /**
-   * Sets up a new worktree's workspace (#69): copy configured files, reuse JS dependencies, run setup.
-   *
-   * A fresh worktree is an empty workspace with only tracked files — no node_modules, no .env — so
-   * the session's first turn starts not with real work but with "command not found". The agent cannot
-   * even recover a .env-type file on its own (its contents were never in git). This is the single most
-   * repeated complaint across this whole category.
-   *
-   * **Session creation continues even if this fails.** A half-set-up workspace is something the agent
-   * can finish setting up itself, but failing to create the session just because setup died would
-   * leave the person with nothing and no idea why. A failure is logged to stderr (-> host.log) and
-   * returned, one line each, so the new session can say it (#841 item 3): logged only, a `.env` that
-   * never arrived was found by the agent's first failing command.
-   *
-   * **Capped at 90 seconds.** pnpm install takes 6.5 seconds in this repository (measured), but a cold
-   * store or a heavy project takes longer. Since this is longer than the 30-second RPC limit, the
-   * creation response can be delayed — but that is better than opening the session while setup is
-   * still running: if the first turn has to compete with an install, this feature's whole reason for
-   * existing disappears.
+   * Sets up a new worktree's workspace (#69): copy configured files, reuse JS dependencies, run setup. A fresh worktree is an
+   * empty workspace with only tracked files (no node_modules, no .env), so the session's first turn would start with "command
+   * not found", and the agent cannot recover a .env-type file on its own (its contents were never in git). **Session creation
+   * continues even if this fails:** a half-set-up workspace is something the agent can finish itself, but failing to create the
+   * session because setup died would leave the person with nothing and no idea why. A failure is logged to stderr (-> host.log)
+   * and returned, one line each, so the new session can say it (#841 item 3): logged only, a `.env` that never arrived was
+   * found by the agent's first failing command. **Capped at 90 seconds:** pnpm install takes 6.5 seconds in this repository
+   * (measured), but a cold store or a heavy project takes longer; that is longer than the 30-second RPC limit, so the creation
+   * response can be delayed, which is better than opening the session while setup still runs: a first turn competing with an
+   * install defeats the feature.
    */
   private async provisionWorktree(projectCwd: string, worktree: Worktree, projectId: string): Promise<string[]> {
     const setup = this.host.store.projects.worktreeSetup(projectId) ?? { copyFiles: [], command: '' }
@@ -500,10 +487,10 @@ export class WorktreeSessions {
         continue
       }
       /*
-       * Session creation continues even if a single copy fails (#167) — this is the promise made in
-       * the header comment above. This used to sit outside the try block, so a single unreadable file
-       * inside node_modules threw an exception all the way out of createSession, and since that path
-       * runs before the failure cleanup, the worktree and its branch were left with no owner.
+       * Session creation continues even if a single copy fails (#167) — this is the promise made in the header comment above.
+       * It sits inside the try block: outside it, a single unreadable file inside node_modules would throw all the way out of
+       * createSession, and since that path runs before the failure cleanup, the worktree and its branch would be left with no
+       * owner.
        */
       try {
         // Clone is tried first (#76) — an 8.5GB target crosses over in 4 seconds and 10MB (measured). Falls
@@ -697,7 +684,7 @@ export class WorktreeSessions {
     }
     const projectId = m.projectId
     /*
-     * Only the worktree Centralu made for a session another session started (#1161 review): a person's own worktree
+     * Only the worktree Centralu made for a session another session started (#1161): a person's own worktree
      * session on the same branch name, named by an id a caller knows, is never one, whatever else holds
      */
     if (!wt.base || wt.branch !== branch || !projectId || recordedAgentDepth(this.host.store.settings, sessionId) < 1) {

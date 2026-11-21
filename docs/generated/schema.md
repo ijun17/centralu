@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 76, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 77, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -225,6 +225,7 @@ erDiagram
     INTEGER released_at
     TEXT released_why
     INTEGER told_at
+    INTEGER given_again_at
   }
   mail_turns {
     TEXT session_id PK
@@ -683,6 +684,7 @@ Added in v65.
 | `released_at` | INTEGER | yes |  |  | v65 |
 | `released_why` | TEXT | yes |  |  | v65 |
 | `told_at` | INTEGER | yes |  |  | v65 |
+| `given_again_at` | INTEGER | yes |  |  | v77 |
 
 Indexes:
 

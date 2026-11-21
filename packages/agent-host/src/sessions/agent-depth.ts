@@ -4,14 +4,12 @@ import type { Delegation } from './child-ownership.js'
 /**
  * How deep agents may start agents (#867). A session the person started is depth 0; a session another session started
  * (`askedBy`), or one working on a task another session gave it (a delegation not yet settled: ask_project, a fork,
- * agent_session), is one deeper than that session. A fork whose requester is no longer known is at least 1.
- *
- * Counted along every link, the deepest one wins: a link that does not count would be the way around the setting, and
- * `auto` used to be that way (#862: twelve sessions at once, a load average of 216).
- *
- * **Never less than the depth it was started at** (`recorded`, #897 review): a link ends when the session it points to
- * is deleted, and counted from the links alone, deleting the middle of a chain would let a grandchild start agents at a
- * setting of 2. A session another session starts records its depth when it is made (`recordAgentDepth`).
+ * agent_session), is one deeper than that session. A fork whose requester is no longer known is at least 1. Counted along every
+ * link, the deepest one wins: a link that does not count would be the way around the setting (`auto` too: without it #862 ran
+ * twelve sessions at once, a load average of 216). **Never less than the depth it was started at** (`recorded`): a link ends
+ * when the session it points to is deleted, and counted from the links alone, deleting the middle of a chain would let a
+ * grandchild start agents at a setting of 2. A session another session starts records its depth when it is made
+ * (`recordAgentDepth`).
  */
 export function sessionDepth(
   sessionId: string,
@@ -35,9 +33,9 @@ export function sessionDepth(
 }
 
 /**
- * Where a session's depth at its start is kept (#897 review): an app setting per session, the way `tool_prefix:<id>`
- * is, so an older build that does not know it leaves it alone and nothing needs a migration. The session archive's purge deletes
- * it with the session (`TrashStore.purgeSession`).
+ * Where a session's depth at its start is kept: an app setting per session, the way `tool_prefix:<id>` is, so an older build
+ * that does not know it leaves it alone and nothing needs a migration. The session archive's purge deletes it with the session
+ * (`TrashStore.purgeSession`).
  */
 export const agentDepthKey = (sessionId: string) => `agent_depth:${sessionId}`
 
@@ -64,7 +62,7 @@ export function recordedAgentDepth(store: Pick<DepthStore, 'appSetting'>, sessio
   return Math.max(at(agentDepthKey(sessionId)), at(hubAskDepthKey(sessionId)))
 }
 
-/** Records a session another one started, one deeper than that session is now (#897 review) */
+/** Records a session another one started, one deeper than that session is now */
 export function recordAgentDepth(
   host: Parameters<typeof agentDepthRefusal>[0],
   childId: string,

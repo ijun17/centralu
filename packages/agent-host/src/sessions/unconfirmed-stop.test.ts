@@ -4,10 +4,10 @@ import { stopNotConfirmed } from '../adapters/session-kit.js'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 
 /**
- * A Stop the tool refused leaves the turn running, for the host too (#1060). The Claude adapter used to say a refused
- * interrupt as an `error` event, which moves the session to `error`: the manager took that as the turn's end, so a
- * delegation wait settled and a queued request went in while the CLI was still working. It is said as a notice now
- * (`stopNotConfirmed`), which moves no state; the turn ends when the tool says so.
+ * A Stop the tool refused leaves the turn running, for the host too (#1060). The Claude adapter says a refused interrupt as a
+ * notice (`stopNotConfirmed`), not an `error` event: that moves the session to `error`, which the manager would take as the
+ * turn's end, so a delegation wait would settle and a queued request go in while the CLI is still working. A notice moves no
+ * state; the turn ends when the tool says so.
  */
 describe('a Stop the tool refused (#1060)', () => {
   let w: CrossWorld

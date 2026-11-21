@@ -777,6 +777,7 @@ sends.
 | `settled_at`, `answer_id` | when, and the reply that settled it (`answered`); `answer_id` set with `settled` null is an answer still held (D8) |
 | `reminded`, `reminded_at` | how many delivered reminders named this row (0 to 2), and the last one's time |
 | `released_at`, `released_why`, `told_at` | when the row was released (D25) and why (§5.4's `why` words), and when its sender was told what became of the row (its gathered notice listed it, or held for its link it is too old to go by itself, linked-mail.md §12); null until then |
+| `given_again_at` | when a task a turn took in while it ran was given again at rest (§10.6.3, #2369, v77); null once it no longer waits for that delivery: delivered, dismissed, released or moved |
 
 Only watched rows (§4) count for waiting (§10.3), and only those of `needsReply` messages to sessions are reminded. A
 task is never reminded: its report settles it.
@@ -895,6 +896,7 @@ CREATE TABLE IF NOT EXISTS mail_recipients (
   released_at       INTEGER,
   released_why      TEXT,
   told_at           INTEGER,
+  given_again_at    INTEGER,           -- v77
   PRIMARY KEY (message_id, recipient)
 );
 CREATE INDEX IF NOT EXISTS mail_recipients_by      ON mail_recipients(recipient, delivered_at);
@@ -1980,6 +1982,16 @@ At the turn's end the tool says which inputs that turn took (`SessionHandle.turn
 neither releases it nor names it. When the tool opens a turn for it (`turnStartInputs`), it is filed under that turn, whose end answers or
 releases it, and that turn is the mail's, as a wake's is (`MailTurns.openedFor`): `started_by` `mail`, its task the work message and the starter
 (C8 below). This closes step 2's open low: a message that needs a reply, taken only after the turn ended, was filed under the turn before.
+
+A task a turn took in while it ran came after the work that turn was doing began, so that turn's end does not answer it (#2369): when the turn
+ends as a turn does (not stopped, and not cut to be continued), the task is undelivered and given again at rest (`MailboxRecords.undeliver`
+with `again`, which sets `given_again_at`), its frame marked `givenAgain="1"` with a line saying that if the last turn already did it, the session says so in one line.
+A stopped turn keeps it, so its giver is told of the stop. One rule for every path: a task that joined a running turn is answered only by a turn
+it starts. A call that waited on it (start_agent, agent_session's send with a wait) reads the joined turn's end as still working (`answerRecorder`
+answers false for the task the call gave, `DelegationWaits.awaitAgent`), and the turn the task starts answers it with its report. Three exceptions:
+- **A cut turn** (an update's, #1975) keeps it, and the turn Centralu continues it with answers it.
+- **A turn the tool ended with an input still waiting** (#2318) is not the work's end: the waiting input's turn runs on, and its end answers it.
+- **A host restart**: what went into a turn is known in memory only, so after one, that turn's end answers or files it as its rows say.
 
 **At rest** is the one rule `agentLook` (protocol session-state.ts) calls `finished`: no turn, no card, none of its own background work
 (`workTasks`), and the turn did not stop short (an error, a limit, an interruption). Not the turn Centralu starts to compact a conversation:

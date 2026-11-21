@@ -7,37 +7,16 @@ import { asObj, str, tryParseJson } from '../json-value.js'
 import { EventCursor, PendingRequests } from '@cc/common'
 
 /**
- * The hub's connection to one linked machine's host (docs/plans/remote-hub.md §2, §5).
- *
- * **A port of `packages/platform/src/web/rpc-client.ts`, not a shared copy.** The layer rules
- * (docs/architecture.md §2) let agent-host depend on `@cc/protocol` alone, and the protocol package
- * is the schemas, without IO; moving the UI's client there would put a socket in the one package
- * everything depends on. What is ported are the rules that took measuring to get right, and they
- * keep their reasons here:
- *
- *   - nothing is sent before `hello_ok` (#82);
- *   - a cursor travels with the host lifetime that issued it (`streamEpoch`), and the host replays
- *     only when the lifetime matches (#82);
- *   - an event at or below the cursor is a repeat and is dropped (#82);
- *   - a first contact takes `currentSeq` as its starting point and drops the replay up to it:
- *     those events are older than the snapshot the hub reads next (#173).
- *
- * What differs, because the hub is not a screen:
- *
- *   - **A call fails at once while the link is down**, instead of waiting in a queue for the
- *     reconnect. The UI waiting on it would otherwise sit for the call's whole timeout behind a
- *     machine that may be gone for hours; "not reachable" is an answer it can show.
- *   - **A refusal is reported, not retried**: a wrong token (4001) or another protocol (4002)
- *     gets the same answer every time. The link (links.ts) asks the remote for its connection line
- *     again, or reports the versions for the person to align (§4).
- *   - **`hello_ok` is reported with the remote's build**, for the version check (§4).
- *   - **It stops redialling after `redials` tries** (#1143): the same forward can stay up while the host behind it is
- *     gone, and redialling it then never ends. The link reads the connection line again, which is what starts a host.
- *   - **It answers a request only through `RemoteClientEvents.call`** (#550, plan §12.7). A host's call to its
- *     client (the reverse direction) is dropped, never dispatched, unless the link gave that handler; the link
- *     gives one that serves an allowlist and refuses everything else, and a compromised remote must not reach the
- *     hub through the link the hub opened any other way. At most `MAX_INCOMING_CALLS` run at once; a call is
- *     aborted when the host withdraws it (`call.cancel`) or the socket goes.
+ * The hub's connection to one linked machine's host (docs/plans/remote-hub.md §2, §5). **A port of `packages/platform/src/web/
+ * rpc-client.ts`, not a shared copy:** agent-host may depend on `@cc/protocol` alone (docs/architecture.md §2) and a socket must
+ * not go into the package everything depends on. The measured rules are ported: nothing is sent before `hello_ok`, a cursor
+ * travels with its host lifetime (`streamEpoch`), an event at or below it is a repeat (#82), a first contact drops the replay up
+ * to `currentSeq` (#173), as those events are older than the snapshot the hub reads next.
+ * - **A call fails at once while the link is down**, not after its timeout behind a machine that may be gone for hours.
+ * - **A refusal is reported, not retried**: a wrong token (4001) or another protocol (4002) gets the same answer every time (§4).
+ * - **It stops redialling after `redials` tries** (#1143): a forward can stay up while the host behind it is gone.
+ * - **It answers a request only through `RemoteClientEvents.call`** (#550, §12.7): a host's call is dropped unless the link gave
+ *   that allowlisted handler, so a compromised remote cannot reach the hub otherwise. At most `MAX_INCOMING_CALLS` run at once.
  */
 
 export type RemoteHello = {
@@ -369,7 +348,7 @@ export class RemoteClient {
 
   /**
    * A call from the remote host (#550): answered only through the handler the link gave, on the socket it came in on.
-   * Without a handler it is dropped, as every build before the reverse direction did.
+   * Without a handler it is dropped.
    */
   private onCall(id: string, method: string, params: unknown): void {
     const handle = this.on.call

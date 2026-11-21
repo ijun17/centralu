@@ -187,6 +187,11 @@ export const EVERY_OS_TESTS = [
   { file: 'tooling/launcher-node-floor.test.ts', why: 'starts the npm launcher as a process; its autostart differs per OS' },
   // The worker-stall watch exists for Windows CI's stalled workers (#368)
   { file: 'tooling/vitest-stall-watch.test.ts', why: 'tests the watch that exists for stalled vitest workers on Windows CI (#368)' },
+  // pnpm pre-pr's tests reach the OS through scripts/, which the rule does not count; pre-pr.test.ts asks the OS itself
+  ...['open-prs', 'reports', 'store-steps'].map((part) => ({
+    file: `tooling/pre-pr-${part}.test.ts`,
+    why: "runs pnpm pre-pr's git, worktrees and report readers on real temporary folders, whose paths Windows spells its own way",
+  })),
 ]
 
 export const REPO_ROOT = ROOT

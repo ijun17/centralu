@@ -2,27 +2,22 @@ import type { NormalizedEvent, SessionInfo } from '@cc/protocol'
 import { inTurn } from '../idle.js'
 
 /**
- * The context figure during a turn (#1492). The tool's own reading comes at a turn's end (Claude reads it just after the turn ends;
- * Codex sends one with each token count), so a long turn left the window's meter where the turn before had put it while the
+ * The context figure during a turn (#1492, docs/agent-host/context-compaction.md). The tool's own reading comes at a turn's end
+ * (Claude reads it just after the turn ends), so a long turn would leave the meter where the turn before put it while the
  * context grew past a share. Each model request of the session's own conversation says how big its prompt was
- * (`usage_update.request`: Claude per assistant message, Codex per token count), and that moves the figure as a `context_update`
- * marked `estimate` (the window draws it like a reading, with no "≈", #1572), so everything that reads `SessionInfo.context` and the event, a hub and an older window
- * included, sees it as it sees a reading.
- *
- *  - **The tool's reading is the authority.** It replaces an estimate whatever the two say. Estimates stop for the rest of a turn
- *    once the tool has read the size in it (Codex does, with every request), so the two do not alternate.
- *  - **A reading owed for the turn before is not this turn's.** A tool that reads the size after a turn ends (Claude) may land it
- *    after the next turn's first request moved the figure; applied then it would put an older, smaller size over a newer one. It is
- *    dropped when this turn has an estimate of its own (`stale`), and applied when it is not (the session is at rest, or the turn has
- *    asked for nothing yet). A turn that ended with no reading in it owes one.
- *  - **Throttled** to one estimate per `ESTIMATE_GAP_MS` per session: a tool-heavy turn makes a request every second or less, and the
- *    window need not redraw the meter for each. The turn's end brings the reading.
- *  - **Denominator.** The window of the session's last reading (`SessionInfo.context.window`: the model's full window when the host
- *    knows it, #1553), so the meter does not change its denominator in the middle of a turn, and carries the reading's `capped` and
- *    `compactAt` along. With no reading yet there is no window and no estimate.
+ * (`usage_update.request`), and that moves the figure as a `context_update` marked `estimate` (drawn like a reading, #1572), so
+ * a hub and an older window see it as a reading. **The tool's reading is the authority:** it replaces an estimate whatever the
+ * two say, and estimates stop for the rest of a turn once the tool has read the size in it (Codex does). **A reading owed for
+ * the turn before is not this turn's:** one that lands after the next turn's first request moved the figure would put an older,
+ * smaller size over a newer one, so it is dropped when this turn has an estimate of its own (`stale`). The denominator is the
+ * window of the session's last reading (`SessionInfo.context.window`, #1553), so the meter does not change it mid-turn; with no
+ * reading yet there is no window and no estimate.
  */
 
-/** At most one estimate per session in this time */
+/**
+ * At most one estimate per session in this time: a tool-heavy turn makes a request every second or less, and the meter need not
+ * redraw for each; the turn's end brings the reading
+ */
 export const ESTIMATE_GAP_MS = 3_000
 
 type State = { working: boolean; estimated: boolean; readThisTurn: boolean; owed: boolean; at: number }
@@ -56,7 +51,7 @@ export class ContextMeter {
   /**
    * After an event is applied (`m` is the session as it now is): the estimate it brings, if any, as the event to apply.
    * `perRequest`: the tool reads the size with every request (Codex sends it right after the request's token count), so the
-   * figure is exact without an estimate, which could only flicker in front of it (#1504 review)
+   * figure is exact without an estimate, which could only flicker in front of it (#1504)
    */
   observe(e: NormalizedEvent, m: SessionInfo, perRequest = false): NormalizedEvent | null {
     const s = this.state(m.id)

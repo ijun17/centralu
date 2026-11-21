@@ -9,8 +9,8 @@ import { SessionManager } from './manager.js'
 import { adoptOpenedSettings } from './opened-settings.js'
 
 /**
- * The record follows what the tool's conversation runs (#1369): an imported Codex thread keeps the model it was started
- * with, and the session used to show the model it was recorded with instead.
+ * The record follows what the tool's conversation runs (#1369): an imported Codex thread keeps the model it was started with,
+ * not the model it was recorded with.
  */
 const handleOf = (opened: { model: string | null; effort: string | null } | null) => ({ takeOpenedSettings: () => opened })
 

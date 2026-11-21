@@ -396,7 +396,7 @@ describe('what a send leaves', () => {
       throw new Error('no process')
     })
     const withdraw = vi.fn()
-    const delegated = vi.spyOn(children, 'delegated').mockReturnValue(withdraw)
+    const delegated = vi.spyOn(children, 'delegated').mockReturnValue({ withdraw })
     expect(await centraluToolsFor(host, 'orch').sendToSession('a', 'do it', true)).toEqual({ ok: false, error: 'no process' })
     expect(delegated).toHaveBeenCalledWith('orch', 'a', 'send_to_session', 'do it')
     expect(withdraw).toHaveBeenCalledOnce()

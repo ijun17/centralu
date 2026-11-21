@@ -12,15 +12,15 @@ type Away = { readonly name: string; readonly whyDown?: string | null; readonly 
 export const TAIL = { tryAgain: 'try again once its link is back', readAgain: 'read it again once its link is back', none: null } as const satisfies Record<string, Tail>
 
 /**
- * `NOT_REACHABLE`, with the attempt a call made to connect the machine (#1532): that it is still under way, or that it
- * failed with the attempt's own words, so the agent can tell a machine that is off from one whose ssh is refused
+ * `NOT_REACHABLE`, with the attempt a call made to connect the machine (#1532): still under way, or failed in the attempt's own
+ * words, so an agent can tell a machine that is off from one whose ssh is refused
  */
 export const notReachable = (m: Pick<Away, 'whyDown'>): string => (m.whyDown ? `${NOT_REACHABLE}; ${oneLineText(m.whyDown, 300)}` : NOT_REACHABLE)
 
 /**
- * Why a machine that is not connected cannot be reached, as the sentence read by the model or the window (#1341). One that
- * nothing here will connect (the person disconnected it, or its Auto reconnect is off and the attempt at the hub's start is
- * over) says so at once and names who can: the person. No call connects a machine by itself
+ * Why a machine that is not connected cannot be reached, as the sentence the model or the window reads (#1341). One nothing
+ * here will connect (disconnected by the person, or Auto reconnect off and the attempt at the hub's start over) says so at once
+ * and names the person; no call connects it by itself
  */
 export const awaySentence = (m: Away, tail: Tail): string =>
   m.waitsForPerson ? `${m.name} ${awayPhrase(NOT_CONNECTED)}, then try again` : `${m.name} is ${notReachable(m)}${tail === null ? '' : `; ${tail}`}`
@@ -29,18 +29,16 @@ export const awaySentence = (m: Away, tail: Tail): string =>
 type Reachable = { readonly reachable: boolean; readonly attemptUnderWay?: boolean; settled?(): Promise<void>; reachForCall?(): Promise<void>; offerAnswered?(): Promise<void> }
 
 /**
- * What an agent's call that needs a machine does first (#1341, #1532): one that is down is tried now (`reachForCall`), and one that
- * cannot be tried waits for an attempt under way, bounded, so the act goes through once it ends. With nothing trying it is answered
- * at once. One that is up, perhaps only just, has answered this connection's offer (`offerAnswered`, bounded), so whether it takes
- * tasks is read from that answer, never as still connecting (#1948 step 6). The caller reads `reachable` after, and words a machine
- * still down with `awaySentence`
+ * What an agent's call that needs a machine does first (#1341, #1532): a machine that is down is tried now (`reachForCall`), or
+ * waited for, bounded, when an attempt is under way (with nothing trying, answered at once); one that is up, perhaps only just,
+ * has answered this connection's offer (`offerAnswered`, bounded), so whether it takes tasks is read from that answer, never as
+ * still connecting (#1948 step 6). The caller reads `reachable` after and words a machine still down with `awaySentence`
  */
 export const settleForCall = async (m: Reachable): Promise<void> => {
   if (!m.reachable) {
     if (m.reachForCall) await m.reachForCall()
     else if (m.attemptUnderWay) await m.settled?.()
   }
-  // Up, and just connected: whether it takes tasks is its answer to this connection's offer, read once it came (#1948 step 6)
   if (m.reachable) await m.offerAnswered?.()
 }
 

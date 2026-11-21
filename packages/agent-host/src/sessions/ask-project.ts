@@ -6,20 +6,17 @@ import type { MessageReader } from './transcript-view.js'
 import { turnAnswer, turnAnswerSeq } from './turn-answer.js'
 
 /**
- * ask_project (#371 part B) — what a session in one project gets back when it asks another project to do something.
- *
- * Selecting the existing session, the consent and the wait are the manager's (`SessionManager.askProject`). What
- * lives here is the pure part around it: the frame the task travels in, the cut of a long answer, which paths the
- * answer names and which of them the caller may read.
+ * ask_project (#371 part B): what a session in one project gets back when it asks another project to do something. Selecting
+ * the existing session, the consent and the wait are the manager's (`SessionManager.askProject`); here is the pure part around
+ * it: the frame the task travels in, the cut of a long answer, which paths it names and which of them the caller may read.
  */
 
 /**
- * How long one ask_project call waits for the delegated turn before it answers "still working".
- *
- * Under Codex's own ceiling for an MCP call (`tool_timeout_sec`, 300 s, set by the adapter) with the same margin as
- * an app's call through the bridge (`BRIDGE_ANSWER_MS`), so "still working" reaches the model before Codex cuts the call. Claude
- * uses the same bound: one rule for both callers, and a model that calls again every four minutes costs a few
- * tokens, while a call that hangs past an unknown ceiling costs the answer.
+ * How long one ask_project call waits for the delegated turn before it answers "still working". Under Codex's own ceiling for
+ * an MCP call (`tool_timeout_sec`, 300 s, set by the adapter) with the same margin as an app's call through the bridge
+ * (`BRIDGE_ANSWER_MS`), so "still working" reaches the model before Codex cuts the call. Claude uses the same bound: one rule
+ * for both callers, and a model that calls again every four minutes costs a few tokens, while a call that hangs past an unknown
+ * ceiling costs the answer.
  */
 export const ASK_WAIT_MS = 240_000
 
@@ -53,14 +50,11 @@ export function askBeforeFinish(to: string): string {
 }
 
 /**
- * The message the delegated session receives. It says who asks and how the answer travels back, because the
- * delegated session cannot see the caller: its final text is all the caller will read, and a file it does not name
- * by its absolute path is a file the caller cannot find.
- *
- * `asker` (#1186): which session asks, by its name and id, so the receiver can tell two asks from one project apart and
- * name the asker to the person. It said the project only, though the store and the screen had the session all along.
- * A name is one line (`frameField`) written as a JSON string (#1186 review), so a `"` or a `\` in it cannot close the
- * quote and go on as Centralu's words on the frame's line.
+ * The message the delegated session receives. It says who asks and how the answer travels back, because the delegated session
+ * cannot see the caller: its final text is all the caller will read, and a file it does not name by its absolute path is a file
+ * the caller cannot find. `asker` (#1186): which session asks, by its name and id, so the receiver can tell two asks from one
+ * project apart and name the asker to the person. A name is one line (`frameField`) written as a JSON string, so a `"` or a `\`
+ * in it cannot close the quote and go on as Centralu's words on the frame's line.
  */
 export function askFrame(callerProject: string, task: string, asker?: { name: string; sessionId?: string; mailable?: boolean }): string {
   const who = asker ? ` It is the session ${JSON.stringify(frameField(asker.name))}${asker.sessionId ? ` [${asker.sessionId}]` : ''}.` : ''
@@ -131,11 +125,10 @@ export type AnswerAt = { sessionId: string; seq: number }
 export const NO_WORDS = '(its turn ended without saying anything: read_session shows what it did)'
 
 /**
- * A long answer cut in the middle, with where the whole of it is. With `at`, the cut names the read that shows what it
- * left out (#1186): read_session from the answer's first message, at the character the cut starts. It used to send
- * the caller to the session by name only, and read_session cut the same answer again at 2,000 characters, so the
- * middle could not be read back at all. Without `at` (a session this caller cannot read, such as a hub's), the session
- * is named as before.
+ * A long answer cut in the middle, with where the whole of it is. With `at`, the cut names the read that shows what it left out
+ * (#1186): read_session from the answer's first message, at the character the cut starts. Naming the session alone would leave
+ * the middle unreadable, as read_session cuts the same answer again at 2,000 characters. Without `at` (a session this caller
+ * cannot read, such as a hub's), the session is named alone.
  */
 export function clipAnswer(answer: string, sessionName: string, at?: AnswerAt): string {
   if (answer.length <= ANSWER_MAX_CHARS) return answer
@@ -185,16 +178,12 @@ function real(p: string): string | null {
 }
 
 /**
- * Which of the named paths the caller may read: each one that exists **inside the target project's folder**, resolved
- * through symlinks on both sides, so a link in the project cannot open a folder outside it.
- *
- *   a file       that file only
- *   a folder     that folder (an output folder the delegated session names as a whole)
- *   outside      not granted — still listed to the caller, whose own permissions then decide (Claude asks the
- *                person before reading outside its folder; Codex does not restrict reads)
- *
- * The project's own root is never granted as a folder: naming it would open the whole project, which is broader
- * than any output. A file directly in the root is still granted as that file.
+ * Which of the named paths the caller may read: each one that exists **inside the target project's folder**, resolved through
+ * symlinks on both sides, so a link in the project cannot open a folder outside it. A file is granted as that file only, a
+ * folder (an output folder the delegated session names as a whole) as that folder; outside is not granted, but still listed to
+ * the caller, whose own permissions then decide (Claude asks the person before reading outside its folder; Codex does not
+ * restrict reads). The project's own root is never granted as a folder: naming it would open the whole project, broader than
+ * any output. A file directly in the root is still granted as that file.
  */
 export function readableGrants(paths: readonly string[], projectRoot: string): { granted: string[]; outside: string[] } {
   const root = real(projectRoot)

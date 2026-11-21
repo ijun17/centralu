@@ -308,12 +308,16 @@
    "to": 76,
    "breaksOlderReaders": true,
    "minReader": 75
+  },
+  {
+   "to": 77,
+   "breaksOlderReaders": false
   }
  ],
- "version": 76,
- "ran": 75,
+ "version": 77,
+ "ran": 76,
  "store": {
-  "userVersion": 76,
+  "userVersion": 77,
   "master": [
    {
     "type": "index",
@@ -727,7 +731,7 @@
     "type": "table",
     "name": "mail_recipients",
     "tbl_name": "mail_recipients",
-    "sql": "CREATE TABLE mail_recipients (\n              message_id        TEXT NOT NULL,\n              recipient         TEXT NOT NULL,\n              recipient_project TEXT,\n              via               TEXT,\n              due_at            INTEGER NOT NULL,\n              attempt_at        INTEGER,\n              delivered_at      INTEGER,\n              read_at           INTEGER,\n              held              TEXT,\n              attempts          INTEGER NOT NULL DEFAULT 0,\n              last_error        TEXT,\n              turn_seq          INTEGER,\n              settled           TEXT,\n              settled_at        INTEGER,\n              answer_id         TEXT,\n              reminded          INTEGER NOT NULL DEFAULT 0,\n              reminded_at       INTEGER,\n              released_at       INTEGER,\n              released_why      TEXT,\n              told_at           INTEGER,\n              PRIMARY KEY (message_id, recipient)\n            )"
+    "sql": "CREATE TABLE mail_recipients (\n              message_id        TEXT NOT NULL,\n              recipient         TEXT NOT NULL,\n              recipient_project TEXT,\n              via               TEXT,\n              due_at            INTEGER NOT NULL,\n              attempt_at        INTEGER,\n              delivered_at      INTEGER,\n              read_at           INTEGER,\n              held              TEXT,\n              attempts          INTEGER NOT NULL DEFAULT 0,\n              last_error        TEXT,\n              turn_seq          INTEGER,\n              settled           TEXT,\n              settled_at        INTEGER,\n              answer_id         TEXT,\n              reminded          INTEGER NOT NULL DEFAULT 0,\n              reminded_at       INTEGER,\n              released_at       INTEGER,\n              released_why      TEXT,\n              told_at           INTEGER, given_again_at INTEGER,\n              PRIMARY KEY (message_id, recipient)\n            )"
    },
    {
     "type": "table",
@@ -1510,7 +1514,8 @@
      "reminded_at INTEGER notnull=0 default=null pk=0",
      "released_at INTEGER notnull=0 default=null pk=0",
      "released_why TEXT notnull=0 default=null pk=0",
-     "told_at INTEGER notnull=0 default=null pk=0"
+     "told_at INTEGER notnull=0 default=null pk=0",
+     "given_again_at INTEGER notnull=0 default=null pk=0"
     ],
     "rows": []
    },

@@ -162,7 +162,7 @@ describe('screen preferences across builds', () => {
   it('a broken row reads as the defaults, says so once with the row name, and the next change replaces it', () => {
     const said = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { mgr, row } = setup('{"textSize": 1.1, ')
-    // "Allow auto from a linked computer" alone reads as off from a damaged record (#1273 review), and is written so
+    // "Allow auto from a linked computer" alone reads as off from a damaged record (#1273), and is written so
     expect(mgr.prefs.uiPreferences()).toEqual({ ...DEFAULT_UI_PREFERENCES, hubAuto: false })
     mgr.prefs.uiPreferences()
     expect(said.mock.calls.filter(([line]) => String(line).includes(`app_settings.${KEY}`))).toHaveLength(1)
@@ -189,7 +189,7 @@ describe('screen preferences across builds', () => {
     expect(fresh.mgr.prefs.uiPreferences().sessionTools).toBe(true)
   })
 
-  // #1273 review: an unrelated change over a damaged record dropped the switch, and absent reads as on
+  // #1273: an unrelated change over a damaged record must not drop the switch, as absent reads as on
   it('keeps a damaged "Allow auto from a linked computer" off when another setting is saved over it', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const broken = setup('{"hubAuto": false, "textSize": 1.1, ')

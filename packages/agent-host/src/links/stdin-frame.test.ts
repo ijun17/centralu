@@ -133,7 +133,7 @@ describe.runIf(process.platform === 'win32')('on Windows PowerShell 5.1', () => 
   }, 90_000 * SLOW)
 
   /*
-   * #1367 review. The hub writes the input only after PowerShell says it runs and waits `SSH_STDIN_ACK_MS` for the confirmation, and the
+   * #1367. The hub writes the input only after PowerShell says it runs and waits `SSH_STDIN_ACK_MS` for the confirmation, and the
    * reader has its own, shorter time (`STDIN_READER_MS`): one that has not reached the dot line by then exits with 4 and prints
    * nothing more, so the step the hub sends again never meets a first reader that is still reading, and a failed step leaves
    * no PowerShell (with its cmd.exe and conhost.exe) waiting behind.

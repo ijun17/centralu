@@ -4,8 +4,6 @@ import type { RegistryOptions } from './registry.js'
 import type { RemoteClientOptions } from './remote-client.js'
 import type { RemoteSpec, Tunnel } from './tunnel.js'
 
-/** What the hub's links are given (links.ts): the registry, the mirror, the tunnels and the installer */
-
 /** One linked machine as the registry keeps it (store: `linked_machines`) */
 export type MachineRecord = {
   id: string
@@ -25,8 +23,8 @@ export type MachineRecord = {
   /** When the link was last up (#1398); absent: never, or a registry that does not keep it */
   lastConnectedAt?: number
   /**
-   * The full credentials the person withdrew from this machine's row (#1712), by id and when (ms): not listed again after
-   * this hub restarts, for as long as the machine's host could still hold a record of them (`REVOKED_KEPT_MS`). Absent: none, or a registry that keeps none
+   * Full credentials the person withdrew from this machine's row (#1712), by id and when (ms), kept while its host could still
+   * hold a record of them (`REVOKED_KEPT_MS`), so they are not listed again after this hub restarts
    */
   revoked?: Record<string, number>
 }
@@ -46,15 +44,13 @@ export interface MachineRegistry {
 }
 
 /**
- * What answers a linked machine's call to this hub (#550, the reverse direction): the machine is the link's own, never
- * what the call says; `signal` fires when the machine withdraws the call or its link goes; `hold` holds or releases the
- * call's limit on the machine (#2271)
+ * Answers a linked machine's call to this hub (#550): the machine is the link's own, never what the call says; `signal` fires
+ * on withdrawal or link loss; `hold` holds or releases the call's limit (#2271)
  */
 export type ReverseCalls = (machine: { id: string; name: string }, method: string, params: unknown, signal: AbortSignal, hold: (held: boolean) => void) => Promise<unknown>
 
 /**
- * What the hub last heard from a machine, for when it cannot ask (mirror.ts): the session and
- * project headers in the remote's own terms, never a conversation.
+ * What the hub last heard from a machine, for when it cannot ask (mirror.ts): session and project headers, never a conversation
  */
 export interface HeadersMirror {
   read(machine: string, kind: 'sessions' | 'projects'): unknown[] | null
@@ -86,49 +82,47 @@ export type LinkDeps = {
   /** The deletes of projects the hub owes machines that were away (#2330) */
   projectDeletes: PendingProjectDeleteList
   /**
-   * A notice from Centralu in the person's Inbox (`MessageService.notice`), written once per `key`: what the person asked
-   * for here and a machine did not do, so that it is not only in the log (#2330, a delete the hub gave up on)
+   * A notice in the person's Inbox (`MessageService.notice`), once per `key`: what the person asked for and a machine did not
+   * do (#2330)
    */
   tellPerson: (text: string, key: string) => void
   log?: (line: string) => void
   /**
-   * The hub's session a linked machine's session is a child of (#1038, `LinkedHost.remoteAgentParent`), by its
-   * hub-side id; none for a session no session here started. Its rows reach the windows with that parent as `askedBy`
+   * The hub's session a linked machine's session is a child of (#1038), by hub-side id; none when no session here started it.
+   * Its rows reach the windows with that parent as `askedBy`
    */
   ownerOf?: (sessionId: string) => string | undefined
   /**
-   * The reverse direction (#550): this hub's own id and name, which it offers a machine whose switch is on
-   * (`host.hubOffer`), and what answers that machine's calls. Without them no machine is offered anything, and a call
-   * from one is dropped, as before the reverse direction existed
+   * The reverse direction (#550): this hub's id and name, offered to a machine whose switch is on (`host.hubOffer`). Without
+   * them no machine is offered anything and its calls are dropped
    */
   hubSelf?: () => { id: string; name: string }
   /**
-   * Whether `reverse` takes mail from the sessions this hub started on a machine to their parents (`hub.mail`, #2067):
-   * said to every machine in the offer (`mail: true`), whatever its switch for asks says
+   * Whether `reverse` takes mail from sessions this hub started on a machine (`hub.mail`, #2067); said to every machine in the
+   * offer, whatever its asks switch says
    */
   hubMail?: boolean
   /**
-   * Whether `reverse` answers `hub.apps` and `hub.appCall` (#1938, docs/plans/remote-hub.md §13.6): said to every machine
-   * in the offer (`apps: true`), so a machine never calls an older hub, which would leave the call unanswered
+   * Whether `reverse` answers `hub.apps` and `hub.appCall` (#1938, docs/plans/remote-hub.md §13.6); said in the offer so a
+   * machine never calls an older hub, which would leave the call unanswered
    */
   hubApps?: boolean
   /**
-   * A machine answered this hub's offer on a connection, whatever it said (#2067 review, #1948 step 6): what became of mail that crossed while
-   * the link was down is told now, and mail owed to it is passed on or settled by its answer (`MailAcross.changed`)
+   * A machine answered this hub's offer, whatever it said (#1948 step 6): mail that crossed while the link was down is told
+   * now, and mail owed to it is passed on or settled (`MailAcross.changed`)
    */
   onOfferAnswered?: (machineId: string, lacks: readonly string[]) => void
   /** The open tasks this hub gave the machine's sessions, which its offer asks it about (`HubOffer.open`, #2289); `lacks` above are those it never got */
   openTasks?: (machineId: string) => readonly string[]
   /**
-   * This hub's "when agents compact" setting (#1376), told to every machine at connect and when it changes: a machine starts
-   * and wakes its own sessions from its own preferences, and the person's setting lives here. Without it nothing is told
+   * This hub's "when agents compact" setting (#1376), told to every machine at connect and on change: a machine starts and
+   * wakes its own sessions from its own preferences, and the setting lives here
    */
   autoCompact?: () => AutoCompact
   reverse?: ReverseCalls
   /**
-   * Whether this hub's "Automatic updates" are on (`updates.autoApply`, update-switches.ts) and it may start work of its own
-   * now (it is not handing over to another build): then a linked machine on an older release follows this hub's version
-   * by itself (#1508, `LinkedMachine.followsHub`). Without it no machine follows, and every `machines.update` asks
+   * Whether this hub's "Automatic updates" are on (`updates.autoApply`) and it may start work now (it is not handing over to another build): then a machine on an older
+   * release follows this hub's version itself (#1508, `LinkedMachine.followsHub`); without it every `machines.update` asks
    */
   autoUpdate?: () => boolean
   /** For tests: how long after a delete a machine failed the hub asks for it again (15 s when absent, #2330) */
@@ -166,8 +160,8 @@ export type LinkDeps = {
   /** For tests: how long it is followed before the update says it could not be (`HostControl.followMs`; 15 minutes) */
   switchFollowMs?: number
   /**
-   * For tests: the ssh binary, config file and home folder `machines.sshHosts` and `machines.probe` use
-   * in place of the person's own (ssh-config.ts, probe.ts)
+   * For tests: the ssh binary, config file and home folder `machines.sshHosts` and `machines.probe` use in place of the
+   * person's own
    */
   ssh?: { ssh?: string; configFile?: string; home?: string; env?: NodeJS.ProcessEnv }
 }

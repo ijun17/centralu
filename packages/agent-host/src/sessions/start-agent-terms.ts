@@ -63,14 +63,14 @@ export function agentStartPersonText(req: Pick<AgentStartRequest, 'detail'>, how
 
 /**
  * The place of the Assistant's children (#853): outside any project, each child in a folder of its own, never the
- * Assistant's (`newAssistantAgentFolder`, #994 review). A child has no project, so the place's id is empty: it
+ * Assistant's (`newAssistantAgentFolder`, #994). A child has no project, so the place's id is empty: it
  * keys the per-place ceiling and names no project on the card, and a stored request carries it as its `projectId`.
  */
 export const ASSISTANT_PLACE = ''
 
 /**
  * The Assistant's place as a start reads a project, with the Assistant's own tool as the default. It has no
- * folder: each child gets one of its own when it is made (`newAssistantAgentFolder`, #994 review)
+ * folder: each child gets one of its own when it is made (`newAssistantAgentFolder`, #994)
  */
 export function assistantPlace(caller: SessionInfo): { id: string; name: string; path: string; trusted: true; defaultTool: ToolName } {
   return { id: ASSISTANT_PLACE, name: 'a folder of its own, outside any project', path: '', trusted: true, defaultTool: caller.tool }

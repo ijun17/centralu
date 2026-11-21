@@ -11,9 +11,8 @@ const clampLine = (text: string): string => (text.length > 500 ? `${text.slice(0
 /** The app_setting key where the Assistant's MCP proposal list lives (propose_mcp_server flow) */
 const MCP_PROPOSALS_KEY = 'orchestrator_mcp_proposals'
 /**
- * The **old** directory of approved MCP servers (before M4 A-7). Approved servers now live as apps
- * in the user folder, and this key is only read by the migration (migrateApprovedMcpServers) — it
- * is never loaded into an adapter.
+ * The **old** directory of approved MCP servers (before M4 A-7): approved servers live as apps in the user folder, and this key
+ * is read only by the migration (migrateApprovedMcpServers), never loaded into an adapter.
  */
 const LEGACY_MCP_SERVERS_KEY = 'orchestrator_mcp_servers'
 
@@ -97,9 +96,9 @@ export class AssistantProposals {
     // Once approved, it becomes the user-folder app `<name>` (M4 A-7): it cannot take an existing user app's id either. Overwriting one is exactly swapping out a command
     if (this.userAppExists(spec.name)) return { ok: false, error: `"${spec.name}" is already installed` }
     /*
-     * A pending proposal is never replaced (#838). The person approves by name, and approval installs what is stored
-     * when the button is pressed: a second proposal under the same name, made while the first one was on screen,
-     * swapped the command the person was reading for one they never saw. To change it, the person dismisses it first.
+     * A pending proposal is never replaced (#838). The person approves by name, and approval installs what is stored when the
+     * button is pressed: a second proposal under the same name, made while the first one was on screen, would swap the command
+     * the person was reading for one they never saw. To change it, the person dismisses it first.
      */
     if (this.mcpProposals().some((p) => p.name === spec.name)) return { ok: false, error: PENDING(spec.name) }
     const proposals = this.mcpProposals()
@@ -149,20 +148,13 @@ export class AssistantProposals {
   }
 
   /**
-   * Migrates a previously approved MCP server into a user-folder app (M4 A-7) — runs once, when the
-   * runtime is received (startup).
-   *
-   * **Idempotent no matter how many times it runs.** `installUserApp` is called for each entry, and
-   * that function simply returns the existing app if an app for the same server already exists — if
-   * migration is interrupted and runs again on the next startup, it never creates a duplicate app, and
-   * an already-migrated app is never touched again.
-   *
-   * **Only entries that migrated successfully are removed from the old key.** An entry that failed to
-   * migrate stays in the key and is retried on every startup, logging the reason. There are two kinds
-   * of these: a name that cannot become an app id (like `centralu`, approved before #93 — that name
-   * was shadowed by a built-in server and never ran even once), and an id where a different app already
-   * exists (an app the person built is never overwritten). A leftover entry is never loaded anywhere —
-   * the adapter no longer reads this key at all. Once everything migrates, the key is deleted.
+   * Migrates a previously approved MCP server into a user-folder app (M4 A-7); runs once, when the runtime is received
+   * (startup). **Idempotent no matter how many times it runs:** `installUserApp` returns the existing app if one for the same
+   * server already exists, so an interrupted migration run again at the next startup never creates a duplicate and never
+   * touches an already-migrated app. **Only entries that migrated are removed from the old key.** One that failed stays and is
+   * retried on every startup, logging the reason: a name that cannot become an app id (like `centralu`, approved before #93,
+   * which a built-in server shadowed so it never ran), or an id where a different app already exists (an app the person built
+   * is never overwritten). A leftover entry is never loaded anywhere. Once everything migrates, the key is deleted.
    */
   migrateApprovedMcpServers(rt: ExternalApps): void {
     const legacy = this.legacyMcpServers()
@@ -245,20 +237,12 @@ export class AssistantProposals {
   }
 
   /**
-   * The person's answer to a proposal (dogfooding request, option b — propose -> one-click approval
-   * -> the app installs, usable at once).
-   *
-   * If approved, that server becomes **a viewless app in the user folder** (M4 A-7, decision 8). Once
-   * it is an app, calls go through the broker (visibility, run log), it comes up only when first
-   * needed and goes back down when idle, and it can be removed from the list (`apps.remove`). A
-   * user-folder app is attached to the Assistant (decision 4) — the same slot a previously approved
-   * server used to attach to. In a session, the `app` tool names it `<name>` (#2231).
-   *
-   * Nothing restarts (#2231): the Assistant's `app` tool counts its apps at each call, on every CLI, so
-   * the app is callable on its next call. Until #2231 this restarted the Assistant, because a Codex
-   * thread only received its server set when it was launched.
-   *
-   * If the app fails to be created, the proposal is left in place — the person can see why and reject it.
+   * The person's answer to a proposal (propose -> one-click approval -> the app installs, usable at once). If approved, the
+   * server becomes **a viewless app in the user folder** (M4 A-7, decision 8): calls go through the broker (visibility, run
+   * log), it comes up only when first needed and goes back down when idle, and it can be removed from the list (`apps.remove`).
+   * A user-folder app is attached to the Assistant (decision 4), so in a session the `app` tool names it `<name>` (#2231).
+   * Nothing restarts: the Assistant's `app` tool counts its apps at each call, on every CLI, so the app is callable on its next
+   * call (#2231). If the app fails to be created, the proposal is left in place: the person can see why and reject it.
    */
   resolveMcpProposal(name: string, approve: boolean): ProposalOutcome {
     const proposals = this.mcpProposals()

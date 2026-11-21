@@ -1,14 +1,11 @@
 import { isNewerVersion } from '@cc/protocol'
 
 /**
- * The oldest Node the host runs on, and what the hub does about a machine whose Node is older
- * (issue #699). The bundled database module declares Node-API 10, which Node has from 22.14.0; under an
- * older one the host crashes on its first database call (exit 3221225477 on Windows, SIGSEGV elsewhere)
- * before it logs anything, which used to reach the person as the raw end of `serve.log`.
- *
- * **The floor is `engines.node` of the npm package, read from the copy the bundle carries**
- * (`nodeFloor()` in install.ts), the same value the launcher checks
- * (`packaging/npm/centralu/bin/node-floor.mjs`).
+ * The oldest Node the host runs on, and what the hub does about a machine whose Node is older (issue #699). The bundled
+ * database module declares Node-API 10, which Node has from 22.14.0; under an older one the host crashes on its first database
+ * call (exit 3221225477 on Windows, SIGSEGV elsewhere) before it logs anything, so the person would see only the raw end of
+ * `serve.log`. The floor is `engines.node` of the npm package, read from the bundle's copy (`nodeFloor()` in install.ts), as
+ * the launcher does (`packaging/npm/centralu/bin/node-floor.mjs`).
  */
 
 /** `>=22.14.0` or `>=22.14` → `22.14.0`; throws on any other shape */
@@ -36,8 +33,8 @@ export function isHostCrash(message: string): boolean {
 }
 
 /**
- * A start that cannot work on the Node there, from the launcher's own refusal (`reason: node_too_old`)
- * or from the host's crash at startup. `found` is the Node the launcher named, when it did
+ * A start that cannot work on the Node there: the launcher's refusal (`reason: node_too_old`) or the host's crash at startup.
+ * `found` is the Node the launcher named
  */
 export class NodeTooOld extends Error {
   constructor(
@@ -64,8 +61,8 @@ export function switchedSentence(o: Why & { node: string }): string {
 }
 
 /**
- * The one sentence when the hub did not switch the machine to its own Node (`reason`: why not), so
- * the person updates Node there
+ * The one sentence when the hub did not switch the machine to its own Node (`reason`: why not), so the person updates Node
+ * there
  */
 export function updateNodeSentence(o: Why & { reason: string }): string {
   const p = problem(o)

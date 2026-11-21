@@ -522,8 +522,10 @@ describe('a turn that lost the sign-in refresh race (#353)', () => {
     await newer
     expect(olderDone).toBe(false)
     await vi.advanceTimersByTimeAsync(100)
-    expect((await cli.input.next()).value!.uuid).toBe(n1)
-    cli.push({ type: 'result', subtype: 'success', user_message_uuids: [n1] })
+    // Resent under an id of its own (#2377); the result that names that id completes the older note
+    const resent = (await cli.input.next()).value!.uuid
+    expect(resent).not.toBe(n1)
+    cli.push({ type: 'result', subtype: 'success', user_message_uuids: [resent] })
     await older
     expect(olderDone).toBe(true)
     cli.end()

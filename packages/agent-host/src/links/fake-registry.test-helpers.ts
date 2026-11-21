@@ -176,35 +176,16 @@ export async function fakeRegistry(packages: FakePackage[]): Promise<FakeRegistr
 }
 
 /**
- * A fake `centralu.mjs` for update tests: plays its version's `serve`. `--stop` and `--detach` write what
- * happened to `<data>/events` and which version runs to `<data>/running`; `FAKE_BROKEN=<version>` makes that
- * version fail to start and leave a line in `host.log`. `--autostart off` and `remove` remove `<data>/autostart`, the
- * stand-in for a boot entry; `FAKE_AUTOSTART_FAILS` makes it refuse, `FAKE_NO_AUTOSTART` plays a version that
- * predates it. `FAKE_STOP_FAILS` makes `--stop` refuse, or with `-` only when no version runs. `--connection` prints a connection line with the running
- * version, and with `installInfo` (the URL of the real `serve-install.mjs`) the `install` field it reads.
- * `fromPackage`: the version is the one in `../package.json` beside it, as a dev build stamps it (#1036).
- * `FAKE_MIGRATES=<version>` plays a version whose migration only it reads: starting, it writes `needs <version>` to
- * `<data>/store.db`, and any other version refuses that store (`StoreTooNewError` in host.log).
- *
- * The data folder's lock (#1903): `--detach` refuses, as a host does, while `<data>/host.lock` names a live process.
- * With `realServe` (the URL of the real `serve.mjs`), `FAKE_HANGS=<version>` plays a version whose host takes the lock
- * and then hangs: a process started outside the session as the real launcher starts its host, which never answers,
- * holds `host.lock` as a serve-started host writes it, its pid in `<data>/hung`, and `--detach` answers that it did not
- * answer in time. `--stop` while such a holder lives is the real launcher's (`runStop`). It listens on a port of its own,
- * `<data>/hung.port`: `hungListening` is how a test tells that it lives (not by its pid: a freed pid goes to the next process, #2082).
- * `FAKE_COPIES=<version>` plays a version whose host holds the lock and copies its store first (#2334): its lock says so
- * (`store`) for `FAKE_COPY_MS`, its pid in `<data>/hung`, and `--detach` answers `starting`; then it serves as that version.
- *
- * The switch (plan §10.5a): with `realServe`, `--switch`, `--switch-run` and `--switch-status` are the real launcher's,
- * and `--detach` asks its gate first (`beforeHostStart`), so the real switcher drives these fake versions through their
- * CLI. A switcher started through WMI gets the account's environment, not the test's, so every `FAKE_*` is read from
- * `<data>/fake-env.json` too. `FAKE_SILENT=<version>`: `--connection` says no host runs while that version would.
- * `FAKE_HOLD=stop` or `FAKE_HOLD=start <version>` holds that command (`<data>/holding` says so) until `<data>/release`
- * appears: `go` lets it on, `quit` ends it having done nothing, as a switcher killed there leaves it. `stopped` holds a
- * stop once it stopped the host, and `connection <version>` that version's `--connection` while a host runs. Each
- * holds once. `FAKE_WMI_BLOCKED`: the handover can start nothing outside the session (WMI blocked), so the switch runs
- * in it. `FAKE_NO_GATE=<version>` plays a version from before the switch: its `--detach` asks no switch. A `--detach`
- * while a host runs answers that one, as the real launcher does.
+ * A fake `centralu.mjs` for update tests: plays its version's `serve` (`fromPackage`: the version is the one in
+ * `../package.json` beside it, as a dev build stamps it, #1036). Its `FAKE_*` knobs are read from `<data>/fake-env.json` too,
+ * because a switcher started through WMI gets the account's environment, not the test's. `FAKE_STOP_FAILS=-` fails `--stop`
+ * only when no version runs; `FAKE_MIGRATES=<v>` makes only that version read the store it wrote; `FAKE_HOLD=stop|stopped|start
+ * <v>|connection <v>` holds that command once until `<data>/release` holds `go` or `quit` (which ends it as a killed switcher
+ * leaves it). With `realServe` (the real `serve.mjs`) `--switch*` are the real launcher's and `--detach` asks its gate and
+ * refuses while `<data>/host.lock` names a live process (#1903). `FAKE_HANGS=<v>` plays a host that holds the lock and never
+ * answers: its port is in `<data>/hung.port`, which `hungListening` asks, as a freed pid goes to the next process (#2082);
+ * `FAKE_COPIES=<v>` one copying its store first, its lock saying `store` for `FAKE_COPY_MS` while `--detach` answers `starting`
+ * (#2334).
  */
 export const fakeServe = (version: string, o: { fromPackage?: boolean; installInfo?: string; realServe?: string } = {}) => `import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'

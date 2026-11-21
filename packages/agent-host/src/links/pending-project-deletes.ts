@@ -4,23 +4,15 @@ import { older } from '../mail/across-core.js'
 import type { HeadersMirror, PendingProjectDelete, PendingProjectDeleteList } from './link-deps.js'
 
 /**
- * The projects of one linked machine the person deleted while the machine could not be asked (#2330,
- * docs/plans/remote-hub.md §5 "Recovery").
- *
- * The machine's own host is the only writer of its store (§1), so the hub deletes nothing there by itself: it keeps the
- * delete, takes the project and its sessions out of what it last heard from the machine (the headers mirror, which every
- * list of an away machine is read from, so no reader filters anything), and asks the machine's own `projects.delete` at
- * its next hello, before its lists are read. The sessions go to the archive there, where they can be restored, and the
- * folder stays, as for a delete while it was connected.
- *
- * A delete is owed until the machine did it. One the machine failed, or did not answer in time, stays owed and is asked
- * again (linked-machine-connection.ts `readLists`): a store that was busy answers the next try. A link that went before
- * the answer keeps it for the next hello and counts as no try. The hub gives up, and the entry is gone, in two cases:
- * the machine's build has no `projects.delete`, which no later try changes, and `TRIES` failures in a row in this run of
- * the hub. The person is then told in the Inbox (`tell`), since the project they deleted is listed again.
- *
- * Between a failed try and the next, the machine's lists say what is there, so the project is listed again: the hub
- * hides nothing a machine that answers says it has.
+ * The projects of one linked machine the person deleted while the machine could not be asked (#2330, docs/plans/remote-hub.md
+ * §5 "Recovery"). The machine's own host is the only writer of its store (§1), so the hub deletes nothing there by itself: it
+ * keeps the delete, takes the project and its sessions out of the headers mirror, which every list of an away machine is read
+ * from (so no reader filters anything), and asks the machine's `projects.delete` at its next hello, before its lists are read.
+ * The sessions go to the archive there and the folder stays, as for a connected delete. A delete is owed until the machine did
+ * it: one it failed or did not answer stays owed and is asked again (linked-machine-connection.ts `readLists`); a link that
+ * went before the answer counts as no try. The hub gives up, and tells the person in the Inbox (`tell`), when the machine's
+ * build has no `projects.delete` or after `TRIES` failures in a row in this run. Between tries the machine's lists say what is
+ * there, so the project is listed again: the hub hides nothing a machine that answers says it has.
  */
 
 /** How many failures in a row end a delete: more than a busy store gives, few enough that a machine that cannot do it is not asked for good */

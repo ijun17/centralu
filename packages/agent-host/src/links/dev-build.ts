@@ -4,22 +4,14 @@ import { installCommand, readStep, type InstallResult } from './install.js'
 import { handOver, type HostControl } from './update.js'
 
 /**
- * A dev build of the host on a linked machine, from a git commit (#1036, docs/plans/remote-hub.md §10.11): the way to
- * try an unreleased host change on a Windows or Linux machine in minutes instead of a whole beta.
- *
- *   build   `remote-install.mjs`'s `dev` action, on the Node `current` runs on there: the working copy there must be at
- *           exactly `commit`, clean unless `allowDirty`, on the hub's protocol and within its Node floor; its own
- *           `bundle.mjs` builds the host into `<data>/remote/versions/<base>.local.N/`, marked `source: { kind: 'dev' }`
- *           in its `install.json`. Nothing runs that is not already there: no file crosses the link but the installer,
- *           as for every update, and the build is the working copy's own
- *   swap    the update's own switch (update.ts `handOver`, run there by the dev build's `serve --switch`): stop,
- *           switch, start, a hello from `<base>.local.N` within 30 s, or the old version put back
- *
- * `previous` stays the release: a dev build over a dev build keeps the release before both, so `machines.rollback`
- * (or `machines.update`, which takes `<base>.local.N` to `<base>`) always leads back to something a release produced.
- *
- * Started from the hub by a maintainer's command (`pnpm remote-dev`, remote-dev.ts) over the link's own ssh, never by
- * an RPC: agents and linked machines gain nothing new.
+ * A dev build of the host on a linked machine, from a git commit (#1036, docs/plans/remote-hub.md §10.11): the way to try an
+ * unreleased host change on a Windows or Linux machine in minutes instead of a whole beta.
+ *   build   `remote-install.mjs`'s `dev` action on the Node `current` runs on there: the working copy must be exactly `commit`,
+ *           clean unless `allowDirty`, on the hub's protocol and within its Node floor; its `bundle.mjs` builds into
+ *           `<data>/remote/versions/<base>.local.N/`, marked `source: { kind: 'dev' }`. Nothing runs that is not already there: no file crosses but the installer.
+ *   swap    the update's own switch (update.ts `handOver`): a hello from `<base>.local.N` within 30 s, or the old one is put back
+ * `previous` stays the release (a dev build over a dev build keeps the release before both), so a rollback always leads back
+ * to something a release produced (or `machines.update`, which takes `<base>.local.N` to `<base>`). Started by a maintainer's command (`pnpm remote-dev`) over the link's ssh, never by an RPC, so agents and linked machines gain no new power.
  */
 
 export type DevBuildOptions = {

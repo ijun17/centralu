@@ -113,6 +113,11 @@ export class MidTurnLedger {
     return ids
   }
 
+  /** Every tracked input completes: the tool took each when it was written and names none back (an older Claude Code, `ClaudeSession.onInit`) */
+  completeTracked(): void {
+    this.receipts.complete(this.receipts.ids)
+  }
+
   /** The conversation is open and nothing is in it: no turn runs, and no input waits to be written or answered */
   get quiet(): boolean {
     return this.phase === 'ready' && this.running === null && this.unanswered === 0 && this.queue.length === 0 && !this.blocking

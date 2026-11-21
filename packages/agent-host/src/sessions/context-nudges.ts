@@ -2,25 +2,16 @@ import { nudgeShares, type AutoCompact, type NormalizedEvent, type SessionInfo }
 import { COMPACT_FLOOR_TOKENS, COMPACT_LABELS } from './self-compaction.js'
 
 /**
- * Telling a session its context is growing (#1492). An agent cannot see how full its context is: Claude Code does not tell the
- * model, and `compact_self` (#1478) only works when the agent thinks of it. So when a session's context passes a first share
- * (30% of the model's window by default) Centralu tells it, once, its size and "when this step of the work is done, call
- * `compact_self` with `then` set to what you do next, and end your turn" (#2024), and tells it once more at a second share that sits below the share the tool compacts at by itself
+ * Telling a session its context is growing (#1492, docs/agent-host/context-compaction.md). An agent cannot see how full its
+ * context is (`compact_self`, #1478, only works when the agent thinks of it), so when the context passes a first share (30% of
+ * the model's window by default) Centralu tells it, once, its size and to call `compact_self` with `then` set to what it does
+ * next when this step is done (#2024), and once more at a second share below the share the tool compacts at by itself
  * (`nudgeShares`: 10 points below it by default, never at or above it), where that compaction would come in the middle of work.
- *
- *  - **Quiet.** The note rides in with the session's next input or tool result (`SessionHandle.nudge`: Claude's quiet input, Codex's
- *    steering of the running turn) and never starts a turn or interrupts one. A session at rest is the rest rule's job (`SelfCompaction`).
- *  - **The size during a turn** is the input of the session's own last model request, as the stream says it per request (Claude: per
- *    assistant message; Codex: per token count, `usage_update.request`). The context reading the tool gives (`context_update`, and
- *    so `SessionInfo.context`) comes at a turn's end for Claude, too late for a turn that grows past a share on its own.
- *  - **Once per share per compaction cycle.** A share is told when a request is first over it; a compaction of any kind (the agent's,
- *    Centralu's, the tool's own, the person's `/compact`) or a fresh conversation starts the cycle again, so the shares are told
- *    again when the context grows back. A request that crosses both shares at once says it once. The counters are in memory; a host
- *    counts the shares a session's stored reading was past when it first heard of it as told (#1913), so a woken session is not told again.
- *  - **Only where it can be acted on.** A session that has `compact_self` (an ordinary session and the Assistant), with Centralu's
- *    control on (`autoCompact.controlled`) and the notices on, over the compaction floor (a smaller context would be refused), and
- *    under the tool's own share (a share at or above it is never told). A note the tool does not take now (Codex between turns, or
- *    in a compact turn) waits and goes with a later request of a running turn.
+ * The note rides in with the session's next input or tool result (`SessionHandle.nudge`) and never starts or interrupts a turn
+ * (a session at rest is `SelfCompaction`'s). During a turn the size is the input of the session's own last model request
+ * (`usage_update.request`), as the tool's reading (`context_update`) comes at a turn's end for Claude, too late. **Once per
+ * share per compaction cycle:** a compaction of any kind or a fresh conversation starts the cycle again; a host counts the
+ * shares a session's stored reading was past when it first heard of it as told (#1913), so a woken session is not told again.
  */
 
 export type ContextNudgesHost = {
@@ -118,6 +109,13 @@ export class ContextNudges {
     return { keys, point }
   }
 
+  /**
+   * Only where the nudge can be acted on: a session that has `compact_self` (an ordinary session and the Assistant), with
+   * Centralu's control on (`autoCompact.controlled`) and the notices on, over the compaction floor (a smaller context would be
+   * refused) and under the tool's own share (a share at or above it is never told). A request that crosses both shares at once
+   * says it once. A note the tool does not take now (Codex between turns, or in a compact turn) waits and goes with a later
+   * request of a running turn
+   */
   private requested(id: string, size: number): void {
     // Cheapest first: this runs for every model request of every session
     if (size < COMPACT_FLOOR_TOKENS) return

@@ -4,27 +4,16 @@ import { lastLine, powershell, WSL_DISTRO_RE } from './tunnel.js'
 import { rpcError } from '../rpc-error.js'
 
 /**
- * What runs at the other end of an ssh target, asked once before it is linked (#514), so the Add
- * machine dialog offers "Windows", "WSL (Ubuntu)" or "Linux or macOS" instead of asking for a shell.
- *
- * **One command for every shell.** The probe is `powershell -NoProfile -NonInteractive
- * -EncodedCommand <base64>`, the way every Windows command is already sent (tunnel.ts), because it is
- * the one line that means the same thing to the three shells an ssh command can land in:
- *
- *   cmd.exe     Windows OpenSSH's default shell when no `DefaultShell` is set, which runs
- *               `cmd.exe /c "<command>"` and so starts PowerShell
- *   PowerShell  a `DefaultShell` of powershell.exe or pwsh.exe: it starts PowerShell too
- *   sh          has no `powershell`, and says so with exit 127, POSIX's "command not found"
- *
- * Nothing else crosses: base64 is letters, digits, `+`, `/` and `=`, which no shell re-parses, and
- * the whole line is about 1,700 characters, far under cmd.exe's 8,191 (`WINDOWS_INLINE_MAX`, #489).
- *
- * **What the script reads, all of it from the registry, nothing started and nothing written:**
- * `HKLM\SOFTWARE\OpenSSH\DefaultShell`, which is where Windows OpenSSH itself reads the shell it runs
- * a command under (empty: cmd.exe), and the WSL distros registered for the account under
- * `HKCU\...\Lxss`, which is where `wsl.exe -l` reads them, with `DefaultDistribution` marking the
- * default. Reading the registry rather than running `wsl.exe -l` avoids its UTF-16 output and does not
- * start the WSL service.
+ * What runs at the other end of an ssh target, asked once before it is linked (#514), so the Add machine dialog offers "Windows",
+ * "WSL (Ubuntu)" or "Linux or macOS". **One command for every shell:** `powershell -NoProfile -NonInteractive -EncodedCommand
+ * <base64>`, as every Windows command is sent (tunnel.ts), means the same to the three shells an ssh command can land in:
+ *   cmd.exe     Windows OpenSSH's default shell (no `DefaultShell`): `cmd.exe /c "<command>"` starts PowerShell
+ *   PowerShell  a `DefaultShell` of powershell.exe or pwsh.exe
+ *   sh          has no `powershell` and says so with exit 127, POSIX's "command not found"
+ * Base64 is letters, digits, `+`, `/` and `=`, which no shell re-parses, and the line is about 1,700 characters, far under
+ * cmd.exe's 8,191 (`WINDOWS_INLINE_MAX`, #489). **The script only reads the registry:** `HKLM\SOFTWARE\OpenSSH\DefaultShell` (where
+ * Windows OpenSSH reads its shell; empty: cmd.exe) and the WSL distros under `HKCU\...\Lxss` (where `wsl.exe -l` reads them;
+ * `DefaultDistribution` marks the default). That avoids `wsl.exe -l`'s UTF-16 output and does not start the WSL service.
  */
 
 export const PROBE_MARK = 'CENTRALU-PROBE'

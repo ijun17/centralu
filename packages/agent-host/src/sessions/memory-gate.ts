@@ -62,7 +62,7 @@ export type MemoryReadDeps = {
  * Free plus reclaimable memory on this machine, in bytes; null when it could not be read, which lets the start go
  * (`MemoryGate.short`). A failed `vm_stat` or `/proc/meminfo` read is **not** replaced with `os.freemem()`: there it
  * counts only the free pages (0.08 GB on a 24 GB Mac with 9 GB reclaimable), so the gate would never open and every
- * child would wait out the bound (#695 review). Only Windows, where `os.freemem()` is the source, reads it.
+ * child would wait out the bound (#695). Only Windows, where `os.freemem()` is the source, reads it.
  */
 export async function readAvailableMemory(deps: MemoryReadDeps = {}): Promise<number | null> {
   const source = deps.source ?? availableMemorySource()

@@ -71,7 +71,7 @@ export class FakeHandle implements SessionHandle {
   readonly answered: { requestId: string; decision: string }[] = []
   interrupted = false
   disposed = false
-  /** A close the test holds open (#378 review): `dispose` resolves when this does, as a real CLI's exit takes its time */
+  /** A close the test holds open: `dispose` resolves when this does, as a real CLI's exit takes its time */
   closing: Promise<void> | null = null
   /** How long the fake takes to answer a send, in ms */
   answerDelayMs = 5
@@ -120,7 +120,7 @@ export class FakeAdapter implements AgentAdapter {
   onSend: (h: FakeHandle, text: string) => void = () => {}
   handles = new Map<string, FakeHandle>()
   opened: CreateSessionOpts[] = []
-  /** A start the test holds (#378 review): the next `createSession` (a wake included) resolves when this does */
+  /** A start the test holds: the next `createSession` (a wake included) resolves when this does */
   starting: Promise<void> | null = null
   /** How long each handle this adapter opens takes to answer a send (`FakeHandle.answerDelayMs`) */
   answerDelayMs = 5
