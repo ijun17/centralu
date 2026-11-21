@@ -1,8 +1,7 @@
 /**
- * Readers the adapters' `surface.read` share (#270): a CLI's `--help` and a vendor's type declarations, text in, names
- * out, no IO. Declarations are read as text, as the host bundle must not carry a compiler; that holds while vendors ship
- * what `tsc` emits (one member per `;`, doc comments in blocks); the drift run gathers the text, tests feed recorded
- * copies. A shape they no longer understand throws: an empty read would report all as gone.
+ * Readers the adapters' `surface.read` share (#270): a CLI's `--help` and a vendor's type declarations, text in, names out,
+ * no IO. Declarations are read as text (the host bundle carries no compiler), which holds while vendors ship what `tsc` emits
+ * (one member per `;`, doc comments in blocks). A shape they no longer understand throws: an empty read would report all as gone.
  */
 
 /**

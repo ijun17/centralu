@@ -131,8 +131,7 @@ export async function personsDefaultMode(): Promise<PermissionMode | null> {
 
 /**
  * Which settings files get read (M4 decision 3, #92, #152): **a file committed to the repo must not decide an approval**.
- * The rules and the measured holes: docs/security-boundaries/project-trust.md "Repository configuration and project trust"
- * (a planted hook is itself an arbitrary command, and `settings.local.json` can be committed).
+ * The rules and the measured holes: docs/security-boundaries/project-trust.md "Repository configuration and project trust".
  *   assistant/coordination sessions (noSettingFiles)   []        no files (only the person's mode: `personsDefaultMode`)
  *   trusted project / a user-folder app's session      omitted   user, project and local: the CLI's own default
  *   untrusted project                                   ['user'] only the user's own settings (~/.claude)
