@@ -116,6 +116,16 @@ program. So, on Windows only (`adapters/claude/exe-link.ts`, `start-gate.ts`):
 | Refresh race | a turn that ends with "another Claude Code process is refreshing it" is sent again once after 3 to 6 s, with a notice in the conversation; a second loss is reported | the CLI calls it transient; the other process has written the new token by then |
 | Leaving | on quit the host waits up to 1.5 s for the Claude processes it closed to exit on their stdin EOF | a Node process takes its children with it when it exits, which could cut a refresh mid-write |
 
+What the hard link was measured to change (Windows 11 / NTFS, Node 24, #353; a copy of `PING.EXE` standing in for the program):
+
+| Running from | Delete the platform name | Delete `bin\claude.exe` | New file at `bin\claude.exe` |
+|---|---|---|---|
+| npm's `bin\claude.exe` | OK | `EPERM` | `EBUSY` |
+| Centralu's hard link | OK | OK | OK |
+
+Writing over one of npm's names in place still fails while the link runs (`EBUSY`: it is the same file), but nothing in an
+update does that: npm and `install.cjs` delete, then create.
+
 The retry runs on every platform (it costs nothing where the race never happens); the rest is
 Windows only, because macOS and Linux replace a running program without complaint and macOS keeps
 the sign-in in the keychain. Ending one session needs nothing extra: on Windows the SDK closes the
