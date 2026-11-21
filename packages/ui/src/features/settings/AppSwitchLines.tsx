@@ -3,10 +3,8 @@ import { useStore } from '../../store/store.js'
 import type { ExternalCatalogApp } from '../../store/app-catalog.js'
 import { useMachineName } from '../../store/selectors.js'
 
-/*
- * The switches on a project app's row in Settings → Apps, each a project app's own (`app_<flag>:` on the host,
- * sessions/app-access.ts `AppFlag`); a user-folder app has neither. The store's actions are read when a switch flips.
- */
+// The switches on a project app's row in Settings → Apps (`app_<flag>:` on the host, sessions/app-access.ts `AppFlag`);
+// a user-folder app has neither. The store's actions are read when a switch flips.
 
 /** One switch on the row: its label beside it, what it does in the title */
 function SwitchLine({ on, set, label, title, testId }: { on: boolean; set: (on: boolean) => void; label: string; title: string; testId: string }) {
@@ -19,11 +17,9 @@ function SwitchLine({ on, set, label, title, testId }: { on: boolean; set: (on: 
 }
 
 /**
- * Sharing a project app with the person's other projects (#371 part A) — off by default, because a
- * project app is that project's own. When on, a session in another project can find it and attach it
- * to itself for as long as it needs the tools, after the person allows that pair of projects once.
- * A user-folder app has no switch: it is the person's own and available to every project already. Nor has a root app
- * (#1141): it follows its project's trust, which already lets it reach the person's other projects (owner, 2026-10-18).
+ * Sharing a project app with other projects (#371 part A), off by default: it is its project's own. When on, another
+ * project's session can attach it while it needs the tools, once the person allows that pair of projects. No switch
+ * for a user-folder app (every project has it) nor a root app (#1141: its project's trust already reaches the others).
  */
 export function ShareLine({ app }: { app: ExternalCatalogApp }) {
   const { projectId, appId } = app
@@ -40,12 +36,10 @@ export function ShareLine({ app }: { app: ExternalCatalogApp }) {
 }
 
 /**
- * Whether a project app runs on its computer (#1938, docs/plans/remote-hub.md §13.7) — on by default. A repository that
- * carries an app registers it in every checkout, so a second computer with the project has a copy of an app the first
- * one runs. Turned off, the copy never starts and no session on its computer gets it. Nothing infers that two checkouts
- * are one project (owner), so the person says it, per project app; a root app too, since its copy is the same case.
- * The switch is on while the app runs there, so it never reads "on" for an app that is off. A linked machine's project
- * app is turned off on that machine, so the line names it.
+ * Whether a project app runs on its computer (#1938, docs/plans/remote-hub.md §13.7), on by default. Every checkout
+ * registers the repository's apps, so a second computer runs a copy; off, it never starts there. Nothing infers that
+ * two checkouts are one project, so the person says it per app, root apps too. It reads "on" only while the app runs
+ * there; a linked machine's app is turned off on that machine, so the line names it.
  */
 export function RunsHereLine({ app }: { app: ExternalCatalogApp }) {
   const machineName = useMachineName(app.info.machine)

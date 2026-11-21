@@ -1,24 +1,8 @@
 import type { McpUiStyleVariableKey, McpUiTheme } from '@modelcontextprotocol/ext-apps/app-bridge'
 
-/**
- * Centralu's theme as an app view receives it (#312 step 6).
- *
- * MCP Apps names 76 style variables (ext-apps 2.0.0 `McpUiStyleVariableKey`). Each one here is
- * mapped from a semantic token in styles/index.css, so whatever theme is on (a preset or a custom
- * file) reaches the view the way it reaches our own screens. Where Centralu has no step
- * of its own (a larger heading, a bold weight), the value is written out and noted.
- *
- * The values are **read where the view sits** (`readHostStyles(el)`): the conversation lane has
- * surfaces of its own (styles/index.css `[data-testid='session-view']`), so a view inside it gets
- * that lane's colours, a pinned view the floor's. Every preset sets the lane's surfaces to the
- * floor's steps (#362), so an app panel and the session panel beside it are told the same ground;
- * only a custom theme that sets `surface-reading` apart makes them differ.
- *
- * Sizes are not scaled by the text size preference: the root zoom already scales the frame and
- * everything in it (see AppFrame's `hostContext`). The fonts and line heights are: Settings →
- * Appearance writes them over `--font-sans`, `--font-mono` and `--leading-body` (app/typography.ts),
- * and announces the change with `cc-themechange`, so a view is sent them again like a theme switch.
- */
+// Centralu's theme as an app view receives it (docs/apps/view-theme-layout-drag.md "The theme in a view"): the 76 MCP Apps
+// style variables (ext-apps `McpUiStyleVariableKey`) mapped from styles/index.css tokens, read where the view sits (the
+// conversation lane has its own surfaces, `[data-testid='session-view']`). Fonts and leading follow app/typography.ts.
 
 /** A token to read, a value written out, or a value made from what was read */
 type Source = `--${string}` | { value: string } | ((read: (token: string) => string) => string)
@@ -29,11 +13,8 @@ const tint = (token: string, pct: number) => (read: (t: string) => string) => {
   return c ? `color-mix(in srgb, ${c} ${pct}%, transparent)` : ''
 }
 
-/*
- * Centralu has no hue in its chrome, so the roles the standard gives a hue map onto the four inks: info is
- * plain ink, and warning is the signal colour, "waiting for you" (#312 decision 5). Danger and
- * success keep the only hues the chrome has, the danger red and the diff's addition green.
- */
+// Hued roles land on the inks: info is plain ink, warning the signal colour (#312 decision 5); danger and success keep the
+// chrome's only hues.
 
 export const STYLE_SOURCES: Record<McpUiStyleVariableKey, Source> = {
   // Backgrounds
@@ -125,11 +106,7 @@ export const STYLE_SOURCES: Record<McpUiStyleVariableKey, Source> = {
   '--shadow-lg': '--shadow-modal',
 }
 
-/**
- * Centralu's own variables, in the `centralu` extension of the host context. The standard has no
- * scrollbar, so the template's scrollbar stylesheet reads these; the signal colour is here as well
- * as in `--color-text-warning`, under its own name.
- */
+/** The host context's `centralu` extension: the standard has no scrollbar, which the template's stylesheet draws from these */
 export const CENTRALU_SOURCES: Record<string, `--${string}`> = {
   '--centralu-signal': '--color-ink-signal',
   '--centralu-scrollbar-thumb': '--color-scrollbar-thumb',

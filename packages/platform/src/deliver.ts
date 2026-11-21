@@ -1,9 +1,7 @@
 /**
- * Hands one value to every subscriber, each on its own (#972 item 4). A subscriber that throws is reported and the
- * rest still get the value: the sender has already moved past it (an event's seq is the cursor, a connection change
- * has already happened), so nothing would ever hand it to them again, and a throw from inside a socket callback would
- * also leave the sender half-way through what it was doing. The web client and the mock both fan out through here, so
- * a test on the mock sees what the app does when one subscriber breaks.
+ * A subscriber that throws is reported and the rest still get the value: the sender has moved past it (an event's seq
+ * is the cursor), and a throw inside a socket callback would leave the sender half-way. The web client and the mock
+ * both fan out here, so a test on the mock sees what the app does.
  */
 export function deliver<A extends unknown[]>(handlers: Iterable<(...v: A) => void>, ...value: A): void {
   for (const h of handlers) {

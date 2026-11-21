@@ -7,24 +7,9 @@ import { Kbd, Tooltip } from '../../components/primitives.jsx'
 import { detailText } from './ApprovalCard.jsx'
 
 /**
- * An approval answered from the waiting list's row (#543, audit items 1 and 2; the sidebar's row no longer has one, #1740).
- * Answering without opening the session is a shortcut past the card, so the row
- * keeps the card's promises:
- *
- * - **It says what is being approved, and nothing of it is hidden.** The verb and the command or path stand on the
- *   row; the tooltip is the card's own text, whole (`detailText`, the same function the card draws, with what the
- *   request says beyond its line). A path shows its file's name first, then its folder inside the session's own
- *   folder (#683 review: cut at the end, an absolute path lost the name). A command is answered from the row only
- *   when it fits on it whole (measured, `useFitsWhole`): a cut command can hide its dangerous end (`cd ~/x && …`).
- * - **Only a plain yes or no.** Allow and Deny for a card whose question one line states whole (`answersInPlace`,
- *   which also sends empty and flagged requests to the card), for an edit inside the session's folder; anything else
- *   shows Open, and the card answers it.
- * - **Never an answer to something else.** The answer is the card's own (`respondApproval`), with the request id this
- *   row was drawn from: the store refuses an id that is no longer pending, and the host one it no longer holds. And
- *   for a moment after the rows change (an approval comes or goes, a session is added or removed) no row answers, so a
- *   row that slid under the pointer, or under the waiting list's cursor, is not answered by a click or a key meant for
- *   the one that was there (`useRowsSettled`). The waiting list's y and n press these buttons, so a key answers only
- *   what a click could.
+ * An approval answered from the waiting list's row (docs/product-spec.md "Answering from a row", #543, #683). The row
+ * keeps the card's promises: a cut command could hide its dangerous end (`cd ~/x && …`), so it must fit whole
+ * (`useFitsWhole`); the answer carries this row's request id; rows answer only once settled (`useRowsSettled`).
  */
 export function RowApproval({
   sessionId,
@@ -65,10 +50,7 @@ export function RowApproval({
   const button =
     'flex shrink-0 items-center gap-1 rounded-full border border-line px-2.5 py-0.5 text-xs text-ink-muted transition-[color,background-color,opacity] hover:bg-surface-hover hover:text-ink disabled:pointer-events-none disabled:opacity-50'
 
-  /*
-   * The line and its buttons stand side by side; their slot has one width whether it holds Allow and Deny or Open, so
-   * the line's room, and so whether it fits, does not change with the answer.
-   */
+  // The buttons' slot has one width for Allow and Deny or Open, so whether the line fits does not depend on the answer
   return (
     <div
       className="flex min-w-0 items-center gap-x-1.5 pb-2 pl-[30px] pr-3"
@@ -252,7 +234,7 @@ export function rowView(d: ApprovalDetail, root: string | null, otherPending = 0
 }
 
 /**
- * A path as a row shows it (#683 review): the file's name first, then its folder relative to the session's folder.
+ * A path as a row shows it: the file's name first, then its folder relative to the session's folder.
  * Both are normalized first, segment by segment (`.`, `..`, repeated separators, either slash, a Windows drive), and
  * compared whole segments at a time: `/proj/src/../../../../etc/zshrc` is `/etc/zshrc`, outside `/proj`, and a
  * prefix of the text alone (`/proj-2` against `/proj`) is not inside. A path outside that folder, one that climbs out

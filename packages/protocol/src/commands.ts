@@ -15,11 +15,8 @@ export * from './commands/projects.js'
 export * from './commands/files.js'
 export * from './commands/session-params.js'
 
-/*
- * One module per concept under commands/methods/ (#850), spread together here. Only the key order follows from the
- * spread: what reads it in order (`scripts/smoke-schemas.mts`) still calls every key. The shapes the methods carry live
- * in commands/ and entities/.
- */
+// One module per concept under commands/methods/; the spread fixes only the key order, and
+// `scripts/smoke-schemas.mts`, which reads in order, still calls every key
 export const RpcMethods = {
   ...sessionMethods,
   ...assistantMethods,
@@ -33,15 +30,8 @@ export const RpcMethods = {
 
 export type RpcMethodName = keyof typeof RpcMethods
 
-/**
- * What the **sender** has to provide (`z.input`).
- *
- * Why not the output type: a field with `.default()` is filled in by the parser, so the caller
- * is allowed to omit it. Collapsing the two into one produces spots like `files.search`'s
- * `limit` that insist on being required when they are actually optional — this actually
- * happened once.
- */
+/** What the sender provides (`z.input`): the parser fills a `.default()` field, so the caller may omit it */
 export type RpcParams<M extends RpcMethodName> = z.input<(typeof RpcMethods)[M]['params']>
 
-/** What the **receiver** holds in hand (`z.output`) — after defaults have been filled in */
+/** What the receiver holds (`z.output`), defaults filled in */
 export type RpcResult<M extends RpcMethodName> = z.output<(typeof RpcMethods)[M]['result']>

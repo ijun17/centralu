@@ -3,13 +3,9 @@ import type { MailHeldRow, MailThreadRow } from '@cc/protocol/client'
 import { threadWaits } from '../../store/mail.js'
 
 /**
- * What the inbox draws, in the order it draws it (owner, 2026-11-12, #2213): mail that could not be delivered pinned on
- * top, then what waits on the person, newest first, sessions and mail threads in one list, and under "Earlier" the
- * threads with nothing unread nor asked. The threads that wait on the person's answer are cards (#2229) and come first in it,
- * newest first like the rest. Derived on every read from the two lists the host and the window keep
- * (docs/state-management.md §3); nothing here is stored.
- *
- * `items` is already newest first (`buildInbox`). The keys' cursor walks this one list, mail rows included.
+ * What the inbox draws, in order (#2213): undelivered mail pinned on top, then what waits on the person, sessions and
+ * threads in one list newest first, cards waiting on an answer first (#2229), and under "Earlier" threads with nothing
+ * unread nor asked. Derived on every read, never stored (docs/state-management.md §3); `items` is newest first already.
  */
 export type WaitingRow = { kind: 'session'; item: InboxItem } | { kind: 'mail'; thread: MailThreadRow }
 
@@ -23,11 +19,10 @@ export type InboxCursor = { key: string | null; row: number }
 export const CURSOR_START: InboxCursor = { key: null, row: 0 }
 
 /**
- * Where the cursor is after the rows changed (named by `keys`, in order: Waiting's `rowKeyOf`, Tasks' `taskKey`), given where it was (the same object when nothing moved, so a caller sets state
- * only on a change). It is on the row it names, and its place follows that row as rows arrive above it. When the row has
- * left (Done, answered) it falls to the row now at the place it had in the list it was last settled on, the last row when
- * that was the last, and it names that row from then on: the row that left does not pull it back when it returns. No row
- * named (the list just opened) takes the top row; a list with no rows takes none, and a closed one resets it.
+ * Where the cursor is after the rows changed (`keys` in order: Waiting's `rowKeyOf`, Tasks' `taskKey`); the same object
+ * when nothing moved, so a caller sets state only on a change. It follows the row it names. When that row leaves (Done,
+ * answered) it falls to the row now at its last settled place, or the last row, and names that one from then on: the row
+ * that left does not pull it back on return. Nothing named (just opened) takes the top row; a closed list resets it.
  */
 export function settleCursor(keys: readonly string[], at: InboxCursor, open: boolean): InboxCursor {
   const first = keys[0]

@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { suffixMatches } from './resolve.js'
 
-/**
- * A relative path an agent wrote → the real file inside the project (user's observation,
- * 2026-09-07). An actual case: `Media/ImageSearch.cs` ↔ `Widgets.Cli/Media/ImageSearch.cs`.
- */
+// A path an agent wrote → the real file, as in a real case: `Media/ImageSearch.cs` ↔ `Widgets.Cli/Media/ImageSearch.cs`
 describe('suffixMatches', () => {
   const files = [
     'Widgets.Cli/Media/ImageSearch.cs',

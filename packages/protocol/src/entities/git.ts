@@ -1,13 +1,12 @@
 import { z } from 'zod'
 
 /**
- * A repository a new project is cloned from (#515): an https, ssh or scp-like address (`gitSourceError` says which),
- * and the branch to check out, the repository's default when absent.
+ * A repository a new project is cloned from: an https, ssh or scp-like address (`gitSourceError` says which), and the
+ * branch to check out, the repository's default when absent.
  */
 export const GitSource = z.object({ git: z.string().max(2048), branch: z.string().max(255).optional() })
 export type GitSource = z.infer<typeof GitSource>
 
-/** The git panel (FR-4) */
 export const GitFileStatus = z.object({
   path: z.string(),
   staged: z.boolean(),
@@ -23,9 +22,8 @@ export const GitCommit = z.object({
   when: z.number(),
   parents: z.array(z.string()),
   /**
-   * The name of the session that made this commit (#50). Known through observation, not a hook
-   * — the hash is picked up from the agent's `git commit` tool call and recorded only in our own
-   * database. Absent for a commit a person made directly — which is the correct outcome.
+   * The session that made it, seen in the agent's `git commit` tool call (no hook) and kept only in our store; absent
+   * for a person's own commit.
    */
   sessionName: z.string().optional(),
 })

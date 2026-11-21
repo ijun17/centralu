@@ -9,27 +9,15 @@ import { useStore, type ChatAttachment, type PinnedView } from '../../store/stor
 import { useSendKey } from '../session/useSendKey.js'
 import type { AppBuilder } from './useAppBuilder.js'
 
-/** The limit the input row grows to — about four lines. Beyond that it scrolls within its own box (it does not push the view down) */
+/** About four lines; beyond it the row scrolls in its own box rather than push the view down */
 const MAX_H = 96
 
 /**
- * The "fix this" row (M4 C-5) — a thin input row below the pinned view. What is written here goes
- * to this app's builder session.
- *
- * **The person never leaves the app.** After sending, the view stays exactly as it was, and only a
- * one-line "sent" note and a way to open that conversation beside it ("Show") remain — from a view on
- * the grid or the project screen, "Show" goes to the app view first (PinnedApps' `showBuilder`). Which app and
- * which view it came from is attached by the host as a header (`apps.askBuilder`) — this row does
- * not write that itself and send it. If the app is stopped or its last run failed, the host attaches
- * that fact too: "this button does not work" has to travel together with that failure.
- *
- * A pasted screenshot attaches through **the same path** as the composer (`attachFile` → the builder
- * session's attachment folder). Capturing the app's own view directly is a later step (plan C-5:
- * WKWebView does not open that path).
- *
- * When there is no builder session (a hand-created app, a deleted session, or a session that failed
- * to start when created), that fact and a button to start one take the place of the input row.
- * Nothing at all is shown for an app in an untrusted project, since one cannot be started there.
+ * The "fix this" row (M4 C-5) below the pinned view, sending to the builder; the person never leaves the app. After
+ * sending, a "sent" line and Show remain (from a slot, Show opens the app view first, `showBuilder`). The host adds the
+ * app, the view and a stopped or failed state as a header (`apps.askBuilder`). A pasted screenshot attaches as in the
+ * composer (`attachFile`); capturing the view itself waits (plan C-5: WKWebView does not open that path). Without a
+ * builder, a line and a start button stand in; nothing in an untrusted project, where none can start.
  */
 export function FixBar({
   app,
@@ -55,7 +43,7 @@ export function FixBar({
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // The height follows the value (the same rule as the composer — sending and clearing also restores the height)
+  // The height follows the value, as in the composer
   useLayoutEffect(() => {
     const el = inputRef.current
     if (!el) return
@@ -105,7 +93,7 @@ export function FixBar({
     setBusy(true)
     setError(null)
     try {
-      // The raw bytes (data) exist only for this row's own thumbnail — only the stored path is sent to the host (same as the composer)
+      // The bytes are only for the thumbnail; the host gets the stored path, as from the composer
       const files = attachments.map(({ data: _data, ...a }) => a)
       await platform.apps.askBuilder({
         appId: app.appId,
@@ -120,7 +108,7 @@ export function FixBar({
       setAttachments([])
       setSent(builderName ?? 'the builder')
     } catch (e) {
-      // Exactly the host's own wording — the typed text and attachments are kept (so it can be sent again)
+      // The host's wording; text and attachments stay for a retry
       setError(errorMessage(e))
     } finally {
       setBusy(false)

@@ -1,8 +1,6 @@
 /**
- * T4-2 completion criterion: runs the same contract test suite against every implementation
- * (mock, web, Tauri). A split between implementations is caught here. The Tauri one is the web
- * one plus what it asks the Rust shell, so it runs on the same real host with a fake shell; its
- * own seams with the shell are in tauri/*.test.ts.
+ * One contract suite against every implementation (mock, web, Tauri), so they cannot drift apart. Tauri runs on the
+ * same real host with a fake shell; its own seams with the shell are in tauri/*.test.ts.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
@@ -40,11 +38,8 @@ import { createWebPlatform } from './web/index.js'
 import { createTauriPlatform } from './tauri/index.js'
 
 /*
- * The Rust shell, as the Tauri implementation reaches it: `invoke` and `listen`. Everything else
- * that implementation does goes over the same WebSocket as the web one, to the real host below,
- * so only the commands it sends the shell are answered here, the way the shell on a Mac answers
- * them. A command the shell is not given here fails, as one missing from the handler list would.
- * Failures are bare strings because that is how Rust's `Err(String)` reaches the webview.
+ * The Rust shell's commands, answered as on a Mac; everything else goes over the WebSocket to the real host. A command
+ * not given here fails, as one missing from the handler list would, with a bare string as Rust's `Err(String)` does.
  */
 vi.mock('@tauri-apps/api/core', () => ({ invoke: (cmd: string, args?: Record<string, unknown>) => fakeShell(cmd, args) }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: async () => () => {} }))
@@ -122,13 +117,8 @@ class EchoAdapter implements AgentAdapter {
 }
 
 /**
- * `offerUpdate`: makes it as if that version were already up on the registry (issue #43).
- * Whether both implementations answer the same stimulus the same way is this file's reason to
- * exist.
- *
- * `makeDir`: creates a folder ahead of time. **The port cannot create a folder** — creation was
- * deliberately left out in #19, so testing where a file gets moved to needs setup written
- * per-implementation. The actual moving and deleting below goes only through the port.
+ * `offerUpdate`: as if that version were on the registry. `makeDir`: the port cannot create a folder (left out on
+ * purpose, #19), so a move's target is set up per implementation; the moving itself goes only through the port.
  */
 type Harness = {
   platform: Platform
@@ -151,10 +141,7 @@ const makeWeb = () =>
     }),
   )
 
-/**
- * The Tauri implementation, started the way the desktop starts it, on the same real host. What
- * a webview would get from the Rust shell comes from `fakeShell` below.
- */
+/** The Tauri implementation, started as the desktop starts it, with `fakeShell` for the Rust shell */
 const makeTauri = () =>
   makeOnRealHost(async (port, token) => {
     shellHost = { port, token }
@@ -172,11 +159,8 @@ async function makeOnRealHost(connect: (port: number, token: string) => Promise<
   const adapters = new Map<ToolName, AgentAdapter>([['claude', echo]])
   const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
   /*
-   * Everything of the machine is **injected**: the registry, `npm i -g`, the global npm package and the installed copy.
-   *
-   * Otherwise, while this suite runs, a request would go out to the real registry, and in the
-   * worst case a test would swap out this machine's global package, or wait on the one it has (#2299).
-   * The service takes them as required (`UpdateMachine`), and `isolatedUpdateService` gives fakes.
+   * The registry, `npm i -g`, the global package and the installed copy are all fakes (`isolatedUpdateService`):
+   * otherwise a test could reach the real registry, or swap or wait on this machine's global package (#2299).
    */
   let registryVersion: string | null = null
   const updates = isolatedUpdateService((status) => server.broadcast({ type: 'update_status', status }), {
@@ -279,11 +263,7 @@ describe.each([
   let h: Harness
   let events: NormalizedEvent[]
 
-  /*
-   * Every case gets a fresh implementation and sets up what it reads. One harness shared by the
-   * whole file let a case read the project an earlier case had registered, so a case run alone
-   * (`-t`) or in another order failed for a reason that was not its own (#845).
-   */
+  // A fresh implementation per case: with one shared, a case run alone (`-t`) or reordered fails for another's reason
   beforeEach(async () => {
     h = await make()
     events = []
@@ -308,14 +288,7 @@ describe.each([
     expect((await h.platform.projects.list()).length).toBe(before)
   })
 
-  /**
-   * A registered shell command **comes along with the project** (issue #44).
-   *
-   * This is not just a test of whether saving works. The run menu draws whatever comes
-   * attached to the project without asking the list separately, so if saving succeeded but
-   * `list()` does not carry it, the screen shows "never registered" — whether both
-   * implementations answer the same way is what this checks.
-   */
+  // The run menu draws the commands that come with the project, without asking the list separately
   it('a shell command registered on a project comes back with the list (#44, label 2026-09-06)', async () => {
     const p = await aProject()
     const saved = await h.platform.projects.setCommands(p.id, [
@@ -352,7 +325,6 @@ describe.each([
     expect(events.some((e) => e.sessionId === s.id)).toBe(true)
   })
 
-  // #1377: the composer asks the host who waits for a session's work, and sends the person's choice with the message
   it('the first message becomes the session name (FR-18)', async () => {
     const p = await aProject()
     const s = await h.platform.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
@@ -388,10 +360,8 @@ describe.each([
   })
 
   /*
-   * Transcript rows (#850 item 13): the mock records a conversation by the same rules as the host (protocol
-   * transcript-rows.ts). One row is one message (#77): two messages with no recorded event between them stay two rows
-   * when their chunks name different messages (#212), and a failed turn leaves its marker row (#107). The e2e scenarios
-   * and the demo draw the mock's rows, so a mock that merged them showed a conversation the real host never stores.
+   * The mock records rows by the host's rules (protocol transcript-rows.ts): one row per message, and a failed turn's
+   * marker row. e2e and the demo draw the mock's rows, so a mock that merged them shows what the host never stores.
    */
   it('keeps one row per message and the marker row of an error, as the host stores them', async () => {
     const p = await aProject()
@@ -420,10 +390,8 @@ describe.each([
   })
 
   /*
-   * An agent's image is a row of its own between the text around it (#868). The host left the text row open across it
-   * and wrote the image's row only once its file was saved, so text, image, text was stored as one text row above the
-   * image, while the live screen drew three. The image here names a path and carries no bytes: nothing is written to
-   * an attachments folder.
+   * A text row left open across an image would store text, image, text as one text row above it, while the live screen
+   * draws three (#868). This image names a path and carries no bytes, so nothing is written.
    */
   it('text, an image, then text are three rows in that order', async () => {
     const p = await h.platform.projects.add(tmpdir())
@@ -476,10 +444,7 @@ describe.each([
     ])
   })
 
-  /*
-   * The session archive (#204): deleting moves a session there with its conversation, and the ways out answer alike in both
-   * implementations — the e2e scenarios drive the mock, so a mock that deleted for real would pass them all.
-   */
+  // e2e drives the mock, so a mock that deleted for real would pass every archive scenario
   it('a deleted session goes to the session archive, reads, comes back, and is deleted for good only from there', async () => {
     const p = await aProject()
     const s = await h.platform.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
@@ -510,7 +475,6 @@ describe.each([
     await expect(h.platform.trash.restore(s.id)).rejects.toThrow(/Not in the session archive/)
   })
 
-  // The person's mailbox (#1347): empty on a fresh host, and a refusal arrives with the same code whichever implementation says it
   it('the mailbox is empty on a fresh host, and a thread that is not there is refused', async () => {
     expect(await h.platform.mail.list()).toEqual({ threads: [], held: [], waiting: 0 })
     await expect(h.platform.mail.thread('hub-contract.t_01ARZ3NDEKTSV4RRFFQ69G5FAV')).rejects.toMatchObject({ code: 'refused' })
@@ -519,7 +483,7 @@ describe.each([
     await h.platform.mail.wake(false)
   })
 
-  // App-agent run records (#378): the mock never runs an app's agent, but the empty answers match the host's
+  // The mock never runs an app's agent, but its empty answers match the host's
   it('the session archive lists its app-agent run records, and one that is not there reads and deletes as gone', async () => {
     const listed = await h.platform.trash.list()
     expect(listed.runs).toEqual([])
@@ -527,10 +491,6 @@ describe.each([
     expect(await h.platform.trash.purgeRuns(['run_missing'])).toEqual({ purged: 0 })
   })
 
-  /*
-   * A session's subagent steps go to the session archive without it (#418), and come back or leave for good from there, alike in
-   * both implementations: the e2e scenario for it drives the mock.
-   */
   it("a session's subagent steps go to the session archive and back while the session stays", async () => {
     const p = await aProject()
     const s = await h.platform.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
@@ -557,7 +517,7 @@ describe.each([
 
     await h.platform.trash.trashSubagentSteps(s.id)
     const [seen] = (await h.platform.trash.list()).subagentSteps!
-    // Steps moved after the list was read: neither deleting all archived sessions nor deleting the listed entry takes them (#418 review)
+    // Steps moved after the list was read: neither emptying the archive nor deleting the listed entry takes them
     events.length = 0
     h.agentSays([{ ...step('later'), parentCallId: 'toolu_b' }, { type: 'turn_complete', sessionId: s.id }])
     await waitFor(() => events.some((e) => e.type === 'turn_complete' && e.sessionId === s.id))
@@ -575,10 +535,7 @@ describe.each([
     await expect(h.platform.trash.trashSubagentSteps('nobody')).rejects.toThrow('That session is no longer here')
   })
 
-  /*
-   * Where the mock had drifted from the host (#999): each of these answered differently in the mock, so e2e and the
-   * demo showed what the app does not.
-   */
+  // A mock that answers any of these differently makes e2e and the demo show what the app does not
   describe('what the mock used to answer differently (#999)', () => {
     let parent = ''
     let repo = ''
@@ -726,10 +683,7 @@ describe.each([
       await waitFor(() => events.some((e) => e.type === 'session_deleted' && e.sessionId === 'never-here'))
     })
 
-    /*
-     * What both share is the shape: a failure, with a reason in words. The words are git's own, and they depend on the
-     * machine (its identity, its language), so the contract does not pin them; the mock's are in its git.ts.
-     */
+    // Only the shape is shared: the words are git's own and depend on the machine; the mock's are in its git.ts
     it('a commit with nothing staged fails and says why', async () => {
       const r = await h.platform.projects.add(repo)
       expect(r.name).toBe(basename(repo))
@@ -739,19 +693,7 @@ describe.each([
     })
   })
 
-  /**
-   * The keyboard's labels are also a capability (issue #32).
-   *
-   * ui has no implementation behind it, so putting an OS branch there would be invisible to
-   * any test we run — that is why `⌘` comes through the port. This checks that the
-   * implementations answer alike here: if only one silently changed, the screen seen in a
-   * browser and the one seen in the app would diverge.
-   *
-   * **The Mac labels are the right answer for the mock and web implementations.** Only Rust
-   * actually knows the keyboard; these two belong to e2e and to the dev server respectively, so
-   * guessing the keyboard here would make the result depend on whatever machine the test runs
-   * on. The Tauri implementation passes on what the shell answers, here the fake shell's Mac.
-   */
+  // The Mac labels for mock and web (`MAC_SHORTCUT_KEYS` says why); Tauri passes on the fake shell's Mac answer
   it('answers what the keyboard calls a modifier combination (#32)', () => {
     const keys = h.platform.capabilities.shortcutKeys
     expect(keys.mod).toBe('⌘')
@@ -760,19 +702,10 @@ describe.each([
     expect(keys.join).toBe('')
   })
 
-  /**
-   * The contract for file operations (#18, #19).
-   *
-   * Creating a file here also goes **only through the port.** A real host sits behind the web
-   * implementation, and memory sits behind the mock, so writing setup separately for each would
-   * mean the two suites test different worlds — sending it in through the same door and moving
-   * it through the same door is what makes "a split between implementations is caught here"
-   * true.
-   */
+  // Files are created through the port too: setup written per implementation would test two different worlds
   describe('file operations (#18, #19)', () => {
     let projectId = ''
     let dir = ''
-    /** Brings a file in from outside, through the port like everything else here */
     const dropIn = (name: string, text: string) => h.platform.fs.importFile(projectId, '', name, btoa(text))
     /** `dropped.txt` already moved into `sub/`, the state the move cases start from */
     const dropInAndMoveToSub = async () => {
@@ -782,7 +715,7 @@ describe.each([
     }
 
     beforeEach(async () => {
-      // The real host side really writes to disk — it never takes one step outside the temp directory
+      // The real host writes to disk, only inside this temp directory
       dir = mkdtempSync(join(tmpdir(), 'cc-contract-fs-'))
       projectId = (await h.platform.projects.add(dir)).id
     })
@@ -796,7 +729,6 @@ describe.each([
       expect((await h.platform.fs.readFile(projectId, 'dropped.txt')).text).toBe('hello')
     })
 
-    /** There is no overwrite — it names what it collided with and does nothing */
     it('lists folders first, then by name, whatever order they were made in (#999)', async () => {
       await h.platform.fs.importFile(projectId, '', 'zz-order.txt', btoa('z'))
       await h.platform.fs.importFile(projectId, '', 'aa-order.txt', btoa('a'))
@@ -835,7 +767,7 @@ describe.each([
       await dropInAndMoveToSub()
       await dropIn('dropped.txt', 'second')
       await expect(h.platform.fs.move(projectId, 'dropped.txt', 'sub')).rejects.toThrow(/already exists/)
-      // The original has to stay where it was — a half-moved state is the worst outcome
+      // The original stays where it was: nothing is half moved
       expect((await h.platform.fs.listDir(projectId, '')).map((e) => e.name)).toContain('dropped.txt')
     })
 
@@ -845,15 +777,7 @@ describe.each([
       await expect(h.platform.fs.move(projectId, 'dropped.txt', '../..')).rejects.toThrow()
     })
 
-    /**
-     * The OS trash and the file manager **answer whether they can, first** (the same shape as
-     * `models()`).
-     *
-     * It is normal for the implementations to answer differently here: a browser has no
-     * trash, and never will. The contract is not "it works" but **"if it does not, a reason
-     * comes with it"** — a supported:false with no reason is indistinguishable on screen from
-     * quietly doing nothing.
-     */
+    // The implementations may differ here (a browser has no trash); the contract is a reason whenever it cannot
     it('the OS trash answers whether it can, and gives a reason if it cannot', async () => {
       await dropIn('dropped.txt', 'hello')
       const res = await h.platform.fs.trash(projectId, 'dropped.txt')
@@ -888,12 +812,7 @@ describe.each([
     await expect(h.platform.agents.send('nope', 'x')).rejects.toThrow()
   })
 
-  /**
-   * Updates: stops at announcing it (issue #43).
-   *
-   * Checks that finding out about it does not change anything by itself. `phase` being 'idle'
-   * is what says so — between finding a new version and installing it, there is a human click.
-   */
+  // `phase` 'idle': between finding a new version and installing it there is a person's click
   it('announces a new version on the registry but does not install it on its own (#43)', async () => {
     h.offerUpdate('9999.0.0')
     const s = await h.platform.updates.status(true)
@@ -903,20 +822,13 @@ describe.each([
     expect(s.phase).toBe('idle')
   })
 
-  /**
-   * Turning it off really means it does not ask.
-   *
-   * There is exactly one way this checkbox would become decorative: only blocking the
-   * periodic request while letting **the one right after startup** through unchanged. The
-   * screen calls `status(force: false)` every time the app opens, so without a guard there, a
-   * request keeps going out from the machine of someone who was told it is off.
-   */
+  // The screen calls `status(force: false)` on every start, so blocking only the periodic check is not off
   it('turning off automatic checking keeps automatic calls from reaching the registry (#43)', async () => {
     h.offerUpdate('9999.0.0')
     await h.platform.updates.status(true)
     await h.platform.updates.setAuto(false)
     h.offerUpdate('9999.0.1')
-    // The automatic call went nowhere — the previously known answer stays
+    // The automatic call went nowhere: the answer known before stays
     expect((await h.platform.updates.status(false)).latest).toBe('9999.0.0')
     // A click from a person still goes through
     expect((await h.platform.updates.status(true)).latest).toBe('9999.0.1')
@@ -932,16 +844,9 @@ describe.each([
     expect(await h.platform.updates.status(true)).toMatchObject({ latest: APP_VERSION, newer: false, phase: 'idle' })
   })
 
-  /**
-   * Installing responds **as soon as it starts**, and the word that it finished arrives as an
-   * event (issue #43).
-   *
-   * `npm i -g` routinely exceeds the RPC timeout (30 seconds). A contract that waits for it to
-   * finish would make an install that actually succeeded look like a timeout on screen, and
-   * from then on the two sides would be telling different stories.
-   *
-   * The last line is this feature's whole point: even once it is done, **the app is still
-   * running as it was.**
+  /*
+   * `npm i -g` routinely runs past the 30 s RPC timeout, so the answer comes at the start and the end is an event; once
+   * done, the app still runs as it was.
    */
   it('installing responds to the start and announces completion as an event — does not restart itself (#43)', async () => {
     h.offerUpdate('9999.0.0')
@@ -955,21 +860,13 @@ describe.each([
     expect((await h.platform.updates.status(false)).phase).toBe('restart_required')
   })
 
-  /**
-   * An install asked for with nothing newer known — the agent's `update_centralu install`, or a line
-   * left from an old answer — refreshes first and answers "up to date" as a result (#645). Recorded
-   * as `failed`, the refusal stayed on the line through every later check.
-   */
+  // The agent's `update_centralu install`, or a stale line; recorded as `failed`, it would stay through every check
   it('an install with nothing newer known refreshes first and answers up to date, not failed (#645)', async () => {
     h.offerUpdate(APP_VERSION)
     const s = await h.platform.updates.apply()
     expect(s).toMatchObject({ phase: 'idle', latest: APP_VERSION, newer: false, error: null })
   })
 
-  /**
-   * How deep agents may start agents (#867): nothing saved reads as 1 on both, a saved value is kept and read back, and
-   * a value out of range is not saved.
-   */
   it('the agent depth reads as 1 until set, keeps what is set, and refuses a value out of range (#867)', async () => {
     expect(agentDepthOf(await h.platform.prefs.load())).toBe(1)
     expect((await h.platform.prefs.save({ agentDepth: 3 })).agentDepth).toBe(3)
@@ -978,10 +875,7 @@ describe.each([
     expect(agentDepthOf(await h.platform.prefs.load())).not.toBe(4)
   })
 
-  /**
-   * Moving idle sessions to a newly installed agent CLI (#297) starts on — the owner's decision — and the switch sticks.
-   * With nothing installed newer, the app-wide action restarts nothing.
-   */
+  // On by default is the owner's decision
   it('moving idle sessions to a new agent CLI starts on, the switch sticks, and nothing older restarts nothing (#297)', async () => {
     expect((await h.platform.agents.versions(true)).autoApply).toBe(true)
     expect((await h.platform.agents.setAutoApplyVersions(false)).autoApply).toBe(false)
@@ -989,15 +883,7 @@ describe.each([
     expect(await h.platform.agents.applyVersions()).toEqual({ restarted: [], busy: [] })
   })
 
-  /**
-   * Screen preferences (UiPreferences).
-   *
-   * Two things are checked here. First, **a fresh install that has never chosen anything
-   * answers with defaults** — if a read came back empty-handed, the composer would not know
-   * what to do. Second, writing changes **only what was written**. With just one field today
-   * this second rule looks free, since an implementation that overwrites everything would pass
-   * just the same right now — so it is pinned down here before the fields grow.
-   */
+  // An empty read would leave the composer without its settings
   it('screen preferences start at defaults, and writing changes only what was written', async () => {
     expect(await h.platform.prefs.load()).toEqual(DEFAULT_UI_PREFERENCES)
 
@@ -1005,7 +891,7 @@ describe.each([
       ...DEFAULT_UI_PREFERENCES,
       sendWithModifierEnter: true,
     })
-    // Asking again gives the same answer — meaning the answer comes from the record
+    // Asking again gives the same answer: it comes from the record
     expect(await h.platform.prefs.load()).toEqual({ ...DEFAULT_UI_PREFERENCES, sendWithModifierEnter: true })
     // A write with nothing in it reverts nothing
     expect(await h.platform.prefs.save({})).toEqual({ ...DEFAULT_UI_PREFERENCES, sendWithModifierEnter: true })
@@ -1018,11 +904,6 @@ describe.each([
     })
   })
 
-  /**
-   * The notification switches moved from the workspace snapshot into the preferences (#1306).
-   * The snapshot's come across once; after that the record is the source, and a snapshot an older window still writes does
-   * not override a switch chosen since. A change carries only the switches that changed, and every change is announced.
-   */
   describe('the notification switches (#1306)', () => {
     it('come across from the snapshot once, then the record is the source', async () => {
       await h.platform.workspace.save({ notifyPolicy: { approval: true, error: true, done: false, allDone: true, whenFocused: false, sound: false } } as never)
@@ -1070,10 +951,6 @@ describe.each([
     })
   })
 
-  /**
-   * Theme files (#312): a save is a file the list reads back, a second save of the same id
-   * replaces it, an import copies a file in under a fresh id, and every change is announced.
-   */
   it('theme files: save, list, overwrite and import round-trip, and each change is announced', async () => {
     const seen: NormalizedEvent[] = []
     const off = h.platform.agents.subscribe((e) => seen.push(e))
@@ -1091,7 +968,6 @@ describe.each([
     off()
   })
 
-  // The Delete project dialog asks what deleting may do to the folder (#1301); an ordinary project's folder stays
   it("the Delete project dialog's question: an ordinary project leaves its folder alone", async () => {
     const p = await aProject()
     expect(await h.platform.projects.deleteOutlook(p.id)).toEqual({ folder: 'stays' })
@@ -1113,20 +989,9 @@ describe.each([
 })
 
 /**
- * The half of the path contract this machine cannot run (issue #47).
- *
- * Everything above runs the same suite against both implementations, which is what catches them
- * drifting apart. Separators are the one axis where that does not work: the harness above builds
- * a real directory with `mkdtempSync` and the host refuses a path that is not on the disk, so a
- * Windows-shaped project directory can never reach it from here. On the axis it *can* reach, the
- * two agreed — on the same wrong assumption, which is the failure this file is supposed to make
- * impossible.
- *
- * So the mock's answer is pinned to the function the host uses instead of to the host itself.
- * `ProjectCreation.addProject` names a project with `basename` from `node:path`; on Windows that
- * is `win32.basename`. Reading only `/` here meant the mock called a project
- * `C:\Users\me\proj` while the host called it `proj`, and e2e — which only ever runs the mock —
- * had no way to notice.
+ * Separators, which the suite above cannot reach: the host refuses a path not on disk, so a Windows-shaped folder never
+ * gets to it here. The mock is pinned to the host's function instead: `ProjectCreation.addProject` names a project with
+ * `node:path` `basename`, `win32.basename` on Windows; a mock reading only `/` would name `C:\Users\me\proj` whole.
  */
 describe('Platform contract: path separator (#47)', () => {
   it('the project name the mock builds matches the basename the host uses', async () => {
@@ -1138,30 +1003,21 @@ describe('Platform contract: path separator (#47)', () => {
     expect((await mock.projects.add(posixDir)).name).toBe(posix.basename(posixDir))
   })
 
-  /**
-   * The mock's "cannot go outside" reads the **wire path** (the same rule caught in #19).
-   * Since the segments are obtained from the protocol, the real thing and the mock read the
-   * same string as the same segments.
-   */
+  // The mock reads the wire path's segments from the protocol, as the host does
   it('the mock also rejects a wire path that points outside the root', async () => {
     const mock = createMockPlatform()
     const p = await mock.projects.add('/tmp/sep-contract')
     await expect(mock.fs.importFile(p.id, '../..', 'evil.txt', btoa('x'))).rejects.toThrow(
       /outside the project/,
     )
-    // And the inside is accepted as normal — if a rejection blocked everything, that would be a bug, not a rule
+    // The inside is still accepted
     expect((await mock.fs.importFile(p.id, '', 'ok.txt', btoa('x'))).path).toBe('ok.txt')
   })
 })
 
 /**
- * The app screen's three doors (M4 B-3) — whether the web implementation connects straight
- * through to the host's RPC.
- *
- * A spot where the same suite cannot be run against the mock. The mock has no host to
- * construct a screen address (e2e plugs the real ViewHost into the mock for that). So only the
- * web implementation is tested against a real host and ViewHost — only the side that reads
- * documents (ViewSource) is a stand-in.
+ * Web only: the mock has no host to make a screen address (e2e plugs the real ViewHost into it). Only the ViewSource
+ * is a stand-in here.
  */
 describe('Platform contract: app screen (web + real host)', () => {
   it('an opened screen gets an address with a secret path, and resources and tools go to the host', async () => {
@@ -1216,14 +1072,7 @@ describe('Platform contract: app screen (web + real host)', () => {
   })
 })
 
-/**
- * A tool call from a screen (M4 B-4 `oncalltool`) — web implementation → `apps.invoke` →
- * external app runtime → a real app process (the `view` mode of the runtime fixture). What the
- * screen receives has to be exactly the MCP result the app gave. The "changed" that call
- * produces is broadcast through the same seam as main.ts (`broadcastAppChanges`), and comes
- * back carrying the calling screen's instance as the owner (B-5) — only that screen skips that
- * notification.
- */
+/** Through `apps.invoke` to a real app process; "changed" goes out through main.ts's seam (`broadcastAppChanges`) */
 describe('Platform contract: tool call from a screen (web + real host + real app)', () => {
   it("the app's response arrives intact down to structuredContent, isError and _meta, and a call that could not reach the app is an isError carrying a reason", async () => {
     const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-contract-apps-')))
@@ -1310,11 +1159,7 @@ describe('Platform contract: tool call from a screen (web + real host + real app
   })
 })
 
-/**
- * The external app list (M4 A-8) — the web implementation's `apps.list` and
- * `external_apps_changed` run through a real host and a real runtime. Plugs in the exact same
- * seam main.ts uses (`onExternalAppListChanged`).
- */
+/** Through the seam main.ts uses (`onExternalAppListChanged`) */
 describe('Platform contract: external app list (web + real host)', () => {
   it('the list comes with a reason, a broadcast arrives when trust changes, and the list re-read at that point is the new state', async () => {
     const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-contract-applist-')))
@@ -1361,11 +1206,6 @@ describe('Platform contract: external app list (web + real host)', () => {
   })
 })
 
-/**
- * A pinned screen (M4 B-2) — the web implementation's `openView`/`closeView` run through a
- * real host, a real runtime and a real app process. An opened instance opens via `viewFrame`,
- * and once closed does not open again.
- */
 describe('Platform contract: pinned screen (web + real host + real app)', () => {
   it('the result and instance home called arrive, a home with no screen is rejected with a reason, and a closed instance does not open again', async () => {
     const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-contract-home-')))
@@ -1440,11 +1280,7 @@ describe('Platform contract: pinned screen (web + real host + real app)', () => 
   })
 })
 
-/**
- * A new app (M4 C-1) — the web implementation's `create`, `builder` and `createBuilder` run
- * through a real host, a real runtime and a real template. Rejection arrives exactly as the
- * host phrased it (the "New app" window shows that wording).
- */
+/** A rejection arrives in the host's words, which the "New app" window shows */
 describe('Platform contract: new app (web + real host)', () => {
   it('the app and its builder session are returned, that app is found by its builder session, an existing id is rejected with the host wording, and a message from the input line reaches that session', async () => {
     const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-contract-newapp-')))
@@ -1511,12 +1347,7 @@ describe('Platform contract: new app (web + real host)', () => {
   })
 })
 
-/**
- * An app's secrets (M4 E) — the web implementation's `setSecret` runs through a real host and
- * a real runtime. The list carries only present/absent per name (no values), and setting one
- * broadcasts. Rejection arrives exactly as the host phrased it — the secret field shows that
- * wording.
- */
+/** A rejection arrives in the host's words, which the secret field shows */
 describe('Platform contract: app secrets (web + real host)', () => {
   it('setting one flips the listing to "set" and broadcasts, the value never appears in the listing, and an undeclared name is rejected with the host wording', async () => {
     const VALUE = 'contract-secret-value-42'
@@ -1563,12 +1394,7 @@ describe('Platform contract: app secrets (web + real host)', () => {
   })
 })
 
-/**
- * Import (M4 E-3) — the web implementation's `importPrepare` and `importCommit` run through a real host and a real
- * runtime. An app lands as a project of its own (#1141): "Import" registers it untrusted, so it does not run until the
- * person trusts it; "Import and enable" registers it trusted, only with the key the person reviewed, and in the parent
- * the person chose. Rejection arrives exactly as the host phrased it.
- */
+/** An app lands as a project of its own (#1141); a rejection arrives in the host's words */
 describe('Platform contract: app import (web + real host)', () => {
   it('preparing does not admit it; "Import" lands it as an untrusted project, "Import and enable" as a trusted one where asked — a different key is rejected with the host wording', async () => {
     const fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-contract-import-')))

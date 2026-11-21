@@ -12,21 +12,13 @@ import { localImagePath } from './localImages.js'
 import { ReplyImage } from './ReplyImage.jsx'
 
 /**
- * Rendering the agent's response.
+ * Rendering the agent's response. While streaming, the markdown arrives incomplete (an open code fence, a truncated
+ * link); react-markdown renders the partial result without throwing, so it is used as-is. Code and quotes are set
+ * apart by background brightness and spacing, not color.
  *
- * While streaming, the markdown **arrives incomplete** (an open code fence, a truncated link).
- * react-markdown does not throw on that kind of input and just renders the partial result, so
- * this uses it as-is.
- *
- * Styling follows the grayscale rule — code and quotes are set apart by background brightness
- * and spacing, not color.
- *
- * `projectRoot` is the session's project directory, or null when it has none (the
- * assistant). It is what decides whether a backticked path is a file the person can open —
- * see `parseFileRef`.
- *
- * `sessionId` is given for an agent's reply, and only there: a local image in it is read by that session's host,
- * which reads only a path one of the session's replies wrote (`ReplyImage`). Elsewhere a local image is not loaded.
+ * `projectRoot` is the session's project directory (null for the assistant): it decides whether a backticked path is a
+ * file the person can open (`parseFileRef`). `sessionId` is given only for an agent's reply: a local image in it is
+ * read by that session's host, which reads only a path one of the session's replies wrote (`ReplyImage`).
  */
 export const Markdown = memo(function Markdown({
   text: written,
@@ -92,7 +84,7 @@ const TONE_CLASS: Record<MarkdownTone, string> = {
 
 /*
  * GitHub's Markdown, except that only a double tilde strikes text through (owner, 2026-10-18). GFM's default also
- * strikes `~text~`, and Korean writes a range with one tilde: "1~3일, 5~7일" struck "3일, 5" through. `~~text~~` still
+ * strikes `~text~`, and Korean writes a range with one tilde: "1~3일, 5~7일" would strike "3일, 5" through. `~~text~~` still
  * strikes, as it does on GitHub. One array for every block, so react-markdown does not see new plugins each render.
  */
 const REMARK_PLUGINS: Options['remarkPlugins'] = [[remarkGfm, { singleTilde: false }]]
@@ -133,10 +125,10 @@ export const MarkdownBlock = memo(function MarkdownBlock({
           return <ReplyImage key={path} path={path} alt={label} sessionId={sessionId} />
         },
         /*
-         * Links branch three ways (extended in #39):
+         * Links branch three ways (#39):
          *  - If href is a file in this project, it is the same file link as a backticked
          *    path — the agent also writes things like `[manager.ts](packages/.../manager.ts)`,
-         *    and that used to be a dead link.
+         *    which would otherwise be a dead link.
          *  - http(s) and mailto open in a new window (navigating inside the app would lose
          *    the session).
          *  - Any other href is **never put into the DOM.** The rule that a string produced
@@ -179,23 +171,11 @@ export const MarkdownBlock = memo(function MarkdownBlock({
           return <>{children}</>
         },
         /*
-         * A path the agent typed opens in the viewer (#39).
-         *
-         * The click can do exactly one thing: hand a string to `openFile`, which reads
-         * it through `fs.readFile(projectId, …)` and shows it read-only. That is the
-         * safety property, and it is why this is a `<button>` and not an `<a href>` —
-         * the text comes out of a model, so there must be no attribute anywhere on this
-         * element that a browser would try to *interpret*. No href, therefore no scheme,
-         * therefore nothing for `javascript:` to be smuggled into. (Right-click reveal
-         * goes through `fs.reveal`, which refuses anything above the project root — the
-         * same property, kept on the host side.)
-         *
-         * `<code>` stays inside so the thing still looks like the code span it was, and
-         * so the surrounding `.cc-md` rules (including the `pre code` reset) keep
-         * applying untouched.
-         *
-         * `node` is react-markdown's own handle on the AST and is dropped rather than
-         * spread: passed through, it lands in the DOM as `node="[object Object]"`.
+         * A path the agent typed opens in the viewer (#39). The click only hands a string to `openFile`, which reads it
+         * through `fs.readFile(projectId, …)` read-only. That is why this is a `<button>`, not an `<a href>`: the text
+         * comes from a model, so no attribute here may be one a browser would interpret (no href, no `javascript:`).
+         * `<code>` stays inside so the `.cc-md` rules keep applying. `node` is dropped, not spread: passed through,
+         * it lands in the DOM as `node="[object Object]"`.
          */
         code: ({ node: _node, children, ...props }) => {
           const ref = typeof children === 'string' ? parseFileRef(children, projectRoot) : null
@@ -230,18 +210,9 @@ function tryDecode(href: string): string {
 }
 
 /**
- * A single file link inside the conversation — a backticked path and a markdown link are the
- * same button. Click opens the read-only viewer (#39), right-click reveals it in the file manager. Right-click
- * opens directly instead of showing a menu because a menu with only one entry just slows the
- * hand down (the file tree has several entries, so a menu makes sense there).
- */
-/*
- * The link carries and opens with its own project (#182). The path is relative to this pane's
- * session's project, so if the viewer picked its project from whichever session is focused, a
- * link in the neighboring pane of the grid would open the same path in a different project —
- * WKWebView does not give focus on a button click, so a pane's onFocusCapture cannot move focus.
- * It carries its session too (#1209): the path is relative to that session's folder, its worktree when it has one, and
- * the host reads it from there; with the project alone a worktree session's link opened the main checkout's copy.
+ * A backticked path or a Markdown link: a click opens the viewer (#39), a right-click reveals the file at once (a menu of
+ * one entry only slows the hand). It carries its own project (#182), as WKWebView gives no focus on a button click for a
+ * grid pane to take, and its session (#1209), whose worktree the path is relative to, not the main checkout.
  */
 export function FileLink({
   refInfo,

@@ -9,25 +9,14 @@ import { useStore } from '../../store/store.js'
 import { AppReviewDetails } from './AppReviewDetails.jsx'
 
 /**
- * Import an app (M4 E-3) — from a folder, a .zip, or an https link to a .zip, into the user
- * folder. A deep link (E-4) opens this same dialog.
- *
- * Two steps. Choosing a **source** and clicking Review moves it into a staging area where the
- * host examines it (it has not been brought in yet); the **confirm** step shows what it runs,
- * what it will use, what secrets it wants, and its files, before it is brought in. An imported
- * app arrives turned off ("Import"). "Import and enable" brings it in and turns it on in the same
- * step — it sends the host exactly the key to the window the person just looked at (what the
- * person saw is what gets turned on).
- *
- * A window opened by a link only pre-fills the source — **nothing is read or downloaded before
- * Review is clicked.** The person clicked the link, but somebody else made it — this machine
- * sending a request to somebody else's address still has to wait for the person to choose to do
- * so.
+ * Import from a folder, a .zip or an https link to one; a deep link opens it too. Review stages the source for the host to
+ * examine, and "Import and enable" sends the key of exactly what was shown. A link only pre-fills the source: someone else
+ * made it, so nothing is fetched before Review.
  */
 export function ImportAppDialog() {
   const request = useStore((s) => s.importDialog)
   if (!request) return null
-  // A new request (a different link) stands up a fresh window — so a half-reviewed confirmation is never mixed with a different source's
+  // A different link gets a fresh window, so a half-done review never mixes sources
   return <ImportDialogBody key={request.at} source={request.source} fromLink={request.fromLink} />
 }
 
@@ -41,7 +30,7 @@ function ImportDialogBody({ source: initial, fromLink }: { source: string; fromL
   const [staged, setStaged] = useState<{ token: string; review: AppReview } | null>(null)
   const [busy, setBusy] = useState<null | 'reading' | 'importing'>(null)
   const [error, setError] = useState<string | null>(null)
-  // When the window closes (cancel, esc, clicking outside), the staging area is cleaned up — nothing that was never imported is left behind on the host
+  // Closing in any way cleans the staging area, so nothing unimported stays on the host
   const pending = useRef<string | null>(null)
   useEffect(() => () => void (pending.current && platform.apps.importCancel(pending.current).catch(() => {})), [platform])
 
@@ -71,7 +60,7 @@ function ImportDialogBody({ source: initial, fromLink }: { source: string; fromL
       close()
       // It lands as a project of its own (#1141): "Import" leaves that project untrusted, and trusting it is enabling it
       setToast(enable ? `Imported and enabled ${appTitleOf(app)}` : `Imported ${appTitleOf(app)}. It stays off until you trust its project`)
-      // Goes to the imported app — if it was enabled, the app itself; if not, the pre-enable confirmation stands
+      // To the imported app: the app itself if enabled, else its confirmation
       openApp(app.projectId, app.appId)
     } catch (e) {
       setError(errorMessage(e))

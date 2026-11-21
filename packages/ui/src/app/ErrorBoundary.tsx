@@ -8,10 +8,7 @@ import type { Platform } from '@cc/platform/ports'
 const REPORT_FIELD_MAX = 20_000
 const cut = (s: string) => s.slice(0, REPORT_FIELD_MAX)
 
-/**
- * Tells the host's log what crashed, where it outlives a reload (the console does not). Nothing waits for it and nothing
- * comes back from it: a report that itself threw would be a second crash on the screen that just crashed.
- */
+/** To the host's log, which outlives a reload. Never throws: that would be a second crash on the crashed screen */
 export function reportCrash(platform: Platform | null | undefined, thrown: unknown, componentStack: string | null | undefined): void {
   try {
     const error = thrown instanceof Error ? thrown : null
@@ -29,20 +26,8 @@ export function reportCrash(platform: Platform | null | undefined, thrown: unkno
 }
 
 /**
- * Leaves a sentence instead of a blank page when the screen crashes (dogfooding, 2026-09-07:
- * "it said there was an error and then went blank").
- *
- * When React has nowhere to catch an exception thrown during render, it unmounts the whole tree —
- * the screen goes blank white. In that state there is nothing the person can tell: not what
- * crashed, not whether there is a way back. This app is a window that stays open all day, so that
- * blank screen reads directly as "the app is dead".
- *
- * So this catches it and says exactly three things: what crashed (the message), where (the first
- * lines of the stack), and the way out (reload). It does not recover automatically — if the same
- * render crashes again, all that is left is a flicker, and what went wrong never becomes visible.
- *
- * The one reason this is a class component: hooks have no equivalent of this spot
- * (componentDidCatch).
+ * Shows what crashed, where, and Reload instead of the blank page React leaves. No automatic recovery: a render that
+ * crashes again would only flicker. A class because hooks have no componentDidCatch.
  */
 export class ErrorBoundary extends Component<{ children: ReactNode; platform: Platform }, { error: Error | null }> {
   override state: { error: Error | null } = { error: null }
@@ -52,7 +37,6 @@ export class ErrorBoundary extends Component<{ children: ReactNode; platform: Pl
   }
 
   override componentDidCatch(error: Error, info: ErrorInfo): void {
-    // Also logs to the console — during development this is what catches the eye first
     console.error('[centralu] render crashed', error, info.componentStack)
     reportCrash(this.props.platform, error, info.componentStack)
   }
@@ -86,7 +70,6 @@ ${error.stack ?? ''}`} />
   }
 }
 
-/** The crash screen's copy button: says "Copied" like every other copy button (`useCopied`) */
 function CopyDetails({ text }: { text: string }) {
   const { copied, copy } = useCopied()
   return (

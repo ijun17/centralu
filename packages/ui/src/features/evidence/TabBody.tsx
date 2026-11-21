@@ -4,11 +4,11 @@ import { lazyComponent } from '../../components/lazy.jsx'
 import { GitChanges } from './GitChanges.jsx'
 import { CommitHistory } from './CommitHistory.jsx'
 
-/** The terminal brings xterm (~300 KB), so it loads when its tab is first shown (components/lazy.tsx) */
+/** xterm is ~300 KB, so it loads with the tab's first showing */
 const TerminalPane = lazyComponent(() => import('./Terminal.jsx').then((m) => m.TerminalPane))
 
 
-/** What one tab shows. The active tab of every group renders through here. */
+/** The active tab of every group renders through here */
 export function TabBody({
   tab,
   projectId,
@@ -20,14 +20,10 @@ export function TabBody({
 }) {
   const isRepo = !!project.git
 
-  // The terminal belongs to the project (a directory), so being a git repo is irrelevant
   if (tab === 'terminal') return <TerminalPane projectId={projectId} />
 
-  /*
-    Git and history both ask questions of the repository, so neither has an answer
-    without one. The tabs are disabled then, but paths still lead here — a saved
-    snapshot can restore them, or a non-repo project can move in under a watching tab.
-  */
+  // Git and history need a repository. Their tabs are disabled without one, but a saved snapshot or a non-repo project
+  // moving in under an open tab still leads here.
   if (tab === 'files' || !isRepo) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
@@ -43,12 +39,8 @@ export function TabBody({
 
   if (tab === 'history') return <CommitHistory projectId={projectId} />
 
-  /*
-    Git tab: what changed right now, alone. The history strip that used to sit below it
-    left with the split feature (#20): it was a fixed-height block, so in a short split
-    half it overflowed the group body straight over the next group's tab strip — and the
-    History tab (#21) already answers "how did we get here" with a full column to do it in.
-  */
+  // No history strip under the changes (#20): a fixed-height block overflows a short split half onto the next group's
+  // strip, and the History tab (#21) has a full column.
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <GitChanges projectId={projectId} denied={project.git?.denied} />

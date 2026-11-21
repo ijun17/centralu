@@ -4,11 +4,8 @@ import { WindowCloseIcon, WindowMaxIcon, WindowMinIcon } from '../components/ico
 import type { WindowAction } from '@cc/platform/ports'
 
 /**
- * Minimize, maximize and close, at the right end of the top bar, where the OS draws no title bar of its own (Windows,
- * owner 2026-10-18: one strip, as on macOS). The capability `windowControls` says when; the UI never asks the OS.
- *
- * Shaped as the OS draws them, so a hand finds them where it expects: 46px wide, the bar's full height, flush with the
- * window's right edge, the close turning red on hover. Not part of the drag region, so a press is a press.
+ * Where the OS draws no title bar (Windows, owner 2026-10-18), as the capability `windowControls` says. Shaped as the
+ * OS draws them (46px, full bar height, flush right, close red on hover); outside the drag region, so a press is a press.
  */
 export function WindowControls() {
   const act = (action: WindowAction) => {

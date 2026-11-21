@@ -1,12 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { APP_LINK_MAX_CHARS, parseAppLink } from './app-link.js'
 
-/**
- * The app link (M4 E-4) — the door through which text written by someone else reaches the
- * import window. This file only checks the shape: opening it only happens after the person
- * clicks in the window, and the host judges it again by its own rules
- * (`apps/external/imports.test.ts`).
- */
+// The app link carries text someone else wrote to the import window. Only its shape is checked here: it opens after the
+// person clicks, and the host judges it again (`apps/external/imports.test.ts`).
 describe('parseAppLink', () => {
   it('extracts an https zip and a file: address on this machine as the source', () => {
     expect(parseAppLink('centralu://app?url=https://example.com/notes.zip')).toEqual({

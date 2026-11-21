@@ -3,8 +3,8 @@ import type { ExternalAppInfo } from '@cc/protocol/client'
 import { createMockPlatform } from './index.js'
 
 /**
- * A linked machine's user-folder app is told from this computer's of the same id (#82): the port methods pass the machine, and the
- * mock finds the machine's row with it (a lookup without it matched nothing: "There is no such app").
+ * A linked machine's user-folder app is told from this computer's of the same id (#82): the port methods pass the
+ * machine, and the mock finds the machine's row with it.
  */
 const row = (machine: string | null): ExternalAppInfo => ({
   appId: 'notes',

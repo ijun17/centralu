@@ -5,32 +5,23 @@ import type { Emit } from './event-bus.js'
 
 /** What a person decides about an app: capability questions, remembered permissions, usage, sharing and secrets (M4 D, E) */
 export class AppSettingsMock {
-  /** Setting or clearing a secret that reached the host (M4 E) — tests check what went to which app under which name */
   readonly secretWrites: { appId: string; projectId: string | null; name: string; value: string | null }[] = []
-  /** What `setShared` received (#371 part A) — a test reads it to see the switch reached the host */
   readonly sharedWrites: { appId: string; projectId: string; shared: boolean }[] = []
-  /**
-   * A capability question from a chain that started at a screen (M4 D-4) — a test sets one up
-   * with `askAppQuestion`. Broadcasts like the host, and when an answer comes in, resolves
-   * whichever side was waiting on that question (a test-supplied `appToolHandler`). This is how
-   * "answering resumes the stalled screen's call" is checked over a real path.
-   */
+  /** Set up with `askAppQuestion`; an answer resolves the waiting side, so "answering resumes the screen's call" is real */
   appQuestionList: AppQuestion[] = []
   readonly answeredQuestions: { questionId: string; decision: 'allow' | 'deny' }[] = []
   private questionWaiters = new Map<string, (d: 'allow' | 'deny') => void>()
-  /** Remembered answers (M4 D-4) — the key is `(project ?? _user)/app`. A test fills this in */
   readonly appPermissions = new Map<string, AppPermission[]>()
-  /** Agent usage (M4 D-5) — the key is `(project ?? _user)/app`. A test fills this in */
   readonly appUsage = new Map<string, AppUsage>()
   readonly forgottenPermissions: { appId: string; projectId: string | null; capability: string }[] = []
-  /** Scenario helper: the host sets up a capability question — returns a promise that resolves once an answer arrives (used from Playwright) */
+  /** Resolves once an answer arrives */
   askAppQuestion(q: AppQuestion): Promise<'allow' | 'deny'> {
     this.appQuestionList.push(structuredClone(q))
     this.emit({ type: 'external_app_questions_changed' })
     return new Promise((resolve) => this.questionWaiters.set(q.id, resolve))
   }
   readonly apps = {
-    // A capability question (M4 D-4) — like the real thing: reads the list, and on an answer removes it from the list and broadcasts. Rejects a closed question
+    // As the host: an answer removes it and broadcasts; a closed question is rejected
     questions: async (): Promise<AppQuestion[]> => structuredClone(this.appQuestionList),
     answerQuestion: async (questionId: string, decision: 'allow' | 'deny') => {
       const at = this.appQuestionList.findIndex((q) => q.id === questionId)
@@ -48,7 +39,7 @@ export class AppSettingsMock {
       this.appPermissions.set(key, (this.appPermissions.get(key) ?? []).filter((p) => p.capability !== capability))
       this.forgottenPermissions.push({ appId, projectId, capability })
     },
-    // Agent usage (M4 D-5) — a test fills this in. If absent, 0, like the host
+    // Absent is 0, as on the host
     usage: async (appId: string, projectId: string | null): Promise<AppUsage> =>
       structuredClone(
         this.appUsage.get(appKeyOf(projectId, appId)) ?? {
@@ -56,14 +47,8 @@ export class AppSettingsMock {
           month: { runs: 0, durationMs: 0, tokens: null },
         },
       ),
-    /**
-     * A secret (M4 E). Like the real thing (`ExternalApps.updateSecret`): only lets in a
-     * declared name (the list's `secrets`), rejects an empty value with the same wording, and
-     * carries only present/absent in the listing before broadcasting. Deleting does not need
-     * to mask the name. What was received is recorded to `secretWrites` so a test can see it —
-     * whether the value stays out of the screen (the DOM) is checked separately by a test.
-     */
-    /** Sharing (#371 part A) — like the host: only an app that exists, the mark in the list, then the broadcast */
+    /** As `ExternalApps.updateSecret`: declared names only, an empty value refused, the list says only present/absent */
+    /** As the host (#371): only an app that exists */
     setShared: async (appId: string, projectId: string, shared: boolean): Promise<void> => {
       const a = this.registry.externalAppList.find((x) => sameApp(x, { appId, projectId }))
       if (!a) throw new Error(`No such app: ${appId}`)
@@ -72,7 +57,7 @@ export class AppSettingsMock {
       this.sharedWrites.push({ appId, projectId, shared })
       this.emit({ type: 'external_apps_changed' })
     },
-    /** Off on this computer (#1938) — like the host: a project app only, the mark in the list with `stopped`, then the broadcast */
+    /** As the host (#1938): a project app only, marked `stopped` */
     setOff: async (appId: string, projectId: string, off: boolean): Promise<void> => {
       const a = this.registry.externalAppList.find((x) => sameApp(x, { appId, projectId }))
       if (!a) throw new Error(`No such app: ${appId}`)

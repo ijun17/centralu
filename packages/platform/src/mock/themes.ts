@@ -7,32 +7,25 @@ import { mockError } from './mock-error.js'
 
 /** The themes folder (#312), behind the `themes` port */
 export class ThemesMock {
-  /**
-   * The themes folder (#312), as file texts by id — the host's rules: a write replaces the text,
-   * a hand edit is `writeThemeFile`, and every change goes out as `themes_changed`.
-   */
+  /** File texts by id, as the host's rules: a write replaces the text, every change goes out as `themes_changed` */
   themeFiles = new Map<string, string>()
   /** Paths `themes.importFile` can read, standing in for files elsewhere on disk */
   themeImportSources = new Map<string, string>()
-  /** Theme ids revealed in the file manager, in order */
   readonly revealedThemes: string[] = []
 
-  /** For tests: what an editor or an agent saving a theme file does */
+  /** What an editor or an agent saving a theme file does */
   writeThemeFile(id: string, text: string): void {
     this.themeFiles.set(id, text)
     this.persistThemes()
     this.emit({ type: 'themes_changed' })
   }
 
-  /*
-   * Kept in localStorage like the preferences: the real folder survives a restart, and a test
-   * that reloads the page has to see the same (node has no localStorage; the map still works).
-   */
+  // In localStorage, as the real folder survives a restart: a test that reloads the page sees the same
   private themesLoaded = false
   private loadThemes(): void {
     if (this.themesLoaded) return
     this.themesLoaded = true
-    const stored = readStored('cc-mock-themes') // nothing in node, or with storage denied
+    const stored = readStored('cc-mock-themes')
     if (isRecord(stored)) for (const [id, text] of Object.entries(stored)) if (typeof text === 'string' && !this.themeFiles.has(id)) this.themeFiles.set(id, text)
   }
   private persistThemes(): void {

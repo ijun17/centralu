@@ -9,7 +9,7 @@ type ToolItem = Extract<ChatItem, { kind: 'tool' }>
 /**
  * The calls whose answer names the one session they made or reached as its first `[id]` (start_agent's "the codex
  * session "…" [id]"). Any other answer may name many (list_sessions, agent_session list, recall's hits): its first id
- * is an arbitrary session, so only the one its arguments name is linked (#730 review).
+ * is an arbitrary session, so only the one its arguments name is linked (#730).
  */
 const ANSWER_NAMES_ITS_SESSION: ReadonlySet<string> = new Set(['start_agent', 'ask_project', 'create_session'])
 

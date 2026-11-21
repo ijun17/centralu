@@ -28,9 +28,8 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
 const { createTauriPlatform, listenForQuit, quitApp } = await import('./index.js')
 
 /**
- * The desktop at the moment the host fails to come up (#184). Checks only the seam with the
- * shell, without a webview — whether ⌘Q actually works, and whether Retry actually brings the
- * host back up, is confirmed by hand in the packaged app.
+ * The desktop when the host fails to come up: the seam with the shell only. That ⌘Q works and Retry brings the host
+ * back is checked by hand in the packaged app.
  */
 beforeEach(() => {
   invoke.mockReset()
@@ -99,7 +98,7 @@ describe('a host that works on its store before it answers (#2334)', () => {
       const told: unknown[] = []
       let settled = false
       const platform = createTauriPlatform({ onStoreWork: (w) => void told.push(w) }).finally(() => (settled = true))
-      // Before: rejected at 30 s with "agent-host did not become ready in time", the copy still running
+      // Without the store-work wait: rejected at 30 s with "agent-host did not become ready in time", the copy still running
       await vi.advanceTimersByTimeAsync(90_000)
       expect(settled).toBe(false)
       // Once for the work, not once per check (the screen's clock is reset by each)

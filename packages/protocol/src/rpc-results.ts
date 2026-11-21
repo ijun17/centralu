@@ -9,10 +9,7 @@ import { settingsResults } from './commands/methods/settings.results.js'
 import { terminalResults } from './commands/methods/terminal.results.js'
 import { parseTolerant } from './tolerant.js'
 
-/**
- * Every method's result schema, and none of their parameters: what a client needs to read an answer. The parameters are
- * the host's to validate and live beside them in `RpcMethods` (commands.ts), which the UI's bundle does not carry (#1648).
- */
+/** Results without parameters: the parameters are the host's to validate (`RpcMethods`), kept out of the UI's bundle (#1648) */
 const RpcResults = {
   ...sessionsResults,
   ...assistantResults,
@@ -24,11 +21,7 @@ const RpcResults = {
   ...settingsResults,
 }
 
-/**
- * A host's answer to `method`, as the receiving client holds it: through the method's result schema, so every field
- * the protocol added with a default has that default even when an older host never sent it (#280 lets a window
- * attach to an older host). Tolerant, not strict — see `parseTolerant`. Call it once, at the client's boundary.
- */
+/** Once, at the client's boundary, so an older host's answer gets the defaults (docs/protocol.md §4) */
 export function parseRpcResult<M extends RpcMethodName>(method: M, raw: unknown): RpcResult<M>
 export function parseRpcResult(method: RpcMethodName, raw: unknown): unknown {
   return parseTolerant(RpcResults[method], raw)

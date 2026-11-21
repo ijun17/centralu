@@ -580,7 +580,11 @@ running, possibly the very session doing the work.
   stays: legal headers, rules of an external platform or dependency, a lint or formatter
   suppression with its reason, public API docs, issue or RFC links, and the non-obvious why; a
   number learned by measuring stays beside it. A long justification without one of these means the
-  code should change instead.
+  code should change instead. In the folders already swept (`COMMENTS_SWEPT`), `guard/comments`
+  (tooling/eslint-guards.js) reports "used to", a sentence opening with "Previously", a file header
+  over 3 lines of text, a comment block over 10, and a source file over 35% comment lines; a file
+  over that share when its folder was swept may not go above its line in `COMMENT_SHARE_HELD`
+  (tooling/guard-exceptions.js).
 - Tests are titled with the behaviour they describe. When one breaks, the title alone
   should tell you what fell over.
 - New comments and documents are written in English — see [Language](#language).

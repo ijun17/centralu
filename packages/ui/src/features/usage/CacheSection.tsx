@@ -6,15 +6,9 @@ import { Badge } from '../../components/Badge.jsx'
 import { formatCount } from '../../app/format.js'
 
 /**
- * The prompt cache, in the usage dropdown (docs/agent-host/prompt-cache.md).
- *
- * A rebuild (a request that wrote its prompt to the cache again) is what costs: it is paid at the write price and
- * counts toward the limit the donut above shows. So the section answers three questions in reading order: how much
- * came from the cache (the hit rate), what the input was made of (read, written, uncached), and where the writes came
- * from (the sessions that wrote most, each one click from being opened).
- *
- * Two windows, the last five hours (the tooltip's) and today, behind one switch rather than side by side: the
- * dropdown is 420px wide, and two columns of six figures would be read as a table to compare, which they are not.
+ * The prompt cache in the usage dropdown (docs/agent-host/prompt-cache.md): hit rate, input make-up, then the sessions
+ * that rebuilt most (a rebuild is what costs). Five hours and today behind one switch: at 420px two columns of six
+ * figures would read as a table to compare.
  */
 export function CacheSection({
   cache,
@@ -155,11 +149,7 @@ function shortName(w: CacheWindowStats): string {
   return sentenceStart(w.label)
 }
 
-/**
- * What the input was made of, as one bar. Brightness, not hue (the screen's rule): writes are the brightest because
- * they are the cost, reads the middle, uncached input the faintest. The legend is the figures below it, each with its
- * swatch, so no part is told apart by tone alone.
- */
+/** The input's make-up as one bar, by brightness: writes (the cost) brightest; the figures below carry swatches as legend */
 function InputBar({ w, writes }: { w: CacheWindowStats; writes: boolean }) {
   const total = w.inputTokens + w.cacheReadTokens + w.cacheCreationTokens
   const parts = [
@@ -201,10 +191,7 @@ function Figure({
   )
 }
 
-/**
- * The sessions that cost the cache most: by what they wrote, or for a tool that reports reads only, by the input that
- * did not come from the cache. A row opens its session; one that is not on this screen is plain text.
- */
+/** The sessions that cost the cache most: by writes, or uncached input for a reads-only tool. Rows open their session */
 function TopSessions({
   sessions,
   writes,
@@ -225,7 +212,7 @@ function TopSessions({
           const figure = `${formatCount(writes ? s.cacheCreationTokens : s.inputTokens)}${
             s.rebuilds ? ` · ${s.rebuilds} rebuild${s.rebuilds === 1 ? '' : 's'}${s.rebuildTokens !== undefined ? ` (${formatCount(s.rebuildTokens)})` : ''}` : ''
           }`
-          // Why this session rebuilt, under its name: the question the row answers is "what made it write"
+          // Why this session rebuilt, under its name
           const causes = s.rebuilds > 0 ? rebuildBreakdown(s.rebuildCauses) : ''
           const body = (
             <span className="flex min-w-0 flex-1 flex-col">

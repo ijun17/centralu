@@ -13,7 +13,10 @@
  * Known gaps, shared: a name rebound through a `let`, a function that is handed what the rule looks for, and a
  * spelling that needs types (a `Reflect` call, an alias of an imported function).
  */
-import { guard, keyOf, nameOf, plain, stringNodes, unwrap } from './eslint-guard-kit.js'
+import { Linter } from 'eslint'
+import tseslint from 'typescript-eslint'
+import { guard, keyOf, nameOf, plain, relativeFile, stringNodes, unwrap } from './eslint-guard-kit.js'
+import { COMMENT_SHARE_HELD } from './guard-exceptions.js'
 import { variableOf } from './eslint-const-init.js'
 import { tsConfigs, tsRules } from './eslint-guards-ts.js'
 
@@ -387,6 +390,91 @@ const onePathRule = guard('one-path-rule', { copy: "{{what}} is a copy of a path
   }
 })
 
+/**
+ * Comments say what the code cannot: a platform rule, a race, a measured number, why a check exists (#2355, the owner's
+ * decision of 2026-11-21; CONTRIBUTING.md "What is expected of code"). In a folder whose comments are swept this reports
+ * history ("used to", not the passive "is used to"; a sentence opening with "Previously"; a "#N review" tag), a file header over 3
+ * lines of text, a comment block over COMMENT_BLOCK_LINES lines of text, and a source file over COMMENT_SHARE comment lines.
+ * Adjacent line comments are one block.
+ */
+const ADVERB = String.raw`(?:\w+ly|only|also|not|just|still|never|often|then|always|now|all|both|again|even|too)`
+const HISTORY = [
+  new RegExp(String.raw`(?<!\b(?:is|are|was|were|be|been|being|get|gets|got|'s)[\s*]+(?:${ADVERB}[\s*]+)?)\bused[\s*]+to\b`, 'gi'),
+  /(?:^[\s*]*|[.!?;:][\s*]+|\n[\s*]*-[\s*]+)(Previously)\b/g,
+  /#\d+[\s*]+review\b/gi,
+]
+const HEADER_LINES = 3
+const COMMENT_BLOCK_LINES = 10
+const COMMENT_SHARE = 0.35
+/** Below this many lines a file's share says little: two comments in a six-line file are a third of it */
+const SHARE_FROM_LINES = 30
+/** A file's lines that hold only a comment, and its lines that hold code or a comment: the share `guard/comments` holds */
+export function commentShare(source) {
+  const code = new Set()
+  for (const t of source.ast.tokens) for (let l = t.loc.start.line; l <= t.loc.end.line; l++) code.add(l)
+  const comment = new Set()
+  for (const c of source.getAllComments()) for (let l = c.loc.start.line; l <= c.loc.end.line; l++) if (!code.has(l) && source.lines[l - 1].trim()) comment.add(l)
+  return { comment: comment.size, lines: code.size + comment.size }
+}
+
+/** `commentShare` of a TypeScript or JavaScript text, outside a lint run; `file` names its kind (`.tsx` parses JSX) */
+export function commentShareOf(text, file = 'x.ts') {
+  let share = { comment: 0, lines: 0 }
+  const rule = { create: (context) => ({ Program: () => void (share = commentShare(context.sourceCode)) }) }
+  new Linter().verify(text, [{ files: ['**/*.{ts,tsx,mts,cts,js,mjs,cjs}'], languageOptions: { parser: tseslint.parser }, plugins: { share: { rules: { of: rule } } }, rules: { 'share/of': 'error' } }], file)
+  return share
+}
+const isTestFile = (file) => /\.test\.|test-helpers\./.test(file)
+const at = (line) => ({ loc: { start: { line, column: 0 }, end: { line, column: 0 } } })
+const comments = guard(
+  'comments',
+  {
+    history: '"{{text}}" tells history: say what the code does and why, now; git and the issues keep the history (#2355)',
+    header: 'the file header is {{n}} lines: at most 3 say what the file is; the rest goes to a document or away (#2355)',
+    block: 'a {{n}}-line comment: keep what the code cannot carry in at most {{max}} lines, and point to the document or runtime-lessons rule for the rest (#2355)',
+    share: '{{pct}}% of this file is comment lines (at most {{max}}%): delete what restates the code, point to documents for the rest (#2355)',
+  },
+  (context, add) => ({
+    Program(program) {
+      const source = context.sourceCode
+      const groups = []
+      // A comment after code on its line stands alone: trailing notes on consecutive lines are not one block
+      const ownLine = (c) => (source.getTokenBefore(c)?.loc.end.line ?? 0) < c.loc.start.line
+      for (const c of source.getAllComments()) {
+        const last = groups.at(-1)
+        if (c.type === 'Line' && last?.type === 'Line' && last.ownLine && ownLine(c) && last.end === c.loc.start.line - 1) {
+          last.text += '\n' + c.value
+          last.end = c.loc.end.line
+        } else groups.push({ type: c.type, ownLine: ownLine(c), text: c.value, start: c.loc.start.line, end: c.loc.end.line })
+      }
+      for (const g of groups) {
+        for (const re of HISTORY) {
+          for (const m of g.text.matchAll(re)) {
+            const from = m.index + m[0].length - (m[1] ?? m[0]).length
+            add(at(g.start + (g.text.slice(0, from).match(/\n/g)?.length ?? 0)), 'history', { text: (m[1] ?? m[0]).replace(/[\s*]+/g, ' ').trim() }, 'history')
+          }
+        }
+      }
+      const firstCode = program.tokens[0]?.loc.start.line ?? Infinity
+      for (const [i, g] of groups.entries()) {
+        // Lines of text: a `/**` or ` */` line alone carries none
+        const n = g.text.split('\n').filter((l) => /[^\s*/]/.test(l)).length
+        // A header stands apart from the code; a doc right on the first declaration is that declaration's
+        if (i === 0 && g.end < firstCode - 1 && !source.lines[g.end].trim()) {
+          if (n > HEADER_LINES) add(at(g.start), 'header', { n }, 'header')
+        } else if (n > COMMENT_BLOCK_LINES) add(at(g.start), 'block', { n, max: COMMENT_BLOCK_LINES }, 'block')
+      }
+      if (isTestFile(context.filename)) return
+      const { comment, lines } = commentShare(source)
+      if (lines < SHARE_FROM_LINES) return
+      const pct = Math.round((100 * comment) / lines)
+      const held = COMMENT_SHARE_HELD.files[relativeFile(context)]
+      const max = held ?? Math.round(100 * COMMENT_SHARE)
+      if (pct > max) add(at(1), 'share', { pct, max }, 'share')
+    },
+  }),
+)
+
 /** The protocol does not know about vendors (#59): no tool name in its code */
 const noToolNames = guard('no-tool-names', { tool: "the protocol names a tool ('{{text}}'): an adapter introduces itself, so a vendor is never written on the shelf both sides reach (#59)" }, (_context, add) => {
   const re = /\b(claude|codex)\b/i
@@ -518,6 +606,7 @@ export const guards = {
     'assistant-kind': assistantKind,
     'held-files': heldFiles,
     'one-path-rule': onePathRule,
+    comments,
     ...tsRules,
   },
 }
@@ -526,6 +615,11 @@ export const guards = {
 const TESTS = ['**/*.test.ts', '**/*.test-helpers.ts']
 const UI = ['packages/ui/src/**/*.{ts,tsx}', 'apps/web/src/**/*.{ts,tsx}', 'apps/desktop/src/**/*.{ts,tsx}']
 const HOST_SRC = 'packages/agent-host/src'
+/** Where guard/comments reads: a folder joins when its comments have been swept (#2355) */
+const COMMENTS_SWEPT = [
+  'packages/{protocol,core,common,platform,ui}/**/*.{ts,tsx,mts,cts,js,mjs,cjs}',
+  'apps/web/**/*.{ts,tsx,mts,cts,js,mjs,cjs}',
+]
 
 /**
  * The files each rule reads. A block per scope, one rule or two each: what the unit test each came from walked.
@@ -602,6 +696,8 @@ export const guardConfigs = [
   { files: [`${HOST_SRC}/adapters/{acp,frames,cursor-agent}/*.test.ts`], rules: { 'guard/no-sleeps': 'error' } },
   // Every shipped reader of a session's kind, on both sides of the wire (#2133)
   { files: ['packages/*/src/**/*.{ts,tsx}', 'apps/web/src/**/*.{ts,tsx}'], ignores: ['**/*.test.{ts,tsx}', '**/*.test-helpers.{ts,tsx}'], rules: { 'guard/assistant-kind': 'error' } },
+  // The folders whose comments have been swept (#2355); each sweep adds its own
+  { files: COMMENTS_SWEPT, rules: { 'guard/comments': 'error' } },
   ...tsConfigs,
 ].map((config) => ({ ...config, plugins: { guard: guards } }))
 

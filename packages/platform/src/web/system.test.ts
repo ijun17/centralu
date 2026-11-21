@@ -8,10 +8,7 @@ class UnconnectedSocket {
 
 const platform = () => createWebPlatform({ token: 'test', WebSocketImpl: UnconnectedSocket as unknown as typeof WebSocket })
 
-/**
- * The browser's system port says when it could not do something (#972 item 5). It used to resolve as if the IDE had
- * opened, the tab had opened behind a pop-up blocker, or the notification had been shown with no permission asked.
- */
+/** Never resolves as if the IDE opened, a blocked tab opened, or a notification showed without permission */
 describe('the web system port', () => {
   afterEach(() => vi.unstubAllGlobals())
 

@@ -7,15 +7,11 @@ import { omitKey } from '../patch.js'
 import { assistantScreen } from '../assistant.js'
 import { computeInbox, currentWaitingId } from '../inbox.js'
 
-/**
- * Picking the session the person looks at: `focusSession`, the one door a dozen call sites go
- * through, and the doors that lead to it (a search hit, the next waiting item).
- */
+// `focusSession` is the one door a dozen call sites go through, so the rules of picking a session live there once.
 
 /** Makes a second search for the same row a new navigation request. */
 let searchTargetAt = 0
 
-/** The store's actions that pick the session the person looks at */
 type FocusActions = Pick<
   AppState,
   | 'openSearchHit'
@@ -43,7 +39,6 @@ export const focusActions = (set: StoreSet, get: StoreGet): FocusActions => ({
     // A proposal's card only stands on the Assistant's own screen, so `preferGrid` does not apply to it
     if (isProposalId(id)) void get().openAssistant()
     else if (isAppArrivalId(id)) {
-      // An app a trusted project gained (#1141): its screen, and the notice is read
       const key = id.slice(APP_ARRIVAL_ID_PREFIX.length)
       const arrival = get().appArrivals.find((a) => a.key === key)
       if (arrival) get().openApp(arrival.projectId, arrival.appId)
@@ -59,51 +54,13 @@ export const focusActions = (set: StoreSet, get: StoreGet): FocusActions => ({
   focusSession(id, opts) {
     const prev = get().focusedSessionId
     const projectId = id ? get().sessions[id]?.projectId : undefined
-    /*
-     * Picking a session **must make that session visible.**
-     *
-     * With the grid left open, clicking a different session in the sidebar left the screen
-     * unchanged: what was picked had changed but what was visible had not, so to the person who
-     * clicked, nothing appeared to happen. This lives here because there are a dozen call sites
-     * (sidebar, inbox, palette, approval banner, …) — attaching it at each call site means one of
-     * them eventually gets missed.
-     *
-     * Deselecting (`null`) leaves the view untouched, because that is not "look at this."
-     */
-    /*
-     * **The Assistant goes to its own screen, not 'focus'** (a dogfooding bug).
-     *
-     * Turning on `view: 'focus'` unconditionally here meant clicking the Assistant from the top
-     * bar's "waiting for response" list opened the Assistant's conversation **inside the frame of
-     * the session screen.** Two symptoms came from that: the right-hand evidence lane came along
-     * (`App`'s `hasEvidenceLane` decides by `view` — the Assistant has no repository to view), and
-     * the sidebar's assistant button looked unpressed (`active` also decides by `view`).
-     *
-     * The fix belongs here for the same reason as the comment above: this function has a dozen call
-     * sites (inbox, notification card, palette, approval banner, shortcuts, …). Even one of them
-     * meeting the Assistant reproduces the same symptom, so the decision has to live in this one
-     * place, not at each caller.
-     */
-    // If the session is already on the grid, the grid is the destination (see the `preferGrid` comment above)
+    // A pick makes the session visible: with the grid open a sidebar click would seem to do nothing. Deselecting
+    // (`null`) leaves the view alone. The Assistant gets its own screen: in 'focus' the evidence lane would come along
+    // and its sidebar button would look unpressed (both decide by `view`).
     const onGrid = !!id && !!opts?.preferGrid && gridSessionIds(get().gridPanels).includes(id)
     const assistant = !!id && (id === get().assistantId || isAssistantKind(get().sessions[id]?.kind))
-    /*
-     * If the picked session's project is folded, it is unfolded (#205) — a picked session must also
-     * be visible in the sidebar. The inbox, palette, notification card, next-waiting (⌘⇧A) and
-     * new-session all pass through this door, so the decision lives here alone (same reason as
-     * `view` above: a dozen call sites).
-     *
-     * **What gets unfolded is remembered** — the same as if the person had unfolded it with the
-     * arrow. A path that unfolds briefly and re-folds on leaving was considered and rejected. That
-     * would require a second, off-screen piece of state to decide "when to fold it back," and a
-     * person cannot predict that moment — a row appearing and disappearing on its own is exactly why
-     * unfolding on hover was rejected too. Remembering it means the arrow always states exactly what
-     * is on screen, and reopening the app returns to exactly what was last seen.
-     *
-     * `reveal: false` happens in exactly two places: restoring a snapshot (a fold left there was also
-     * left by the person) and clicking a grid panel (the session is already visible in its panel, and
-     * if typing into a panel unfolded its project every time, folding would be pointless).
-     */
+    // A picked session's folded project unfolds (#205) and stays so, as if by the arrow: re-folding on leaving would
+    // be a row appearing and vanishing on its own. `reveal: false` only on a snapshot restore and a grid panel click.
     const picked = id ? get().sessions[id] : undefined
     const rowProject = picked?.projectId ?? null
     const reveal =
@@ -115,29 +72,19 @@ export const focusActions = (set: StoreSet, get: StoreGet): FocusActions => ({
       const folded = get().prefs.foldedGroups
       if (hiding.some((k) => folded.includes(k))) get().setGroupsFolded(hiding, false)
     }
-    // Switching sessions clears any overlay — the new session's conversation must be visible first
+    // Any overlay goes: the new session's conversation must be visible
     set({
       focusedSessionId: id,
       overlay: null,
       // A composer asked to take the keyboard belongs to the session asked for, not the one shown now (#528)
       ...(get().composerFocusFor !== null && get().composerFocusFor !== id ? { composerFocusFor: null } : {}),
       ...(reveal ? { foldedProjects: get().foldedProjects.filter((p) => p !== rowProject) } : {}),
-      /*
-       * The Assistant's screen shows the session `assistantId` names, and a run learns that id only by opening the
-       * screen itself. A pick that arrives by another way (a mail, a notice, the waiting list) knows the session, so it
-       * names it here, in the state change the sidebar's button makes (#1647); left unset, the screen showed its empty
-       * start state over a conversation that exists, until the person went to the grid and back.
-       */
+      // A pick from elsewhere (a mail, a notice, the waiting list) names the Assistant's session here (#1647), or its
+      // screen would show the empty start over a conversation that exists
       ...(id && assistant && !onGrid && !picked?.machine ? assistantScreen(id) : {}),
       ...(id
         ? {
-            /*
-             * The Assistant can be placed on the grid too. If clicking its panel's composer or
-             * notification got hijacked into the dedicated screen, "view side by side" would break
-             * immediately. `preferGrid` is only ever the explicit intent `GridView` gives, so it is
-             * the only case where the grid outranks the dedicated screen. A normal pick, like from
-             * the sidebar or the palette, still goes to the Assistant's dedicated screen.
-             */
+            // `preferGrid`, given only by GridView, is the one case the grid outranks the Assistant's own screen
             view: onGrid ? ('grid' as const) : assistant ? ('assistant' as const) : ('focus' as const),
           }
         : {}),
@@ -145,9 +92,7 @@ export const focusActions = (set: StoreSet, get: StoreGet): FocusActions => ({
     })
     get().saveWorkspace()
 
-    // Messages of a session that lost focus are trimmed (docs/state-management.md §4).
-    // Holding all of ten sessions × hundreds of turns each would blow the §7.1 memory target.
-    // The summary (state, unread, preview) stays intact, so the sidebar and inbox remain accurate.
+    // A session that lost focus is trimmed to the window (docs/state-management.md §4)
     if (prev && prev !== id) {
       const items = get().chat[prev]
       const trimmed = items && trimWindow(items)
@@ -165,32 +110,19 @@ export const focusActions = (set: StoreSet, get: StoreGet): FocusActions => ({
 
     if (!id) return
     void get().markRead(id)
-    // If the session's conversation has not been read yet, load it from storage (history survives even a host restart)
     const cur = get()
     /*
-     * "Read" means **a cursor exists** (#79). Having conversation rows does not mean it was read —
-     * if an event arrives before the screen does (a session the host created in the background, like
-     * an app's requested agent, or an event replayed by the initial connection), only rows appear.
-     *
-     * Before this (09-09), such a session's cursor used to be set from the top row on screen. The
-     * reasoning was that re-reading could wipe out a still-streaming message or an optimistically
-     * drawn first prompt. But that number was the render key: a stored 8-line session ended up with a
-     * cursor of 48, so "earlier conversation" appended the whole conversation a second time (measured
-     * 2026-09-25), and whenever the key was lower than the stored number, the entire middle went
-     * missing. Now that `loadHistory` merges with history rather than clearing the screen's rows
-     * (`mergePage`), it is always safe to read.
+     * "Read" means a cursor exists (#79): rows alone may be events that arrived before the screen. The cursor is never
+     * the top row's number, a render key and not the stored seq: that read the conversation twice (measured). Reading
+     * is safe: `loadHistory` merges with the rows on screen (`mergePage`).
      */
     if (opts?.targetSeq !== undefined) {
-      // Mark the cursor as loading before the pane observes this session. Otherwise its ordinary
-      // first-open read races this targeted page and lands us back at the newest message.
+      // Loading before the pane sees this session, or its first-open read races this page back to the newest message
       const targetSeq = opts.targetSeq
       set((s) => ({ history: { ...s.history, [id]: { oldestSeq: targetSeq, more: false, loading: true } } }))
       void get().loadHistoryAt(id, targetSeq)
     } else if (!cur.history[id]) void get().loadHistory(id)
-    /*
-     * Selecting a session no longer wakes it (#568). Its process starts when the person sends to it or its composer takes
-     * the keyboard: reading an old conversation should not start a 250 MB process that the host puts back to sleep in
-     * 15 minutes. The resume this used to hide costs about 0.7 s (p50) on Claude, and it runs while the person types.
-     */
+    // Selecting does not wake a session (#568): reading should not start a 250 MB process. It wakes on send or when its
+    // composer takes the keyboard; the resume, about 0.7 s (p50) on Claude, runs while the person types.
   },
 })

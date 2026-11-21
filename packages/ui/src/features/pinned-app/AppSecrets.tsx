@@ -8,17 +8,10 @@ import { useStore } from '../../store/store.js'
 import { userAppMachine, type ExternalCatalogApp } from '../../store/app-catalog.js'
 
 /**
- * An app's secrets (M4 E) — for each name the manifest declares, whether it has a value, and a field
- * to set, replace or clear it.
- *
- * **The value never comes back.** The host's list only carries set or not set (so the value never
- * rides a broadcast), and this field forgets the value it sent right away. That is why "Replace" is
- * not a field that shows the old value for editing, it is an empty field for entering a new one. It
- * is a password field, so the characters stay hidden even while sharing the screen during a call. A
- * value that was set reaches the app **the next time it starts** (a running app is brought down by
- * the host once its current call finishes) — that fact is stated in one line.
- *
- * The pinned view's panel and the settings screen's app row share this one component.
+ * An app's secrets (M4 E): per declared name, set or not, and a field to set, replace or clear it. The value never
+ * comes back (the host's list says set or not, so it never rides a broadcast), so Replace is an empty password field,
+ * hidden even when screen sharing. A value reaches the app on its next start (the host stops a running one after its
+ * call), said in one line. Shared by the pinned view's panel and the Settings app row.
  */
 export function AppSecrets({ app }: { app: ExternalCatalogApp }) {
   const slots = app.info.secrets ?? []
@@ -47,10 +40,9 @@ export function AppSecrets({ app }: { app: ExternalCatalogApp }) {
 }
 
 /**
- * The saved secrets could not be read (#944): said once above the fields. On screen nothing said it before, and a
- * section showing every value missing read as values never entered. Moved aside, the values are in that copy; the line
- * goes once a value is saved again. Still in place, the file has to be fixed or removed first. Why, when the host knows
- * (`reason`, words that never quote the file)
+ * The saved secrets could not be read (#944): said once above the fields, or all-missing reads as never entered. Moved
+ * aside, the values are in that copy, and the line goes once one is saved again; still in place, the file must be
+ * fixed or removed first. `reason`: why, when the host knows, never quoting the file.
  */
 function SecretsUnreadable({ movedTo, reason }: { movedTo: string | null; reason?: string }) {
   return (
@@ -74,7 +66,7 @@ function SecretRow({ app, name, set, stuck }: { app: ExternalCatalogApp; name: s
   const platform = usePlatform()
   const setToast = useStore((s) => s.setToast)
   const refresh = useStore((s) => s.refreshExternalApps)
-  // The field only opens when empty or when "Replace" is pressed — a field that would hide a value already set is not kept standing all the time
+  // Open only when unset or on Replace: a standing field would hide that a value is set
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
@@ -86,13 +78,13 @@ function SecretRow({ app, name, set, stuck }: { app: ExternalCatalogApp; name: s
     setError(null)
     try {
       await platform.apps.setSecret(app.appId, app.projectId, name, value, userAppMachine(app.info))
-      // Once sent, it is forgotten — this field has no more reason to hold the value
+      // Forgotten once sent
       setDraft('')
       setEditing(false)
       setToast(value === null ? `Cleared ${name}` : `Saved ${name}. ${app.title} gets it the next time it starts`)
       void refresh()
     } catch (e) {
-      // Exactly the host's own wording — that wording never contains the value (the host never carries it)
+      // The host's wording, which never contains the value
       setError(errorMessage(e))
     } finally {
       setBusy(false)
@@ -185,7 +177,7 @@ function SecretRow({ app, name, set, stuck }: { app: ExternalCatalogApp; name: s
   )
 }
 
-/** A panel that opens and closes beside the pinned view (same spot and shape as the Runs panel) — where a missing key is discovered while using the app */
+/** Beside the pinned view, as the Runs panel: where a missing key is found while using the app */
 export function SecretsPanel({ app }: { app: ExternalCatalogApp }) {
   return (
     <aside className="flex w-[300px] shrink-0 flex-col border-l border-line bg-surface-side" data-testid="secrets-panel" aria-label="Secrets">
@@ -199,7 +191,7 @@ export function SecretsPanel({ app }: { app: ExternalCatalogApp }) {
   )
 }
 
-/** The count of unset secrets — the pinned view's header and the settings row state "what is missing" in one word */
+/** Unset secrets, counted for the pinned view's header and the Settings row */
 export function missingSecrets(app: ExternalCatalogApp | undefined): number {
   return app?.info.secrets?.filter((s) => !s.set).length ?? 0
 }

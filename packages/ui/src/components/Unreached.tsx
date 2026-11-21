@@ -2,9 +2,8 @@ import { useRef } from 'react'
 import { Fold } from './Fold.jsx'
 
 /**
- * The linked machines whose part of a merged list the hub could not read just now (the session archive, #841 item 4; Tasks, #2268): without this
- * line the list read as the whole of it, and what a machine still holds looked gone. It folds in and out as a change on screen does (design-system
- * §9), keeping the last names for its exit. `className` places it; the look is this one
+ * The linked machines a merged list could not include just now (#841 item 4, #2268), so the list is not read as the
+ * whole and what a machine holds does not look gone. Keeps the last names for its exit. `className` places it.
  */
 export function Unreached({ what, unreached, className, testId }: { what: string; unreached?: readonly { name: string }[]; className?: string; testId: string }) {
   const last = useRef('')

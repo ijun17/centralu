@@ -3,7 +3,7 @@ import { ApprovalScope, GridPanel, UiPreferences } from '../../entities.js'
 import { ThemeFileEntry } from '../../theme.js'
 import { machineField } from '../machine-fields.js'
 
-/** The results of the `settings` methods, which a client reads through `parseRpcResult`. Their parameters, and what each method is for: ./settings.params.ts */
+/** Results of the `settings` methods, read through `parseRpcResult`. Params and what each method does: ./settings.params.ts */
 export const settingsResults = {
   'workspace.save': z.object({ ok: z.literal(true) }),
   'approvals.deleteRule': z.object({ ok: z.literal(true) }),
@@ -24,10 +24,10 @@ export const settingsResults = {
       matcher: z.string(),
       decision: z.string(),
       createdAt: z.number(),
-      /** Which project or session this rule belongs to — the same rule from two different projects used to look like one identical row in Settings (#183) */
+      /** Without it, the same rule of two projects looks like one row in Settings */
       projectId: z.string().nullable().default(null),
       sessionId: z.string().nullable().default(null),
-      /** A rule of a linked machine (#82): its `id` is then folded into a negative number the hub maps back */
+      /** A linked machine's rule: its `id` is then folded into a negative number the hub maps back */
       ...machineField,
     }),
   ),

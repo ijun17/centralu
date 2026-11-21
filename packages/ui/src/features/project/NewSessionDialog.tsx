@@ -19,23 +19,13 @@ import { ToolSetupLine } from '../tools/ToolSetupLine.jsx'
 import { TrustProjectButton } from './TrustCard.jsx'
 import { envFilesOf, installCommandFor } from './worktreeSuggestions.js'
 
-/**
- * The state of the past sessions list.
- * 'unsupported' is not a failure, it is **a normal outcome** — an older tool version cannot
- * provide the list. A new session still has to be creatable then, so it is not treated as an error.
- */
+/** 'unsupported' is a normal outcome, not an error: an older tool cannot list, and a new session must still start. */
 type PastState =
   | { status: 'loading' }
   | { status: 'ok'; sessions: ExternalSession[] }
   | { status: 'unsupported'; reason: string }
 
-/**
- * Reads one comma-separated list (#76).
- *
- * **Must use the same rule** as when it is saved (copyFiles.split below) — if the suggestion chip
- * counted "is this already picked" differently, a pressed-in item could end up unable to be pressed
- * back out.
- */
+/** One comma-separated list (#76). Saving splits the same way, or a pressed chip could not be pressed back out. */
 const splitList = (s: string): string[] =>
   s
     .split(',')
@@ -43,25 +33,10 @@ const splitList = (s: string): string[] =>
     .filter(Boolean)
 
 /**
- * Session creation (FR-7).
- *
- * **The only things chosen here are the tool and "start fresh vs. resume."** Model and permissions
- * are changed from the header after the session is created — something changeable while talking to
- * it is actually more useful than something fixed before starting. (Tool is the one exception,
- * because it is the process itself and cannot be changed partway through.)
- *
- * **There is no first-prompt input field** (dogfooding, 2026-08-27: "this feels crude, and is it
- * even necessary?"). It goes straight to a screen with its own input field the moment it is
- * created, so there is no reason to type ahead of that in a dialog — the rule for what becomes the
- * session name (FR-18) applies identically to the input field's first message (the manager rewrites
- * the first sentence sent as 'New session'). The subheading and helper text were removed for the
- * same reason: this dialog's body is nothing but the conversation list.
- *
- * The frame matches the other dialogs (Settings, Inbox) — **fixed header / scrolling body / fixed
- * footer.** The tool row and the start button must stay in place no matter how long the dialog
- * grows, and only the middle (the conversation list, worktree settings) is allowed to grow. The
- * whole dialog used to grow instead, and turning on the worktree option and expanding the
- * suggestions pushed the start button off screen.
+ * Session creation (FR-7). Only the tool (it is the process) and "new vs. resume" are chosen here; model and
+ * permissions change from the header later. No first-prompt field: the session opens on its own composer, and the
+ * naming rule (FR-18) applies to its first message. Fixed header and footer with a scrolling body (as Settings and
+ * Inbox), so the worktree fields never push Start off screen.
  */
 export function NewSessionDialog({ projectId, onClose }: { projectId: string; onClose: () => void }) {
   const platform = usePlatform()
@@ -69,14 +44,10 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
   const createSession = useStore((s) => s.createSession)
   const saveWorktreeSetup = useStore((s) => s.saveWorktreeSetup)
   const running = useSessionsOf(projectId)
-  // A worktree can only be created in a git repository — otherwise the checkbox is disabled and the reason is stated
+  // A worktree needs a git repository; the checkbox is only drawn in one
   const isRepo = !!project?.git
 
-  /**
-   * The list that builds the row of tool buttons is what was received at connect time, while
-   * `tools` below is asked for **again, when this dialog opens.** The list itself never changes,
-   * but whether a tool is installed or logged in may have just changed.
-   */
+  // The buttons come from the connect-time list; `tools` is asked again on open, as install or login may have changed
   const allTools = useTools()
   const machine = project?.machine ?? null
   // What the start asks of the tool: the project's trust, and the preset a new session starts with
@@ -87,74 +58,45 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
   )
   const [busy, setBusy] = useState(false)
   /**
-   * Run only this session in a worktree (an FR-2 option).
-   *
-   * **Defaults to off.** The spec's stated principle is "work directly in the original directory,"
-   * and a worktree is an isolation mechanism that only a person who wants it turns on. The one
-   * exception is opening it from the + on a manager row (#69) — there it opens already turned on.
-   * That is a head start, not a requirement: turning it off is free, and since this is only the
-   * initial value, the store is not re-read again while the dialog stays open (read once per mount).
+   * Run this session in a worktree (FR-2). Off by default, as the spec works in the original directory; already on
+   * when opened from the + on a manager row (#69). Only the initial value: read once per mount.
    */
   const [worktree, setWorktree] = useState(useStore.getState().newSessionWorktree)
-  /**
-   * The branch name (#69). The branch name is also the session name and the directory name —
-   * effectively permanent, so there has to be a place to set it before creation. Leaving it blank
-   * lets the host use an automatic name (no requirement to fill it in).
-   */
+  /** The branch name (#69), also the session and directory name, so it is set before creation. Blank: the host names it. */
   const [branch, setBranch] = useState(useStore.getState().newSessionBranch)
-  /**
-   * Provisioning (#69). Shown as a collapsed one-line summary if a setting is already saved, and
-   * expanded if there is none (first use) — right when the thought "oh, node_modules needs to be
-   * installed" first comes up, the input field needs to already be in front of the person.
-   */
+  // Provisioning (#69): a one-line summary once saved, expanded on first use, when "node_modules is missing" comes up
   const savedSetup = project?.worktreeSetup ?? null
   const [setupOpen, setSetupOpen] = useState(!savedSetup)
   const [setupCommand, setSetupCommand] = useState(savedSetup?.command ?? '')
   const [copyFiles, setCopyFiles] = useState(savedSetup?.copyFiles.join(', ') ?? '')
   const [error, setError] = useState<string | null>(null)
   /**
-   * Copy candidates (#76) — things git ignores, in other words **things that will be missing from
-   * the new worktree.**
-   *
-   * The list is offered, but the app does not pick for the person: defaulting to "copy everything
-   * ignored" would drag in 637MB of node_modules plus an 8.5GB Rust target in this repository alone.
-   * The size is shown alongside instead — the judgment a person actually makes from this list is
-   * "this one is too big." It is only asked for once the worktree option is turned on (no need to
-   * run `du` for a list that will not be used).
-   */
-  /**
-   * Where it branches off from (user finding, 2026-09-07: "when creating a worker, there is no way
-   * to choose which branch to fork from").
-   *
-   * The default is the project's trunk (as set by the manager), or the current branch if there is
-   * none — in other words, **something that used to happen silently, now written out in words.**
-   * The list only assists, so being unable to read it does not block creation (the same rule as the
-   * manager dialog).
+   * Where the branch forks from: the manager's trunk, else the current branch, written out instead of happening
+   * silently. The list only assists, so an unreadable one does not block creation (as in the manager dialog).
    */
   const trunk = project?.worktreeManager?.baseBranch || project?.git?.branch || ''
   /**
-   * null = untouched so far → the field shows the trunk. An empty string is **something the person
-   * cleared** and is handled differently (left to the host's own order in that case). Initializing
-   * the state to the trunk would leave the field frozen empty in a repository where git information
-   * arrives late.
+   * null = untouched, so the field shows the trunk; '' = cleared by the person, left to the host's order. Not
+   * initialized to the trunk: where git info arrives late, the field would stay empty.
    */
   const [base, setBase] = useState<string | null>(null)
   const baseValue = base ?? trunk
-  // Read once a worktree is asked for; a failed read offers none, as before (the base stays the trunk)
+  // Read once a worktree is asked for; a failed read offers none and the base stays the trunk
   const branches: GitBranch[] | null =
     useLoad(
       () => (isRepo && worktree ? platform.git.branches(projectId).then((list) => list.filter((b) => !b.remote)) : null),
       [isRepo, worktree, platform, projectId],
     ).data ?? null
 
+  /**
+   * Copy candidates (#76): what git ignores, so what a new worktree lacks. Offered, never preselected: "copy all
+   * ignored" would drag 637MB of node_modules and an 8.5GB Rust target here. Sizes are shown instead.
+   */
   const ignored: { path: string; bytes: number | null }[] | null =
     useLoad(() => (isRepo && worktree ? platform.git.ignoredEntries(projectId) : null), [isRepo, worktree, platform, projectId]).data ?? null
 
-  /*
-   * The first worktree of a project (#1512): nothing saved yet, so the dialog points at what a new worktree lacks, the
-   * install command its lockfile names and the `.env` files git ignores, as chips that fill the two fields below.
-   * Read only then, and only once a worktree is asked for.
-   */
+  // A project's first worktree (#1512): with nothing saved, chips offer the lockfile's install command and the ignored
+  // `.env` files. Read only then, once a worktree is asked for.
   const lockfileNames: string[] | null =
     useLoad(
       () =>
@@ -172,25 +114,15 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
 
 
   /**
-   * Follows the row picked by the arrow keys when it is outside the collapsed list's view —
-   * **only when the selection changes.**
-   *
-   * This used to be called from the row's own `ref` callback. An inline ref's function identity is
-   * different on every render, so React detaches and reattaches it, which meant scrollIntoView ran
-   * **on every render.** This dialog subscribes to the store (the project, the session list), so
-   * even with just one session running, it re-renders on every event, and each time the list got
-   * yanked back to the selected row — this is what "the scroll position snaps back to the top after
-   * a moment" was, once the dialog grew from turning the worktree option on (dogfooding, 2026-09-07;
-   * measured: one event took the outer value from 324 to 13, the inner one from 1140 to 0).
-   *
-   * `block: 'nearest'` means nothing happens for a row already visible — that is why the screen does
-   * not jump while picking with the mouse.
+   * Scrolls the arrow-picked row into view, only when the pick changes. Not from the row's inline ref: React reattaches
+   * it on every render, and every store event re-renders this, which yanked the scroll back (measured: 324 to 13 outer,
+   * 1140 to 0 inner, on one event). `block: 'nearest'` leaves a visible row alone, so mouse picks do not jump.
    */
   useEffect(() => {
     listRef.current?.querySelector<HTMLElement>('[aria-pressed="true"]')?.scrollIntoView({ block: 'nearest' })
   }, [resume?.externalId])
 
-  // Changing the tool changes the list too — the previous selection belonged to a different tool, so it is discarded
+  // The previous pick belonged to another tool's list
   useEffect(() => setResume(null), [platform, projectId, tool])
   const listed = useLoad(() => platform.agents.listExternalSessions(projectId, tool), [platform, projectId, tool])
   const past: PastState =
@@ -202,7 +134,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           ? { status: 'ok', sessions: listed.data.sessions }
           : { status: 'unsupported', reason: listed.data.reason ?? 'Could not list past conversations' }
 
-  // The weight that copying would drag along — the judgment a person makes from this list is "this is too big," so a total is shown
+  // A total, since what a person judges from this list is "this is too big"
   const picks = splitList(copyFiles)
   const pickedBytes = (ignored ?? [])
     .filter((e) => picks.includes(e.path))
@@ -213,20 +145,9 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
       <form
         className="flex max-h-[calc(82vh/var(--text-zoom))] w-[480px] max-w-[calc(92vw/var(--text-zoom))] flex-col overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal)"
         onKeyDown={(e) => {
-          /*
-           * The list is this dialog's body, so the arrow keys pick within it — resuming has to be
-           * completable without a mouse, as ⌘N → ↓↓ → ↵. An already-open conversation is skipped
-           * over: clicking that row means "jump to it and close," and the dialog must not close
-           * while just passing over it with the arrow keys.
-           */
-          /*
-           * **An arrow key inside an input field belongs to that field** (#181). While this handler,
-           * attached to the whole form, was not checking the target, a ↓ pressed in the Branch
-           * field to move the cursor silently picked a past conversation instead (the button changed
-           * from Start to Load), and the Enter pressed right after resumed that conversation instead
-           * of starting a new one. The From field's suggestion list (datalist) also failed to open
-           * on ↓.
-           */
+          // Arrows pick in the list, so resuming works without a mouse (⌘N ↓↓ ↵). Open conversations are skipped: their
+          // row jumps and closes. Not in a text field (#181): ↓ in Branch would pick a session for the next Enter, and
+          // the From datalist would not open.
           if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && past.status === 'ok' && !isTextEntry(e.target)) {
             e.preventDefault()
             const rows: (ExternalSession | null)[] = [null, ...past.sessions.filter((s) => !s.importedAs)]
@@ -240,12 +161,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           setBusy(true)
           setError(null)
           try {
-            /*
-             * The provisioning setting is saved **before** creation (#69) — the host reads and runs
-             * the saved setting while creating the worktree, so if the order were reversed, the
-             * setup just typed would not apply to this creation. The round trip only happens when
-             * it actually changed.
-             */
+            // Saved before creation (#69): the host runs the saved setup while creating the worktree
             if (worktree && setupOpen) {
               const next = { command: setupCommand.trim(), copyFiles: splitList(copyFiles) }
               const changed =
@@ -256,32 +172,27 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
             }
             const created = await createSession(projectId, {
               tool,
-              // If a past session was picked, the tool is asked to resume that conversation (resume),
-              // and the past conversation is also restored on screen (importHistory).
+              // A picked past session: the tool resumes it and its history is restored on screen
               resumeExternalId: resume?.externalId,
               importHistory: resume ? true : undefined,
               worktree: worktree || undefined,
               worktreeBranch: (worktree && branch.trim()) || undefined,
-              // Sent exactly as written on screen — only when empty is it left to the host's own order (trunk → HEAD)
+              // Sent as written; only an empty one is left to the host's order (trunk → HEAD)
               worktreeBase: (worktree && baseValue.trim()) || undefined,
             })
             // What comes next is the first instruction: the new session's composer takes the keyboard once this closes (#528)
             askComposerFocus(created.id)
             onClose()
           } catch (err) {
-            // A toast disappears after 2.5 seconds and would look like "nothing happened when pressed" — kept inside the modal instead
+            // Kept in the modal: a toast vanishes after 2.5 s and reads as "nothing happened"
             setError(errorMessage(err))
           } finally {
             setBusy(false)
           }
         }}
       >
-        {/*
-          The header stays fixed and only the body scrolls (the same frame as Settings and Inbox) —
-          this is exactly where turning on the worktree option used to add fields and suggestion
-          chips and grow the dialog off screen. The start button is pinned at the bottom, so it stays
-          within reach no matter how far the scroll has gone.
-        */}
+        {/* Fixed header;
+          only the body scrolls */}
         <header className="shrink-0 border-b border-line px-4 py-2.5">
           <h2 className="flex items-baseline gap-1.5 text-md font-medium text-ink">
             <span className="shrink-0">New session</span> <span className="text-ink-faint">·</span>{' '}
@@ -289,7 +200,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
             {/* The machine it will run on (#82): the project decides it, so it is stated, not asked */}
             <MachineTag machine={machine} testId="new-session-machine" className="self-center font-normal" />
           </h2>
-          {/* The tool — two buttons need no subheading to make their meaning clear. Model and permissions are set from the header after creation */}
+          {/* The tool, without a subheading */}
           <Segmented
             label="Tool"
             value={tool}
@@ -303,7 +214,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
               dim: !!tools && !usable(t.name),
             }))}
           />
-          {/* The reason it cannot be used is not hidden — a disabled button alone would look like it just does nothing */}
+          {/* Why it cannot be used is said: a disabled button alone looks broken */}
           <ToolSetupLine
             status={info(tool)}
             label={toolMeta.label}
@@ -325,10 +236,8 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-          {/*
-          This dialog's body. Being able to carry a conversation over exactly as it was in the
-          terminal is what keeps this app from becoming 'just another window.'
-        */}
+          {/* The body: carrying a terminal
+             conversation over as it was */}
           <div
             ref={listRef}
             className="max-h-64 overflow-y-auto rounded-md border border-line bg-surface-raised"
@@ -344,7 +253,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
             {past.status === 'loading' && (
               <SkeletonLines lines={3} className="px-2.5 py-2" label="Looking for past conversations" testId="past-loading" />
             )}
-            {/* Using an older tool version does not block a new session too — only the reason is quietly stated */}
+            {/* An older tool still allows a new session; the reason is stated quietly */}
             {past.status === 'unsupported' && (
               <p
                 className="px-2.5 py-2 text-xs leading-body text-ink-faint"
@@ -364,8 +273,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                   key={s.externalId}
                   selected={resume?.externalId === s.externalId}
                   onSelect={() => {
-                    // Does not create another one if it is already open — jumps to that session instead.
-                    // Marking it visually without blocking the click used to let the same conversation end up twice in the list (measured).
+                    // Already open: jump to it. Only marking the row let the same conversation open twice (measured).
                     if (s.importedAs) {
                       focusSession(s.importedAs)
                       askComposerFocus(s.importedAs)
@@ -376,15 +284,8 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                   }}
                   testId={`past-${s.externalId}`}
                   title={s.title}
-                  /*
-                  The title comes from the tool, and it means something different per tool:
-                    Claude — a summary (represents the whole conversation)
-                    Codex  — **the first user message** (even a conversation carried on for days
-                             shows as its very first topic)
-                  So "how recently it was last continued" is stated plainly next to the title —
-                  otherwise a recent conversation looks old and cannot be found (a dogfooding
-                  finding).
-                */
+                  /* The title is Claude's summary but Codex's first user message, so the last activity is stated
+                     beside it, or a recent conversation would look old. */
                   meta={<>
                     last <RelativeAge when={s.updatedAt} />
                     {s.branch && ` · ${s.branch}`}
@@ -394,11 +295,8 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
               ))}
           </div>
 
-          {/*
-          The warning and its solution are placed in the same spot — the solution to "editing the
-          same files can lose changes" is a worktree. The checkbox is only drawn for a repository:
-          explaining an option that cannot even be used is noise for the task of creating a session.
-        */}
+          {/* The warning sits by its fix, a worktree;
+             the checkbox only in a repository */}
           {running.length > 0 && (
             <p className="mt-2.5 text-xs leading-body text-ink-muted" data-testid="concurrent-warning">
               {running.length} sessions are already running in this directory. Editing the same files can lose
@@ -422,14 +320,8 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
               </span>
             </label>
           )}
-          {/*
-          Details are only asked for once it is turned on, and when they are, they are grouped
-          **into one block** (the same shape as the worktree field in the delete confirmation
-          dialog) — stacking full-width input fields plainly would leave it unclear to the eye
-          whether they belong to the checkbox or to the dialog as a whole. Since the name becomes
-          both the session name and the directory name (effectively permanent), before creation is
-          the one and only moment to set it.
-        */}
+          {/* Details once on, in one block (as in the delete dialog)
+             so they read as the checkbox's */}
           {isRepo && worktree && (
             <div
               className="mt-2 space-y-2.5 rounded-md border border-line bg-surface-raised p-2.5"
@@ -442,12 +334,8 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                   <TrustProjectButton projectId={project.id} testId="worktree-untrusted-trust" className="mt-1.5" />
                 </div>
               )}
-              {/*
-                States what an empty field results in (dogfooding, 2026-09-07: "if I don't enter a
-                name, what does the branch get called?"). "blank = auto" only states the fact that
-                it is automatic, not what it becomes — the name the host derives is
-                `centralu/<first 8 chars of the session id>` (manager.ts).
-              */}
+              {/* The hint names what blank yields: the host's
+                 `centralu/<first 8 chars of the session id>` (manager.ts) */}
               <Field label="Branch" hint="blank = centralu/<session id>">
                 <TextInput
                   type="text"
@@ -460,7 +348,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                   className="w-full"
                 />
               </Field>
-              {/* **Where** the new branch forks from — a fact that used to live nowhere on screen */}
+              {/* Where the new branch forks from */}
               <Field label="From" hint="the new branch forks from here">
                 <TextInput
                   type="text"
@@ -479,12 +367,8 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                   ))}
                 </datalist>
               </Field>
-              {/*
-              Provisioning (#69) — a new worktree is an empty workbench (only tracked files exist:
-              no node_modules, no gitignored .env). What is written here runs automatically at
-              creation time: copy, then setup. When it is saved, it collapses to a one-line summary —
-              always expanding it would make it a confirmation with nothing to confirm.
-            */}
+              {/* Provisioning (#69): a new worktree has tracked files only.
+                 Runs at creation: copy, then setup */}
               {setupOpen ? (
                 <div className="space-y-2.5" data-testid="worktree-setup-edit">
                   {/* Offered only before anything is saved: pressing one fills the field it names, and pressing it again takes it out */}
@@ -541,12 +425,8 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                       font="mono"
                       className="w-full"
                     />
-                    {/*
-                    Candidates are only **pointed at** (#76). Pressing one adds it to the field
-                    above, pressing again removes it — the field remains the single source of truth,
-                    so something typed by hand and something added by pressing a chip are not
-                    distinguished from each other.
-                  */}
+                    {/* Chips toggle entries in the field above (#76);
+                       the field stays the one source */}
                     {ignored && ignored.length > 0 && (
                       <div className="mt-1.5" data-testid="worktree-ignored-suggestions">
                         <ul className="flex flex-wrap gap-1">
@@ -578,12 +458,8 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                             )
                           })}
                         </ul>
-                        {/*
-                        States the **total** of what is picked. Even with a size attached to every
-                        chip, a person does not add them up mentally — in a repository where the
-                        Rust target alone adds 8.5GB, without a total the weight would only be known
-                        after the worktree is already created.
-                      */}
+                        {/* The total: people do not add the chip sizes up,
+                           and one Rust target is 8.5GB */}
                         {picks.length > 0 && (
                           <p className="mt-1.5 text-2xs text-ink-faint" data-testid="copy-total">
                             {picks.length} to copy{pickedBytes > 0 ? ` · ~${formatBytes(pickedBytes)}` : ''}
@@ -622,11 +498,8 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           )}
         </div>
 
-        {/*
-          The shortcut hint was removed (dogfooding, 2026-09-02) — ↑↓, ↵ and esc are things the hand
-          already knows in any dialog with a list, and the value is too small for a spot that gets
-          read every time. The behavior is unchanged: only the hint text is gone.
-        */}
+        {/* No shortcut hint: ↑↓ ↵ esc are
+           known from any list dialog */}
         <footer className="flex shrink-0 justify-end gap-2 border-t border-line px-4 py-2.5">
           <button
             type="button"
@@ -638,7 +511,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
           <Button
             type="submit"
             variant="primary"
-            /* Since the input field is gone, Enter means start — this needs to hold the default focus */
+            /* With no input field, Enter means start — this needs to hold the default focus */
             autoFocus
             // A worktree is refused in a project that is not trusted, and the setup typed here would be saved before that: trust it first (#1512)
             disabled={busy || blocked || (worktree && !!project && !project.trusted)}
@@ -653,17 +526,8 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
 }
 
 /**
- * A label plus a field.
- *
- * A long instruction that used to live in the placeholder was moved up into the label — a
- * placeholder **disappears the moment typing starts**, so it is gone exactly when the person needs
- * to ask again "what was I supposed to put here." On top of that, in a 480px dialog, "Setup command,
- * runs once in the new worktree (e.g. pnpm install)" got truncated and could not even be read in
- * full.
- *
- * Why a div instead of a label: a suggestion chip (a button) sits inside it, and a click inside a
- * label passes through to the field — the input field grabbing focus every time a chip is pressed
- * would get in the way of picking one.
+ * A label plus a field. Instructions go in the label: a placeholder vanishes once typing starts and truncates at 480px.
+ * A div, not a label: a click on a chip inside a label would move focus to the field.
  */
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
@@ -677,10 +541,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   )
 }
 
-/**
- * One list row. Selection is stated by brightness alone (the grayscale rule) — drawing a checkbox
- * would make it look like a setting, and picking is what this actually does.
- */
+/** One list row. Selection shows by brightness alone (the grayscale rule); a checkbox would read as a setting. */
 function PastRow({
   selected,
   onSelect,

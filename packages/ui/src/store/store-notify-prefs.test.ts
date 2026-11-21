@@ -7,9 +7,8 @@ import { useStore } from './store.js'
 import { resetStore } from './store.test-helpers.js'
 
 /**
- * The notification switches are the host's (#1306): the window reads them from the preferences, saves only the switches
- * that changed through them, hears a change another writer made (the Assistant, another window), and falls back to the
- * workspace snapshot's copy only for a host that has none.
+ * The switches are the host's (#1306): read from the preferences, saved only as changed, updated by other writers (the
+ * Assistant, another window); the workspace snapshot's copy counts only for a host that has none.
  */
 const tick = () => new Promise((r) => setTimeout(r, 0))
 

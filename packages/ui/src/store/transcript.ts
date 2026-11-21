@@ -15,33 +15,19 @@ import {
   projectCreateQuestion,
 } from '@cc/core'
 
-/**
- * The conversation transcript — the rows a session's conversation draws, and the pure rules that
- * build them from live events (`appendChat`) and from stored history (`messagesToChat`). Nothing
- * here touches the zustand store; the store wires these in (docs/state-management.md §2).
- */
+// A conversation's rows, built by one set of rules from live events (`appendChat`) and stored history
+// (`messagesToChat`), so both paths draw the same screen. Pure; the store wires it in.
 
 /**
- * An attachment plus the bytes needed to display it.
- *
- * `data` is used only to render the image thumbnail — storage and transfer always go through the
- * path (D-1). When sending, the just-read bytes are already at hand, so they are filled in
- * without a round trip; after a restart, the host supplies the file again from `loadMessages`
- * (the same rule as the agent images in #40).
+ * `data` only draws the thumbnail; storage and transfer go by path. Sending fills it from the bytes at hand; after a
+ * restart the host supplies it in `loadMessages`.
  */
 export type ChatAttachment = Attachment & { data?: string }
 
 export type ChatItem =
   /**
-   * pending: the UI drew this optimistically and has not yet gotten the host's confirmation
-   * (`user_message`).
-   * from: a message that another session sent, not the person (FR-11 — assistant instructions,
-   * worker reports).
-   */
-  /**
-   * attachments: things sent along with it. Images are drawn as real thumbnails (the successor to
-   * the 📎 label — back when the label was mixed into the text, what was drawn and what was sent
-   * could differ, causing a double render, #75).
+   * pending: drawn before the host's `user_message` confirmed it. from: sent by another session, not the person (FR-11).
+   * attachments: kept apart from the text, so what is drawn and what was sent never differ (#75).
    */
   (
     | {
@@ -51,32 +37,25 @@ export type ChatItem =
         attachments?: ChatAttachment[]
         pending?: boolean
         from?: { sessionId: string; name: string }
-        /** A message sent by an in-conversation app view (M4 B-1) — the person chose to send it, but the app wrote it */
+        /** Sent by an in-conversation app view (apps-plan B-1): the person sent it, the app wrote it */
         fromApp?: { appId: string; projectId: string | null; name: string }
-        /** A first message a script wrote (§8.1) — not typed by the person, drawn as the script's */
+        /** A first message a script wrote, drawn as the script's */
         fromScript?: { credential: string }
       }
     | { kind: 'assistant'; seq: number; text: string }
-    /** A reasoning summary (#58). Only codex gives text — claude's thinking shows only through the session's thinkingTokens */
+    /** Only codex gives reasoning text (#58); claude's thinking shows only as the session's thinkingTokens */
     | { kind: 'reasoning'; seq: number; text: string }
-    /*
-     * An image the agent produced (#40). Persisted as a file (under attachments/, referenced by path,
-     * 500MB cap). If `data` is empty, `note` says why (failures are shown, not hidden).
-     */
+    // An agent's image (#40), a file under attachments/ (500MB cap); with `data` empty, `note` says why
     | { kind: 'image'; seq: number; mime: string; data: string; path?: string; name?: string; note?: string }
-    /**
-     * live: the tail of output while running (#58, codex outputDelta). Discarded once `result` comes
-     * in — the full output lives in `result`.
-     * callId: the name by which the result/output finds its own row (#98, `ownerOf`).
-     */
+    /** live: the output's tail while running, dropped once `result` holds it all (#58). callId: see `ownerOf`. */
     | {
         kind: 'tool'
         seq: number
         tool: string
         title: string
-        /** The files the call names (the host's `ToolSummary.paths`), so the card can link them; absent when none */
+        /** The files the call names, so the card can link them */
         paths?: string[]
-        /** A call to one of Centralu's own servers (#730, the host's `ToolSummary.centralu`), drawn apart from the rest */
+        /** A call to one of Centralu's own servers (#730), drawn apart from the rest */
         centralu?: ToolSummary['centralu']
         callId?: string
         result?: string
@@ -85,93 +64,57 @@ export type ChatItem =
       }
     | { kind: 'approval'; seq: number; requestId: string; summary: string; decision?: string }
     /**
-     * A boundary marker for the conversation (e.g. a compaction point). A fact about the conversation, not part of it.
-     * `notice` is there when the line is a tool's notice the host made readable (#342); `text` is then its one-line form.
-     * `mark` is what kind of line it is, from the event that left it (#2338), so the row never guesses it from the words.
+     * A fact about the conversation, not part of it (a compaction point). `mark` comes from the event (#2338), never
+     * guessed from the words; `notice` is a tool's notice the host made readable (#342).
      */
     | { kind: 'mark'; seq: number; text: string; mark: MarkKind; notice?: NoticeLine; pickModel?: true }
   ) & {
     /**
-     * The **number within the session** the host assigned when it stored this row (the store's
-     * `messages.seq`, #79).
-     *
-     * This is a different number from `seq`. `seq` is the React key, and live items get theirs from
-     * `chatSeq`, which is shared across all sessions. The history cursor (`history.oldestSeq`) and the
-     * merge of history with live items go **only by this number**. If the render key were to leak
-     * into the cursor, `loadOlder` would start reading from the wrong place: the first time the
-     * session for an app's requested agent was opened, a stored 8-line session ended up with a
-     * cursor of 48, and the whole conversation got appended a second time (measured 2026-09-25).
-     *
-     * Absent on rows that are never stored (an optimistic message before confirmation) and on an event
-     * from a host that sends no number. An agent's image carries its row's number since #868, as every
-     * recorded row does. A merged message carries the number of its first chunk — the same rule the
-     * host's `loadMessages` uses.
+     * The host's number for the stored row (`messages.seq`, #79), not `seq`, the render key shared across sessions. The
+     * history cursor and the merge go only by this: a leaked render key appends the conversation twice. Absent on rows
+     * never stored; a merged message carries its first chunk's number, as `loadMessages` does.
      */
     storedSeq?: number
-    /**
-     * When it was said or happened (epoch ms; owner, 2026-10-18): the stored row's `ts` for history, the moment
-     * the window received it for a live row. Shown under a bubble (the person's message, the end of the agent's
-     * answer), and read on every row for where a day begins (the conversation's day dividers). A live answer's time
-     * moves with each chunk, so it reads as when the answer was finished.
-     */
+    /** Epoch ms: the stored `ts`, or when a live row arrived; a live answer's moves with each chunk, so it reads as finished */
     at?: number
   }
 
 /**
- * The render key counter for live conversation items. ONE counter shared by every session — see
- * `ChatItem.storedSeq` for why it must never stand in for a stored number.
+ * One render key counter (React and virtual-scroll key) for every session. It must never overlap an item read back
+ * from the store, or two items draw in one spot: `bumpChatKeysAbove` pushes it past each.
  */
 let chatSeq = 0
 
-/** The next render key for a live conversation item */
 export function nextChatKey(): number {
   return ++chatSeq
 }
 
-/** Pushes the counter up so it always uses a number bigger than any item brought in from the store */
 export function bumpChatKeysAbove(items: { seq: number }[]): void {
   for (const it of items) if (it.seq > chatSeq) chatSeq = it.seq
 }
 
 /**
- * The **tool row that owns** this result or live output (#98), found by `callId`: a background agent's card stays open while
- * its parent uses another tool, so a rule by position attached the parent's results to the agent's card. Measured: across
- * 44,140 `tool_call` rows in the store (28,517 claude, 15,623 codex), `callId` has never once collided within a single
- * session (2026-09-25).
+ * By `callId` (#98): a background agent's card stays open while its parent uses other tools, so position would misattach.
+ * Measured 2026-09-25: no `callId` collision within a session across 44,140 `tool_call` rows (28,517 claude, 15,623 codex).
  */
 function ownerOf(items: ChatItem[], callId: string): number {
   return callId ? items.findIndex((i) => i.kind === 'tool' && i.callId === callId) : -1
 }
 
-/** Carries the stored number the host sent along onto the item (#79) — omitted when there is none */
 const stored = (seq: number | undefined): { storedSeq?: number } =>
   seq === undefined ? {} : { storedSeq: seq }
 
 /**
- * Does this hold a row with this stored number already (#79)?
- *
- * If a history page arrives first and an event for the same row follows (replaying an event held in
- * the pen), the same message would appear twice. Rows with the same stored number are the same row.
- * Used only for events where one row is one item. A streaming chunk carrying the same number more
- * than once is normal, so it is not filtered here.
+ * A history page can arrive before an event for the same row (a pen replay), which would draw it twice (#79). Not for
+ * streaming chunks, which repeat their number by design.
  */
 function holds(items: ChatItem[], seq: number | undefined): boolean {
   return seq !== undefined && items.some((i) => i.storedSeq === seq)
 }
 
 /**
- * Does this chunk continue the last item's message (#77) — **a different stored number means a
- * different message.**
- *
- * The host groups a message's chunks into one row (#66) and carries that row's number on every
- * chunk. So chunks of the same message share a number, while a new reply with no human message in
- * between (a background task finished, a question card was answered) arrives under a new number.
- * While this only checked the kind and appended blindly, two such messages ran together into one
- * paragraph with no gap ("…still running.All six reviews are in."). History (`messagesToChat`) also
- * counts one row as one item — both paths draw the same screen this way.
- *
- * The unnumbered side is still appended: an unstored empty chunk (arrives with no number), and a
- * message that started with no number (its empty chunk arrived first).
+ * A different stored number is a different message (#77): every chunk carries its row's number, and two replies with no
+ * human message between would otherwise run into one paragraph. An unnumbered side still appends.
  */
 function continues<K extends 'assistant' | 'reasoning'>(
   last: ChatItem | undefined,
@@ -182,12 +125,8 @@ function continues<K extends 'assistant' | 'reasoning'>(
 }
 
 /**
- * The conversation with one row replaced: one copy of the list, every other row the same object (#364).
- *
- * Streaming replaces a row per delta, and the focused conversation can hold thousands of rows after reading back
- * through history (2,200 in the spike, docs/spikes/2026-10-memory-heavy-store.md). The delta paths used to copy the
- * list twice (`slice(0, -1)` and a spread) or build it with `map` and a closure per row; a list has to be new for the
- * screen to see the change, but once is enough.
+ * One copy per streaming delta (docs/state-management.md §4): a focused conversation can hold thousands of rows (2,200
+ * in docs/spikes/2026-10-memory-heavy-store.md).
  */
 function replaceAt(items: ChatItem[], index: number, item: ChatItem): ChatItem[] {
   const next = items.slice()
@@ -214,11 +153,10 @@ function toolItem(
   }
 }
 
-/** A streamed chunk of one message: it continues the last row (`continues`) or starts a row of its own */
 function appendText(items: ChatItem[], kind: 'assistant' | 'reasoning', e: { seq?: number; text: string }): ChatItem[] {
   const last = items[items.length - 1]
   if (continues(last, kind, e.seq)) {
-    // A message that started with no number (its unstored empty chunk arrived first) receives the first number learned
+    // A message whose empty chunk came unnumbered takes the first number learned
     return replaceAt(items, items.length - 1, {
       ...last,
       text: last.text + e.text,
@@ -228,7 +166,6 @@ function appendText(items: ChatItem[], kind: 'assistant' | 'reasoning', e: { seq
   return [...items, { kind, seq: ++chatSeq, ...stored(e.seq), text: e.text }]
 }
 
-/** Converts an event to a conversation item (a streaming delta is appended to the same message's item — `continues`) */
 export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
   switch (e.type) {
     case 'message_delta':
@@ -240,10 +177,7 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       if (holds(items, e.seq)) return items
       return [...items, toolItem(++chatSeq, stored(e.seq), e.callId, e.summary)]
     case 'message_image':
-      /*
-       * With its row's number (#868), so a re-read of history matches it by number. The host's row holds a file path and
-       * no bytes, so matching by content (`sameLine`) never paired them, and the image showed twice after a re-read.
-       */
+      // Matched by number (#868): the host's row holds a path, not bytes, so a re-read cannot pair it by content
       if (holds(items, e.seq)) return items
       return [
         ...items,
@@ -259,23 +193,13 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
         },
       ]
     case 'tool_result': {
-      /*
-       * A result attaches to **its own call's row** (#98 — `ownerOf`). Restoration (`messagesToChat`) uses the same rule — the same screen must
-       * never end up pairing things differently across the two paths.
-       */
+      // Its own call's row (#98), the same rule as `messagesToChat`
       const real = ownerOf(items, e.callId)
       if (real === -1) return items
       const target = items[real] as Extract<ChatItem, { kind: 'tool' }>
-      // `live` is discarded here — the full completed output has already arrived as `result`, so the chunk's job is done
       return replaceAt(items, real, { ...target, result: e.summary, ok: e.ok, live: undefined })
     }
-    /*
-     * Live output while running (#58). Attaches to its own call's row (`ownerOf`) — having several
-     * calls open at once actually happens: a background agent's card stays open the whole time its
-     * parent uses a different tool, and that agent's own steps arrive through this same path (#98).
-     * Never attached to an already-closed row — its result already carries the whole output. Only the
-     * tail is kept: what needs showing is "what is coming out right now," not the full text.
-     */
+    // Never onto a closed row: its result holds the whole output. Only the tail shows what is coming out now (#58).
     case 'tool_output_delta': {
       const real = ownerOf(items, e.callId)
       if (real === -1) return items
@@ -285,11 +209,7 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       return replaceAt(items, real, { ...target, live })
     }
     case 'approval_request':
-      /*
-       * The same card stands again — when the host re-raises a capability question's card (M4 D-4)
-       * after whatever other card was covering it closes. The conversation already has one row for
-       * it: this never draws a second one.
-       */
+      // The host re-raises a capability card once the card over it closes (apps-plan D-4); it has a row already
       if (
         items.some(
           (it) => it.kind === 'approval' && it.requestId === e.requestId && it.decision === undefined,
@@ -330,24 +250,10 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       )
     case 'user_message': {
       /*
-       * If I sent it, it is already drawn — this only confirms it.
-       * If someone else sent it (the Assistant's `send_to_session`), this is the only path by
-       * which it appears on screen at all. Before this branch existed, an injected message was only
-       * stored, never shown.
-       *
-       * A message carrying `from` is excluded from confirmation matching (FR-11) — if the person
-       * happened to have the same sentence sitting pending, the Assistant's instruction would be
-       * absorbed into that bubble and its origin marker would quietly disappear. Matching by text is
-       * an assumption that only holds among my own messages.
+       * Confirms the person's pending bubble by the text as sent (#75), or draws another sender's message, which has no
+       * other way on screen. One from another session, an app or a script never confirms a pending bubble (FR-11): its
+       * origin mark would be absorbed. A history page may have confirmed it already (#79).
        */
-      /*
-       * The match is made against **the text as sent** (#75). Back when attachments were mixed into
-       * `text` as a 📎 label, what was drawn and what was sent differed, so confirmation never lined
-       * up and a second bubble was appended (discovered on codex). Now that attachments are a
-       * separate field, `text` is exactly the text sent — this identity is what this match relies on.
-       */
-      // A message sent by an app (M4 B-1) is also excluded from the human message's confirmation match — its origin marker must never be absorbed into a human bubble
-      // Already confirmed by the merge with history (#79) — a history page arrived before this event
       if (holds(items, e.seq)) return items
       const idx =
         e.from || e.fromApp || e.fromScript ? -1 : items.findIndex((i) => i.kind === 'user' && i.pending && i.text === e.text)
@@ -362,7 +268,7 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
             ...(e.from ? { from: e.from } : {}),
             ...(e.fromApp ? { fromApp: e.fromApp } : {}),
             ...(e.fromScript ? { fromScript: e.fromScript } : {}),
-            // Attachments of a message inserted by the host (M4 C-5) — only a path and a name. Image bytes come when history is re-read
+            // Host-inserted (apps-plan C-5): a path and a name only; image bytes come with a history re-read
             ...(e.attachments?.length ? { attachments: e.attachments } : {}),
           },
         ]
@@ -374,29 +280,21 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       // The actual content already went into the store — the screen re-reads it outside `dispatchEvent`
       return items
     case 'compaction':
-      // Only the model's own context was folded — our record stays intact. Where it was folded must
-      // be shown so someone can read back past that point
+      // Only the model's context was folded; the mark shows where, so one can read back past it
       if (holds(items, e.seq)) return items
       return [...items, { kind: 'mark', seq: ++chatSeq, ...stored(e.seq), ...markerParts(e) }]
     case 'handoff':
-      // Where this session came from (#102). The note's full text lives only in the stored payload — this is a single line
+      // The note's full text stays in the stored payload (#102)
       if (holds(items, e.seq)) return items
       return [...items, { kind: 'mark', seq: ++chatSeq, ...stored(e.seq), ...markerParts(e) }]
-    // A fresh conversation inside the session (#304) and what the tool wanted read (#304): one quiet line each
+    // A fresh conversation inside the session and a tool's notice: one quiet line each (#304)
     case 'conversation_reset':
     case 'notice':
       if (holds(items, e.seq)) return items
       return [...items, { kind: 'mark', seq: ++chatSeq, ...stored(e.seq), ...markerParts(e) }]
-    /*
-     * A failed turn is also kept in the conversation (#107).
-     *
-     * An error used to only change state and pass through. So a turn that died with a 400 was
-     * indistinguishable on screen from **nothing having happened at all** — an empty reply, and
-     * "waiting for a human." What happened must be visible in the transcript: the session badge
-     * recovers once the next turn starts, but even then the person still has no idea why.
-     */
+    // A failed turn stays in the conversation (#107): a state change alone reads as nothing having happened
     case 'error':
-      // A session's error is recorded as a marker row and carries its number (#161) — matched by number like every other stored row
+      // Matched by number like every stored row (#161)
       if (holds(items, e.seq)) return items
       return [...items, { kind: 'mark', seq: ++chatSeq, ...stored(e.seq), ...markerParts(e) }]
     default:
@@ -404,13 +302,7 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
   }
 }
 
-/**
- * What to write on the compaction marker.
- *
- * "Compacted" alone is not enough. The worst case is a failure that looks like a success, and
- * how much it shrank tells someone roughly when the next compaction might come (only when the tool
- * reports it).
- */
+/** A failure must not read as success; how much it shrank hints when the next compaction comes */
 function compactionText(e: Extract<NormalizedEvent, { type: 'compaction' }>): string {
   if (e.failed) return `Compaction failed — ${e.reason ?? 'unknown reason'}`
   if (e.before != null && e.after != null) {
@@ -419,21 +311,12 @@ function compactionText(e: Extract<NormalizedEvent, { type: 'compaction' }>): st
   return 'Earlier messages were compacted here'
 }
 
-/**
- * What to write on the handoff marker (#102).
- *
- * The note's full text is never drawn here — it can run to megabytes, and the successor's first
- * message already carries a preview. What this states is the single fact that "this session
- * continues that one," and the full text is kept in the record alongside that fact.
- */
+/** Never the note itself (#102): it can run to megabytes, and the successor's first message carries a preview */
 function handoffText(e: Extract<NormalizedEvent, { type: 'handoff' }>): string {
   return `Handed off from "${e.from}" — the note is kept with this session`
 }
 
-/**
- * The line a fresh conversation leaves (#304). What matters is that the model no longer knows anything above it — the
- * record does, which is why the line exists at all.
- */
+/** The model knows nothing above this line, the record does: why the line exists (#304) */
 export function resetText(e: Extract<NormalizedEvent, { type: 'conversation_reset' }>): string {
   return e.trigger === 'clear'
     ? 'Conversation cleared — the agent remembers nothing above this line'
@@ -449,7 +332,7 @@ const KNOWN_MARKERS: ReadonlySet<string> = new Set([
   'notice',
 ])
 
-/** One stored or live marker's line — the live and restored paths must never word the same marker differently */
+/** The live and restored paths must never word the same marker differently */
 function markerText(
   e: Extract<NormalizedEvent, { type: 'compaction' | 'handoff' | 'error' | 'conversation_reset' | 'notice' }>,
 ): string {
@@ -460,7 +343,7 @@ function markerText(
       return errorText(e)
     case 'conversation_reset':
       return resetText(e)
-    // The tool's own sentence, as is (#304) — the same rule as an error's. A readable notice leads with who and what (#342)
+    // The tool's own sentence as is (#304); a readable notice leads with who and what (#342)
     case 'notice': {
       const line = noticeLine(e)
       if (!line) return e.text
@@ -474,32 +357,27 @@ function markerText(
 }
 
 /**
- * The readable parts of a tool's notice (#342), for the line that draws it. The owner saw two Codex notices in a row
- * that read like the same kind of problem: one about the person's own `config.toml`, one about how Centralu loads
- * history, which they can do nothing about. So the line says who is speaking and what kind of notice it is
- * (`head`), whose it is to act on (`audience`), and for a notice the host recognized, a plain explanation (`summary`,
- * `items`, `hint`) with the tool's own words (`original`) one click away.
+ * Two notices can read alike while only one is the person's to act on (#342), so the line says who and what (`head`),
+ * whose (`audience`), and the host's plain explanation with the tool's own words (`original`) one click away.
  */
 export type NoticeLine = {
   /** "Codex · config warning" */
   head: string
   audience?: 'you' | 'centralu'
-  /** What the line says after who and what: the plain explanation, or the tool's own text when there is none */
   body: string
   summary?: string
   items?: string[]
   hint?: string
-  /** The tool's own words, shown on demand when there is a summary; absent when they are the line itself */
+  /** Absent when the tool's words are the line itself */
   original?: string
-  /** Who said `original`, for the control that shows it */
   from: string
-  /** A line Centralu's mail left (a delivery, a note about one): drawn as the mail capsule, with no head (#2332) */
+  /** A line Centralu's mail left: drawn as the mail capsule, with no head (#2332) */
   mail?: true
-  /** The messages a delivery's line stands for, which it folds open to (#2333); absent from an older host's line and a row stored before */
+  /** What a delivery's line folds open to (#2333); absent from an older host's line and an older row */
   delivered?: MailDelivered[]
 }
 
-/** A notice's readable parts, or null for one the host did not place (stored before #342): it reads as its text alone */
+/** null for a notice stored before #342: it reads as its text alone */
 function noticeLine(e: Extract<NormalizedEvent, { type: 'notice' }>): NoticeLine | null {
   if (!e.from) return null
   // A row stored before #2332 starts with the ✉ the host wrote then; the capsule's icon stands for it now (the old comma stays)
@@ -515,25 +393,20 @@ function noticeLine(e: Extract<NormalizedEvent, { type: 'notice' }>): NoticeLine
   }
 }
 
-/** Whose notice it is to act on, in the words the line uses (#342) */
 export function audienceText(a: 'you' | 'centralu'): string {
   return a === 'you' ? 'for you' : 'for Centralu'
 }
 
 /**
- * The audience the line says after its head, or null when it says none: a notice from Centralu that is for Centralu says nothing more by "for Centralu"
- * than its speaker does ("Centralu · next step after compaction", owner, 2026-11-18). The one place that decides, for the capsule and for the copied text
+ * null for Centralu's notice for Centralu: "for Centralu" adds nothing to its speaker (owner, 2026-11-18). One answer
+ * for the capsule and the copied text.
  */
 export function audienceShown(n: Pick<NoticeLine, 'audience' | 'from'>): 'you' | 'centralu' | null {
   if (!n.audience) return null
   return n.audience === 'centralu' && n.from === 'Centralu' ? null : n.audience
 }
 
-/**
- * What kind of line a marker is (#2338), for its icon: a failure (a turn that failed, a compaction that did, a conversation
- * that could not open) is drawn as a dashed box, every other kind as a capsule. `notice` is also a line the window adds itself
- * (a question a message dropped).
- */
+/** For the icon (#2338): `failed` draws a dashed box, every other kind a capsule; the window adds `notice` lines too */
 export type MarkKind = 'compaction' | 'handoff' | 'reset' | 'notice' | 'failed'
 
 function markKind(e: Extract<NormalizedEvent, { type: 'compaction' | 'handoff' | 'error' | 'conversation_reset' | 'notice' }>): MarkKind {
@@ -541,7 +414,6 @@ function markKind(e: Extract<NormalizedEvent, { type: 'compaction' | 'handoff' |
   return e.type === 'conversation_reset' ? 'reset' : e.type
 }
 
-/** A marker's text, its kind, and for a readable notice its parts — the live and restored paths build the row the same way */
 function markerParts(
   e: Extract<NormalizedEvent, { type: 'compaction' | 'handoff' | 'error' | 'conversation_reset' | 'notice' }>,
 ): {
@@ -556,16 +428,16 @@ function markerParts(
   return notice ? { ...line, notice } : line
 }
 
-/** The model the provider refused, when this error is that failure (#1369) — the host marks it in `error.data`; other errors carry none */
+/** The host marks a refused model in `error.data` (#1369) */
 function refusedModel(e: Extract<NormalizedEvent, { type: 'error' }>): string | null {
   const data: unknown = e.error.data
   if (typeof data !== 'object' || data === null || !('reason' in data) || data.reason !== 'model_rejected') return null
   return 'model' in data && typeof data.model === 'string' ? data.model : null
 }
 
-/** A failed turn's one line (#107) — carries the tool's own sentence as is. Rewording it into our own words would erase the cause */
+/** The tool's own sentence as is: rewording it would erase the cause (#107) */
 function errorText(e: Extract<NormalizedEvent, { type: 'error' }>): string {
-  // No turn was running — the conversation could not be opened at all (#168, item 5)
+  // No turn was running: the conversation could not be opened at all (#168)
   if (e.error.code === 'conversation_locked') return `Could not open this conversation — ${e.error.message}`
   // Trying again cannot help; picking another model can, and the row offers it (#1369)
   if (refusedModel(e)) return `The agent could not finish this turn — ${e.error.message} Pick another model for this session to continue.`
@@ -577,7 +449,6 @@ export function subagentRow(sessionId: string, seq: number, step: SubagentStep):
   return { sessionId, seq, ...subagentStepRow(step), payload: step, ts: Date.now() }
 }
 
-/** Message restoration (on restart, or switching sessions) */
 export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
   const items: ChatItem[] = []
   for (const m of msgs) {
@@ -588,7 +459,6 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
   return items
 }
 
-/** Marks a row with when it was said or happened (see `ChatItem.at`) */
 export function stampSaid(item: ChatItem, at: number): ChatItem {
   return { ...item, at }
 }
@@ -611,11 +481,10 @@ function pushStored(items: ChatItem[], m: StoredMessage): void {
         ...(p?.from ? { from: p.from } : {}),
         ...(p?.fromApp ? { fromApp: p.fromApp } : {}),
         ...(p?.fromScript ? { fromScript: p.fromScript } : {}),
-        // Attachment restoration — image bytes (`data`) come from the host reading the file inside `loadMessages`
         ...(p?.attachments?.length ? { attachments: p.attachments } : {}),
       })
     } else if (m.kind === 'text' || m.kind === 'reasoning') {
-      // One row is one message (#77) — neighboring rows are different replies and are never merged (the same rule as live's `continues`)
+      // One row is one message (#77), the rule live's `continues` follows
       const e = m.payload as { text?: string }
       items.push({
         kind: m.kind === 'text' ? 'assistant' : 'reasoning',
@@ -624,16 +493,12 @@ function pushStored(items: ChatItem[], m: StoredMessage): void {
         text: e.text ?? '',
       })
     } else if (m.kind === 'marker') {
-      // The stored payload is the event itself — live and restored paths must never produce different wording
+      // The stored payload is the event itself
       const e = m.payload as Extract<
         NormalizedEvent,
         { type: 'compaction' | 'handoff' | 'error' | 'conversation_reset' | 'notice' }
       >
-      /*
-       * A marker kind this build does not know (one a newer host stored) is left out. It used to be drawn as a
-       * compaction, the only marker there was at first — so a #304 notice read back by an older window would have said
-       * "Earlier messages were compacted here".
-       */
+      // A kind a newer host stored is left out: drawn as a known kind, it would be worded wrongly
       if (typeof e.type !== 'string' || !KNOWN_MARKERS.has(e.type)) return
       items.push({ kind: 'mark', seq: m.seq, storedSeq: m.seq, ...markerParts(e) })
     } else if (m.kind === 'tool_call') {
@@ -643,24 +508,13 @@ function pushStored(items: ChatItem[], m: StoredMessage): void {
       }
       if (e.summary) items.push(toolItem(m.seq, { storedSeq: m.seq }, e.callId, e.summary))
     } else if (m.kind === 'tool_result') {
-      /*
-       * A restored tool card also **carries its output** (2026-09-12, surfaced in a demo scene).
-       *
-       * The host keeps `tool_call` and `tool_result` as separate rows, but only the `tool_call` branch
-       * existed here. So reopening a session left the card with only its title, its output gone
-       * completely — a screen that had only ever been visible to whoever watched it live. The
-       * attachment rule is the same as live's (`appendChat`): **its own call's row** (`ownerOf`, #98).
-       *
-       * If no match is found (a page boundary put its `tool_call` outside this batch), it is silently
-       * dropped — attaching an ownerless output to the conversation as a new row would invent a
-       * message that never existed.
-       */
+      // Onto its own call's row (#98); with the call outside this page it is dropped, as a new row would invent a message
       const e = m.payload as { callId?: string; summary?: string; ok?: boolean }
       const i = ownerOf(items, e.callId ?? '')
       const it = items[i]
       if (it?.kind === 'tool') items[i] = { ...it, result: e.summary ?? '', ok: e.ok }
     } else if (m.kind === 'image') {
-      // An image is persisted (#40, second pass) — the host resends the bytes by reading the file again
+      // The host reads the persisted file again for the bytes (#40)
       const e = m.payload as { mime?: string; data?: string; path?: string; name?: string; note?: string }
       items.push({
         kind: 'image',

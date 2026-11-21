@@ -16,15 +16,16 @@ import { AnsweringPicker } from './AnsweringPicker.js'
 import { answerTo, answeringTarget, choicesLabel, closeStopsWork, replyKind, threadStateLabel } from './mailLabels.js'
 
 /**
- * One conversation of the mailbox in the inbox (#1347, docs/plans/mailbox.md §10.1): who is in it, what was said, and the person's reply. Others' words are drawn as theirs, in a frame under their name, through the session view's `Markdown` (#2228: no raw HTML, links as that view treats them);
- * the person's own are marked as theirs and stay plain text. Centralu's lines (a state moved, a party joined) are small and plain.
+ * One mailbox conversation in the inbox (#1347, docs/plans/mailbox.md §12.3): who is in it, what was said, the person's
+ * reply. Others' words go under their name through the session view's `Markdown` (#2228: no raw HTML, links as there);
+ * the person's stay plain text. Centralu's lines (a state moved, a party joined) are small and plain.
  */
 export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: string) => void }) {
   const view = useStore((s) => s.mailThread)
   const back = useStore((s) => s.closeMailThread)
   const close = useStore((s) => s.closeMail)
   const older = useStore((s) => s.loadOlderMail)
-  // A host of an older build stops the turn when the chain is closed: asked once first, with no way to close and leave it running. A host of this build stops nothing (it says so by sending `canReply`)
+  // An older build's host stops the turn on close, so that asks once first; this build's stops nothing (it sends `canReply`)
   const [confirming, setConfirming] = useState<'finished' | 'dropped' | null>(null)
   // The questions whose pick is on its way to the host: the reply box waits for every one of them, since its words would answer the newest open question
   const [picking, setPicking] = useState<readonly string[]>([])
@@ -43,7 +44,7 @@ export function MailThread({ onOpenSession }: { onOpenSession: (sessionId: strin
   const parties = [thread.owner, ...(thread.assignee ? [thread.assignee] : []), ...view.parties.map((p) => p.party)]
   const unique = [...new Map(parties.filter((p) => p.sessionId !== null).map((p) => [p.address, p])).values()]
   return (
-    // The session panel's colours (owner, 2026-11-14): its floor behind, its bubbles for who said what (`bubbleLook`)
+    // The session panel's colours: its floor behind, its bubbles for who said what (`bubbleLook`)
     <div className="flex min-h-0 flex-col bg-surface-floor" data-testid="mail-thread">
       <header className="flex items-center gap-2 border-b border-line px-4 py-2.5">
         {/* The window's own back chevron (App `NavButtons`): one shape for "back" */}
@@ -206,7 +207,7 @@ function Reply({ blocked }: { blocked: boolean }) {
   const sendKey = useSendKey()
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
-  // Which question the words answer, once the person has named one (#2191): else the newest, as it was before
+  // Which question the words answer, once the person has named one (#2191): else the newest
   const [chosen, setChosen] = useState<string | null>(null)
   if (!view) return null
   const { questions, target } = answeringTarget(view, chosen)

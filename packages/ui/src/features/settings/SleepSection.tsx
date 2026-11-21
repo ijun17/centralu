@@ -3,16 +3,14 @@ import { useStore } from '../../store/store.js'
 import { SettingsSelect } from './OtherChoice.jsx'
 import { SettingsRow } from './SettingsLayout.jsx'
 
-/** The choices, in minutes; null never. 15 is the default (the owner's decision, 2026-10-12) */
+/** The choices, in minutes; null never. 15 is the default (the owner's decision) */
 const CHOICES: readonly (number | null)[] = [5, 15, 30, 60, 240, null]
 
 const label = (m: number | null) => (m === null ? 'Never' : m < 60 ? `${m} minutes` : m === 60 ? '1 hour' : `${m / 60} hours`)
 
 /**
- * "Put idle sessions to sleep after" (#568). Each session runs its own agent process, a few hundred megabytes
- * that grow while it sits there; a session left alone this long has its process ended and wakes when it is used. In
- * the Background category because it answers the same question as the switch beside it: what happens to my agents
- * when I am not using them.
+ * "Put idle sessions to sleep after" (#568): each session's agent process takes a few hundred megabytes that grow while
+ * idle; after this long it is ended, and the session wakes on use. In Background, beside the switch of the same errand.
  */
 export function SleepSection(_props: { first: boolean }) {
   const policy = useStore((s) => s.sleepPolicy)

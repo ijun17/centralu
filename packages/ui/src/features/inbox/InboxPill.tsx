@@ -5,19 +5,15 @@ import type { Notice } from '../../store/state/notifications.js'
 import { MailIcon } from '../../components/icons.jsx'
 import { mailAsksYou, mailAttention } from '../../store/mail.js'
 
-/** How long a new notice stays written out in the capsule before it folds back into the count (owner, 2026-10-18: 4 s;
- * 2026-10-20: 5 s, as 4 s sometimes folded before it was read); a finished turn on screen is judged seen at the same
- * moment, Notices.tsx */
+/**
+ * How long a new notice stays written out before it folds into the count: 4 s sometimes folds before it is read. A
+ * finished turn on screen is judged seen at the same moment (Notices.tsx)
+ */
 export const PEEK_MS = 5000
 
 /**
- * The inbox's door in the top bar: an envelope and the count of sessions waiting on the person, on one capsule
- * (owner, 2026-10-18). It replaced the "Waiting for input NN" readout and the cards that stacked in the top right
- * over the conversation: both said the same things, and the cards covered what the person was reading.
- *
- * Something new that happened off screen (`notices`: a turn finished, an approval or an agent start asked for, an
- * error) is written out in the capsule itself for a few seconds ("api finished"), then it folds back into the
- * count. Nothing covers the page; the list behind the count (the inbox) still holds every item.
+ * The inbox's door in the top bar (docs/design-system.md §6): an envelope and the waiting count on one capsule, which
+ * writes a new notice out for a few seconds ("api finished") and folds it back; no cards cover the page.
  */
 export function InboxPill({ counts, onOpen, title }: { counts: WaitingCounts; onOpen: () => void; title: string }) {
   const peek = useNoticePeek()
@@ -27,13 +23,7 @@ export function InboxPill({ counts, onOpen, title }: { counts: WaitingCounts; on
   const total = counts.approval + counts.input + counts.error + mailWaiting
   // Brightness says what kind of wait: an approval or an error is the signal, plain waiting stays quiet
   const tone = counts.approval + counts.error > 0 ? 'signal' : total > 0 ? 'text-ink-muted' : 'text-ink-faint'
-  /*
-   * The border says what waits that only the person can settle (owner, 2026-10-18): the signal ink and solid for an approval or a question
-   * waiting on their answer (a card, or mail: #2227), the signal ink and dashed for an error. `ink-signal` is the strongest ink of each theme
-   * (white in the dark presets, near black in the light ones, a custom theme's own), so one token gives the edge its role on every theme.
-   * An error outranks the rest, so with both the border is dashed: it is the one shape that tells a failure from a wait, and a failure
-   * is what the person has not been expecting. The colour changes with the short fade of the capsule's `transition-colors` (design-system §9).
-   */
+  // The edge follows docs/design-system.md §6 (the inbox capsule's row, #2227), fading with `transition-colors` (§9)
   const answers = counts.approval > 0 || mailAsks > 0
   const edge = counts.error > 0 ? 'border-dashed border-ink-signal' : answers ? 'border-solid border-ink-signal' : 'border-solid border-line'
   return (
@@ -124,12 +114,9 @@ export function peekText(n: Notice): string {
 }
 
 /**
- * What the capsule writes out: the newest notice that arrived, for PEEK_MS, or null. A notice already there when the
- * screen opens is not news.
- *
- * **Shown only while the window is in front.** One that arrives while the person is in another window waits, and is
- * written out the moment they come back: a line that opened and folded behind another window was never seen. More
- * than one waiting comes back as the newest, with how many more ("api finished · 2 more").
+ * The newest notice that arrived, for PEEK_MS, or null; one there when the screen opens is not news. Only while the
+ * window is in front, as a line behind another window is never seen: what arrives meanwhile waits and comes back as the
+ * newest with how many more ("api finished · 2 more").
  */
 function useNoticePeek(): Peek | null {
   const notices = useStore((s) => s.notices)
@@ -145,10 +132,7 @@ function useNoticePeek(): Peek | null {
   }, [notices])
   useEffect(() => {
     if (!appFocused || held.current.length === 0) return
-    /*
-     * Everything that arrived while away, the session on screen included: coming back to the window clears that one's
-     * notice (it is on screen now), but the person was not there when it finished, so this line is how they learn it.
-     */
+    // All that arrived while away, the on-screen session's too: coming back clears its notice, so this line tells of it
     const waiting = held.current
     held.current = []
     if (waiting.length === 0) return
@@ -166,9 +150,8 @@ function useNoticePeek(): Peek | null {
 type Peek = { notice: Notice; more: number; at: number }
 
 /**
- * Which of `notices` arrived since `seen` (null: the screen just opened, and nothing there is news), and what is seen
- * now. That is the notices there now, not every one ever: each is made with the instant it was made (`at`), so one that
- * left never comes back under its key, and keeping it would only grow the set for the window's life.
+ * Which of `notices` arrived since `seen` (null: the screen just opened, nothing is news), and the new `seen`: only the
+ * notices there now, as a key holds its `at`, so one that left never comes back under it.
  */
 export function arrivedNotices(seen: Set<string> | null, notices: Notice[]): { fresh: Notice[]; seen: Set<string> } {
   const key = (n: Notice) => `${n.sessionId}:${n.kind}:${n.at}`

@@ -12,34 +12,22 @@ import { TextInput } from '../../components/TextField.jsx'
 import { Pill } from '../../components/Pill.jsx'
 import { Tooltip } from '../../components/primitives.jsx'
 
-/**
- * Changed files — the most frequently viewed list in this app.
- * Only the list and committing happen here; a diff opens up somewhere wide.
- */
+/** The list and committing; a diff opens in the wide overlay */
 export function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean }) {
   const platform = usePlatform()
   const openGit = useStore((s) => s.openGit)
   const setToast = useStore((s) => s.setToast)
-  /*
-   * Writes through the store, reads straight from the platform (issue #49).
-   *
-   * This panel sits **beside** the sidebar count it was leaving stale — commit here and the
-   * number a few pixels to the left kept the old value. `refresh` below stays local because
-   * it fetches the file list, which the store does not hold; the store owns the summary.
-   */
+  // Writes go through the store, so the sidebar's count beside it updates too (#49); the file list is read here, since
+  // the store holds only the summary.
   const gitStage = useStore((s) => s.gitStage)
   const gitCommit = useStore((s) => s.gitCommit)
   const touched = useGitRefreshKey(projectId)
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
-  /** The person asked to end the running write (#1007); held until that write answers, so Cancel is pressed once */
+  /** Held until the cancelled write answers, so Cancel is pressed once (#1007) */
   const [cancelling, setCancelling] = useState(false)
 
-  /*
-   * A response arriving late while switching projects must not draw another project's list (`useLoad`). Re-reads
-   * whenever an agent touches a file (evidence only means something if it is current). A failed read says so: it
-   * used to be drawn as "No changes" (#850 item 8).
-   */
+  // Re-read whenever an agent touches a file, since evidence must be current. A failed read says so, not "No changes" (#850 item 8).
   const status = useLoad(() => platform.git.status(projectId), [platform, projectId], [touched])
   const files = status.data
   const refresh = status.reload
@@ -47,14 +35,14 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
   const unstaged = files?.filter((f) => !f.staged) ?? []
   const staged = files?.filter((f) => f.staged) ?? []
 
-  /** `verb` names the action in a failure's toast ("Could not commit: …"), the shape every error takes (docs/ux-writing.md 1.5) */
+  /** `verb` names the action in a failure's toast ("Could not commit: …", docs/ux-writing.md 1.5) */
   const run = async (fn: () => Promise<void>, verb: string) => {
     setBusy(true)
     try {
       await fn()
       await refresh()
     } catch (e) {
-      // When the RPC throws (disconnect, timeout), nothing caught it and it looked like a success — no silent failures
+      // A thrown RPC (disconnect, timeout) must not pass for a success
       setToast(`Could not ${verb}: ${errorMessage(e)}`)
     } finally {
       setBusy(false)
@@ -62,10 +50,8 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
     }
   }
 
-  /*
-   * A commit or push waits up to ten minutes on a hook or a credential helper (#980); this ends it sooner (#1007). The
-   * write itself answers that it was cancelled, and its toast says so.
-   */
+  // A commit or push waits up to ten minutes on a hook or credential helper (#980); this ends it sooner (#1007), and the
+  // write's own answer says it was cancelled.
   const cancel = async () => {
     setCancelling(true)
     try {
@@ -79,7 +65,7 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
 
   return (
     <section className="flex min-h-0 flex-1 flex-col border-b border-line" data-testid="evidence-git">
-      {/* The label 'Changes' was dropped since the tab already says it — only the count and buttons go to the right of the strip */}
+      {/* No 'Changes' label: the tab says it */}
       {files && files.length > 0 && (
         <TabActions>
           <ChangeCount count={changedFileCount(files)} />
@@ -117,11 +103,7 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
       ) : (
         <>
           {/*
-            Staged and unstaged files are shown **split apart.**
-            What will actually go into the commit is the one fact that matters right before
-            committing, and mixing them into one list meant reading that off a small tag at the end
-            of each row instead. Above the boundary is what goes in, below it is what does not — the
-            boundary itself is the answer.
+            Split apart: what goes into the commit is the fact that matters before committing, not a tag per row.
           */}
           <div className="min-h-0 flex-1 overflow-y-auto">
             <ChangeGroup
@@ -153,13 +135,7 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
       )}
       {/* After a failed read too: git may still commit and push what it could not list */}
       {!denied && (files !== undefined || status.error !== null) && (
-        /*
-         * Committing has to work in a narrow space too — the flow of checking a change and then
-         * wrapping it up right there must not be broken. This block stays even when the list is
-         * empty (#160). In the most common sequence of committing and pushing as separate steps,
-         * the moment everything got committed and the state became "No changes," Push disappeared
-         * along with it — there was no way left in the app to push the commit just made.
-         */
+        /* Stays with an empty list (#160): right after a commit the list is "No changes", and Push must remain */
         <div className="mt-auto border-t border-line px-3 py-2">
           <TextInput
             size="sm"
@@ -284,7 +260,7 @@ function ChangeRow({
   actionLabel: string
   onAction: () => void
 }) {
-  // The row whose diff the wide view shows is the selected one: the same pair as a commit row and a file tree row
+  // The row whose diff the wide view shows is selected, as with a commit or tree row
   const selected = useStore(
     (s) =>
       s.overlay?.kind === 'git' &&
@@ -307,9 +283,7 @@ function ChangeRow({
         <span className="readout truncate text-xs">{file.path}</span>
       </button>
       {/*
-        A way to stage or unstage just this one file. Without it, doing "commit everything except
-        this one" meant dropping out to the terminal — it must be possible to finish it right where
-        it was being reviewed.
+        Per file, so "everything but this one" is done here, not in a terminal.
       */}
       {/* Its own positioned box: the tooltip's anchor is `relative`, and two positions on one element race in the CSS order */}
       <span className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 transition-opacity focus-within:opacity-100 group-hover/file:opacity-100">
@@ -329,7 +303,7 @@ function ChangeRow({
   )
 }
 
-/** How many files changed, in the label capsule; the words are in its tooltip, as on the top bar's capsules */
+/** The words are in the tooltip, as on the top bar's capsules */
 function ChangeCount({ count }: { count: number }) {
   return (
     <Tooltip content={`${count} changed ${count === 1 ? 'file' : 'files'}`} align="right">
@@ -340,36 +314,22 @@ function ChangeCount({ count }: { count: number }) {
   )
 }
 
-/** A write that answered with a failure: what failed and git's own reason, or what failed alone when it gave none */
+/** What failed, with git's reason when it gave one */
 function failure(verb: string, reason: string | undefined): string {
   return reason ? `Could not ${verb}: ${reason}` : `Could not ${verb}`
 }
 
 /**
- * The single letter in front of a row (user request, 2026-09-10: "a new file shows up as a
- * question mark, but it should show A").
- *
- * git writes a file it does not yet track as `?`, but on screen that reads as **unknown** — when
- * it is actually a known fact (a new file). The letter a person reads should state what happened,
- * the way M, A, D and R do, so it is written as A (added) instead. Whether it is staged is already
- * stated by the group it is in (Staged/Changed), so this letter does not need to say it again.
- *
- * **The data itself is not changed.** The host's `'?'` stays exactly as the fact "not tracked" — only
- * the display is changed here (the same rule the diff's file band follows, keeping the original
- * wording for a copy).
+ * git's untracked `?` reads as unknown, so a new file shows A, as M, A, D and R say what happened; the group says whether
+ * it is staged. Display only: the host's `'?'` stays.
  */
 function statusMark(status: GitFileStatus['status']): string {
   return status === '?' ? 'A' : status.toUpperCase()
 }
 
 /**
- * The signal that knows when to re-read the list — two signals combined.
- *
- * The count of files an agent touched reports the first edit **during** a turn. That alone was not
- * enough (#160): a `git commit` run through Bash, a command typed into the terminal, or re-editing a
- * file already touched does not change this count. So this also watches `gitEpoch`, which is bumped
- * by the same signals that make the sidebar's summary re-read (turn end, window regaining focus, an
- * approval, switching branches).
+ * When to re-read: the touched-file count catches a turn's first edit, but not a Bash `git commit`, a terminal command or a
+ * re-edit (#160), so `gitEpoch` (turn end, window focus, an approval, a branch switch) joins it.
  */
 export function useGitRefreshKey(projectId: string): string {
   const touched = useStore((s) => {

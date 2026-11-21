@@ -12,7 +12,7 @@ export function isRelayed(item: { from?: unknown; fromApp?: unknown; fromScript?
 /** The colour classes of the person's bubble, or of a relayed one */
 export const mineBubbleLook = (relayed: boolean): string => bubbleLook(relayed ? 'theirs' : 'mine')
 
-/** Markers for the person's bubble and for a relayed one (tests and the replay scenarios read them; the edges are tokens now, not a stylesheet override) */
+/** Markers for the person's bubble and for a relayed one (tests and the replay scenarios read them; the edges are tokens, not a stylesheet override) */
 export function mineBubbleAttrs(relayed: boolean): { 'data-mine-bubble': ''; 'data-relayed'?: '' } {
   return relayed ? { 'data-mine-bubble': '', 'data-relayed': '' } : { 'data-mine-bubble': '' }
 }

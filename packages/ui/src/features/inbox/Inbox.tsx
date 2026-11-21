@@ -33,16 +33,9 @@ import { useLeavingCards } from './useLeavingCards.js'
 import { MailThread } from './MailThread.jsx'
 
 /**
- * The inbox (FR-15) — the entry point for coming back to the desk.
- * Ignores project structure and shows only "what is waiting on me right now": the sessions and the mail in one list,
- * newest first, with the mail that was not delivered pinned on top and what is read or finished folded under
- * "Earlier" (owner, 2026-11-12, #2213).
- *
- * **It is a dropdown hanging below the top-bar number** (user request, 2026-09-09). While it was
- * a modal in the middle of the screen, the place clicked and the place it opened were far apart,
- * so the one action of checking the number and opening the list moved the eye twice. The
- * location moved, but **keyboard ownership stays the same** — clearing the list with ↑↓, ↵ and
- * esc is the heart of this screen, and that has nothing to do with where it sits.
+ * The inbox (FR-15): what waits on the person now, sessions and mail in one list across projects, newest first,
+ * undelivered mail pinned on top, what is read or finished folded under "Earlier" (#2213). A dropdown under the top
+ * bar's count, so the eye does not jump; the keyboard is still a modal's, as clearing the list by key is its heart.
  */
 export function Inbox() {
   const open = useStore((s) => s.inboxOpen)
@@ -63,7 +56,7 @@ export function Inbox() {
   // Nothing to act on: what is read is folded under Earlier, which is no reason for the list to look as if something waited
   const nothingWaiting = list.held.length === 0 && list.waiting.length === 0 && !mail?.waiting
   const [earlierOpen, setEarlierOpen] = useState(false)
-  // Waiting or Tasks (#1577, owner 2026-11-14): what waits on the person, or the host's work by who acts next
+  // Waiting or Tasks (#1577): what waits on the person, or the host's work by who acts next
   const [tab, setTab] = useState<'waiting' | 'tasks'>('waiting')
   const loadTasks = useStore((s) => s.loadTasks)
   const mailTasks = useStore((s) => s.mailTasks)
@@ -125,8 +118,7 @@ export function Inbox() {
 
   useEffect(() => {
     if (!open) return
-    // The inbox is a modal — it takes over keyboard ownership.
-    // Right after sending a message, focus stays on the composer; left alone, d, j and k would type straight into the body.
+    // Takes the keyboard: right after a send, focus is on the composer, where d, j and k would type into the message
     ;(document.activeElement as HTMLElement | null)?.blur()
     panelRef.current?.focus()
   }, [open])
@@ -134,7 +126,7 @@ export function Inbox() {
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      // The list's keys only when nothing covers it and no field has the keyboard (#683 review, inboxKeys.ts)
+      // The list's keys only when nothing covers it and no field has the keyboard (#683, inboxKeys.ts)
       const action = inboxKeyAction(e, {
         typing: isTextEntry(e.target),
         covered: inboxCovered(useStore.getState()),
@@ -172,10 +164,11 @@ export function Inbox() {
       } else if (action === 'done') {
         // Done (#669): marks a finished turn read without opening it; on an error (#1549) it clears the mark. Approvals have no Done.
         if (item && doneable(item)) void markDone(item.id)
-        // A mail thread's Done is its Mark done, on the host (#2226). One a session is working on opens instead: closing it may ask first (`closeStopsWork`). So does a card: a question is answered, never closed by a key
+        // A thread's Done is Mark done on the host (#2226). A worked-on one opens instead, as closing may ask (`closeStopsWork`);
+        // so does a card: a question is answered, never closed by a key
         else if (row?.kind === 'mail') void (row.thread.working === true || row.thread.ask !== null ? openMailThread(row.thread.id) : closeMail('finished', row.thread.id))
       } else if (action === 'choose') {
-        // The number is the choice's own, on the card under the cursor: the key presses its button, so it answers exactly what a click would, and never a card that has taken a press already
+        // The key presses the choice's button on the cursor's card: what a click would answer, never a card already pressed
         const button = row?.kind === 'mail' ? panelRef.current?.querySelector<HTMLButtonElement>(`[data-testid="mail-ask-choices-${CSS.escape(row.thread.id)}-${e.key}"]`) : null
         if (button && !button.disabled) button.click()
       } else if (action === 'allow' || action === 'deny') {
@@ -206,7 +199,7 @@ export function Inbox() {
       {/*
         Pressing outside closes it. Covers the screen without dimming it — a dropdown does not take the screen away.
         On the press, not the click, and marked data-no-drag: this sits inside the top bar's window drag region, and on
-        Windows a window drag swallows the mouseup, so a click never came and the inbox stayed open (#365, DragRegion.tsx).
+        Windows a window drag swallows the mouseup, so a click never comes and the inbox would stay open (#365, DragRegion.tsx).
       */}
       {!leaving && (
         <div
@@ -228,8 +221,8 @@ export function Inbox() {
         data-testid="inbox"
       >
         {/*
-          The conversation's shapes (owner, 2026-10-18): a 14px card, its rows rounded inside a 4px inset, the row the
-          keys are on filled (no edge bar), the row's actions as capsules.
+          The conversation's shapes: a 14px card, its rows rounded inside a 4px inset, the row the keys are on filled
+          (no edge bar), the row's actions as capsules.
         */}
         {!mailThread && (
           <header className="flex items-baseline gap-2 border-b border-line px-4 py-2.5">
@@ -370,8 +363,8 @@ export function Inbox() {
 }
 
 /**
- * The list's keys on Tasks: up and down walk the rows, Enter opens the row (`openTask`), D marks done the person's task that came back reported (the one
- * act such a row waits for) and opens any other, Esc closes. The number keys and Allow / Deny are Waiting's: a task row has no card
+ * The list's keys on Tasks. D marks done the person's task that came back reported (the one act it waits for) and opens
+ * any other. The number keys and Allow / Deny are Waiting's: a task row has no card
  */
 function onTaskKey(
   action: NonNullable<ReturnType<typeof inboxKeyAction>>,
@@ -399,7 +392,6 @@ function Pane({ leaving, children }: { leaving: boolean; children: ReactNode }) 
   )
 }
 
-/** What the list says when nothing waits */
 function Nothing() {
   return (
     <p className="px-4 py-10 text-center text-md text-ink-muted" data-testid="inbox-empty">

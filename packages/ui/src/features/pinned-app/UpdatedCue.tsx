@@ -1,21 +1,14 @@
 import { useEffect, useState } from 'react'
 
-/** How long it stays visible — one glance is enough */
+/** One glance */
 const SHOWN_MS = 8_000
-/** If this much time has passed since it was reopened, it does not appear at all — so an old notice does not attach to a view redrawn after coming back from somewhere else */
+/** Older reopens show nothing, so a view redrawn on coming back does not get a stale note */
 const FRESH_MS = 30_000
 
 /**
- * "Updated" — a one-word note that the app came back up with new code and its view was reopened
- * (M4 C-4).
- *
- * If the result of a builder agent's fix changes in front of the person **without a sound**, the
- * person cannot tell whether the view changed or they just misread it. But it is not something that
- * should call the person either — waiting and notices belong to quiet colors (the palette rule). So
- * one small word stands briefly next to the title and then withdraws. Its visible duration is
- * measured from when this component renders (measuring from `at` instead would eat into it by
- * however long the new view took to come up). If it has been a while since the last reopen, it does
- * not appear even on a fresh render.
+ * "Updated": the app came back with new code and its view reopened (M4 C-4). A silent change reads as a misreading,
+ * yet notices stay quiet (the palette rule), so one word stands briefly by the title. Timed from this render, not
+ * `at`, which the new view's start-up would eat into.
  */
 export function UpdatedCue({ at, testId }: { at: number; testId: string }) {
   const [shown, setShown] = useState(() => Date.now() - at < FRESH_MS)

@@ -42,13 +42,8 @@ export type PlatformStartup<T> =
   | { readonly platform: null; readonly error: Error }
 
 /**
- * Returns "could not build the runtime" **as a value** instead of throwing it.
- *
- * That failure has to be drawn on screen by the entry module, so it cannot disappear by being
- * thrown. Throwing at the top of a module leaves only one console line and an otherwise blank
- * page — which is exactly what happened when VITE_HOST_TOKEN was missing. The reason this
- * boundary lives here rather than in main.tsx is that it has to be testable: the entry module
- * cannot even be imported without a DOM, a bundler and a live host (#121).
+ * The failure as a value: thrown at a module's top it leaves one console line and a blank page. Here, not in main.tsx,
+ * so it is testable: the entry cannot be imported without a DOM, a bundler and a live host (#121).
  */
 export function startPlatform<T>(search: string, env: BrowserEnv, create: PlatformFactories<T>): PlatformStartup<T> {
   try {

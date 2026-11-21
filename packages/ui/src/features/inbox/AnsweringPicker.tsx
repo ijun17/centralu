@@ -7,8 +7,8 @@ import { useDismiss } from '../../components/useDismiss.js'
 import { questionLine } from './mailLabels.js'
 
 /**
- * Which question the reply box answers, when more than one is open in the thread (#2191, owner 2026-11-12, mock-up A): "Answering Builder · “Keep the old
- * settings format?”" and how many others are open, with a list to answer another one. The reply box's words go to the question named here.
+ * Which question the reply box answers when several are open in the thread (#2191): "Answering Builder · “Keep the old
+ * settings format?”", how many others are open, and a list to pick another.
  */
 export function AnsweringPicker({
   questions,

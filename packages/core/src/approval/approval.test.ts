@@ -120,7 +120,7 @@ describe('matching "always allow" rules', () => {
     expect(matchesRule('git * origin', 'git * origin')).toBe(true)
   })
 
-  // The rule the card suggests for a command must match that command (#428): suggestMatcher trims, and the match did not
+  // suggestMatcher trims, so the match must too (#428)
   it('a command matches the rule suggested for it, surrounding whitespace and all', () => {
     const command = '  npm test\n'
     expect(matchesRule(command, suggestMatcher(command))).toBe(true)
@@ -182,7 +182,7 @@ describe('update cards (#581, #665)', () => {
     expect(centraluUpdateQuestion({ kind: 'centralu_update', action: 'install' })).toBe('Allow this session to install a Centralu update?')
   })
 
-  // #665 review: what applying costs must be said. Since #1895 step 3 the host restarts and every running turn, the asker's too, is cut and continued
+  // #665: what applying costs must be said. The host restarts (#1895 step 3) and every running turn, the asker's too, is cut and continued
   it('says that applying relaunches the window, restarts the host, and that running turns stop and go on', () => {
     expect(CENTRALU_APPLY_QUESTION).toContain('the agent host restarts')
     expect(CENTRALU_APPLY_QUESTION).toContain('this one included, stop and go on')
@@ -208,7 +208,7 @@ describe('answering from a list row (#543)', () => {
     expect(answersInPlace({ kind: 'other', raw: '{}' })).toBe(false)
   })
 
-  // #683 review: a request whose line says nothing, or that carries a risk the line does not show
+  // #683: a request whose line says nothing, or that carries a risk the line does not show
   it('an empty, multi-line, or flagged command opens the session', () => {
     const c = (over: object) => ({ kind: 'command' as const, command: 'ls', cwd: '/p', ...over })
     expect(answersInPlace(c({ command: '' }))).toBe(false)

@@ -31,25 +31,20 @@ export function putInOrder<T extends { id: string }>(items: readonly T[], ordere
 
 /** The project port: adding, creating (#515), trust, commands and worktree settings */
 export class ProjectsMock {
-  /** For tests: what deleting a project may do to its folder, by project id (#1301); absent: by the project's mark */
+  /** By project id (#1301); absent: by the project's mark */
   readonly deleteOutlooks = new Map<string, 'stays' | 'may_move' | 'around_may_move' | 'unsure'>()
-  /** For tests: the project ids the Delete project dialog asked about, in order */
   readonly deleteOutlooksAsked: string[] = []
-  /** For tests: answer as a host before the call does */
+  /** Answers as a host before the call does */
   deleteOutlookUnknown = false
-  /** For tests: the answer waits for this to settle, as one from a slow or far host does */
+  /** The answer waits for this, as a slow or far host's does */
   deleteOutlookHold: Promise<void> | null = null
-  /** For tests: paths a new project may not take, as if a folder of that name were already there (#515) */
+  /** As if a folder of that name were already there (#515) */
   takenPaths = new Set<string>()
-  /** Every `projects.create` call, as asked (#515) */
   readonly createProjectCalls: { name: string; parent?: string; machine?: string | null; source?: GitSource }[] = []
-  /** For tests: the sentence the next clone fails with, as a host's would (#515); null clones */
+  /** The next clone fails with this sentence (#515); null clones */
   nextCloneError: string | null = null
 
-  /**
-   * Where a new project would go on a machine (#515), as its host would say: `~/Centralu` on this computer, or on a
-   * linked machine in its own path terms. Refuses what the host refuses — the name rule is the host's own (protocol).
-   */
+  /** As the host says (#515): `~/Centralu` here, a linked machine's in its own path terms, by the host's name rule */
   private newProjectTarget(name: string, parent?: string, machine?: string | null, source?: GitSource): { parent: string; path: string | null; error: string | null } {
     const windows = !!machine && this.machinesMock.machinesList.find((m) => m.id === machine)?.shell === 'powershell'
     const sep = windows ? '\\' : '/'
@@ -66,12 +61,10 @@ export class ProjectsMock {
     if (taken) return { parent: where, path: null, error: `Something named "${folder}" is already in ${where} — choose another name.` }
     return { parent: where, path, error: null }
   }
-  /** For tests: how many times projects.gitStatus was asked — an eye on whether debouncing is working (issue #41) */
   gitStatusCalls = 0
-  /** The record of trust turned on and off — tests check "it only asks, it does not send" (M4) */
   readonly trustCalls: { projectId: string; trusted: boolean }[] = []
   readonly projects: ProjectPort = {
-    /** The same rule as the real thing (ProjectRegistry.reorderProjects, #999): a project missing from the list stays at the end, as it was */
+    /** As ProjectRegistry.reorderProjects (#999): a project missing from the list stays at the end */
     reorder: async (orderedIds: string[]) => {
       this.projectStore.list = putInOrder(this.projectStore.list, orderedIds)
       return [...this.projectStore.list]
@@ -86,9 +79,8 @@ export class ProjectsMock {
       if (cloneError) throw mockError(cloneError)
       this.takenPaths.add(t.path)
       /*
-       * The same rule as the real thing (project-creation.ts createProject, #655, #999): a folder made empty holds only
-       * what Centralu and the person write, so it starts trusted, and with no repository its git is null (projectInfo)
-       * until an agent makes one. A clone is a repository on its branch, and untrusted: a stranger's code is in it.
+       * As createProject (#655, #999): an empty folder holds only what Centralu and the person write, so it starts
+       * trusted, with git null until an agent makes a repository. A clone is untrusted: a stranger's code is in it.
        */
       const info = await this.projects.add(t.path, machine)
       const made: ProjectInfo = source
@@ -104,13 +96,8 @@ export class ProjectsMock {
       const existing = this.projectStore.list.find((p) => p.path === path && (p.machine ?? null) === (machine ?? null))
       if (existing) return existing
       /*
-       * The name is the directory's last segment under **either** separator (#47).
-       *
-       * This one is not a wire path — a project's directory is native, and it is the one string
-       * that arrives here still spelled the way its own machine spells it. The host names the
-       * project with `basename` from `node:path`, which reads `\` on Windows; reading only `/`
-       * here meant the mock would have called a project `C:\Users\me\proj` while the host called
-       * it `proj`, and e2e — which only ever runs the mock — would have stayed green about it.
+       * The last segment under either separator (#47): a project's path is native, and the host's `node:path`
+       * `basename` reads `\` on Windows. e2e runs only the mock, so it must name `C:\Users\me\proj` `proj` too.
        */
       const info = mockProjectInfo({
         // A folder on a linked machine is named the way the hub names it: `<machine>.<id>`, with the machine said (#82)
@@ -123,17 +110,12 @@ export class ProjectsMock {
       this.projectStore.list.push(info)
       return info
     },
-    /**
-     * Trust (M4). Like the real thing, that project's app list follows along: the runtime
-     * re-scans when trust changes, standing an untrusted project's apps as `untrusted` and a
-     * trusted one's as resting (`stopped`). If the mock skips this, e2e would pass green on a
-     * screen where clicking "Trust" still leaves the app blocked.
-     */
+    /** The apps follow, as the runtime re-scans; else e2e passes while "Trust" leaves an app blocked */
     setTrusted: async (projectId: string, trusted: boolean) => {
       const at = this.projectStore.list.findIndex((x) => x.id === projectId)
       const current = this.projectStore.list[at]
       if (at === -1 || !current) throw projectNotFound(projectId)
-      // Swaps in a new object — the screen holds onto the object `add` returned as-is, so mutating it would let a value that never crossed the wire leak into the screen (the real thing's response is always a new object)
+      // A new object, as the host's answer always is: the screen holds the one `add` returned
       const was = current.trusted
       this.projectStore.list[at] = { ...current, trusted }
       this.trustCalls.push({ projectId, trusted })
@@ -156,11 +138,8 @@ export class ProjectsMock {
       return this.projectStore.withGit(p)
     },
     /*
-     * Removes things in the same order as the real thing: deletes sessions one by one, firing
-     * `session_deleted` for each, then drops the project. The screen clears its list from that
-     * event, so if the mock silently deleted only the project, e2e would be left with ghost
-     * sessions in the sidebar. The sessions go to the session archive (#204), marked to keep
-     * the tool's files and worktrees, as the host does.
+     * As the host: each session to the archive first (#204, keeping its files and worktree), with `session_deleted`,
+     * which the screen clears its list from; then the project.
      */
     remove: async (projectId: string) => {
       const at = this.projectStore.list.findIndex((x) => x.id === projectId)
@@ -173,10 +152,6 @@ export class ProjectsMock {
       this.gridMock.gridPanels = this.gridMock.gridPanels.filter((p) => !(p.kind === 'app' && p.projectId === projectId))
       return { ok: true as const }
     },
-    /**
-     * What deleting a project may do to its folder (#1301): what a test set in `deleteOutlooks`, else what the project's mark says.
-     * A test sets `deleteOutlookUnknown` to stand in for a host before the call.
-     */
     deleteOutlook: async (projectId: string) => {
       if (this.deleteOutlookUnknown) throw mockError('Unknown method: projects.deleteOutlook')
       await this.deleteOutlookHold
@@ -185,13 +160,7 @@ export class ProjectsMock {
       // As the host: a project it does not know leaves its folder alone
       return { folder: this.deleteOutlooks.get(projectId) ?? (p?.fromUserFolder ? ('may_move' as const) : ('stays' as const)) }
     },
-    /**
-     * The registered shell commands (issue #44).
-     *
-     * **Strips blank lines exactly like the host.** If the mock were more forgiving than the
-     * real thing, e2e would stay green while the actual app behaved differently — the contract
-     * this file's header lays out.
-     */
+    /** Strips blank lines as the host does (#44): a gentler mock keeps e2e green while the app differs */
     setCommands: async (projectId: string, commands: SavedCommand[]) => {
       const p = this.projectStore.list.find((x) => x.id === projectId)
       if (!p) throw projectNotFound(projectId)
@@ -206,7 +175,7 @@ export class ProjectsMock {
       if (was !== JSON.stringify(p.commands)) this.emit({ type: 'projects_changed' })
       return [...p.commands]
     },
-    // The same rule as the real thing (#69): an empty setup lays down as null — a mock that is more forgiving would split the contract apart
+    // As the host (#69): an empty setup is stored as null
     setWorktreeSetup: async (projectId: string, setup: { command: string; copyFiles: string[] } | null) => {
       const p = this.projectStore.list.find((x) => x.id === projectId)
       if (!p) throw projectNotFound(projectId)

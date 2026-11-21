@@ -1,9 +1,6 @@
 /**
- * Store regression tests: handing off and starting fresh.
- *
- * Ports go through `MockPlatform` (no ad-hoc mocking, or the contract falls apart). The
- * `pendingEvents` holding pen is module state, so it cannot be cleared between tests — each test
- * uses a different session id instead. Shared fixtures are in store.test-helpers.ts.
+ * Store tests: handing off and starting fresh. Ports go through `MockPlatform`.
+ * The `pendingEvents` pen is module state that tests cannot clear, so each test uses its own session id.
  */
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -17,9 +14,8 @@ import { line, readAll, resetStore, sessionInfo } from './store.test-helpers.js'
 beforeEach(resetStore)
 
 /**
- * Pretends the predecessor wrote its note **as a reply** (#142) — the host (mocked) places the file at
- * the note's spot in the data folder. What is returned is that location. The path is keyed to the
- * departing session's id (#104).
+ * The predecessor's note written as a reply (#142), placed by the mocked host at the note's spot in the data
+ * folder, keyed to the departing session's id (#104). Returns that path.
  */
 function mockNote(mock: MockPlatform, sessionId: string, text: string): string {
   mock.emit({ type: 'message_delta', sessionId, role: 'assistant', text } as NormalizedEvent)
@@ -28,10 +24,7 @@ function mockNote(mock: MockPlatform, sessionId: string, text: string): string {
 const notePathOf = (mock: MockPlatform, sessionId: string) =>
   `/mock-data/handoff/${mock.sessions.get(sessionId)!.projectId}/${sessionId}.md`
 
-/**
- * A note a pre-#142 handoff left in the user's repository — an old successor session still holds this
- * path. The app never reads it, overwrites it, or clears it away.
- */
+/** A note an older build's handoff left in the user's repository, a path an older successor still holds. The app never reads, overwrites or clears it. */
 function oldRepoNote(mock: MockPlatform, sessionId: string): string {
   const path = `.centralu/handoff/${sessionId}.md`
   mock.placeFile(path, 'note from the old spot')
@@ -64,36 +57,32 @@ describe('handing off and starting fresh', () => {
     mock.emit({ type: 'state_change', sessionId: 'ho-s1', state: 'waiting_input' } as NormalizedEvent)
     await done
 
-    /*
-     * The new session's first message is **the note's location, not the note** (#102). A preview is
-     * carried, but not the full text — the prompt's promise that length is not a constraint is only
-     * true inside the file.
-     */
+    // The first message carries the note's location and a preview, not the note (#102): the prompt's promise that
+    // length is no constraint holds only inside the file.
     expect(mock.lastCreateParams?.initialPrompt).toContain(notePath)
     expect(mock.handoffNotes.get(notePath)).toBe('To my successor: status summary')
     expect(mock.lastCreateParams?.initialPrompt).toContain('To my successor: status summary') // Preview
     // Nothing was written to or cleared from the user's repository — even the old note's location is untouched (#142)
     expect(repoHandoffTraces(mock, old)).toEqual([])
-    // The full text goes into the record — the only material that can never be recreated once the predecessor is gone
-    // Its id goes along too (#106) — this is how the host's cleanup knows this note still has an owner
-    // and that the original goes next (#738), so the host gives the new session every child, settled ones too
+    // The full text goes into the record: once the predecessor is gone, nothing can recreate it. Its id (#106) tells the
+    // host's cleanup the note still has an owner; `removesOriginal` (#738) has the host give the new session every child.
     expect(mock.lastCreateParams?.handoff).toEqual({ from: 'Mea', note: 'To my successor: status summary', fromSessionId: 'ho-s1', removesOriginal: true })
     expect(mock.lastCreateParams?.tool).toBe('codex')
     expect(mock.lastCreateParams?.model).toBe('gpt-5.6')
     const heir = [...mock.sessions.values()].find((r) => r.name === 'Mea')
     expect(heir).toBeDefined()
     expect(heir!.id).not.toBe('ho-s1')
-    // The screen's summary also shows the inherited settings immediately — if it is only in the database while the menu says Default, it reads as "never carried over" (dogfooding)
+    // The screen's summary also shows the inherited settings immediately — if it is only in the database while the
+    // menu says Default, it reads as "never carried over"
     expect(useStore.getState().sessions[heir!.id]).toMatchObject({ model: 'gpt-5.6', effort: null })
     // The old session is in the session archive (#204), its tool file marked to go when it is deleted for good
     expect(mock.sessions.has('ho-s1')).toBe(false)
     expect(mock.externallyDeleted).not.toContain('ho-s1')
     expect((await mock.trash.list()).sessions.find((x) => x.id === 'ho-s1')?.conversationFile).toBe('remove')
-    // The screen is looking at the new session
     expect(useStore.getState().focusedSessionId).toBe(heir!.id)
   })
 
-  // #841 item 5: a note the host could not write read as "no note yet" and was polled for ten minutes
+  // #841 item 5: a note the host cannot write is not read as "no note yet" and polled for ten minutes
   it('stops at once and says why when the host cannot save the note', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho-fail')
@@ -135,16 +124,12 @@ describe('handing off and starting fresh', () => {
     await done
 
     const heir = [...mock.sessions.values()].find((r) => r.name === 'Middle' && r.id !== 'ho-g2')!
-    // The middle panel keeps its successor in place — a panel disappearing and reappearing would scramble the arrangement (dogfooding)
+    // The middle panel keeps its successor in place — a panel disappearing and reappearing would scramble the arrangement
     expect(useStore.getState().gridPanels).toEqual(['ho-g1', heir.id, 'ho-g3'].map(sessionGridPanel))
     expect(useStore.getState().focusedSessionId).toBe(heir.id)
   })
 
-  /*
-   * Record mode (#78): asking an agent whose service has been cut off for a note is asking a
-   * counterpart who cannot respond for a will — the host builds the record from the store's own
-   * transcript and **asks the dead session nothing at all**.
-   */
+  // Record mode (#78): the host builds the note from the store's own transcript; a cut-off agent cannot answer.
   it('record mode asks the dead session nothing, and a kept original stays standing (#78)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho-rec')
@@ -154,26 +139,22 @@ describe('handing off and starting fresh', () => {
 
     await useStore.getState().handoffSession('ho-r1', { tool: 'claude', deleteOld: false, mode: 'record' })
 
-    // No message went out to the dead session — this is the whole reason this mode exists
     expect((useStore.getState().chat['ho-r1'] ?? []).some((i) => i.kind === 'user')).toBe(false)
-    // The record also lands at **the same location** (#102) — only the producer differs, and what the successor receives is identical
+    // The record lands at the same location (#102): only the producer differs
     expect(mock.handoffNotes.get(notePathOf(mock, 'ho-r1'))).toContain('Handoff Record')
     expect(mock.lastCreateParams?.initialPrompt).toContain(notePathOf(mock, 'ho-r1'))
     expect(repoHandoffTraces(mock, old)).toEqual([]) // The user's repository is never touched (#142)
     expect(mock.lastCreateParams?.initialPrompt).toContain('Handoff Record') // Preview
     expect(mock.lastCreateParams?.handoff?.note).toContain('Handoff Record')
     expect(mock.lastCreateParams?.tool).toBe('claude')
-    // The original survives — it was kept (until the successor is confirmed)
+    // Kept until the successor is confirmed
     expect(mock.sessions.has('ho-r1')).toBe(true)
     expect(mock.externallyDeleted).not.toContain('ho-r1')
-    // The name is inherited
     expect([...mock.sessions.values()].some((r) => r.name === 'Dead Mea' && r.id !== 'ho-r1')).toBe(true)
   })
 
-  /*
-   * The note from the record is every session's default in the dialog (owner decision on #694): a live session that
-   * could answer is still not asked, since it is the one least likely to summarize itself correctly.
-   */
+  // Owner decision on #694: record mode is the default even for a live session, the one least likely to summarize
+  // itself correctly.
   it('record mode asks even a live session nothing, and a kept original stays standing (#694)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho-default')
@@ -274,18 +255,13 @@ describe('handing off and starting fresh', () => {
     mock.emit({ type: 'state_change', sessionId: 'ho-s4', state: 'waiting_input' } as NormalizedEvent)
     await done
 
-    // The report from the previous turn is not in the text — a handoff starting with "Applied:" was exactly that incident
+    // The report from the previous turn is not in the text — a handoff starting with "Applied:" is that failure
     expect(mock.lastCreateParams?.handoff?.note).toBe('# 1. Project and objective')
     expect(mock.lastCreateParams?.initialPrompt).not.toContain('Applied:')
   })
 
-  /*
-   * #102: the predecessor was told "it is a file, so length is not a constraint" and then the result
-   * was delivered as a single chat message — the longer it got, the more thorough the note, and the
-   * more thorough, the more likely the successor died the moment it arrived (measured: handing a long
-   * session off to codex produced an error). The first message now points at the note's **location**
-   * instead, so no matter how long the note grows, the first message never grows with it.
-   */
+  // #102: the predecessor is told length is no constraint, and a long note sent as one chat message kills the
+  // successor (measured: a long handoff to codex failed), so the first message points at the note's location.
   it('even a long note never becomes a huge first message — what is handed over is a path, not the content (#102)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho-big')
@@ -303,7 +279,7 @@ describe('handing off and starting fresh', () => {
     await done
 
     const prompt = mock.lastCreateParams!.initialPrompt!
-    // The note is over 500,000 characters, but the first message fits on one screen — that gap is exactly what this fix is
+    // The note is over 500,000 characters, but the first message fits on one screen — that gap is the point
     expect(huge.length).toBeGreaterThan(500_000)
     expect(prompt.length).toBeLessThan(2_000)
     expect(prompt).toContain(bigPath)
@@ -314,13 +290,8 @@ describe('handing off and starting fresh', () => {
     expect(kept.endsWith('the note is just as long.')).toBe(true)
   })
 
-  /*
-   * #106: cleanup used to hang off a turn boundary — **the instant the successor's first turn ends.**
-   * That condition asks neither whether the turn succeeded nor whether the note was ever read. In an
-   * actual incident, the first turn died with a 400 in under a second, and the directory was empty
-   * within three minutes. The successor was holding a path to a file that no longer existed, and that
-   * text could never be recreated, since the session that wrote it had just been replaced.
-   */
+  // #106: the end of the successor's first turn does not say the note was read. A first turn that dies with a 400 would
+  // leave a path to a cleared file, and the session that wrote the text has been replaced.
   it('the note survives even if the first turn fails — nothing is ever cleared at a turn boundary (#106)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho-sweep')
@@ -337,25 +308,20 @@ describe('handing off and starting fresh', () => {
     await done
 
     const heir = [...mock.sessions.values()].find((r) => r.name === 'Cleanup' && r.id !== 'ho-sw')!
-    // The first turn dies with a 400 — the note used to disappear right here
+    // The first turn dies with a 400 — a cleanup tied to the turn's end would delete the note here
     mock.emit({
       type: 'error', sessionId: heir.id,
       error: { code: 'internal', message: "The 'opus[1m]' model is not supported", retryable: true },
     } as NormalizedEvent)
-    // Same result even with a successful turn — the reasoning was "was it read," which cannot be observed
+    // Same result even with a successful turn — what matters is "was it read," which cannot be observed
     mock.emit({ type: 'turn_complete', sessionId: heir.id } as NormalizedEvent)
     await new Promise((r) => setTimeout(r, 50))
 
     expect(mock.handoffNotes.get(notePath)).toBe('text that must not disappear before it is read')
   })
 
-  /*
-   * #104: running several sessions at once in one project is the whole reason this app exists, yet the
-   * handoff file was one per project. So two handoffs running at the same time would (1) write to the
-   * same location, letting whichever wrote later win — the one waiting quietly received a note with
-   * the right shape and the wrong content — and (2) have the successor that finished its first turn
-   * first clear away someone else's text with its cleanup.
-   */
+  // #104: with one file per project, two handoffs at once would write one location (the later wins, the other gets the
+  // wrong note) and the first successor's cleanup would clear the other's text.
   it('two handoffs in the same project never overwrite or clear each other\'s text (#104)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho-pair')
@@ -378,18 +344,14 @@ describe('handing off and starting fresh', () => {
     }
     await Promise.all([a, b])
 
-    // Each received its own predecessor's text — when there was one filename, both received whichever one was written last
+    // Each received its own predecessor's text — with one filename, both would receive whichever one was written last
     const paramsOf = (from: string) => mock.createParamsLog.find((x) => x.handoff?.from === from)
     expect(paramsOf('Left')?.handoff?.note).toBe("Left's note")
     expect(paramsOf('Right')?.handoff?.note).toBe("Right's note")
     expect(paramsOf('Left')?.initialPrompt).toContain(pathA)
     expect(paramsOf('Right')?.initialPrompt).toContain(pathB)
 
-    /*
-     * Even after one successor's first turn ends, **no text disappears** (#106). While cleanup hung
-     * off a turn, whichever finished first cleared away someone else's text (what #104 fixed); now not
-     * even its own predecessor's text is cleared here — there is no way to tell whether it was read.
-     */
+    // After a first turn ends, neither the other's text (#104) nor its own is cleared: whether it was read is unknown (#106)
     const heirA = [...mock.sessions.values()].find((r) => r.name === 'Left' && r.id !== 'ho-a')!
     mock.emit({ type: 'turn_complete', sessionId: heirA.id } as NormalizedEvent)
     await new Promise((r) => setTimeout(r, 50))
@@ -398,21 +360,15 @@ describe('handing off and starting fresh', () => {
     expect(mock.handoffNotes.get(pathB)).toBe("Right's note")
   })
 
-  /*
-   * The counterpart of #104 (#142): the old wait loop only checked "the file exists and is not
-   * empty," so a file left behind by a past failed handoff was delivered as if it were the freshly
-   * written note. Now that the note is a reply, the same trap becomes **the reply to a past request.**
-   * A failed handoff leaves the same request and its reply sitting in the conversation, and the host
-   * reads "the last reply after the request" as the note. Finding the request by taking the first one
-   * makes that old reply the note.
-   */
+  // #142: a failed handoff leaves the same request and its reply in the conversation, and the host reads the last reply
+  // after the request as the note; matching the first request would take that old reply.
   it('a reply left by a past failure is never mistaken for a freshly written note (#104, #142)', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho-stale')
     mock.sessions.set('ho-st', sessionInfo('ho-st', { projectId: proj.id, name: 'an old spot' }))
     await useStore.getState().attach(mock)
 
-    // A handoff that failed previously: the same request and its reply are already in the conversation
+    // A handoff that failed earlier: the same request and its reply are already in the conversation
     mock.emit({ type: 'user_message', sessionId: 'ho-st', seq: 1, text: handoffPrompt() } as NormalizedEvent)
     mockNote(mock, 'ho-st', 'an old note left by a failed handoff last month')
     mock.emit({ type: 'turn_complete', sessionId: 'ho-st' } as NormalizedEvent)
@@ -422,7 +378,7 @@ describe('handing off and starting fresh', () => {
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-st'] ?? []).filter((i) => i.kind === 'user').length).toBe(2)
     })
-    // The predecessor ended this turn without answering anything — exactly the moment the old text used to be delivered
+    // The predecessor ended this turn without answering anything — the moment a first-request match would deliver the old text
     mock.emit({ type: 'turn_complete', sessionId: 'ho-st' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-st', state: 'waiting_input' } as NormalizedEvent)
     await new Promise((r) => setTimeout(r, 1_500))
@@ -437,12 +393,9 @@ describe('handing off and starting fresh', () => {
   })
 
   /*
-   * #142: the note's location is the first human message after "the last recorded point right before
-   * the request." If that point is measured by the screen's `lastSeq`, then while the confirmation
-   * (`user_message`) for a message sent earlier has not yet arrived, `lastSeq` does not count that
-   * message and lags behind — so the first human message after that lagging point is the earlier
-   * message, and the request becomes "the next human message," so the reply is never read as the note
-   * (this actually stalled in e2e).
+   * #142: the request is the first human message after the last point recorded before it. Measured by the screen's
+   * `lastSeq`, that point lags a sent message not yet confirmed (`user_message`), which then reads as the request:
+   * the reply is never taken as the note and the handoff stalls.
    */
   it('never misses the request\'s point even when a previously sent message has not been confirmed yet (#142)', async () => {
     const mock = new MockPlatform()
@@ -481,10 +434,8 @@ describe('handing off and starting fresh', () => {
     expect(useStore.getState().toast).toMatch(/Worktree sessions/)
   })
 
-  /*
-   * The state says a card stands even where the card is not carried (a linked machine's row, `needsAnswer`, #2158): asking
-   * for a note then would answer or drop that card, as with a card listed (#174), so it is refused the same way.
-   */
+  // A linked machine's row carries the state, not the card (`needsAnswer`, #2158); asking for a note would answer or
+  // drop that card, as with a listed one (#174).
   it('never asks for a note while the state says a card stands, though no card is listed', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho-card')
@@ -499,18 +450,16 @@ describe('handing off and starting fresh', () => {
 })
 
 /*
- * #172: the host broadcasts `session_created`, `handoff` and `user_message`, in that order, before the
- * response, while creating a session. The screen registers the session from the first one and attaches
- * the other two to the conversation, but the returned response used to overwrite the conversation with
- * a single pending opening prompt, erasing the marker. Reading history brought the marker back, so the
- * opening prompt stood twice. The mock now broadcasts in the same order as the host.
+ * #172: creating a session, the host (and the mock) broadcasts `session_created`, `handoff` and `user_message`, in that
+ * order, before the response. Overwriting the conversation with a pending opening prompt on the response would erase
+ * the marker, and reading history would bring it back with the prompt twice.
  */
 describe('the first screen of a session born from a handoff (#172)', () => {
   it('exactly one marker and one opening prompt stand, and reading back through history leaves them as is', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho172')
     await useStore.getState().attach(mock)
-    // The history page arrives one round trip late — the merge with history (#197) sees the screen before the response's overwrite covers it
+    // The history page arrives one round trip late — the merge with history (#197) sees the screen as the response left it
     const load = mock.agents.loadMessages.bind(mock.agents)
     let release!: () => void
     const gate = new Promise<void>((r) => (release = r))
@@ -535,7 +484,7 @@ describe('the first screen of a session born from a handoff (#172)', () => {
   })
 })
 
-// #1822: a machine whose link drops shows its session as not working; the hand-off still waits for it, as before
+// #1822: a machine whose link drops shows its session as not working; the hand-off still waits for its turn to end
 describe('handing off a session of a linked machine whose link drops', () => {
   const box = (over: Partial<MachineInfo> = {}): MachineInfo => ({
     id: 'box', name: 'Box', sshTarget: 'me@box', shell: 'posix', wslDistro: null, command: null, status: 'connected',

@@ -1,18 +1,13 @@
 import { setupOfDetection, type ToolSetup, type ToolStatus } from '@cc/protocol/client'
 
-/**
- * What a tool's setup line says (#59, owner 2026-10-27): one mapping from where a tool stands to what the new-session
- * dialog, the first-run card and the new-app dialog draw, so the three never answer differently.
- *
- * `ready` draws nothing. Everything else is one line, with the action the state allows.
- */
+/** What a tool's setup line says (#59): one mapping, so the three places that draw it never differ. `ready` draws nothing */
 export type SetupView =
   | { kind: 'ready' }
-  /** Not installed, and the person installs it from a terminal (`ToolDescriptor.install`) */
+  /** `ToolDescriptor.install` */
   | { kind: 'terminal_install' }
-  /** Installed, signed out, and the person signs in from a terminal (`ToolDescriptor.login`) */
+  /** `ToolDescriptor.login` */
   | { kind: 'terminal_login' }
-  /** Centralu installs it (`agents.installTool`) */
+  /** `agents.installTool` */
   | { kind: 'install' }
   /** As `install`, for a tool whose own app is already on that machine (`ToolSetup.appFound`): only the sentence differs */
   | { kind: 'install_app_found' }
@@ -22,22 +17,22 @@ export type SetupView =
   | { kind: 'unsupported'; message: string }
   | { kind: 'sign_in' }
   | { kind: 'signing_in' }
-  /** The sign-in ended without success (it timed out, or failed): said, and offered again */
+  /** Said, and offered again */
   | { kind: 'sign_in_failed'; reason: 'timed_out' | 'failed'; message: string }
   /** Google did not set the account up, and may give an address to verify it at */
   | { kind: 'ineligible'; verifyUri: string | null }
-  /** Signed out on a linked machine: the sign-in happens there, so this line only says so */
+  /** Signed out on a linked machine: the sign-in happens there */
   | { kind: 'sign_in_elsewhere' }
 
-/** The address Google gives to verify an account that is not eligible (`ToolSetup.failure.verifyUri`), when it gave one */
+/** Google's address to verify an ineligible account, only if https */
 export function verifyUriOf(setup: ToolSetup): string | null {
   const uri = setup.failure?.verifyUri
   return uri?.startsWith('https://') ? uri : null
 }
 
 /**
- * A tool's setup as it stands: this computer's live one (a `tool_setup` event) when there is one, else the detection's
- * own, else the two booleans in the one shape. A linked machine has no live one here: its events are not this window's.
+ * The live setup (`tool_setup` event), else the detection's, else the booleans. Never live for a linked machine: its
+ * events are not this window's.
  */
 export function setupOf(status: ToolStatus, live: ToolSetup | undefined, linked: boolean): ToolSetup {
   return (linked ? undefined : live) ?? status.setup ?? setupOfDetection(status.installed, status.loggedIn)
@@ -71,10 +66,7 @@ export function setupView(setup: ToolSetup, linked: boolean): SetupView {
   }
 }
 
-/**
- * The detection with this computer's live setups laid over it: a tool whose setup moved after the list was read (an
- * install finished, a sign-in succeeded) is usable, or not, from that moment, without asking again.
- */
+/** The detection with this computer's live setups over it, so a finished install or sign-in counts without asking again */
 export function withLiveSetups(tools: readonly ToolStatus[], live: Partial<Record<string, ToolSetup>>): ToolStatus[] {
   return tools.map((t) => {
     const s = live[t.name]
@@ -95,7 +87,7 @@ export function setupStates(live: Partial<Record<string, ToolSetup>>): string {
     .join(',')
 }
 
-/** The tools to draw an signed-out donut for: installed, and the tool says it is signed out (`unknown`, OpenCode's, is not) */
+/** The tools to draw a signed-out donut for (`unknown`, OpenCode's, is not signed out) */
 export function signedOutTools(tools: readonly ToolStatus[]): ToolStatus[] {
   return tools.filter((t) => {
     const s = t.setup ?? setupOfDetection(t.installed, t.loggedIn)

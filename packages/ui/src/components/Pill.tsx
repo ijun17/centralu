@@ -1,26 +1,13 @@
 import type { HTMLAttributes, MouseEventHandler, ReactNode } from 'react'
 
 /**
- * The capsule: a short status in a rounded-full frame. It is a `<button>` when it does something (`onClick`), a
- * `<span>` when it only reports. Two sizes, both from the screens of #1160 (owner, 2026-10-18):
+ * The capsule (docs/design-system.md §11): a `<button>` with `onClick`, else a `<span>`. `line` is the one size whose
+ * words wrap: a sentence in a pane that may be narrow would otherwise push the conversation wide.
  *
- * - `bar`: 28px tall on a translucent hover fill, the top bar's shape (the update line beside the inbox count).
- * - `label`: a card's kind written in a capsule at its top left ("Awaiting approval", "Agent is asking"), no fill.
- * - `line`: a line of the conversation drawn as a capsule between two rules (the mail line, #2332), no fill. The one size whose
- *   words wrap: it is a sentence in a pane that may be narrow, and a capsule that did not wrap would push the conversation wide.
- *
- * The border is what it says, in the order of the brightness hierarchy (docs/design-system.md §1):
- *
- * - `quiet`: a hairline. Something to know, nothing to do (Updating…).
- * - `live`: a stronger line. It can be pressed and nothing is urgent (Update).
- * - `solid`: the signal ink. Something only the person can settle is waiting (an approval, a question).
- * - `dashed`: the signal ink, dashed. Something failed and waits on the person (Update failed).
- *
- * An edge that waits on the person is the signal ink at full strength (owner, 2026-10-18): not a fraction of it, and
- * not the plain ink, so it is the brightest line on screen exactly when something is waiting.
- *
- * `tone` sets the ink when the content's own state should speak louder than the edge (`signal` keeps the glow of a
- * waiting count, `bright` is the same white without it); otherwise each edge brings its own.
+ * Edges by urgency (§1): `quiet` a hairline, nothing to do (Updating…); `live` pressable, nothing urgent (Update);
+ * `solid` the signal ink, waiting on the person; `dashed` the signal ink, failed and waiting (Update failed). An edge
+ * that waits is the signal at full strength, the brightest line on screen exactly then. `tone` overrides each edge's
+ * ink when the content should speak louder (`signal` keeps a waiting count's glow, `bright` is the same white without).
  */
 export type PillEdge = 'quiet' | 'live' | 'solid' | 'dashed'
 export type PillTone = 'signal' | 'bright' | 'ink' | 'muted' | 'faint'
@@ -60,7 +47,7 @@ export function pillClass({
   // The bar's translucent fill, except on a failure, which stands on the bar's own ground (the update line's)
   const fill = size === 'bar' && edge !== 'dashed' ? 'bg-surface-hover/30' : ''
   return [
-    // A capsule never breaks its words: in a narrow card the text beside it wraps instead (owner, 2026-10-19). A line is the text, so it wraps
+    // A capsule never breaks its words: the text beside it wraps instead. A line is the text, so it wraps
     'items-center rounded-full border transition-colors',
     size === 'line' ? 'inline-flex min-w-0 break-words' : 'flex shrink-0 whitespace-nowrap',
     SIZE[size],

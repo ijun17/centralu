@@ -408,7 +408,7 @@ describe('the update prompt when sessions are in a turn', () => {
 // #1398: a machine that does not answer at all is a state, not an error
 describe('a machine that is away', () => {
   it('has a label of its own, apart from a link that failed', () => {
-    // The sidebar's menu says "away" for a link that is down, as it did before the status existed
+    // The sidebar's menu says "away" for a link that is down
     expect(MACHINE_STATUS_LABEL.away).toBe('away')
     expect(MACHINE_STATUS_LABEL.unreachable).toBe('away')
   })

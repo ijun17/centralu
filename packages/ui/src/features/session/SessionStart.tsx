@@ -13,8 +13,8 @@ import { PastConversations } from './PastConversations.jsx'
  * What a new session's empty screen offers before its first message: which tool runs it, and the project's past
  * conversations of that tool to continue instead.
  *
- * The `+` starts a session at once with the tool the project remembers, so the choice of tool moved here, where the
- * person already is, instead of a dialog before it. Picking the other tool switches this same session to it: no
+ * The `+` starts a session at once with the tool the project remembers, so the choice of tool sits here, where the
+ * person already is, not in a dialog before it. Picking the other tool switches this same session to it: no
  * second session is made and none is removed.
  */
 export function SessionStart({
@@ -59,7 +59,7 @@ function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; project
   const [setupFor, setSetupFor] = useState<ToolName | null>(null)
   // A tool that cannot keep what this project asks (an untrusted project, `launchRefusal`) is left out like one not installed
   const trusted = useStore((s) => !!s.projects[projectId]?.trusted)
-  // Asked with the session's own preset and role (#1562 review): the switch keeps both, so a tool must keep them too
+  // Asked with the session's own preset and role (#1562): the switch keeps both, so a tool must keep them too
   const preset = useStore((s) => s.sessions[sessionId]?.permissionPreset ?? 'normal')
   // Role text by its kind; a builder's fixed role the window does not hold, and the host refuses that switch itself
   const roleText = useStore((s) => isAssistantOrCoordinator(s.sessions[sessionId]?.kind))

@@ -7,32 +7,19 @@ import { startPlatform } from './bootstrap.js'
 import '../../../packages/ui/src/styles/index.css'
 
 /**
- * The only place that knows about a concrete implementation (docs/platform-abstraction.md §4).
- *
- * Only two things can follow the question mark:
- *
- *   ?mock=1            Launches with the in-memory implementation. **A blank screen** — this
- *                      is the path Playwright uses.
- *   ?demo[=scene]      Lays a scene on top of that (project, session, conversation, git,
- *                      usage). Talking to it gets a real answer back.
- *                      Scenes: focus (default) · grid · empty · shot (one English screen for
- *                      the README)
- *
- * `demo` implies `mock` — a scene only grows on top of the mock. With nothing appended, it
- * connects to the real host (ws://127.0.0.1:5175).
+ * The only place that knows an implementation (docs/platform-abstraction.md §4). `?mock=1`: the empty in-memory mock
+ * Playwright uses; `?demo[=focus|grid|empty|shot]`: a scene on the mock (`shot` is the README's screen); else the host.
  */
 const rootElement = document.getElementById('root')
 if (!rootElement) throw new Error('Root element #root not found')
 
-// The theme the last run chose, before anything is drawn, and the bundled fonts' load, which the app is drawn after
-// (below; firstPaint.ts says why)
+// The last run's theme before anything is drawn, and the fonts the app is drawn after (firstPaint.ts says why)
 const firstPaint = prepareFirstPaint()
 
 const params = new URLSearchParams(location.search)
 const demo = params.get('demo')
 const root = createRoot(rootElement)
-/* A failure is also **a screen that has to be drawn** — throwing it leaves a blank page. The
-   boundary lives in bootstrap. */
+// A failure is a screen to draw: thrown, it leaves a blank page
 const started = startPlatform<Platform>(location.search, import.meta.env, {
   mock: seedMock,
   host: createWebPlatform,
@@ -57,11 +44,7 @@ if (started.error) {
     </main>,
   )
 } else {
-  /*
-   * The scene is laid down **before drawing anything.** Since the app asks for its lists the
-   * moment it comes up, laying it down late would mean drawing a blank screen once before the
-   * content arrives — not the screen the person came to see.
-   */
+  // Before drawing: the app asks for its lists as it comes up, and a late scene draws a blank screen first
   if (demo !== null) {
     const { seedDemo, isDemoScene } = await import('@cc/platform/mock/demo')
     await seedDemo(started.platform as never, isDemoScene(demo) ? demo : 'focus')

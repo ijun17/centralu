@@ -9,7 +9,7 @@ import { PartyName } from './PartyName.js'
 import { crowdText, heldLabel, heldResume, threadStateLabel } from './mailLabels.js'
 
 /**
- * The mailbox's parts of the inbox (#1347, docs/plans/mailbox.md §10.1), drawn by `Inbox` in the order `arrangeInbox` gives
+ * The mailbox's parts of the inbox (#1347, docs/plans/mailbox.md §12.3), drawn by `Inbox` in the order `arrangeInbox` gives
  * (#2213): the mail the person has to act on pinned on top, a thread as a row of the list. Nothing here takes the list's
  * keys, so Move, Open and Done still mean what they meant for the sessions among them.
  */

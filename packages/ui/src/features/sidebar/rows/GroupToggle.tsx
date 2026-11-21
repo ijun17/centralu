@@ -3,12 +3,7 @@ import { ChevronIcon } from '../../../components/icons.jsx'
 import { GUTTER_WIDTH, DISCLOSURE_BUTTON, DISCLOSURE_ICON } from '../layout.js'
 
 /**
- * The chevron of a group that folds (#666): the children a session started, the sessions an app owns.
- *
- * It stands in the **gutter to the left of its row's content**, the 28px every row keeps free after its bar, so the
- * content (tool mark, name) starts in the same column whether or not the row has a group. It is faint ink: a state, not a
- * call to act, so it spends no brightness (the project row's arrow is the same). The project row keeps its own
- * arrow; this one is for what stands under it.
+ * The chevron of a group that folds (#666), in the row's gutter (layout.ts). Faint ink: a state, not a call to act.
  */
 export function GroupToggle({ folded, label, testId, onToggle }: { folded: boolean; label: string; testId: string; onToggle: () => void }) {
   return (

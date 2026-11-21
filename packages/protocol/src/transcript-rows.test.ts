@@ -43,7 +43,7 @@ describe('transcript rows', () => {
     expect(endsStreamRow(error)).toBe(true)
     expect(endsStreamRow({ type: 'state_change', sessionId: 's', state: 'working' })).toBe(false)
     expect(endsStreamRow({ type: 'turn_complete', sessionId: 's' })).toBe(true)
-    // An agent's image is a row of its own between the text around it (#868)
+    // An agent's image is a row of its own between the text around it
     expect(endsStreamRow({ type: 'message_image', sessionId: 's', mime: 'image/png', data: '' })).toBe(true)
     // …and its event keeps the row's number through the wire schema, which drops a key it does not know
     expect(

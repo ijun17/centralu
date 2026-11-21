@@ -9,52 +9,36 @@ import type {
 
 /** Linked machines (#82). */
 export type MachinesSlice = {
-  /**
-   * The machines this computer's host is linked to (#82, docs/plans/remote-hub.md), by id, in the
-   * order the host lists them. Each row is replaced whole by its `machine_status`. Empty with no
-   * links, and with a host from before them.
-   */
+  /** docs/state-management.md §7: by id, in the host's order, each replaced whole by its `machine_status`. */
   machines: Record<string, MachineInfo>
-  /** The agent CLIs installed on each linked machine (#297 per machine), read when a remote session's header asks */
+  /** Read when a remote session's header asks (#297) */
   machineAgentVersions: Record<string, AgentVersions>
   refreshMachines(): Promise<void>
-  /**
-   * The recovery `machine_resync` asks for, scoped to one machine (#82): re-read the session and
-   * project lists and replace that machine's rows only, re-read the conversations of its sessions
-   * that are open, and wake only its sessions that were live and are not now. Every other machine's
-   * rows, and this computer's, are left exactly as they are.
-   */
+  /** `machine_resync`'s recovery, scoped to that machine's rows: docs/state-management.md §7. */
   recoverMachine(machineId: string): Promise<void>
   addMachine(spec: { name: string; sshTarget: string; shell: RemoteShell; wslDistro?: string | null; command?: string | null }): Promise<MachineInfo>
-  /**
-   * The hosts of the ssh config of the computer the host runs on (#514), for the Add machine dialog.
-   * Null when the host cannot say (an older host): the dialog then asks for a target by hand
-   */
+  /** The host computer's ssh config hosts (#514); null from an older host, and the dialog asks for a target by hand */
   machineSshHosts(): Promise<SshHostList | null>
-  /** What runs at the other end of a target, asked over one BatchMode ssh (#514); null when the host cannot ask */
+  /** Asked over one BatchMode ssh (#514); null when the host cannot ask */
   probeMachine(sshTarget: string): Promise<MachineProbe | null>
   removeMachine(machineId: string): Promise<void>
   reconnectMachine(machineId: string): Promise<void>
-  /** Closes the machine's link until the person connects it again; it stays linked (#1134). A refusal is a toast */
+  /** Closes the link until the person connects again; it stays linked (#1134) */
   disconnectMachine(machineId: string): Promise<void>
-  /** Withdraws one of a machine's other full credentials there (#1405); a failure is said in a toast */
+  /** One of the machine's other full credentials (#1405) */
   revokeMachineCredential(machineId: string, credentialId: string): Promise<void>
-  /** Auto reconnect on or off for the machine (#1341); false (with a toast) when the host refused */
+  /** (#1341) false, with a toast, when refused */
   setMachineAutoReconnect(machineId: string, autoReconnect: boolean): Promise<boolean>
   acceptMachineVersions(machineId: string): Promise<void>
-  /**
-   * Installs, updates, rolls back or removes the Centralu this computer installs on a machine
-   * (docs/plans/remote-hub.md §10.5). True when it was done; a refusal or failure is a toast in the
-   * host's words (an update that did not take says which version runs there now)
-   */
+  /** docs/plans/remote-hub.md §10.5. A refusal is toasted in the host's words (a failed update names the running version) */
   changeMachineInstall(machineId: string, kind: 'install' | 'update' | 'rollback' | 'uninstall', when?: 'idle' | 'now'): Promise<boolean>
-  /** Ends an update's wait for the sessions on a machine to finish (#1399); a refusal is a toast */
+  /** Ends an update's wait for the machine's sessions to finish (#1399) */
   cancelMachineUpdate: (machineId: string) => Promise<void>
-  /** Starts a machine's host at boot, or stops doing that (plan §10.4); false (with a toast) when it was refused */
+  /** docs/plans/remote-hub.md §10.4; false, with a toast, when refused */
   setMachineAutostart(machineId: string, on: boolean): Promise<boolean>
-  /** Lets a machine's sessions ask this computer's projects, or stops it (#550); false (with a toast) when it was refused */
+  /** Lets a machine's sessions ask this computer's projects (#550); false, with a toast, when refused */
   setMachineAsks(machineId: string, on: boolean): Promise<boolean>
-  /** What would stop on a machine if its host stopped now, for the update prompt; null when unknown */
+  /** What would stop if the machine's host stopped now; null when unknown */
   machineActivity(machineId: string): Promise<HostActivity | null>
   checkMachineAgentVersions(machineId: string, force?: boolean): Promise<void>
 }

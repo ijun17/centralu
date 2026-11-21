@@ -9,7 +9,7 @@ describe('PresetTag (#2213)', () => {
   it('says the preset of a session a linked computer started when it is not the default, and nothing otherwise', () => {
     expect(html('normal', true)).toMatch(/data-preset="normal"[^>]*>normal</)
     expect(html('edits', true)).toContain('data-preset="edits"')
-    // The default says what was already assumed; a session no linked computer started carries none
+    // The default says what is already assumed; a session no linked computer started carries none
     expect(html('auto', true)).toBe('')
     expect(html('normal', false)).toBe('')
     expect(html('normal', undefined)).toBe('')

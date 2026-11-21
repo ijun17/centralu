@@ -1,22 +1,18 @@
 import type { UsageHistoryRow } from '@cc/protocol/client'
 import { cacheHitRate } from './cache.js'
 
-/** One key's share of a usage history range: its rows summed over the periods (docs/agent-host/usage.md "Usage over time") */
+/** docs/agent-host/usage.md "Usage over time" */
 export type UsageTop = {
   key: string
   name: string
-  /** Everything the model was sent and wrote back: uncached input, cache reads, cache writes and output */
+  /** Uncached input, cache reads, cache writes and output */
   tokens: number
-  /** `cacheHitRate` of the summed input; null with none */
   hitRate: number | null
   requests: number
   rebuilds: number
 }
 
-/**
- * The keys that used the most tokens over a range, most first. The row for the keys the host folded together
- * (`*`, "Others") is not one of them; it is never named as a top.
- */
+/** The host's folded row (`*`, "Others") is never named as a top */
 export function topUsage(rows: readonly UsageHistoryRow[], count: number): UsageTop[] {
   const sums = new Map<string, UsageHistoryRow>()
   for (const r of rows) {

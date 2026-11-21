@@ -1,63 +1,54 @@
 import type { MailDelivered, MailHeldRow, MailMessage, MailTaskRow, MailThreadRow, MailThreadView, UnreachedMachine, WatchView } from '@cc/protocol/client'
 
-/** What a mail line folded open shows (#2333): the delivered messages still kept, each with its chain's subject, and how many are not */
+/** A mail line folded open (#2333): the delivered messages still kept, with their chain's subject, and how many are gone */
 export type DeliveredMail = { messages: { message: MailMessage; subject: string; threadId: string }[]; gone: number }
 
 /** The person's mailbox (#1347): the threads the Inbox lists among its rows and the thread open in it. */
 export type MailSlice = {
-  /**
-   * The mailbox as the Inbox lists it: the threads the person is in, the mail held for them to act on, and how
-   * many sleeping sessions wait for their word. A copy of the host's answer, read again when `mail_changed` says something
-   * moved. Null until read.
-   */
+  /** The host's mailbox answer, read again on `mail_changed`; `waiting`: sleeping sessions waiting for the person's word. */
   mail: { threads: MailThreadRow[]; held: MailHeldRow[]; waiting: number } | null
   /**
-   * The host's open and recently settled work (#1577), as `mail.tasks` last listed it for the Inbox's Tasks: read when the Inbox opens and again on
-   * `mail_changed` while it is open. Null until the host answers, and again when the window comes back to a host; an older host's answer is an empty list.
-   * On a hub it lists the linked machines' work too, and `unreached` names the machines whose work is not in it (#2268)
+   * `mail.tasks` for the Inbox's Tasks (#1577), read on opening and on `mail_changed` while open. Null until answered
+   * and again after a reconnect. A hub lists linked machines' work too; `unreached` names those missing (#2268).
    */
   mailTasks: { tasks: MailTaskRow[]; capped: number | null; unreached: UnreachedMachine[] } | null
-  /** Reads the tasks again; keeps the last list on a failure */
+  /** Keeps the last list on a failure */
   loadTasks: () => Promise<void>
-  /** The thread open in the Inbox, with the messages read so far (`mail.thread`); null when the list shows */
+  /** The thread open in the Inbox (`mail.thread`); null when the list shows */
   mailThread: MailThreadView | null
-  /** Reads the list again; keeps the last one on a failure, and is quiet for a host that has no mailbox */
+  /** Keeps the last list on a failure; quiet for a host with no mailbox */
   loadMail: () => Promise<void>
-  /** Opens a thread in the Inbox: reads it (which reads it for the person) and shows it */
+  /** Reading it marks it read for the person */
   openMailThread: (threadId: string) => Promise<void>
   /**
-   * The messages a mail line in a conversation stands for (#2333), read from their chains as a look in: nothing is read for anyone, since the line is
-   * the session's mail, not the person's. A chain the host no longer keeps counts its messages as gone; a read the link lost throws
+   * A conversation's mail line (#2333), read as a look in that marks nothing read: it is the session's mail, not the
+   * person's. A chain no longer kept counts as gone; a read the link lost throws.
    */
   readDeliveredMail: (delivered: MailDelivered[]) => Promise<DeliveredMail>
-  /** Reads the page of messages before the first one held (a long thread opens at its end) */
+  /** A long thread opens at its end; this reads the page before */
   loadOlderMail: () => Promise<void>
-  /** Back to the list */
   closeMailThread: () => void
   /**
-   * The person's words in the open thread, or in the one `threadId` names (a pick on the list's card, which opens nothing); true when it was sent, false (with the host's words in a toast) when it was refused. `answers`: the
-   * question whose choice `text` is (a pick, #1630). A pick that fails reads the thread again, whatever the failure was (another window answered
-   * first, or the link dropped after the host had taken it), so the choices show what became of the question
+   * To the open thread, or `threadId`'s (a pick on the list's card); false, with the host's words toasted, when refused.
+   * `answers`: the question a pick answers (#1630). A failed pick reads the thread again, since another window may have
+   * answered or the host may have taken it before the link dropped.
    */
   replyMail: (text: string, kind?: 'note' | 'answer' | 'question', answers?: string, threadId?: string) => Promise<boolean>
   /**
-   * Closes the open thread, or the one `threadId` names (the list's Done, which opens nothing): Mark done (`finished`) or Drop (`dropped`). A session working on it
-   * is stopped and told (the host's close, 3.10). True when it closed; false, with the host's words in a toast, when it did not
+   * The open thread, or `threadId`'s (the list's Done). A session working on it is stopped and told (the host's close,
+   * 3.10). False, with the host's words toasted, when it did not close.
    */
   closeMail: (outcome?: 'finished' | 'failed' | 'stopped' | 'dropped', threadId?: string) => Promise<boolean>
   /** Sends held mail now, or lets it go */
   heldMail: (action: 'release' | 'dismiss', row: Pick<MailHeldRow, 'recipient' | 'messageId'>) => Promise<boolean>
   /** Lifts a pause for a thread's turns */
   resumeMail: (target: { threadId: string }) => Promise<boolean>
-  /** The answer to "N sessions have mail from while Centralu was off" */
+  /** Answers "N sessions have mail from while Centralu was off" */
   wakeMail: (wake: boolean) => Promise<boolean>
-  /**
-   * The watches each session keeps (#1324), as the host last listed them for its header; read again on `watches_changed`. A session
-   * the host has not listed (an older host has no such method) has no entry, and its header shows no badge
-   */
+  /** Each session's watches for its header (#1324), read again on `watches_changed`; unlisted: no entry, no badge. */
   watches: Record<string, WatchView[]>
-  /** Reads a session's watches again; quiet when it fails, keeping what it had */
+  /** Quiet on failure, keeping what it had */
   loadWatches: (sessionId: string) => Promise<void>
-  /** The person cancels a watch; false, with the host's words in a toast, when it could not */
+  /** false, with the host's words toasted, when it could not */
   cancelWatch: (sessionId: string, id: string) => Promise<boolean>
 }

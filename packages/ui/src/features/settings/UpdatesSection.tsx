@@ -7,18 +7,9 @@ import { Button } from '../../components/Button.jsx'
 import { More, SettingsGroup, SettingsRow } from './SettingsLayout.jsx'
 
 /**
- * Updates (issue #43).
- *
- * This screen says three sentences: this is what is currently running, that is what is out
- * there, and whether to upgrade is for the person to decide. **It upgrades on its own only with
- * "Automatic updates" on** (one switch for checking and applying since the owner's 2026-10-20
- * decision; #352) — swapping out the running app is not reversible, so even then it waits until
- * nothing is running and nobody is typing.
- *
- * The check is done by the host. The launcher has the same code too, but what actually runs is
- * a copy already installed on the person's machine, and that copy's comparison logic was wrong
- * (#42) — checking here runs the code shipped with the app itself, bypassing the stale launcher
- * entirely.
+ * Updates (#43): what runs, what is out there, and the person decides. It upgrades by itself only with "Automatic
+ * updates" on (one switch for checking and applying, #352), and even then waits until nothing runs and nobody types:
+ * the swap is not reversible. The host checks, not the launcher, whose installed copy can compare wrongly (#42).
  */
 export function UpdatesSection() {
   const reportedUpdate = useStore((s) => s.update)
@@ -32,25 +23,16 @@ export function UpdatesSection() {
   const update = installedUpdate(reportedUpdate, APP_VERSION, relaunch)
   const offer = update?.phase === 'restart_required' ? applyOffer(update, APP_VERSION, relaunch) : null
   const words = applyWords(relaunch)
-  /*
-   * One switch for the host's two (owner, 2026-10-20): automatic checking (`auto`) and applying when idle (`autoApply`).
-   * It reads as on only when both are, so a host still holding the old default (checking on, applying off) shows it
-   * off, and turning it on sets both. Saved one after the other; the switch holds until both answers are back.
-   */
+  // One switch for the host's `auto` (checking) and `autoApply` (applying when idle): on only when both are, and turning
+  // it on sets both. Saved one after the other; the switch holds until both answers are back.
   const automatic = update ? update.auto && update.autoApply === true : false
   const setAutomatic = async (on: boolean) => {
     await setUpdateAuto(on)
     await setUpdateAutoApply(on)
   }
 
-  /*
-   * Even before the host has answered, **the current version can already be stated.**
-   *
-   * It is the same constant from the same build (`tooling/brand.test.ts` keeps it identical
-   * everywhere), so there is no room for it to drift, and that is why this branch is never empty
-   * from the moment it opens — if one side of the comparison is invisible, the rest of the line
-   * cannot be read either.
-   */
+  // The current version shows before the host answers: the same build's constant (`tooling/brand.test.ts` keeps it
+  // identical), and a comparison missing one side cannot be read
   const current = update?.current ?? APP_VERSION
   const busy = update?.phase === 'checking' || update?.phase === 'updating' || update?.phase === 'waiting_for_npm'
 
@@ -89,11 +71,8 @@ export function UpdatesSection() {
         }
       />
 
-      {/*
-        Someone turning it off needs to know what they are turning off, and someone leaving it on needs to know what
-        goes out — there is no request that goes out silently. Applying needs a window that can relaunch (#352); what it
-        costs, and whether it can wait for idle by itself, is `applyWords` (#1895 step 3).
-      */}
+      {/* The hint says what goes out, as no request goes silently. Applying needs a window that can relaunch (#352);
+          its cost and idle wait are `applyWords` (#1895 step 3) */}
       <SettingToggle
         checked={automatic}
         disabled={update === null}
@@ -114,12 +93,9 @@ export function UpdatesSection() {
 }
 
 /**
- * The agent CLIs (#297): which versions are installed, and whether idle sessions move to a newer one by themselves.
- *
- * Next to the app's own update because it is the same errand — "am I on the new version" — for the other programs
- * this app runs. Unlike the app's update this one is **on by default** (the owner's decision, 2026-10-05): nothing is
- * installed here, the CLIs update themselves or through npm, and moving a session waits until nothing in it would be
- * lost. Its conversation continues, and a line in it says that it moved.
+ * The agent CLIs (#297): installed versions, and whether idle sessions move to a newer one by themselves; beside the
+ * app's update, as the same errand. On by default, unlike it (owner's decision): nothing is installed here, and a move
+ * waits until nothing would be lost. The conversation continues, with a line saying it moved.
  */
 export function AgentCliUpdates() {
   const versions = useStore((s) => s.agentVersions)

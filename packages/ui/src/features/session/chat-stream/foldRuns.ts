@@ -2,22 +2,9 @@ import type { ChatItem } from '../../../store/store.js'
 import { formatElapsed } from '../elapsed.js'
 
 /**
- * Folding what the agent did between its words (#2007, owner, 2026-11-06). A conversation shows the agent's answer
- * bubbles and the person's messages; the reasoning rows and tool calls between two of them fold into one line, a run
- * to a line, and open in place when the line is pressed.
- *
- * A run is the rows in a row that may fold. These never fold, and a row of them ends the run, so the rows before and
- * after it fold separately:
- *  - what waits on the person: an approval's row, a question (its card stands after the list), a worktree proposal, an
- *    `ask_project` call until it is answered (its line says whether the session it asked is waiting on the person);
- *  - what happened: every marker (an error line, a usage limit, a stop or restart cut, compaction, handoff, a tool's
- *    notice);
- *  - an app's view shown inline, the tool call that opened it;
- *  - an image the agent shows.
- * The answer's own bubbles and the person's messages are not folded either; they are what the run stands between.
- *
- * The list stays one virtual row per chat row (the indexes the scroller, the banner and a search hit speak in do not
- * move): a folded run's first row draws the line, and the rest of its rows stand at no height (`ChatStream`).
+ * Folding what the agent did between its words into one line per run (#2007; what never folds: docs/design-system.md §7,
+ * plus an `ask_project` call until answered). One virtual row per chat row stays, so the indexes the scroller, the banner
+ * and a search hit speak in do not move: a run's first row draws the line, the rest stand at no height.
  */
 
 /** One run of foldable rows */

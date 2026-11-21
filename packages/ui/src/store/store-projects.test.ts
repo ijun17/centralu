@@ -1,9 +1,6 @@
 /**
- * Store regression tests: projects, their trust, defaults and saves.
- *
- * Ports go through `MockPlatform` (no ad-hoc mocking, or the contract falls apart). The
- * `pendingEvents` holding pen is module state, so it cannot be cleared between tests — each test
- * uses a different session id instead. Shared fixtures are in store.test-helpers.ts.
+ * Store tests: projects, their trust, defaults and saves. Ports go through `MockPlatform`.
+ * The `pendingEvents` pen is module state that tests cannot clear, so each test uses its own session id.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
@@ -41,10 +38,7 @@ describe('picking a project', () => {
   })
 })
 
-/**
- * Trust (M4, decision 3): asked **once**, at registration, and answering nothing sends nothing.
- * Picking an already-trusted project again is never asked about.
- */
+// M4 decision 3: asked once, at registration; answering nothing sends nothing.
 describe('project trust (M4)', () => {
   it('a newly registered project is asked once — "later" sends nothing, "trust" sends it and records it on screen', async () => {
     const mock = new MockPlatform()
@@ -133,14 +127,9 @@ describe('project trust (M4)', () => {
   })
 })
 
-/**
- * A project's default model belongs to **the tool** (#107).
- *
- * An actual incident: a project with `default_tool=codex` was also holding
- * `default_model=opus[1m]`, and a codex session born from it died every turn with a
- * `400 invalid_request_error`. A handoff deliberately clears the model when the tool changes
- * (`sameTool ? … : undefined`), but the project default filled it right back in beneath that guard —
- * a shape where the guard collapsed onto a layer it had delegated to.
+/*
+ * A codex session started with a project's `default_model=opus[1m]` dies every turn with a `400 invalid_request_error`.
+ * A handoff clears the model when the tool changes (`sameTool ? … : undefined`); a per-project default would refill it.
  */
 describe('a project\'s default model follows the tool (#107)', () => {
   const withDefaults = async (mock: MockPlatform, path: string, defaults: Record<string, { model: string | null; effort: string | null }>) => {
@@ -166,10 +155,7 @@ describe('a project\'s default model follows the tool (#107)', () => {
     expect(mock.lastCreateParams?.effort).toBe('high')
   })
 
-  /*
-   * Storing it per tool is not enough by itself: models retire. If the name picked yesterday is not
-   * on today's list, sending it as is kills the session — `agents.models` is the source of truth.
-   */
+  // Models retire, and a name not on today's list kills the session: `agents.models` is the source of truth.
   it('drops a model that tool no longer accepts', async () => {
     const mock = new MockPlatform()
     const proj = await withDefaults(mock, '/tmp/def-2', { codex: { model: 'gpt-5-retired', effort: 'high' } })
@@ -388,10 +374,7 @@ describe('a project git count the host could not read (#850 review of item 10)',
   })
 })
 
-/*
- * A failed save puts back only what it changed (#842 item 3). The rollbacks used to put back the whole map from before
- * the save, so whatever happened while the save was out was lost with it.
- */
+// Putting back the whole map from before the save would lose whatever happened while the save was out.
 describe('a failed reorder or command save puts back only what it changed (#842 item 3)', () => {
   /** A promise this test settles by hand */
   function held() {

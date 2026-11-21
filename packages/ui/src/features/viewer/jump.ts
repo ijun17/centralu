@@ -2,18 +2,9 @@ import { createListeners } from '@cc/common'
 import { useSyncExternalStore } from 'react'
 
 /**
- * "Open this file **at this line**" — the half of the request `openFile` does not carry.
- *
- * `openFile(path)` is the store's entire viewer contract and a line is not part of it, so
- * the line rides beside it instead of inside it. It cannot just be a module variable,
- * though: clicking `store.ts:20` and then `store.ts:900` leaves `viewerPath` untouched, so
- * nothing re-renders and the second click would quietly do nothing — precisely the silent
- * no-op this app refuses to ship. Hence a subscribable box, small enough to be read in one
- * sitting, with `at` making two identical requests still count as two.
- *
- * The viewer clears the request once it has flown there. Otherwise a stale line would lie
- * in wait: open some other file from the tree, come back to this one, and it would jump
- * again to a line nobody asked about this time.
+ * The line of an "open this file at this line", beside the store's `openFile(path)`. Subscribable, not a plain variable:
+ * `store.ts:20` then `store.ts:900` leaves `viewerPath` as it is, so nothing would re-render. `at` makes two identical
+ * requests two. The viewer clears it on arrival, or a later visit to the file would jump again.
  */
 export type ViewerJump = { path: string; line: number; at: number }
 
@@ -28,13 +19,7 @@ export function requestViewerJump(path: string, line: number): void {
   notify()
 }
 
-/**
- * The pending request, read outside React.
- *
- * The viewer needs this when it re-opens the file under a different path (a relative path
- * resolved to where the file actually is): the line was asked for against the old path, and
- * it has to be asked again against the new one or the jump silently evaporates.
- */
+/** The pending request, read outside React: a file re-opened under its resolved path asks for the line again */
 export function currentViewerJump(): ViewerJump | null {
   return current
 }

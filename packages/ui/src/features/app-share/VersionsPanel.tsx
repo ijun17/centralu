@@ -9,17 +9,9 @@ import { Badge } from '../../components/Badge.jsx'
 import { Button } from '../../components/Button.jsx'
 
 /**
- * An app's versions (M4 E-1) — an expandable panel next to the pinned view (the same spot and
- * shape as the evidence panel).
- *
- * A user-folder app's versions are snapshots the host keeps every time it starts on new code
- * (the most recent 5). Since this is where a person recovers an app a building session broke
- * while fixing it, "Restore previous version" sits at the top — the version right before the
- * current code. Restoring rewrites files, so it asks once. That question also says what stays
- * (the current code is kept as a version too).
- *
- * A project app is not restored here, since git is its version history. Only the recent commits
- * that touched that app's folder are read.
+ * Beside the pinned view, as the evidence panel. A user-folder app's versions are the host's snapshots per start on new
+ * code (the last 5), with "Restore previous version" on top for an app a building session broke. A project app's history
+ * is git: only the commits touching its folder are read.
  */
 export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
   const platform = usePlatform()
@@ -31,19 +23,15 @@ export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
   // A linked machine's user-folder app (#82): its versions are that machine's
   const machine = userAppMachine(app.info)
 
-  // A new version appears when the app restarts on new code — reads again whenever the list's codeStamp changes
+  // A restart on new code makes a version, so a new codeStamp re-reads
   const read = useLoad(() => platform.apps.versions(app.appId, app.projectId, machine), [platform, app.appId, app.projectId, machine], [app.info.codeStamp])
   const versions: AppVersions | null = read.data ?? null
   const error = restoreError ?? read.error
-  // A list read again after a failed restore clears that failure, as it did before useLoad
+  // A list read again after a failed restore clears that failure
   useEffect(() => setRestoreError(null), [read.data])
 
-  /*
-   * Restores one version at once (#1512): the host keeps the current files as a version first, so the restore can be undone,
-   * and the toast's Undo does that. The way back is the version that was current before, or when the code had been edited
-   * and not yet started, the copy the host just kept (`before restore`). `undo` marks a restore that is itself the way
-   * back: it offers none, since the first one stays in the list.
-   */
+  // One press restores (#1512). The host first keeps the current files as a version, so the toast's Undo can go back: to
+  // the version current before, or to the `before restore` copy for unstarted edits. An `undo` restore offers no Undo.
   const restore = async (snap: AppSnapshot, undo = false) => {
     setBusy(true)
     setRestoreError(null)
@@ -54,7 +42,7 @@ export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
       const wasCurrent = kept.find((s) => s.current)
       await platform.apps.restoreVersion(app.appId, app.projectId, snap.id, userAppMachine(app.info))
       const now = await platform.apps.versions(app.appId, app.projectId, machine).catch(() => null)
-      // The copy the host made for this restore is the one that was not there before; an older 'before restore' is another restore's
+      // This restore's copy is the new one; an older 'before restore' is another restore's
       const copy = now?.kind === 'snapshots' ? now.snapshots.find((s) => s.reason === 'before restore' && !kept.some((k) => k.id === s.id)) : undefined
       const back = wasCurrent && wasCurrent.id !== snap.id ? wasCurrent : copy && copy.id !== snap.id ? copy : null
       const text = `Restored ${app.title} to the version from ${when(snap.at)}`
@@ -70,7 +58,7 @@ export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
 
   const snaps = versions?.kind === 'snapshots' ? versions.snapshots : []
   const at = snaps.findIndex((s) => s.current)
-  // The version right before the current code — if the current code matches no version at all (edited but not yet started), it is the most recent version
+  // The version before the current code; with unstarted edits (no version matches), the newest
   const previous = at >= 0 ? snaps[at + 1] : snaps[0]
 
   return (
@@ -142,7 +130,7 @@ export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
   )
 }
 
-/** A project app — git is its version history. Only reads it */
+/** Read-only: git is a project app's history */
 function GitHistory({ versions }: { versions: Extract<AppVersions, { kind: 'git' }> }) {
   return (
     <div data-testid="versions-git">

@@ -4,17 +4,9 @@ import { GridSpan } from './grid.js'
 import { AppId } from './ids.js'
 
 /**
- * An external app's status (M4 A).
- *
- *   invalid     the manifest is missing or invalid — `error` states why
- *   untrusted   an app in an untrusted project. Discovered and shown in the list, but **never starts**
- *   stopped     startable, but currently down (starts only the first time it is actually needed)
- *   starting    starting up — from when the process comes up until it reports its tool list
- *   running     up and running
- *   crashed     the last startup or run failed (`error` states why). The next time it is needed, it starts again after a backoff
- *   failed      stopped after repeated failures — does not start again before `apps.restart`
- *   unconfirmed an app imported from outside that the person has not turned on yet, or whose `server`/`uses` changed after being turned on (M4 E-3). Like `untrusted`,
- *               it **never starts**, is not attached to any session, and every call to it is rejected — until the person reviews it via `apps.review` and turns it on via `apps.enable`
+ * An external app's status (docs/apps/trust-lifecycle-calls.md; `error` says why). `untrusted` and `unconfirmed` (an
+ * import not turned on yet, or whose `server`/`uses` changed since) never start, attach to no session and refuse every
+ * call. `stopped` starts on first need; `crashed` starts again after a backoff; `failed` waits for `apps.restart`.
  */
 export const ExternalAppStatus = z.enum([
   'invalid',
@@ -28,29 +20,23 @@ export const ExternalAppStatus = z.enum([
 ])
 export type ExternalAppStatus = z.infer<typeof ExternalAppStatus>
 
-/** The manifest's `uses` — the capabilities the app declares it will use (M4 D). `agent` is either `true` (the person's default agent) or a list of tool names */
+/** The manifest's `uses`: what the app declares it will use. `agent`: `true` (the person's default agent) or tool names */
 export const AppUses = z.object({
   agent: z.union([z.boolean(), z.array(z.string())]).optional(),
   apps: z.array(z.string()).optional(),
   host: z.array(z.string()).optional(),
-  /**
-   * The background work the app may keep its process running for with no view open and no call (#1236), in the
-   * manifest's words. Absent from an older host, and from an app that declares none.
-   */
+  /** Background work it may keep its process running for with no view open and no call, in the manifest's words */
   background: z.string().optional(),
-  /** It may post notices into a session that called it (#1161 item 1). Absent from an older host, and when not declared */
+  /** It may post notices into a session that called it */
   notices: z.boolean().optional(),
 })
 export type AppUses = z.infer<typeof AppUses>
 
-/**
- * One discovered external app (M4 A-2). There is one instance per (project, id) — the same id
- * in two different projects means two different apps. `projectId: null` means a user-folder app.
- */
+/** One per (project, id): the same id in two projects is two apps. `projectId: null` is a user-folder app */
 export const ExternalAppInfo = z.object({
   appId: AppId,
   projectId: z.string().nullable(),
-  /** The absolute path to the app's folder (a native path — the screen only ever displays it) */
+  /** A native path: the screen only ever displays it */
   dir: z.string(),
   name: z.string().nullable(),
   version: z.string().nullable(),
@@ -61,106 +47,65 @@ export const ExternalAppInfo = z.object({
   error: z.string().nullable(),
   warnings: z.array(z.string()),
   /**
-   * A fingerprint of the app folder read by the running (or most recently running) process —
-   * absent if it has never started on this host (M4 C-4).
-   *
-   * An open screen's HTML belongs to whatever code was running when that screen was opened. When
-   * the building session's turn ends and the app restarts on new code (or `check`/Restart starts
-   * it with the current files), this value changes, and the screen uses that to know "my HTML is
-   * stale." Restarting on the same code (dying and coming back, or waking from idle) does not
-   * change it — reopening would show nothing different. Since it carries no meaning of its own,
-   * it is only ever compared.
+   * Changes only when the app runs on new code, so an open view knows its HTML is stale (docs/apps/views.md); only
+   * compared. Absent: never started on this host
    */
   codeStamp: z.string().optional(),
   /**
-   * The time of this app's most recent error bundle (`apps.errors`'s `latest.at`, M4 C-6) —
-   * absent if there has been no error since the host started. The screen's error line refetches
-   * the bundle when this changes. This cannot be known from the "changed" notification alone: a
-   * read-only tool's failure never emits that notification (emitting it would create a loop of
-   * the screen refetching and failing again).
+   * The latest error bundle's time; absent: none since the host started. The screen refetches the bundle when it
+   * changes, since a read-only tool's failure sends no "changed" (that would loop) (docs/apps/build-loop.md)
    */
   lastErrorAt: z.number().optional(),
-  /**
-   * The secrets the manifest declares, and whether a value is set on this machine (M4 E, the
-   * secrets field) — absent if there is no declaration. **The value never appears here**: since
-   * this list is refetched on every broadcast, it only carries what the screen needs to show
-   * (whether a field is empty). Setting and clearing a value goes through `apps.setSecret`.
-   */
+  /** Declared secrets and whether each is set here. Never the value: this list goes out on every broadcast */
   secrets: z.array(z.object({ name: z.string(), set: z.boolean() })).optional(),
   /**
-   * The saved secrets could not be read (#944, #841 item 2), on an app that declares secrets: `movedTo` names the copy
-   * the unreadable file was moved aside to (the values were not lost, but the app no longer gets them), or is null
-   * when it could not be moved, and saving is refused until the file is fixed or removed. `at` is when the host met
-   * it. Gone once this app has a value again (the file holds every app's, #993 review), or once a stuck file reads
-   * again; a copy moved aside is found in the data folder, so a restart says it again. Absent from older hosts.
-   * `reason` says why in a few words (`it is not valid JSON`, `Centralu may not read it (EACCES)`), never anything the
-   * file holds (#944); absent when the host does not know (a copy found after a restart) and from older hosts.
+   * The saved secrets file did not read (docs/apps/what-an-app-is.md): `movedTo` the copy it was moved aside to, null
+   * while stuck in place; `reason` in a few words, never what the file holds. Absent from older hosts
    */
   secretsUnreadable: z
     .object({ movedTo: z.string().nullable(), at: z.number(), reason: z.string().optional() })
     .optional(),
-  /** Which linked machine the app lives on (#82); absent or null for the hub's own (a user-folder app is otherwise ambiguous) */
+  /** Which linked machine the app lives on; absent or null for the hub's own (a user-folder app is otherwise ambiguous) */
   machine: z.string().nullable().optional(),
   /**
-   * For a user-folder app imported from outside, its provenance (M4 E-3) — where it came from,
-   * when, and when the person turned it on (null if not turned on). The host keeps this marker
-   * outside the app's own folder. If it has not been turned on, or `server`/`uses` changed after
-   * it was, its status is `unconfirmed`.
+   * A user-folder app imported from outside: where from, when, and when the person turned it on (null: not yet). Kept
+   * by the host outside the app's folder
    */
   imported: z.object({ source: z.string(), at: z.number(), confirmedAt: z.number().nullable() }).optional(),
   /**
-   * The span the app recommends for its panel on the grid (#306), from the manifest's `view.span`, already checked and
-   * clamped by the host — absent when the manifest has none. Only a default: the person's choice for the placement and
-   * their setting for the app both come first, and an app without one stands at 1 × 1 as before.
+   * The panel span the manifest recommends (`view.span`), checked and clamped by the host. A default only: the person's
+   * choices come first; absent: 1 × 1
    */
   span: GridSpan.optional(),
   /**
-   * A project app the person shares with their other projects (#371 part A, `apps.setShared`) — true
-   * only when on. Absent means not shared, and a user-folder app never carries it (it is available to
-   * every project already). An older host never sends it, which reads as off: the safe default.
+   * A project app shared with the person's other projects (`apps.setShared`). Absent: not shared, also from an older
+   * host (the safe default). A user-folder app never carries it: every project has it already
    */
   shared: z.boolean().optional(),
   /**
-   * The person turned this project app off on this computer (#1938, `apps.setOff`, docs/plans/remote-hub.md §13.7): its
-   * project's checkout here carries a copy of an app another computer runs, so the copy never starts, is never called and
-   * is given to no session here. True only when so; its `status` then reads `stopped`. Absent from an older host, which
-   * has no such switch: on.
+   * Turned off on this computer (`apps.setOff`, docs/plans/remote-hub.md §13.7): a copy of an app another computer runs,
+   * never started, called or given to a session here; `status` reads `stopped`. Absent: on
    */
   off: z.boolean().optional(),
-  /**
-   * A root app (#1141): the manifest stands at its project's own root, so the project is the app — `dir` is the
-   * project's folder, and the app is listed with its project rather than under it. True only when so; absent from an
-   * older host, which has none.
-   */
+  /** The manifest stands at its project's root, so the project is the app: `dir` is the project's folder */
   root: z.boolean().optional(),
   /**
-   * What the manifest declares it will ask Centralu for (`uses`: agents it may run, apps it may call, host data it may
-   * read) (#1141). Present, empty when it declares nothing, whenever the manifest was read (#1219: a host before it left
-   * an empty one out too); absent when the manifest is invalid, or from an older host, which a trust card reads as
-   * "not known", never as asking for nothing. A declaration, not a permission: the project's trust card lists it per
-   * app, so the person sees what trusting lets its apps ask for.
+   * What the manifest declares, empty when nothing; absent when it is invalid, or from an older host, which a trust card
+   * reads as not known, never as asking for nothing. A declaration, not a permission
    */
   uses: AppUses.optional(),
   /**
-   * The app holds its process for background work now (#1236): what it said it is doing, in its own words. Only an app
-   * whose manifest declares `uses.background` can hold, and only while its process runs; the idle rule leaves it
-   * running meanwhile, and stopping it (`apps.restart`) ends the hold with the process. Absent when it holds nothing,
-   * and from an older host.
+   * The app holds its process for background work now, in its own words. Only with `uses.background`, while its process
+   * runs: the idle rule leaves it running, and `apps.restart` ends the hold
    */
   busy: z.string().optional(),
 })
 export type ExternalAppInfo = z.infer<typeof ExternalAppInfo>
 
 /**
- * What a person sees before turning an app on (M4 E-3) — for an app to import (or an imported
- * app that needs to be asked about again), **what it runs** (`server`), **what it intends to
- * use** (`uses`), which secrets it wants, and which files will be brought in. Anything not
- * carried over (a name starting with a dot, a symlink) is also listed with a reason.
- *
- * `reviewKey` is the key for whatever turning it on binds together (server and uses). It is sent
- * back unchanged when turning the app on, and the host checks it against **that same** manifest
- * — what the person reviewed and what gets turned on have to be the same thing. `changed` states
- * what changed since it was turned on, when this is a re-review (null for a first-time import).
+ * What a person sees before turning an imported app on: what it runs, what it will use, its secrets and files, and
+ * what is not carried over (a dot name, a symlink) with why. `reviewKey` binds `server` and `uses`: sent back to turn it
+ * on and checked against that same manifest, so what was reviewed is what runs. `changed`: null for a first import.
  */
 
 export const AppReview = z.object({
@@ -193,23 +138,16 @@ export const AppReview = z.object({
 export type AppReview = z.infer<typeof AppReview>
 
 /**
- * One run of an external app (M4 A-6) — who called it (a screen, session or app), which tool,
- * and how it ended.
- *
- * The arguments carry **only a summary and a hash**. The raw arguments are kept in `failure`,
- * and only for the most recent handful of failed calls (since the agent fixing the app needs to
- * see the input that failed). A secret value is replaced with `[redacted:name]` everywhere it
- * would otherwise appear.
+ * One run of an external app. Arguments only as a summary and a hash; the raw ones are kept in `failure` for the last
+ * few failed calls, for the agent fixing the app. A secret value reads `[redacted:name]` everywhere.
  */
 export const AppRun = z.object({
   id: z.string(),
   projectId: z.string().nullable(),
   appId: AppId,
   /**
-   * A record of what (M4 D-6) — `tool` is this app's own tool being called, `broker` is this app
-   * asking Centralu for something (`tool` is the name of the broker tool: run_agent, call_app,
-   * host_data). One app's history also carries the chain below it (the row for another app it
-   * called, the row for the agent it requested) — linked by `parentRunId`.
+   * `broker`: this app asking Centralu for something (`tool` is then run_agent, call_app or host_data). The rows of a
+   * chain (another app it called, an agent it requested) link by `parentRunId`.
    */
   kind: z.enum(['tool', 'broker']),
   tool: z.string(),
@@ -222,37 +160,20 @@ export const AppRun = z.object({
   argsSummary: z.string(),
   error: z.string().nullable(),
   createdAt: z.number(),
-  /** The agent session run_agent stood up (M4 D-6) — the run history panel's link to jump to that session. Null before the session stands up, and for any other row */
+  /** The session run_agent stood up; null before it stands up, and on any other row */
   sessionId: z.string().nullable(),
-  /** The tokens for a run_agent row (M4 D-5) — the input/output the tool reported. Null for other rows, and for a run the tool never reported */
+  /** A run_agent row's tokens as the tool reported them; null on other rows and when it reported none */
   tokens: z.object({ input: z.number(), output: z.number() }).nullable(),
   failure: z.object({ args: z.string(), result: z.string().nullable() }).nullable(),
-  /**
-   * A run_agent row whose session was deleted once the run ended cleanly (#378): its request, answer and conversation
-   * are kept in Settings → Archive. Absent from a host older than #378.
-   */
+  /** A run_agent row whose session was deleted after a clean end: kept in Settings → Archive. Absent from older hosts */
   kept: z.boolean().optional(),
 })
 export type AppRun = z.infer<typeof AppRun>
 
 /**
- * An external app's error bundle (M4 C-6) — holds that moment as one unit, whether the app
- * failed to start (start), ended without warning (crash), or a tool call failed (tool). Used by
- * the app screen when it offers "send to builder." The host **never sends it on its own** — only
- * when the person clicks does the UI send `text` to the building session.
- *
- * The arguments are summary-only, and a secret value is replaced with `[redacted:name]` wherever
- * it would appear in standard error, the reason, or the arguments (the same rule as the run history).
- */
-/**
- * A question raised the first time an app tries to use a capability (M4 D-4) — belongs to a
- * chain that **started from a screen**. A question from a chain that started from a session is
- * not here; it stands as that session's own approval card (`ApprovalDetail`'s `capability`).
- *
- * `origin` is the app of the screen that started the chain — the question appears on that app's
- * pinned screen, and the sidebar shows that app's row as "waiting for an answer." The app trying
- * to use the capability (`app`) can be another app that the first one called. Once `expiresAt`
- * passes, the host closes it as a denial.
+ * A capability question from a chain that started from a screen (one from a session is its approval card). It shows on
+ * `origin`'s pinned screen and sidebar row; `app` may be another app the first one called. Past `expiresAt` the host
+ * closes it as a denial.
  */
 export const AppQuestion = z.object({
   id: z.string(),
@@ -266,10 +187,8 @@ export const AppQuestion = z.object({
 export type AppQuestion = z.infer<typeof AppQuestion>
 
 /**
- * A remembered answer for one app (M4 D-4). If `current` is false, it is an allow and the
- * manifest's `uses` changed afterward: a caller under `safe` is asked again. A deny is always
- * current from a host of #2237's build on (it refuses at any `uses`); an older host reports a
- * deny given against older `uses` as not current, and asks again.
+ * A remembered answer for one app. `current` false: an allow whose manifest `uses` changed since, so a `safe` caller is
+ * asked again. A deny is current from #2237's build on; an older host reports one given against older `uses` as not current.
  */
 export const AppPermission = z.object({
   capability: z.string(),
@@ -280,35 +199,35 @@ export const AppPermission = z.object({
 })
 export type AppPermission = z.infer<typeof AppPermission>
 
-/** Agent use one app requested over a period (M4 D-5) — only counts runs that actually stood up (a rejected request never stood one up) */
+/** Agent use one app requested over a period, counting only runs that stood up */
 export const AgentUse = z.object({
   runs: z.number(),
-  /** The sum of time taken by finished runs — a still-running run only counts toward the count */
+  /** Finished runs only; a running one counts toward `runs` alone */
   durationMs: z.number(),
-  /** The sum of tokens across runs the tool reported. Null if none reported any */
+  /** Null if no run reported any */
   tokens: z.object({ input: z.number(), output: z.number() }).nullable(),
 })
 export type AgentUse = z.infer<typeof AgentUse>
 
-/** One app's agent use (M4 D-5) — the last day, and the 30 days the record retains */
+/** The last day, and the 30 days the record keeps */
 export const AppUsage = z.object({ day: AgentUse, month: AgentUse })
 export type AppUsage = z.infer<typeof AppUsage>
 
+/**
+ * An app's failure to start, crash or failed tool call, for the screen's "send to builder" (docs/apps/build-loop.md):
+ * the host never sends it on its own. A secret value reads `[redacted:name]`, as in the run history.
+ */
 export const AppErrorBundle = z.object({
   kind: z.enum(['start', 'crash', 'tool']),
   at: z.number(),
   message: z.string(),
-  /** The last lines of the app's standard error */
   stderr: z.array(z.string()),
   tool: z.string().nullable(),
   args: z.string().nullable(),
   runId: z.string().nullable(),
   /**
-   * This failure came from a person's decision (M4 D-4) — the person denied a request (agent,
-   * another app, host data) made by this call or a chain below it. The screen reports the
-   * decision rather than an app error, and does not offer "send to builder." The place to reverse
-   * it is that `app`'s run history panel (Permissions, Forget). Absent from an older host's
-   * response — null if not present.
+   * The person denied a request somewhere in this call's chain: the screen says so instead of an app error, offers no
+   * "send to builder", and points to that `app`'s Permissions. Absent from an older host: null
    */
   denied: z
     .object({
@@ -320,27 +239,19 @@ export const AppErrorBundle = z.object({
     })
     .nullable()
     .default(null),
-  /** Text that can be sent to the building session as-is */
   text: z.string(),
   /**
-   * When the person sent this bundle to the building session — null if it was never sent (C-6).
-   * Each bundle goes **only once**: the host records it and rejects a second attempt. The screen
-   * draws "sent" from this (the same on a reopened screen, and in a different window). Absent
-   * from an older host's response — null if not present.
+   * When the person sent it; null if never, and from an older host. A bundle goes once: the host refuses a second send,
+   * and every screen draws "sent" from this
    */
   sentAt: z.number().nullable().default(null),
 })
 export type AppErrorBundle = z.infer<typeof AppErrorBundle>
 
 /**
- * An app's versions (M4 E-1). For an app outside git (a user-folder app, including an imported
- * one), these are host-kept snapshots taken every time it starts on changed code (the most
- * recent 5); for a project app, git is the version history, so these are the recent commits that
- * touched that app's folder (read-only — restoring happens through git instead).
- *
- * A snapshot's `current` means the app folder's current code matches that version (the folder
- * fingerprints match). `reason` states why it was taken: `started` (it started on that code),
- * `imported` (as brought in), `before restore` (the code right before a restore).
+ * An app outside git has host-kept snapshots, taken whenever it starts on changed code (the last 5); a project app has
+ * the recent commits touching its folder instead (read-only: restore through git). `current`: the folder's code matches.
+ * `reason`: `started`, `imported` or `before restore`.
  */
 export const AppSnapshot = z.object({
   id: z.string(),
@@ -358,11 +269,7 @@ export const AppVersions = z.discriminatedUnion('kind', [
 ])
 export type AppVersions = z.infer<typeof AppVersions>
 
-/**
- * `uses` in plain words, one line per capability: the import review, the window's trust card, the inbox's app notice and
- * the Assistant's trust card (#1219) all say an app's asks the same way, so the person reads one wording wherever
- * they are asked.
- */
+/** `uses` in plain words, one line per capability: the one wording on every card that asks (review, trust, notice) */
 export function usesLines(uses: AppUses): string[] {
   const out: string[] = []
   if (uses.agent === true) out.push('Run your default agent in a new session')
@@ -371,23 +278,21 @@ export function usesLines(uses: AppUses): string[] {
   if (uses.apps?.length) out.push(`Call other apps: ${uses.apps.join(', ')}`)
   if (uses.host?.length)
     out.push(`Read Centralu data: ${uses.host.map((name) => HOST_DATA_WORDS[name] ?? name).join('; ')}`)
-  // Kept running with nothing open while it says it is busy (#1236), in the app's own words
   if (uses.background) out.push(`Keep running in the background while busy: ${uses.background}`)
   if (uses.notices) out.push('Post notices into the sessions that called it')
   return out
 }
 
 /**
- * What a trusted app can do, said the same way on every card that shows it (the window's trust card, the inbox's app
- * notice, the Assistant's trust card): one "Can …" line per `usesLines` line. In a trusted project what it declares runs
- * without asking (#2237), so it is said as what the app can do, not what it may ask for
+ * One "Can …" line per `usesLines` line, on every card that shows a trusted app: in a trusted project what it declares
+ * runs without asking (#2237), so it is said as what the app can do
  */
 export function appCanLines(lines: readonly string[]): string[] {
   if (!lines.length) return ['Uses nothing beyond its own tools']
   return lines.map((l) => `Can ${l.charAt(0).toLowerCase()}${l.slice(1)}`)
 }
 
-/** The host data names an app may declare (`HOST_CAPABILITIES`), in plain words; an unknown one is shown as it is */
+/** The host data names an app may declare (`HOST_CAPABILITIES`), in plain words */
 const HOST_DATA_WORDS: Record<string, string> = {
   'sessions.list': "the names and states of its project's sessions (sessions.list)",
   'git.status': "its project's branch and changed files (git.status)",

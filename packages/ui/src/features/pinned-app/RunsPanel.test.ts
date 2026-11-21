@@ -2,10 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { AppRun } from '@cc/protocol'
 import { chainRuns } from './RunsPanel.jsx'
 
-/**
- * The runs panel's chain (M4 D-6) — lays a single list from the host (newest first) out under each
- * parent.
- */
+/** The runs panel's chain (M4 D-6): the host's newest-first list laid out under each parent */
 
 const run = (id: string, createdAt: number, parentRunId: string | null = null): AppRun => ({
   id, projectId: 'p1', appId: 'notes', kind: 'tool', tool: 't', callerKind: parentRunId ? 'app' : 'view', callerSessionId: null, parentRunId,

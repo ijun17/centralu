@@ -11,21 +11,12 @@ import { reloadBudget } from './reloadBudget.js'
 import { viewReconnect } from './viewReconnect.js'
 import { coalescedRead } from './single-flight.js'
 
-/**
- * External apps in the store: the app list and its re-reads, the views an app stands in (a pinned
- * view, opened from the sidebar or the grid, and an in-conversation view under a tool call's card),
- * following an app to new code, and the capability questions apps ask. `appActions` holds the
- * store's actions for them; the rest is what those actions and the event handlers share.
- */
+// External apps in the store: the list, pinned and in-conversation views, following new code, capability questions.
 
-/** The number assigning the order things came alive — it only ever increases, across all sessions */
+// The order views came alive, across all sessions
 let inlineLiveSeq = 0
 
-/**
- * Folds one host `app_view` event into a session's view history. Events that **close** a live view
- * (`closed`, or `rejected` on an already-open view) are not handled here — teardown must go first,
- * so those go through the store's own closing path (`closeInlineView`).
- */
+// Closing a live view is not done here: teardown goes first, through `closeInlineView`
 export function applyAppView(views: Record<string, InlineView> | undefined, e: Extract<NormalizedEvent, { type: 'app_view' }>): Record<string, InlineView> {
   const cur = views?.[e.callId]
   const base = { callId: e.callId, appId: e.appId, projectId: e.projectId, tool: e.tool }
@@ -52,30 +43,18 @@ export function applyAppView(views: Record<string, InlineView> | undefined, e: E
 }
 
 /**
- * The frame of the in-conversation view currently drawn (M4 B-1) — a handle for sending teardown
- * before it closes.
- *
- * The view (`InlineView`) registers here while its frame is mounted, and unregisters when it comes
- * down. The store uses this to send teardown before closing, and the conversation list uses this to
- * know "this row has a drawn view" — the basis for holding that row before the virtual scroll can
- * drop it. The frame belongs to the DOM, so it is not kept in the store's state; each change only
- * bumps a counter (`inlineFramesVersion`) so the list re-renders.
+ * Drawn in-conversation view frames (M4 B-1), registered by `InlineView`: the store sends teardown through them, and the
+ * list holds a row with one against the virtual scroll. DOM, so outside state; `inlineFramesVersion` counts changes.
  */
 export type InlineFrame = { teardown(): Promise<unknown> }
 export const inlineFrames = new Map<string, InlineFrame>()
 export const inlineFrameKey = (sessionId: string, callId: string) => `${sessionId}\n${callId}`
 
-/** Whether this card's view is currently drawn as a frame */
 export function inlineFrameShown(sessionId: string, callId: string): boolean {
   return inlineFrames.has(inlineFrameKey(sessionId, callId))
 }
 
-/**
- * The frame of the pinned view currently drawn (M4 C-4) — the same reason as the in-conversation
- * view's handle. When the app comes up again with new code, the store reopens that view
- * (`reloadPinnedView`). Teardown must go out **before** it comes down (per spec), and the frame
- * belongs to the DOM, so the view is the one that registers and unregisters it.
- */
+// Drawn pinned view frames (M4 C-4), as above: teardown goes out before a view comes down (per spec)
 const pinnedFrames = new Map<string, InlineFrame>()
 
 export function registerPinnedFrame(key: string, frame: InlineFrame): () => void {
@@ -85,21 +64,17 @@ export function registerPinnedFrame(key: string, frame: InlineFrame): () => void
   }
 }
 
-/**
- * The cap on how many times a single view can **automatically** reopen to follow new code (M4 C-4)
- * — this many within this window. Past the cap it stops reopening automatically and just marks it
- * "changed" for the person to press. See the comment on `followAppCode` for why.
- */
+// Automatic reopens of one view within the window below (M4 C-4); past it the view is only marked "changed"
 const AUTO_RELOADS = 3
 const AUTO_RELOAD_WINDOW_MS = 60_000
 const autoReloads = reloadBudget(AUTO_RELOADS, AUTO_RELOAD_WINDOW_MS)
 
-/** The app's current code as reported by the list — `null` if unknown (never came up, or an old host) */
+// null if unknown: never came up, or an old host
 export function codeStampOf(apps: readonly ExternalAppInfo[], projectId: string | null, appId: string, machine?: string | null): string | null {
   return apps.find((a) => isApp(a, projectId, appId, machine))?.codeStamp ?? null
 }
 
-/** Patches one inline view if it still exists; `liveOnly` also skips it once it is no longer live (the close and reopen steps patch parked and closing views on purpose). */
+// `liveOnly` skips a view no longer live (the close and reopen steps patch parked and closing views on purpose)
 export function patchInlineView(set: (fn: (s: AppState) => Partial<AppState>) => void, sessionId: string, callId: string, next: Partial<InlineView>, liveOnly = false): void {
   set((s) => {
     const cur = s.inlineViews[sessionId]?.[callId]
@@ -108,27 +83,9 @@ export function patchInlineView(set: (fn: (s: AppState) => Partial<AppState>) =>
 }
 
 /**
- * The app came up again with new code — reopen that app's open views (M4 C-4). Runs every time the
- * list is re-read.
- *
- * When a builder session's turn ends, the host brings the app back up with new code. But an open
- * view's HTML is from when it was opened, so the app has changed while the screen in front of the
- * person is still the old one. The decision comes down to **a single fingerprint change**: if the
- * code that was up when the view was opened (`codeStamp`) differs from the list's current code, it is
- * stale HTML. An app that came back up with the same code (it died and came back, or was restarted)
- * has the same fingerprint, so nothing happens. If the fingerprint was unknown when the view opened
- * (the app came up for the first time at that instant), only the first value learned is recorded.
- *
- * A "changed" notification (`external_app_state_changed`) never reopens a view on its own. That
- * notification means a value inside the app changed, and the view re-reads it through its own state
- * tool — hooking a reopen onto that would create a loop, where a reopened view's first call fires
- * another notification.
- *
- * Even so, an app can keep coming back up with new code without pause — for an app that writes to its
- * own folder, a reopened view's `home` call can change the folder, and the host reflects that by
- * bringing it up yet again. So there is a cap on how many times a single view reopens on its own
- * (three within a minute). Past that, it only shows "changed" and waits for the person to press it —
- * the loop is broken by a human hand.
+ * Reopens views whose `codeStamp` differs from the list's (M4 C-4), on every list read; an unknown stamp only learns the
+ * first value. `external_app_state_changed` never reopens: a reopened view's first call would fire it again. An app that
+ * writes its own folder can restart on each `home`, hence the cap: past it a person breaks the loop.
  */
 function followAppCode(get: () => AppState, set: (fn: (s: AppState) => Partial<AppState>) => void): void {
   const { externalApps, pinnedViews, inlineViews } = get()
@@ -159,12 +116,7 @@ function followAppCode(get: () => AppState, set: (fn: (s: AppState) => Partial<A
   }
 }
 
-/**
- * Keeps a conversation's live views within the cap (`APP_VIEWS_LIVE_PER_SESSION`) — closes the
- * longest-live one first. Never closes the view that just came alive. The host keeps the same cap,
- * so both sides usually close the same view together — because there is only one path to closing
- * (only a live view is closed), it is never closed twice.
- */
+// The host keeps the same cap and closes the same view; only a live view closes, so never twice
 export function capInlineViews(get: () => AppState, sessionId: string, keep: string): void {
   const live = Object.values(get().inlineViews[sessionId] ?? {})
     .filter((v) => v.state === 'live')
@@ -177,11 +129,8 @@ export function capInlineViews(get: () => AppState, sessionId: string, keep: str
 }
 
 /**
- * An in-conversation app view's slot within conversation history (M4 B-1). History only says "some
- * app's view stood under this card (or was rejected)" — no input, no result. So a past card only ever
- * shows a placeholder. Whether it can be reopened (`kept`) is unknown until the host is asked: if the
- * host has already come back up, it is holding nothing. If the same card has both an open and a
- * rejection (the result pointed at someone else's view), the rejection wins as the later row.
+ * History holds no view's input or result, so a past card is a placeholder, `kept` unknown until the host is asked
+ * (M4 B-1). A rejection after an open wins as the later row.
  */
 export function inlineViewsFromHistory(msgs: StoredMessage[]): Record<string, InlineView> {
   const out: Record<string, InlineView> = {}
@@ -205,7 +154,7 @@ export function inlineViewsFromHistory(msgs: StoredMessage[]): Record<string, In
   return out
 }
 
-/** Adds slots read from history — never touches a card this UI already knows about (a live one, or one this UI closed) */
+// Never touches a card this UI already knows (a live one, or one it closed)
 export function mergeInlineHistory(
   all: Record<string, Record<string, InlineView>>,
   sessionId: string,
@@ -216,14 +165,8 @@ export function mergeInlineHistory(
 }
 
 /**
- * Asks the host which views it is still holding for this conversation, and fixes up the placeholders
- * (M4 B-1, `apps.inlineViews`).
- *
- * A held card gains "Reopen"; a discarded one loses it. Among instances left open that this UI is not
- * drawing, it closes them — a UI that reopened does not know that frame (it has no input or result to
- * send), and leaving it open lets that instance keep holding onto the app. If the person wants it
- * back, "Reopen" opens a fresh one. If it could not even ask (an old host), the placeholder only
- * offers the path to open the app.
+ * Fixes the placeholders by what the host still holds (M4 B-1): a held card gains "Reopen". An instance left open that
+ * this UI does not draw is closed, or it holds its app; an old host leaves only the path to open the app.
  */
 export async function syncInlineViews(get: () => AppState, set: (fn: (s: AppState) => Partial<AppState>) => void, sessionId: string): Promise<void> {
   const platform = get().platform
@@ -252,7 +195,7 @@ export async function syncInlineViews(get: () => AppState, set: (fn: (s: AppStat
     const cur = get().inlineViews[sessionId]?.[k.callId]
     if (cur?.reopening) continue
     if (cur && cur.state !== 'parked' && cur.instanceId === k.instanceId) continue
-    // Between two reads of history (before an earlier close has reached the host), the same instance is never closed twice — an instance id is never reused
+    // Not closed twice by two reads before the first close lands; instance ids are never reused
     const id = k.instanceId
     releasedOrphans.add(id)
     void platform.apps
@@ -263,14 +206,8 @@ export async function syncInlineViews(get: () => AppState, set: (fn: (s: AppStat
 }
 
 /**
- * Claims this window's pinned views after a reconnect (#392).
- *
- * The host leases a pinned view to the connection that opened it, and closes it a few minutes after
- * that connection ends unless a window claims it, so a reloaded or closed window does not hold its
- * apps open for good. This window is still here, so it claims what it shows. A view the host no
- * longer has (the window was away longer than the host waited) goes back to idle, which opens it
- * again, as after a restart. An older host has no such call and never closes a view on its own, so
- * a failure here leaves everything as it is.
+ * The host closes a pinned view a few minutes after its connection ends unless claimed (#392). A view it no longer has
+ * goes back to idle, which opens it again; an older host has no such call and never closes one.
  */
 export async function holdPinnedViews(get: () => AppState, set: (fn: (s: AppState) => Partial<AppState>) => void): Promise<void> {
   const platform = get().platform
@@ -293,14 +230,9 @@ export async function holdPinnedViews(get: () => AppState, set: (fn: (s: AppStat
   }))
 }
 
-/**
- * An instance left open that a reopened UI is closing (`syncInlineViews`). Held only while its close is on its way:
- * once the host has answered, it no longer lists the instance, and one it still lists is open and closed again. Kept
- * for good, this grew by one id per orphan for the life of the window (#392).
- */
+// Only while the close is on its way: kept for good it grows by one id per orphan (#392)
 const releasedOrphans = new Set<string>()
 
-/** The store's actions for external apps */
 type AppActions = Pick<
   AppState,
   | 'refreshExternalApps'
@@ -340,7 +272,6 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
         set({ externalApps })
         noteArrivals(get, set)
         get().pruneFoldedGroups()
-        // If an app came up again with new code, reopen that app's open views (M4 C-4)
         followAppCode(get, set)
       },
     )
@@ -386,7 +317,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
       const appQuestions = await platform.apps.questions()
       set((s) => ({ appQuestions, appQuestionsVersion: s.appQuestionsVersion + 1 }))
     } catch {
-      // If it cannot be read, the old list stays — the next broadcast or reconnect re-reads it
+      // The old list stays; the next broadcast or reconnect reads it again
     }
   },
 
@@ -398,7 +329,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
     } catch (e) {
       set({ toast: errorMessage(e) || 'Could not answer the question' })
     }
-    // Whether the answer landed or not (already closed), align to the list the host knows — so an answered question does not linger on screen
+    // Landed or not (already closed), the host's list is read, so an answered question does not linger
     await get().refreshAppQuestions()
   },
 
@@ -406,16 +337,12 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
     const v = get().inlineViews[sessionId]?.[callId]
     if (!v || v.state !== 'live') return
     const patch = (next: Partial<InlineView>) => patchInlineView(set, sessionId, callId, next)
-    // Closing — the frame stays standing until teardown's answer comes back. A second close arriving in this window returns from the guard above
+    // The frame stands until teardown answers; a second close meanwhile returns at the guard above
     patch({ state: 'closing', reason })
     await inlineFrames.get(inlineFrameKey(sessionId, callId))?.teardown().catch(() => {})
-    // The session was deleted in the meantime (gone along with the whole screen), or another path already closed it
+    // The session was deleted meanwhile, or another path closed it
     if (get().inlineViews[sessionId]?.[callId]?.state !== 'closing') return
-    /*
-     * A placeholder draws neither the input nor the result, and reopening takes both from the host (#392). Kept
-     * here, each parked card held its call's whole input and outcome (up to 256 KB each) for the life of the
-     * window, and a long conversation parks one card per app call.
-     */
+    // Reopening reads them from the host (#392); kept, a parked card holds input and outcome, up to 256 KB each
     patch({ state: 'parked', instanceId: null, toolInput: undefined, toolResult: undefined })
     if (v.instanceId) void get().platform?.apps.closeView(v.instanceId).catch(() => {})
   },
@@ -428,7 +355,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
     patch({ reopening: true })
     try {
       const r = await viewReconnect(platform, () => platform.apps.reopenInlineView(sessionId, callId))
-      // If an outcome (from a call still running) arrived during the reopen, it is the newer one
+      // An outcome that arrived during the reopen (a call still running) is the newer one
       const now = get().inlineViews[sessionId]?.[callId]
       patch({
         state: 'live',
@@ -438,7 +365,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
         cancelled: r.cancelled ?? now?.cancelled,
         reason: undefined,
         liveAt: ++inlineLiveSeq,
-        // The code the new instance opens with (C-4) — reopened again if the list's fingerprint ever differs from this
+        // `followAppCode` compares the list's stamp with this (C-4)
         codeStamp: codeStampOf(get().externalApps, v.projectId, v.appId, get().sessions[sessionId]?.machine),
       })
       capInlineViews(get, sessionId, callId)
@@ -470,9 +397,8 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
       focusedApp: machine ? { projectId, appId, machine } : { projectId, appId },
       ...(opts?.builder ? { builderPaneFor: key } : {}),
       ...(opts?.runs ? { runsPanelFor: key } : {}),
-      // What is picked must be shown (the same rule as `focusSession`) — any covering wide surface is dismissed
+      // What is picked is shown, as in `focusSession`, and passes the intro, as in `setView` (#63)
       overlay: null,
-      // Picking a screen = having passed the intro (the same reason as `setView`, #63)
       introSeen: true,
       ...(projectId ? { focusedProjectId: projectId } : {}),
       pinnedViews: s.pinnedViews.some((p) => p.key === key)
@@ -505,7 +431,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
   },
 
   ensureGridAppView(projectId, appId, machine) {
-    // A linked machine's user-folder app opens on that machine (#82): the view carries it, as a pinned view does
+    // Only a user-folder app needs its machine named (#82)
     const own = projectId ? null : (machine ?? null)
     const key = gridAppViewKey(projectId, appId, own)
     if (get().pinnedViews.some((p) => p.key === key)) return
@@ -545,17 +471,12 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
         recover = true
         return platform.apps.openView(pv.appId, pv.projectId, pv.machine ?? undefined, openKey, reclaim)
       })
-      /*
-       * It was closed while opening (its slot is gone), or the app was blocked and returned to idle.
-       * The instance just opened has nowhere to go — if it is not released, a view nobody sees ends up
-       * holding onto the app forever (blocking idle-app teardown).
-       */
+      // Closed or blocked while opening: released, or an unseen view holds the app for good
       const now = get().pinnedViews.find((p) => p.key === key)
       if (!now || now.phase !== 'opening') {
         void platform.apps.closeView(v.instanceId).catch(() => {})
         return
       }
-      // The code this instance was opened with — if the list's fingerprint ever differs from this, it is stale HTML (`followAppCode`)
       const codeStamp = codeStampOf(get().externalApps, pv.projectId, pv.appId, pv.machine)
       patch((p) => ({ ...p, phase: 'open', instanceId: v.instanceId, toolInput: v.toolInput, toolResult: v.toolResult, codeStamp }))
     } catch (e) {
@@ -585,7 +506,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
       return {
         pinnedViews: s.pinnedViews.filter((p) => p.key !== key),
         ...(focused ? { focusedApp: null } : {}),
-        // The view being watched was closed — returns to the session it had been viewing before (`focusedSessionId` is untouched)
+        // Back to the session viewed before (`focusedSessionId` is untouched)
         ...(focused && s.view === 'app' ? { view: 'focus' as const } : {}),
       }
     })
@@ -600,15 +521,11 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
       set((s) => ({ pinnedViews: s.pinnedViews.map((p) => (p.key === key ? fn(p) : p)) }))
     if (pv.instanceId) void platform.apps.closeView(pv.instanceId).catch(() => {})
     /*
-     * Set to `restarting`, not `idle`. With `idle`, the view would reopen immediately (if the app can
-     * be opened), and that open could reach the host before `restart` does. Then `restart` would tear
-     * down the app just brought up, and the open would fail with "the app went down and startup
-     * stopped." Reopening happens only after `restart` finishes.
+     * `restarting`, not `idle`: an idle view reopens at once, and an open that reaches the host before `restart` would be
+     * torn down by it. No "Updated" mark either: that is for a view that followed new code.
      */
-    // "Updated" is a message for a view that reopened with new code — it is never re-attached to a view the person just restarted themselves
     patch((p) => ({ ...p, phase: 'restarting', instanceId: null, toolInput: undefined, toolResult: undefined, error: null, codeStamp: null, stale: false, updatedAt: null }))
     try {
-      // A linked machine's user-folder app (#82) is restarted on that machine
       await platform.apps.restart(pv.appId, pv.projectId, pv.machine ?? undefined)
       patch((p) => (p.phase === 'restarting' ? { ...p, phase: 'idle' } : p))
     } catch (e) {
@@ -619,7 +536,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
   async stopApp({ key, appId, projectId, machine }) {
     const platform = get().platform
     if (!platform) return
-    // Its view, if one is open, is closed first (teardown, then close): an open view holds its app, and reopening it would start the app again
+    // Its open view closes first: it holds the app, and reopening would start it again
     if (get().pinnedViews.some((p) => p.key === key)) {
       await pinnedFrames.get(key)?.teardown().catch(() => {})
       get().closeApp(key)
@@ -636,12 +553,12 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
     const pv = get().pinnedViews.find((p) => p.key === key)
     if (!platform || !pv || pv.phase !== 'open' || !pv.instanceId) return
     const instanceId = pv.instanceId
-    // Notified before it comes down (per spec) — the view saves or cleans up during this window
+    // Teardown before it comes down (per spec), so the view can save or clean up
     await pinnedFrames.get(key)?.teardown().catch(() => {})
-    // It was closed in the meantime, or a different path (restart, losing trust) already brought it down first — that path's job
+    // Another path (restart, lost trust) brought it down meanwhile
     if (get().pinnedViews.find((p) => p.key === key)?.instanceId !== instanceId) return
     void platform.apps.closeView(instanceId).catch(() => {})
-    // Setting it to `idle` makes the view reopen it (if the app can be opened) — the same slot, a fresh instance. The new fingerprint is received once it opens
+    // `idle` makes the view reopen it: the same slot, a fresh instance
     set((s) => ({
       pinnedViews: s.pinnedViews.map((p) =>
         p.key === key
@@ -654,7 +571,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
   async reloadInlineView(sessionId, callId) {
     const v = get().inlineViews[sessionId]?.[callId]
     if (!v || v.state !== 'live') return
-    // If the host is not holding the input and outcome, it cannot be reopened — it is closed instead of left as stale HTML (the path to open the app is still there)
+    // Not held by the host, it cannot reopen: closed rather than left as stale HTML
     if (!v.kept) return get().closeInlineView(sessionId, callId, 'Closed because the app now runs new code')
     await get().closeInlineView(sessionId, callId, "Reopening with the app's new code")
     await get().reopenInlineView(sessionId, callId)
@@ -670,7 +587,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
   async createApp(spec) {
     const platform = get().platform
     if (!platform) throw new Error('Not connected to the host')
-    // A refusal is thrown as is — the host's own message is the reason (an id already taken, an untrusted project). The window shows that message
+    // A refusal is thrown as is: the host's message is the reason the window shows
     const made = await platform.apps.create(spec)
     const { app, builder } = made
     // An app the person made here is no news to them: seen before the list brings it (#1141)
@@ -679,20 +596,14 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
       const key = appKeyOf(madeIn, app.appId)
       set((s) => ({ appsSeen: { ...s.appsSeen, [madeIn]: [...new Set([...(s.appsSeen[madeIn] ?? []), key])].sort() } }))
     }
-    /*
-     * Placed into the list immediately. The host also sends its own list broadcast
-     * (`external_apps_changed`), but waiting for it would leave the sidebar without a row for a while
-     * after the window closes, and the pinned view would see "no such app" (a pinned view only opens
-     * an app that is in the list). Once the broadcast arrives, the whole list is re-read, so the row
-     * set here is simply replaced by that answer.
-     */
+    // Listed at once, not at `external_apps_changed`: a pinned view opens only a listed app; the re-read replaces it
     set((s) => ({
       externalApps: s.externalApps.some((a) => isApp(a, app.projectId, app.appId, app.machine))
         ? s.externalApps
         : [...s.externalApps, app],
     }))
     void get().refreshExternalApps()
-    // The builder session is also registered right away for the same reason — the same path as the host's `session_created`, so arriving twice still counts as once
+    // Through the host's `session_created` path, so arriving twice counts once
     if (builder) get().dispatchEvent({ type: 'session_created', sessionId: builder.id, session: builder })
     get().openApp(app.projectId, app.appId)
     if (!builder) {
@@ -702,7 +613,7 @@ export const appActions = (set: StoreSet, get: StoreGet): AppActions => ({
   },
 })
 
-/** Forgets what this window had seen of one project, and its notices: the next read looks at it afresh (#1141) */
+// The next read looks at the project afresh (#1141)
 export function forgetArrivalsOf(get: StoreGet, set: StoreSet, projectId: string): void {
   const s = get()
   if (!(projectId in s.appsSeen) && !s.appArrivals.some((a) => a.projectId === projectId)) return
@@ -711,15 +622,10 @@ export function forgetArrivalsOf(get: StoreGet, set: StoreSet, projectId: string
   get().saveWorkspace()
 }
 
-/**
- * Notes the apps trusted projects gained since this window last looked (#1141, `noteAppArrivals`): each one becomes an
- * inbox notice once. Run after the app list is read; a project whose trust changed is looked at afresh then
- * (`forgetArrivalsOf`). Saved with the workspace, so a reload does not say it again.
- */
+// Each app a trusted project gained is an inbox notice once (#1141), saved with the workspace so a reload is silent
 function noteArrivals(get: StoreGet, set: StoreSet): void {
   const s = get()
   const trusted = new Set(Object.values(s.projects).filter((p) => p.trusted).map((p) => p.id))
-  // Keyed as the catalog keys an app with a project (`appKeyOf`), titled as it titles one
   const apps = s.externalApps.flatMap((a) =>
     a.projectId ? [{ key: appKeyOf(a.projectId, a.appId), projectId: a.projectId, appId: a.appId, title: appTitleOf(a), asks: a.uses ? usesLines(a.uses) : [] }] : [],
   )

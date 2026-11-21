@@ -1,8 +1,5 @@
-/**
- * Golden tests (M1 plan T1-1). The fixtures here are a fixed list of "messages this version must
- * be able to parse." If changing the schema breaks this file, that is a backward-compatibility
- * break. Adding a field must never break this file (docs/protocol.md §4).
- */
+// Golden fixtures: messages this version must parse. A schema change that breaks one breaks backward
+// compatibility; adding a field never may (docs/protocol.md §4).
 import { randomUUID } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
@@ -48,7 +45,7 @@ import { currentSession } from './test-helpers.js'
 
 const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'message_delta', sessionId: 's1', role: 'assistant', text: 'hi' },
-  // Which message the chunk belongs to (#212) — optional, so the frame above still parses
+  // messageId is optional, so the frame above still parses
   { type: 'message_delta', sessionId: 's1', role: 'assistant', text: 'hi', messageId: 'm1' },
   {
     type: 'tool_call',
@@ -57,7 +54,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     summary: { tool: 'Bash', title: 'npm test', readOnly: false, paths: [] },
   },
   { type: 'tool_result', sessionId: 's1', callId: 'c1', ok: true, summary: 'exit 0' },
-  // The whole record of a tool call (#221) — optional, so the two frames above still parse
+  // The call's whole record is optional, so the two frames above still parse
   {
     type: 'tool_call',
     sessionId: 's1',
@@ -66,14 +63,13 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     input: { file_path: 'a.ts', content: 'export {}' },
   },
   { type: 'tool_result', sessionId: 's1', callId: 'c2', ok: true, summary: 'wrote', output: 'wrote a.ts' },
-  // A summary with no read-only hint (#428): adapters no longer set it, and it is optional, so the frames above still parse
+  // readOnly is optional: adapters do not set it
   {
     type: 'tool_call',
     sessionId: 's1',
     callId: 'c3',
     summary: { tool: 'Bash', title: 'git push', paths: [] },
   },
-  // A native subagent's step, under the call that launched it (#222)
   {
     type: 'subagent_event',
     sessionId: 's1',
@@ -119,7 +115,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     detail: { kind: 'file_edit', path: 'a.ts', diffPreview: '+x', multi: false },
   },
   { type: 'approval_request', sessionId: 's1', requestId: 'r3', detail: { kind: 'other', raw: '{}' } },
-  // A capability question's card (M4 D-4) — raised by the host
+  // A capability card is raised by the host
   {
     type: 'approval_request',
     sessionId: 's1',
@@ -131,7 +127,6 @@ const GOLDEN_EVENTS_V1: unknown[] = [
       text: 'run an agent (Claude Code) in a new session',
     },
   },
-  // The Assistant's create_project card (#515)
   {
     type: 'approval_request',
     sessionId: 's1',
@@ -149,7 +144,6 @@ const GOLDEN_EVENTS_V1: unknown[] = [
       source: { git: 'git@github.com:me/app.git', branch: 'dev' },
     },
   },
-  // The Assistant's add_project card (#1220): a folder here, and one on a linked machine
   {
     type: 'approval_request',
     sessionId: 's1',
@@ -181,7 +175,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
       text: 'Add the existing folder C:\\Users\\me\\Desktop\\notes on laptop as the project notes? It is not a git repository.',
     },
   },
-  // One project reaching another (#371), with the fields added since (#382, #700): a host of each age sends one of these
+  // An older host sends the first shape, a current one the second
   {
     type: 'approval_request',
     sessionId: 's1',
@@ -208,7 +202,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
       session: { id: 's9', name: 'Sprites' },
     },
   },
-  // start_agent's card (#561), before and after the difficulty and the worktree (#729, #561 part 2)
+  // start_agent's card as an older host sends it, then with difficulty and worktree
   {
     type: 'approval_request',
     sessionId: 's1',
@@ -236,7 +230,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
       text: 'fix the build',
     },
   },
-  // An update card (#581) and an agent's apply card (#665), which rides on `other`
+  // An update card, and an agent's apply card, which rides on `other`
   {
     type: 'approval_request',
     sessionId: 's1',
@@ -272,10 +266,10 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   },
   { type: 'question_resolved', sessionId: 's1', requestId: 'q1' },
   { type: 'turn_complete', sessionId: 's1' },
-  // A turn that answered against a schema (M4 D-1)
+  // A turn that answered against a schema
   { type: 'turn_complete', sessionId: 's1', output: { summary: 'short' } },
   { type: 'state_change', sessionId: 's1', state: 'waiting_input' },
-  // A turn the tool ran for a note sent into the turn before (#1604); a build from before drops the field and reads a plain state change
+  // A turn run for a note sent into the turn before; an older build drops origin and reads a plain state change
   {
     type: 'state_change',
     sessionId: 's1',
@@ -295,13 +289,13 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     usedPercent: 21,
     windowMins: 10080,
   },
-  // A v1 frame from before auto existed — must be read as an automatic name (adding a field must never break an old frame)
+  // Without auto, as an older host sends it: read as an automatic name
   { type: 'session_title', sessionId: 's1', title: 'auth refactor' },
-  // A name a person set (issue #5). auto=false means an automatic name never overwrites it again
+  // auto=false: a name a person set, which an automatic name never overwrites
   { type: 'session_title', sessionId: 's1', title: 'Guard MCP', auto: false },
   { type: 'files_touched', sessionId: 's1', paths: ['src/a.ts'] },
   { type: 'user_message', sessionId: 's1', seq: 12, text: 'text the Assistant inserted' },
-  // The origin of a message that arrived via instruction (FR-11)
+  // A message another session sent
   {
     type: 'user_message',
     sessionId: 's1',
@@ -309,7 +303,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     text: 'clean up the release notes',
     from: { sessionId: 'orc-1', name: 'coordinator session' },
   },
-  // A message sent by an inline conversation app screen (M4 B-1, B-4) — a person sent it, but an app wrote it
+  // From an inline app screen: a person sent it, but the app wrote it
   {
     type: 'user_message',
     sessionId: 's1',
@@ -324,9 +318,8 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     text: 'Triage the failing build',
     fromScript: { credential: 'ci runner' },
   },
-  // The composer's report choice (#1377), which a host before #1948 still puts on the person's message: read as a plain message
+  // An older host still puts the report choice on the person's message: read as a plain message (docs/protocol.md §3.2)
   { type: 'user_message', sessionId: 's1', seq: 17, text: 'I will do this myself', intent: 'takeover' },
-  // An inline conversation app screen (M4 B-1) — open (input), result, cancelled, rejected, closed
   {
     type: 'app_view',
     sessionId: 's1',
@@ -381,10 +374,10 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     phase: 'closed',
     reason: 'This app was removed',
   },
-  // Reasoning (measured in #58): codex has summary text, claude only a token estimate — so both are optional
+  // Measured: Codex sends summary text, Claude only a token estimate, so both are optional
   { type: 'reasoning_delta', sessionId: 's1', seq: 14, text: '**Reviewing path constraints**' },
   { type: 'reasoning_delta', sessionId: 's1', estTokens: 150 },
-  // Measured in #58 (codex turn/plan/updated): a snapshot — the real shape with all three states present
+  // Codex turn/plan/updated as measured: a snapshot, all three states present
   {
     type: 'plan_update',
     sessionId: 's1',
@@ -394,11 +387,11 @@ const GOLDEN_EVENTS_V1: unknown[] = [
       { text: 'Count its output lines and report', status: 'pending' },
     ],
   },
-  // Measured in #58 (codex item/commandExecution/outputDelta): an output chunk from a running command
+  // Codex item/commandExecution/outputDelta as measured
   { type: 'tool_output_delta', sessionId: 's1', callId: 'exec-5de387b1', text: 'tick 2\n' },
-  // An image an agent produced (#40) — display-only, so no seq
+  // Display-only, so no seq
   { type: 'message_image', sessionId: 's1', mime: 'image/png', data: 'aWJs', path: '/tmp/shot.png' },
-  // An image that failed to render is still an event — a failure should be visible
+  // An image that failed still arrives, so the failure shows
   {
     type: 'message_image',
     sessionId: 's1',
@@ -408,13 +401,13 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     note: 'Image is too large (12MB)',
   },
   { type: 'activity', sessionId: 's1', activity: 'compacting' },
-  // While codex's /review (a dedicated RPC) is running (measured — an enteredReviewMode item)
+  // Codex's /review running (measured: an enteredReviewMode item)
   { type: 'activity', sessionId: 's1', activity: 'reviewing' },
   { type: 'compaction', sessionId: 's1' },
   { type: 'compaction', sessionId: 's1', failed: true, reason: 'Not enough messages to compact.' },
   { type: 'compaction', sessionId: 's1', before: 25485, after: 3686 },
   { type: 'settings_changed', sessionId: 's1', model: 'gpt-5.3-codex', effort: 'high', verbosity: null },
-  // The tool switched by itself (#304) — the host records it without a restart and the screen shows it without a toast
+  // The tool switched by itself: recorded without a restart, shown without a toast
   {
     type: 'settings_changed',
     sessionId: 's1',
@@ -423,7 +416,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     verbosity: null,
     by: 'tool',
   },
-  // A change a client made through agents.updateSettings (#659), with the preset the event now carries
+  // A change a client made through agents.updateSettings
   {
     type: 'settings_changed',
     sessionId: 's1',
@@ -443,10 +436,10 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     permissionPreset: 'safe',
     by: 'orchestrator',
   },
-  // Claude Code's /clear (#304), measured: conversation_reset {trigger: 'clear'}
+  // Claude Code's /clear, as measured
   { type: 'conversation_reset', sessionId: 's1', seq: 21, trigger: 'clear' },
   { type: 'conversation_reset', sessionId: 's1' },
-  // Text the tool wants read (#304) — the measured Claude hook block and Codex configuration warning
+  // Measured: a Claude hook block and a Codex configuration warning
   {
     type: 'notice',
     sessionId: 's1',
@@ -461,7 +454,6 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     text: 'Codex is ignoring 2 unrecognized configuration settings.',
     oncePerSession: true,
   },
-  // The same notice made readable (#342): who speaks, what kind, who acts, a plain explanation and its list
   {
     type: 'notice',
     sessionId: 's1',
@@ -475,7 +467,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     items: ['a.b'],
     hint: 'Codex already runs without it; removing it from the file only silences this notice.',
   },
-  // A mail delivery's line with the messages it delivered (#2333), which the window folds open
+  // A mail delivery's line; the window folds its messages open
   {
     type: 'notice',
     sessionId: 's1',
@@ -488,24 +480,23 @@ const GOLDEN_EVENTS_V1: unknown[] = [
       { threadId: 'm_root2', messageId: 'm_2' },
     ],
   },
-  // A marker for a session born from a handoff (#102) — note is never carried in a broadcast, so the shape without it is the golden one
+  // A broadcast never carries note, so the golden shape has none
   { type: 'handoff', sessionId: 's1', from: 'Mea' },
   { type: 'history_synced', sessionId: 's1', added: 2 },
   { type: 'session_deleted', sessionId: 's1' },
-  // An announcement for a session the host created on its own (#69) — session is a SessionInfo, but the
-  // event schema carries it as unknown (so events never depends on commands). The receiving side parses it.
+  // session is a SessionInfo carried as unknown, so events never depend on commands; the receiver parses it
   {
     type: 'session_created',
     sessionId: 's-new',
     session: { id: 's-new', projectId: 'p1', name: 'Worktrees' },
   },
-  // A handoff moved a live child to the session that took over (#693)
+  // A handoff moved a live child to the session that took over
   { type: 'session_owner', sessionId: 's1', askedBy: 's-heir', parentSessionId: null },
   { type: 'worktree_merged', sessionId: 's1' },
-  // An external app's call finished (M4 A-4) — an app is unique per (project, id), so both are carried. null means a user-folder app
+  // An app is unique per (project, id); projectId null is a user-folder app
   { type: 'external_app_state_changed', appId: 'notes', projectId: 'p1' },
   { type: 'external_app_state_changed', appId: 'timer', projectId: null },
-  // A change caused by a screen — that screen never hears it again (M4 B-5). An unknown caller kind must not fail validation either
+  // The screen that caused a change never hears it again; an unknown cause kind still parses
   {
     type: 'external_app_state_changed',
     appId: 'notes',
@@ -518,14 +509,14 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     projectId: 'p1',
     cause: { kind: 'broker', via: 'x' },
   },
-  // An external app's run history panel changed (M4 D-6) — heard by the run history panel, not a screen
+  // Heard by the run history panel, not an app's screen
   { type: 'external_app_runs_changed', appId: 'notes', projectId: 'p1' },
   { type: 'external_app_runs_changed', appId: 'timer', projectId: null },
-  // The external app list changed (M4 A-8) — carries nothing. The receiving side refetches apps.list
+  // Carries nothing: the receiver refetches apps.list
   { type: 'external_apps_changed' },
-  // A file in the themes folder changed (#312) — the screen refetches the list
+  // A file in the themes folder changed: the screen refetches the list
   { type: 'themes_changed' },
-  // The screen preferences changed (#1306) — carries nothing, the screen reads prefs.get again
+  // Carries nothing: the screen reads prefs.get again
   { type: 'prefs_changed' },
   {
     type: 'host_request',
@@ -540,14 +531,14 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   },
   { type: 'host_request_resolved', requestId: 'r1', outcome: 'allowed' },
   { type: 'external_app_questions_changed' },
-  // An Assistant proposal list changed (#703): carries nothing, the screen refetches both lists
+  // Carries nothing: the screen refetches both proposal lists
   { type: 'orchestrator_proposals_changed' },
   { type: 'assistant_proposals_changed' },
   { type: 'project_consents_changed' },
   { type: 'projects_changed' },
-  // A project the Assistant added once the person allowed it (#1220)
+  // A project the Assistant added once the person allowed it
   { type: 'projects_changed', added: 'p9' },
-  // A linked machine's link changed state, and what the UI holds about it has to be read again (#82)
+  // A link changed state; on machine_resync the UI reads again what it holds about the machine
   {
     type: 'machine_status',
     machine: {
@@ -559,7 +550,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     },
   },
   { type: 'machine_resync', machineId: 'ubuntu' },
-  // A sign-in's serve waits to take over from this host, gave up, or nothing is pending (#1224)
+  // A sign-in's serve waits to take over from this host, gave up, or nothing is pending
   { type: 'host_handover', handover: { state: 'waiting', since: 1791182683464 } },
   { type: 'host_handover', handover: { state: 'gave_up', since: 1791182683464 } },
   { type: 'host_handover', handover: null },
@@ -569,7 +560,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     sessionId: 's1',
     pr: { number: 7, state: 'merged', url: 'https://github.com/x/y/pull/7' },
   },
-  // A goal announcement (2026-09-07) — both the union-of-both-tools shape and the cleared state (null) are golden
+  // The union of both tools' goal shapes, and the cleared goal
   {
     type: 'goal',
     sessionId: 's1',
@@ -583,7 +574,6 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     },
   },
   { type: 'goal', sessionId: 's1', goal: null },
-  // A session's background work (#290): the live set, and the tasks that just ended with their status
   {
     type: 'background_tasks',
     sessionId: 's1',
@@ -600,7 +590,7 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     ended: [{ id: 'b1', kind: 'shell', description: 'sleep 191', status: 'stopped', summary: 'sleep 191' }],
   },
   { type: 'background_tasks', sessionId: 's1', live: [], clearEnded: true },
-  // The CLI version a session's process runs (#297), and the installed ones (app-wide, defaults filled in)
+  // agent_versions is app-wide; an empty status gets its defaults
   { type: 'agent_version', sessionId: 's1', version: '2.1.289' },
   { type: 'session_live', sessionId: 's1', live: false, reason: 'asleep' },
   { type: 'session_live', sessionId: 's1', live: true },
@@ -609,7 +599,6 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     type: 'agent_versions',
     status: { installed: { claude: '2.1.290', codex: null }, autoApply: true, checkedAt: 1791182683464 },
   },
-  // A tool's own install and sign-in (#59): its progress, and where it rests after
   { type: 'tool_setup', tool: 'some-tool', setup: { state: 'installing', install: 'centralu', signIn: 'centralu', progress: { received: 1048576, total: null } } },
   { type: 'tool_setup', tool: 'some-tool', setup: { state: 'signed_out', install: 'centralu', signIn: 'centralu', failure: { reason: 'timed_out', message: 'Sign-in timed out' } } },
   {
@@ -617,21 +606,14 @@ const GOLDEN_EVENTS_V1: unknown[] = [
     sessionId: 's1',
     error: { code: 'adapter_crashed', message: 'process exited', retryable: true },
   },
-  /*
-   * An event that does not belong to a session (issue #43). It must parse **even without**
-   * sessionId — the fact that this app as a whole is out of date is not owned by any conversation.
-   *
-   * A field with a default must still be readable when omitted. If an old host sends only half
-   * of status and a new UI rejects it, checking the version would fail purely because of a
-   * version difference.
-   */
-  // A project event, so there is no sessionId (#34) — the same rule as update_status
+  // A project or app-wide event carries no sessionId. An older host's half status still parses (docs/protocol.md §4),
+  // or the version check itself would fail on the version difference.
   { type: 'fs_changed', projectId: 'p1', dirs: ['', 'src'] },
   { type: 'update_status', status: { current: '0.1.0-beta.2' } },
-  // The mailbox (#1347): a thread changed, named and nothing of its content; an older sender omits `toPerson`
+  // Names the thread and nothing of its content; an older sender omits `toPerson`
   { type: 'mail_changed', threadId: 'hub-aaaaaaaa.t_01J', toPerson: true },
   { type: 'mail_changed', threadId: 'hub-aaaaaaaa.t_01J' },
-  // A session's watches changed (#1324): the header lists them again
+  // The header lists the session's watches again
   { type: 'watches_changed', sessionId: 's1' },
   {
     type: 'update_status',
@@ -645,10 +627,9 @@ const GOLDEN_EVENTS_V1: unknown[] = [
       checkedAt: 1755000000000,
     },
   },
-  // An agent's "Apply now" (#665): the request every window answers, and the go only the ticket's window follows
+  // An agent's "Apply now": the request every window answers, and the go only the ticket's window follows
   { type: 'update_apply_request', requestId: 'r1' },
   { type: 'update_apply_go', requestId: 'r1', ticket: 't1' },
-  // Why a turn did not run to its end (#698), and its clearing
   {
     type: 'interruption',
     sessionId: 's1',
@@ -673,10 +654,7 @@ describe('golden: every v1 event type', () => {
   })
 })
 
-/**
- * Every approval card kind a host of this protocol has sent is in the fixtures above, and reads back as itself: the
- * fallback that turns an unreadable card into an `other` (#844) must never catch one this build knows.
- */
+// The fallback that reads an unreadable card as `other` must never catch a kind this build knows
 describe('golden: every approval card kind', () => {
   const sent = GOLDEN_EVENTS_V1.filter(
     (e): e is { type: 'approval_request'; requestId: string; detail: { kind: string } } =>
@@ -698,11 +676,8 @@ describe('golden: every approval card kind', () => {
   )
 })
 
-/**
- * A newer host's card in this window (#844). An approval rides on an event, and `parseServerFrame` drops an event it
- * cannot parse whole: before this, a card of a new kind, or a known kind with a new word, cost the whole event, and
- * the session sat waiting on a question no window showed. These fixtures are what a newer host may send.
- */
+// An unreadable card would cost its whole event, and the session would wait on a question no window shows
+// (docs/protocol.md §3.3). These fixtures are what a newer host may send.
 describe("a newer host's approval card", () => {
   const frame = (detail: unknown, seq = 9) => ({
     kind: 'event',
@@ -746,11 +721,7 @@ describe("a newer host's approval card", () => {
     )
   })
 
-  /*
-   * Review of #936: the first version showed only the card's text when it had one. A `project_access` card with a new
-   * `access` then read as the agent's own "export the sprites", with Allow live, and never said it was a new kind of
-   * reach into another project.
-   */
+  // The text alone would make a new kind of reach into another project read as the agent's own words, with Allow live
   it("of a known kind with a word this build does not have says the kind, the word and the projects before the agent's text", () => {
     const d = detailOf(
       frame({
@@ -817,11 +788,8 @@ describe("a newer host's approval card", () => {
 })
 
 describe('forward compatibility (docs/protocol.md §4)', () => {
-  /*
-   * #659: a build from before `person` and `permissionPreset` parses the new frame with the shape below (copied from
-   * the schema as it stood). A frame that fails there is dropped whole (`parseServerFrame` salvages only answers), so a
-   * window of the old build, open while the host is swapped, would miss the change. A new word in `by` did exactly that.
-   */
+  // `before` is the schema of a build without `person` and `permissionPreset`. It drops a frame it cannot parse whole,
+  // so an old window open across a host swap would miss the change; a new word in `by` would do that.
   it('an older build still parses every settings_changed frame this one sends (#659)', () => {
     const before = z.object({
       sessionId: z.string(),
@@ -843,7 +811,7 @@ describe('forward compatibility (docs/protocol.md §4)', () => {
   it("asks a machine at connect which of the hub's open tasks it lacks, and an older peer on either side reads the other (#2289)", () => {
     const offer = { hub: { id: 'hub-0000000a', name: 'Hub mac' }, on: false, mail: true, you: 'm1', open: ['hub-0000000a.m_01JX0000000000000000000000'] }
     expect(RpcMethods['host.hubOffer'].params.parse(offer).open).toEqual(offer.open)
-    // A machine from before it: the offer as its schema stood still parses, without the list
+    // An older machine's schema still parses the offer, without the list
     const before = z.object({ hub: z.object({ id: z.string(), name: z.string() }), on: z.boolean(), mail: z.boolean().optional(), you: z.string().optional(), apps: z.boolean().optional() })
     expect(before.parse(offer)).not.toHaveProperty('open')
     const answer = RpcMethods['host.hubOffer'].result
@@ -861,7 +829,7 @@ describe('forward compatibility (docs/protocol.md §4)', () => {
       type: 'update_status',
       status: { phase: 'updating', error: 'Downloading 3 of 9 MB' },
     })
-    // A host from before the field sends none: that is still idle
+    // An older host sends no phase: idle
     expect(parseEventLenient({ type: 'update_status', status: { current: '1.0.0' } })).toMatchObject({
       status: { phase: 'idle' },
     })
@@ -918,7 +886,7 @@ describe('forward compatibility (docs/protocol.md §4)', () => {
     })
     const row = { ...currentSession('s1'), interruption: { reason: 'quit', at: 'yesterday' } }
     expect(SessionInfo.parse(row).interruption).toBeNull()
-    // A host from before #698 sends no field at all
+    // An older host sends no interruption at all
     const { interruption: _, ...older } = currentSession('s1')
     expect(SessionInfo.parse(older).interruption).toBeUndefined()
   })
@@ -926,12 +894,9 @@ describe('forward compatibility (docs/protocol.md §4)', () => {
   it('rejects an event missing a required field', () => {
     expect(parseEventLenient({ type: 'message_delta', sessionId: 's1' })).toBeNull()
   })
-  /*
-   * Events this protocol carried once and no longer does (docs/protocol.md §3.2). A host from before their removal can
-   * still send one to a newer window, which drops it the way it drops a type it has never heard of, and goes on.
-   */
+  // Retired events (docs/protocol.md §3.2): a window drops one an older host sends as it drops an unknown type
   it.each([
-    // The compiled-in apps' "document changed" (#81), removed with them (#372)
+    // The compiled-in apps' "document changed"
     { type: 'app_state_changed', appId: 'control' },
   ])('drops a retired event an older host may still send: $type', (raw) => {
     expect(parseEventLenient(raw)).toBeNull()
@@ -1041,12 +1006,8 @@ describe('envelope', () => {
   })
 })
 
-/**
- * A tool's presentation used to be a `Record<ToolName, …>` compiled into this package, so the
- * compiler guaranteed every tool had a label and a mark. It is data on the wire now — sent by
- * whichever adapter the host happens to have — and the schema is the only thing left standing
- * between a half-filled descriptor and a screen that draws it.
- */
+// Presentation arrives as data from whichever adapter the host has, so no compiler checks a tool's label and
+// mark: the schema is the only check before a screen draws a half-filled descriptor.
 describe('tool presentation metadata', () => {
   const descriptor = {
     name: 'claude',
@@ -1057,42 +1018,33 @@ describe('tool presentation metadata', () => {
   }
 
   it('accepts a tool this build has never heard of', () => {
-    // The point of opening ToolName: a third adapter must not need an edit here to exist.
+    // ToolName is open so a new adapter needs no edit here
     expect(ToolName.safeParse('some-new-agent').success).toBe(true)
   })
 
   it('refuses a nameless tool', () => {
-    // '' is what a missing id degrades into, and it would key a React list and a session row.
+    // '' is what a missing id degrades into, and it would key a React list and a session row
     expect(ToolName.safeParse('').success).toBe(false)
   })
 
   it('refuses a descriptor with no mark', () => {
-    // The session chip shows one glyph and nothing else — there is no second place for the
-    // name to appear, so a descriptor without a mark draws an empty square in the sidebar.
+    // The session chip shows only the mark: without one it draws an empty square in the sidebar
     const { mark: _mark, ...noMark } = descriptor
     expect(ToolDescriptor.safeParse(descriptor).success).toBe(true)
     expect(ToolDescriptor.safeParse(noMark).success).toBe(false)
   })
 
   it('refuses a status that is only a detect result', () => {
-    // ToolStatus carries both halves so no screen has to join them. A raw detect result —
-    // installed/loggedIn/detail with no descriptor — is exactly the shape that join used to
-    // take, and it must not pass for the joined one.
+    // ToolStatus joins the descriptor and the detect result so no screen has to; the detect half alone must not pass
     const detected = { name: 'claude', installed: true, loggedIn: true, detail: 'v2.0.0' }
     expect(ToolStatus.safeParse({ ...descriptor, ...detected }).success).toBe(true)
     expect(ToolStatus.safeParse(detected).success).toBe(false)
   })
 })
 
-/**
- * A session id is an identifier, not a path (#94).
- *
- * Two commands turn it straight into one: `attachments.save` makes the directory it names, and
- * `agents.deleteSession` removes that directory recursively *without first looking the session
- * up*. Measured before this schema existed, `{ sessionId: '../../Documents' }` answered
- * `{ ok: true }` and the directory two levels above the data folder was gone. The refusal has to
- * live here because this is the one place every caller of every command passes through.
- */
+// A session id becomes a path: attachments.save makes its directory, agents.deleteSession removes it recursively
+// without a lookup. Measured without this check, '../../Documents' answered ok and that folder was gone. The schema
+// is the one place every caller of every command passes through.
 describe('SessionId', () => {
   const del = RpcMethods['agents.deleteSession'].params
   const save = RpcMethods['attachments.save'].params
@@ -1101,8 +1053,7 @@ describe('SessionId', () => {
     expect(del.safeParse({ sessionId: '../../Documents' }).success).toBe(false)
     expect(del.safeParse({ sessionId: 'a/b' }).success).toBe(false)
     expect(del.safeParse({ sessionId: '..' }).success).toBe(false)
-    // A leading dot is refused outright, which is what makes `..` unspellable rather than
-    // merely caught — there is no second rule to keep in step with this one.
+    // Refusing a leading dot makes `..` unspellable, with no second rule to keep in step
     expect(del.safeParse({ sessionId: '.hidden' }).success).toBe(false)
     expect(del.safeParse({ sessionId: '' }).success).toBe(false)
   })
@@ -1126,8 +1077,7 @@ describe('SessionId', () => {
   })
 
   it('accepts the ids we actually mint', () => {
-    // Guard against a regex so tight it refuses the app's own traffic: host ids are UUIDs, and
-    // tests and fixtures use short readable ones.
+    // Host ids are UUIDs; tests and fixtures use short readable ones
     expect(del.safeParse({ sessionId: randomUUID() }).success).toBe(true)
     expect(del.safeParse({ sessionId: 's1' }).success).toBe(true)
     expect(del.safeParse({ sessionId: 'ho-s1' }).success).toBe(true)
@@ -1216,11 +1166,8 @@ describe("a session's background tasks (#290)", () => {
   })
 })
 
-/**
- * An agent's apply card (#665 review) must read right in a window released before it. Such a window parses events
- * strictly (`parseServerFrame`) and drops one whose detail it cannot parse, so the card rides on `other`, the shape
- * every build has read since v1, with its whole question as the text.
- */
+// An older window drops an event whose detail it cannot parse, so the apply card rides on `other`, which every build
+// reads, with its whole question as the text (docs/protocol.md §3.3)
 describe('the apply card in a released window (#665)', () => {
   // ApprovalDetail's branches as beta.22 shipped them, for the two kinds in question
   const released = z.discriminatedUnion('kind', [
@@ -1238,12 +1185,12 @@ describe('the apply card in a released window (#665)', () => {
 
   it('would have been dropped as an update card with a new action', () => {
     expect(released.safeParse({ kind: 'centralu_update', action: 'apply' }).success).toBe(false)
-    // This build no longer drops it (#844), but could only say it cannot show it: the question is not in it
+    // This build does not drop it, but can only say it cannot show it: the question is not in it
     expect(isUnknownCard(ApprovalDetail.parse({ kind: 'centralu_update', action: 'apply' }))).toBe(true)
   })
 })
 
-/** The cards whose "always" is for the asking session only (#694): a window keeps it there, and the host remembers it there */
+// The cards whose "always" is for the asking session only: a window keeps it there, and the host remembers it there
 describe('sessionOnlyAlways (#581, #665, #694)', () => {
   it('is an update, an apply and a handoff, and no other card', () => {
     expect(sessionOnlyAlways({ kind: 'centralu_update', action: 'install' })).toBe(true)
@@ -1279,7 +1226,7 @@ describe('ProjectInfo.fromUserFolder (#1301)', () => {
   })
 })
 
-// #1399: what an update waits for
+// What an update waits for
 describe('turnsRunning', () => {
   const act = (o: Partial<HostActivity>): HostActivity => ({
     working: 0,
@@ -1298,10 +1245,8 @@ describe('turnsRunning', () => {
   })
 })
 
-/**
- * #2133 step 3: the Assistant's wire values under the role's new name, which a host of a later release sends
- * (docs/plans/assistant-rename.md). This build reads both and sends the old one.
- */
+// A later release sends the Assistant's wire values under the role's new name (docs/plans/assistant-rename.md);
+// this build reads both and sends the old one
 describe("the Assistant's values under both names (#2133)", () => {
   it('reads both kinds as the Assistant, and no other kind', () => {
     expect(['orchestrator', 'assistant', 'worker', 'coordinator', undefined, 'Assistant'].map(isAssistantKind)).toEqual([true, true, false, false, false, false])

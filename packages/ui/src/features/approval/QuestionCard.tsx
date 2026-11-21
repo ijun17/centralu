@@ -3,31 +3,13 @@ import type { Question, QuestionAnswer } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { WaitCard, WaitFooter } from './WaitCard.jsx'
 
+// AskUserQuestion: the answer is content for the model, not whether something runs, so apart from the approval card.
+// Nothing is truncated: a cut option cannot be answered. Several questions are tabs, not a stack (#8): stacked, they
+// outgrow a panel and push Answer below everything.
+
 /**
- * The choices an agent holds out (AskUserQuestion).
- *
- * Kept apart from the approval card because what travels back differs — an approval is
- * whether something runs, this is *content*: the picked answer goes to the model.
- *
- * In dogfooding this tool call used to flow as raw JSON and get cut off mid-stream; from
- * the second option on there was **no way to answer at all.** So nothing here truncates —
- * not the question, not the options, not the descriptions. If it had to be cut, there was
- * no point asking.
- *
- * **Several questions become tabs, not a stack** (issue #8). Stacked, three questions
- * with descriptions ran past a panel height and the Answer button sat below everything,
- * so the card read as a wall exactly where the agent is waiting on a person. One question
- * at a time is also how people actually answer; the tab row keeps the others in reach and
- * shows which still need one. A single question keeps the flat layout — a tab row of one
- * would be decoration.
- */
-/**
- * Whether a click on an option is the whole answer (issue #543, item 5).
- *
- * That holds for exactly one question with one choice: the pick *is* the decision, and a
- * separate Answer button was a second decision (`M P B B`, 2.6 s) with nothing left to
- * decide. Several questions need every one answered before anything is sent, and a
- * multiple-choice question has no way to say the last option was picked — those keep Answer.
+ * A click is the whole answer for exactly one single-choice question (#543 item 5): Answer would be a second decision
+ * (`M P B B`, 2.6 s). Several questions, or a multiple-choice one, keep Answer.
  */
 export function answersOnPick(questions: Question[]): boolean {
   return questions.length === 1 && !questions[0]!.multiSelect
@@ -44,22 +26,13 @@ export function QuestionCard({
 }) {
   const answer = useStore((s) => s.answerQuestion)
   const [picked, setPicked] = useState<Record<number, string[]>>({})
-  /*
-   * **Free-form input.**
-   *
-   * The tool's schema pins this down: "There should be no 'Other' option, that will be
-   * provided automatically." That slot is the screen's to provide — and since we draw our
-   * own screen, it is ours. Without it a person can only answer with what was offered,
-   * and has nothing to say when the real answer is a third thing.
-   */
+  // The free-form slot, ours to draw: the tool's schema says "There should be no 'Other' option, that will be provided
+  // automatically."
   const [otherOn, setOtherOn] = useState<Record<number, boolean>>({})
   const [otherText, setOtherText] = useState<Record<number, string>>({})
   const [active, setActive] = useState(0)
   const [sending, setSending] = useState(false)
-  /*
-   * `sending` is state, so two clicks (or a click and Enter) handled before React re-renders
-   * would both still read it as false. The ref changes at once and gates every send.
-   */
+  // Gates every send: two clicks (or click and Enter) before a re-render would both read `sending` as false
   const inFlight = useRef(false)
 
   const toggle = (qi: number, label: string, multi: boolean) => {
@@ -77,13 +50,13 @@ export function QuestionCard({
     if (!multi) setPicked((p) => ({ ...p, [qi]: [] }))
   }
 
-  /** What would actually be sent for this question (picked + typed) */
+  /** Picked plus typed */
   const answersFor = (qi: number): string[] => {
     const typed = otherOn[qi] ? (otherText[qi] ?? '').trim() : ''
     return [...(picked[qi] ?? []), ...(typed ? [typed] : [])]
   }
 
-  // Every question must be answered before sending — send half and the model invents the rest
+  // All or nothing: sent half, the model invents the rest
   const answered = questions.map((_, i) => answersFor(i).length > 0)
   const ready = answered.every(Boolean)
   const tabbed = questions.length > 1
@@ -112,12 +85,8 @@ export function QuestionCard({
     )
   }
 
-  /*
-   * An option on a single-choice question answers at once. It is still recorded as the pick
-   * first, so a send that fails leaves the card showing what was chosen. "Other" never takes
-   * this path: it opens the text field, and Answer sends what is typed. A pick made while
-   * the previous answer is still on its way is ignored, so a double click sends once.
-   */
+  // A quick pick is recorded first, so a failed send still shows it; one made while an answer is in flight is ignored.
+  // "Other" never comes here: it opens the field, and Answer sends it.
   const pick = (qi: number, label: string, multi: boolean) => {
     if (quick) {
       if (inFlight.current) return
@@ -137,9 +106,7 @@ export function QuestionCard({
 
       {tabbed && (
         /*
-          Same shapes as the evidence panel's tab row — one app, one way to draw a tab.
-          The dot on a tab is its answered state: what still waits is legible without
-          visiting every tab, which is the whole point of not stacking.
+          The evidence panel's tab shapes; a tab's dot says whether it is answered, without visiting it.
         */
         <nav
           className="mt-2 flex items-center gap-0.5 border-b border-line px-2 pb-1"
@@ -169,9 +136,7 @@ export function QuestionCard({
       <div className="mt-2 flex flex-col gap-3 px-3">
         {questions.map((q, qi) =>
           /*
-            Inactive tabs are hidden, not unmounted. Unmounting would drop a half-typed
-            free-form answer the moment someone peeks at the next question — losing what a
-            person wrote is the one cost tabs must not introduce over the stack.
+            An inactive tab renders nothing; its half-typed answer lives in this card's state, so a peek loses nothing.
           */
           tabbed && qi !== active ? null : (
             <div key={qi} className="flex flex-col gap-1.5">
@@ -182,7 +147,7 @@ export function QuestionCard({
                   </span>
                 )}
                 <span className="text-md leading-tight text-ink">{q.question}</span>
-                {/* That several answers are allowed must be known before pressing, not after */}
+                {/* Known before pressing, not after */}
                 {q.multiSelect && <span className="shrink-0 text-2xs text-ink-faint">multiple allowed</span>}
               </div>
               <div className="flex flex-col gap-1">
@@ -209,7 +174,7 @@ export function QuestionCard({
                   )
                 })}
 
-                {/* An answer that wasn't offered — the slot the tool leaves to the screen */}
+                {/* An answer not offered */}
                 <button
                   type="button"
                   data-testid="question-other"

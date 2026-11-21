@@ -29,13 +29,9 @@ import { Switch } from '../../components/Switch.jsx'
 import { More, SettingsCard, SettingsPage, SettingsRow } from './SettingsLayout.jsx'
 
 /**
- * Settings → Machines (#82, docs/plans/remote-hub.md): the other computers this computer's host reaches.
- *
- * The person arrives here with one of three errands: link a machine, find out why one is not connected, or decide
- * about versions that differ. So each row says its state, then its last error **as what to do** (core's
- * `machineProblem`: "run ssh-add", "ssh once in a terminal", "centralu is not installed there"), then the version
- * prompt when the link is held on versions. Adding one is the consent for this computer to reach it (plan §3.2): the
- * person can already open an ssh connection to it, and the link uses their own ssh and keys, never a password.
+ * Settings → Machines (#82, docs/plans/remote-hub.md), for three errands: link a machine, see why one is not connected,
+ * settle differing versions. A row says its state, its last error as what to do (core's `machineProblem`), then the
+ * version prompt. Adding is the consent to reach it (plan §3.2), over the person's own ssh and keys, never a password.
  */
 export function MachinesSection({ onOpenCategory }: { onOpenCategory: (category: 'background') => void }) {
   const machines = useStore((s) => s.machines)
@@ -250,7 +246,7 @@ function StopConfirm({ m, action, onCancel, onConfirm }: { m: MachineInfo; actio
   const machineActivity = useStore((s) => s.machineActivity)
   /*
    * Undefined while the machine is being asked. A failed question reads as an unknown answer (null), which the
-   * sentence words as such: it used to leave the confirmation asking, with its button disabled, for good.
+   * sentence words as such; left undefined, the confirmation would stay asking, with its button disabled, for good.
    */
   const asked = useLoad(() => machineActivity(m.id), [machineActivity, m.id])
   const activity: HostActivity | null | undefined = asked.error !== null ? null : asked.data
@@ -356,9 +352,9 @@ function InstalledRow({ m }: { m: MachineInfo }) {
 }
 
 /**
- * Auto reconnect (#1341, owner decision 2026-10-20), on by default: this computer connects when it starts and again
- * after every drop. Off, it tries once when it starts and then only when you press Connect, which suits a laptop that is
- * often closed or a server used once a week. The box shows what the host answered, as the autostart switch does.
+ * Auto reconnect (#1341), on by default: this computer connects when it starts and after every drop. Off, it tries once
+ * at start, then only on Connect, which suits a laptop often closed or a server used once a week. The box shows what
+ * the host answered, as the autostart switch does.
  */
 function AutoReconnectSwitch({ m }: { m: MachineInfo }) {
   const setAutoReconnect = useStore((s) => s.setMachineAutoReconnect)
@@ -421,10 +417,10 @@ function AutostartSwitch({ m }: { m: MachineInfo }) {
 }
 
 /**
- * The reverse direction (#550, docs/plans/remote-hub.md §12.7, owner decision 2026-10-18): this machine's sessions may
- * ask this computer's projects. Per machine, off by default. Turning it on asks once and says what it allows; turning it
- * off does not ask, and forgets the pairs. While it is on, the pairs approved on this computer's card are listed, each
- * withdrawn here. The switch shows what the host answered: it moves when the row does, not when it is clicked.
+ * The reverse direction (#550, docs/plans/remote-hub.md §12.7): this machine's sessions may ask this computer's
+ * projects. Per machine, off by default. Turning it on asks once and says what it allows; turning it off does not ask,
+ * and forgets the pairs. While on, the pairs approved on this computer's card are listed, each withdrawn here. The
+ * switch shows what the host answered: it moves when the row does, not when it is clicked.
  */
 function AsksSwitch({ m }: { m: MachineInfo }) {
   const setAsks = useStore((s) => s.setMachineAsks)
@@ -482,14 +478,14 @@ export function hubAutoNote(name: string, state: 'on' | 'off' | 'older' | 'unrea
 }
 
 /**
- * The machine's own "Allow auto from a linked computer" (#1273 review, owner decision 2026-10-19), read and set over the
- * link, so a machine with no window of its own (`centralu serve`) can be set from here. The machine reads it at each
- * start: off, a child this computer's `auto` session starts there runs under normal, and this computer asks first. The
- * switch shows what the machine answered; while the link is down, or on a machine from before it, it says so instead.
+ * The machine's own "Allow auto from a linked computer" (#1273), read and set over the link, so a machine with
+ * no window (`centralu serve`) can be set from here. Read at each start: off, a child this computer's `auto` session
+ * starts there runs under normal, and this computer asks first. The switch shows the machine's answer; while the link
+ * is down, or on an older machine without it, it says so instead.
  */
 function HubAutoSwitch({ m }: { m: MachineInfo }) {
   const platform = usePlatform()
-  // The machine's answer to the last change, kept only while the link is as it was then (#1273 review): a link that
+  // The machine's answer to the last change, kept only while the link is as it was then (#1273): a link that
   // goes or comes back reads the machine again, and that read is what shows
   const [set, setSet] = useState<{ state: 'on' | 'off' | 'older' | 'unreachable'; status: MachineInfo['status'] } | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
@@ -685,7 +681,7 @@ function VersionPrompt({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: 
 function OtherCredentials({ m }: { m: MachineInfo }) {
   const others = m.otherCredentials
   if (!others?.length && !m.ownCredentialGone && !m.credentialFileUnreadable) return null
-  // One that is gone no longer gives access: listed, since something used it, but not counted (#1405 review)
+  // One that is gone no longer gives access: listed, since something used it, but not counted (#1405)
   const count = (others ?? []).filter((c) => !c.gone).length + m.otherCredentialsMore
   return (
     <div className="mt-1 text-xs leading-body" data-testid={`machine-credentials-${m.id}`}>
@@ -709,7 +705,7 @@ function OtherCredentials({ m }: { m: MachineInfo }) {
               {c.created ? `, since ${new Date(c.created).toLocaleDateString()}` : ''}
               {/* A pairing under a label already there is a change, not a silent swap (#1405) */}
               {c.hubsName ? ', under this computer’s own name but not made by it' : c.replaced ? ', which replaced an earlier one of that name' : ''}
-              {/* Used there, then withdrawn before a read listed it (#1405 review): nothing left to revoke */}
+              {/* Used there, then withdrawn before a read listed it (#1405): nothing left to revoke */}
               {c.gone ? ', used, then withdrawn' : ''}
             </span>
             {!c.gone && (

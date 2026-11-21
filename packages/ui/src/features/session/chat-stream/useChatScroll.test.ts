@@ -5,14 +5,9 @@ import type { Virtualizer } from '@tanstack/react-virtual'
 import { useStore, type ChatItem } from '../../../store/store.js'
 import { useChatScroll } from './useChatScroll.js'
 
-/**
- * Where the conversation's view sits (#31, #61): following the bottom, letting go of a person who
- * scrolled up, and returning to the row left behind.
- *
- * The hook runs in real React. The node test run has no DOM (and a DOM library would have no
- * layout, which is all this hook reads), so what the hook touches is stood in for: a scroller that clamps `scrollTop` the way a browser does, a virtual scroller whose rows all
- * measure ROW px, and animation frames that run only when a test says so. A browser fires a scroll
- * event after every move; here a test calls `onScroll` where the browser would.
+/*
+ * The conversation's scroll position (#31, #61) in real React, without a DOM (a DOM library has no layout): a clamping
+ * scroller, rows of ROW px, frames run on a test's word, and `onScroll` called where a browser would fire it.
  */
 
 /** A scroller with layout: the browser clamps scrollTop between 0 and the end */

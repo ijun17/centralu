@@ -3,7 +3,7 @@ import { MAX_PANEL_H, MIN_PANEL_W, addPanel, columnsFor, removePanel, rowsFor, v
 
 /**
  * A screen height that leaves the height guard inert, which is every ordinary one
- * (see MAX_PANEL_H). Cases that pass this are about the width, as they always were.
+ * (see MAX_PANEL_H). Cases that pass this are about the width.
  */
 const H = 900
 
@@ -31,8 +31,7 @@ describe('columnsFor', () => {
   })
 
   it('a panel never goes below the minimum width — that is why the grid was held back', () => {
-    // With the three-column cap gone this is the only hard limit left, so it is checked
-    // over every count and width we expect to see rather than one of each (#51)
+    // The only hard limit (#51), so every expected count and width is checked
     for (const w of [500, 900, 1400, 2200, 2560, 4000]) {
       for (let n = 2; n <= 12; n++) {
         const cols = columnsFor(w, H, n)
@@ -58,9 +57,7 @@ describe('columnsFor', () => {
   })
 
   it('a wide screen may hold more than three columns — the limit is the panel width, not a count', () => {
-    // 12 panels at 4000: four columns are 1000px each, where the old cap of three insisted on
-    // 1333px and a fourth row. Both fill every cell, so the wider-panel tie-break is not what
-    // decides it — three columns would be a row deeper.
+    // 12 panels at 4000: both fill every cell; three columns would be a row deeper
     expect(columnsFor(4000, H, 12)).toBe(4)
     // Seven and eight panels only ever fit without a wasted cell above three columns
     expect(columnsFor(2560, H, 7)).toBe(4)
@@ -116,14 +113,12 @@ describe('columnsFor', () => {
   })
 
   it('two panels on a 5K screen give the shape up rather than the height limit', () => {
-    // There is nothing else available: two panels are one row or one column, and one row
-    // is 2828px tall. The height limit is the decided one, so the shape rule is what yields
+    // One row would be 2828px tall: the height limit wins over the shape rule
     expect(columnsFor(4820, 2828, 2)).toBe(1)
   })
 
   it('the height decides nothing at all on any screen under the limit', () => {
-    // Measured screen heights — 13", 16", 24", 27" (see MAX_PANEL_H). 0 is the first render,
-    // before the grid has been measured: an unknown height may not invent a constraint either
+    // 13", 16", 24", 27" (MAX_PANEL_H); 0 is the first render, before the grid is measured
     for (const h of [848, 1028, 1065, 1388]) {
       for (const w of [1140, 1428, 1620, 2260]) {
         for (let n = 2; n <= 12; n++) expect(columnsFor(w, h, n)).toBe(columnsFor(w, 0, n))

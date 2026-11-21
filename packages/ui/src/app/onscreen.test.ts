@@ -33,11 +33,7 @@ describe('the gust only blows when a session on screen finishes', () => {
     expect(isOnScreen('focus', 'p2', { ...screen, focusedSessionId: 'p1' })).toBe(false)
   })
 
-  /*
-   * This is the whole point. With ten sessions there are ten off-screen completions, and
-   * sweeping the screen for each one would interrupt whatever is being read — that job belongs
-   * to notifications instead.
-   */
+  // Off-screen completions belong to notifications: ten sessions would sweep the screen ten times
   it('does not blow for something that finished off screen', () => {
     expect(isOnScreen('focus', 'zzz', ctx)).toBe(false)
     expect(isOnScreen('grid', 'zzz', ctx)).toBe(false)

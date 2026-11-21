@@ -3,16 +3,7 @@ import type { AppState } from './state.js'
 import type { Screen } from './navHistory.js'
 import { gridAppViewKey, isApp } from './appKeys.js'
 
-/**
- * Which screen the person is on, read from the store's state: the project screen and what it shows,
- * the project the focus lane is in, the apps the grid shows, and the screen history records (#374).
- * Pure selectors; components and the store's actions read them alike.
- */
-
-/**
- * The project whose screen is showing (#203), or null. The project screen is the focus lane with no session
- * picked: `focusProject` releases the session focus to open it, and picking a session leaves it.
- */
+/** The project screen (#203) is the focus lane with no session picked */
 export function projectScreenOf(
   s: Pick<AppState, 'view' | 'focusedSessionId' | 'focusedProjectId' | 'projects'>,
 ): string | null {
@@ -21,15 +12,8 @@ export function projectScreenOf(
 }
 
 /**
- * The project the focus lane is showing — its screen, one of its sessions or one of its apps — or null. The sidebar tints that
- * project's group, so the person can see which project they are in as well as which row.
- *
- * Only the focus lane counts: the grid and the Assistant are views of their own, lit by their own buttons, and a
- * tinted project beside them would be a second answer to "what am I looking at".
- *
- * A focused session answers with **its own** project, not `focusedProjectId`. Opening a session that has no project
- * (a coordinator) leaves `focusedProjectId` on the project looked at last, and reading that would tint a project the
- * screen is not showing.
+ * The project the sidebar tints. Only the focus lane counts: the grid and the Assistant are lit by their own buttons. A
+ * session answers with its own project: one with none leaves `focusedProjectId` on the project looked at last.
  */
 export function openProjectOf(
   s: Pick<
@@ -37,11 +21,7 @@ export function openProjectOf(
     'view' | 'focusedSessionId' | 'focusedProjectId' | 'focusedApp' | 'projects' | 'sessions'
   >,
 ): string | null {
-  /*
-   * An app open in the app view belongs to its project the way a session does: the person is inside that project, so
-   * its group is tinted and the app's own row carries the mark. An app in the user folder belongs to no project and
-   * tints nothing, like a session with no project.
-   */
+  // An app belongs to its project as a session does; a user-folder app tints nothing
   if (s.view === 'app') {
     const pid = s.focusedApp?.projectId
     return pid && s.projects[pid] ? pid : null
@@ -53,23 +33,15 @@ export function openProjectOf(
 }
 
 /**
- * The project whose files and git history the evidence panel and the overlay show, or null: a focused session's own
- * project, and the project looked at last only while no session is focused.
- *
- * A session with no project (the Assistant, a coordinator) **does not fall back to the last project** (a dogfooding
- * finding, 2026-09-06): that project's files beside it would read as if the session started in that folder, when it
- * actually runs from the Assistant's home.
+ * A session with no project does not fall back to the last project: its files beside the session would read as the
+ * folder it runs in.
  */
 export function evidenceProjectOf(s: Pick<AppState, 'focusedSessionId' | 'focusedProjectId' | 'sessions'>): string | null {
   const sess = s.focusedSessionId ? s.sessions[s.focusedSessionId] : null
   return sess ? sess.projectId : s.focusedProjectId
 }
 
-/**
- * Where "New session" from the command palette starts one (#529): the project the person is in, by the same answer the
- * sidebar tints (`openProjectOf`); on the grid, the focused panel's session's project; otherwise the project looked at
- * last, then the first one. null only when there is no project at all, and the palette then does not offer it.
- */
+/** Where the palette's "New session" starts one (#529); null only with no project, and then it is not offered */
 export function newSessionProjectOf(
   s: Pick<
     AppState,
@@ -86,10 +58,6 @@ export function newSessionProjectOf(
   )
 }
 
-/**
- * The sessions explicitly placed on the project screen right now. The
- * trash (#204) needs no rule here — an archived session is not in `sessions`.
- */
 export function projectScreenSessions(
   s: Pick<
     AppState,
@@ -108,10 +76,7 @@ export function projectScreenSessions(
   return sessions.filter((x) => shown.has(sessionPanelId(x.id))).map((x) => x.id)
 }
 
-/**
- * The apps the project screen shows as panels right now, as pinned view keys (#203). PinnedApps lays exactly these
- * over their panels, so it and ProjectView must not decide this separately.
- */
+/** PinnedApps and ProjectView both read this, so they never decide it separately (#203) */
 export function projectScreenAppKeys(
   s: Pick<
     AppState,
@@ -130,11 +95,7 @@ export function projectScreenAppKeys(
   return apps.filter((a) => shown.has(appPanelId(a.appId))).map((a) => appKeyOf(pid, a.appId))
 }
 
-/**
- * The apps the grid shows as panels right now, as their grid view keys (#288, `gridAppViewKey`). PinnedApps lays exactly
- * these over the grid's panels, and GridView opens a view for each, so the two read this one answer. An app the list does
- * not have is not a panel (`visibleGridPanels`), so it gets no view either.
- */
+/** PinnedApps and GridView both read this (#288); an app the list lacks is not a panel (`visibleGridPanels`) */
 export function gridScreenAppKeys(s: Pick<AppState, 'view' | 'gridPanels' | 'externalApps'>): string[] {
   if (s.view !== 'grid') return []
   const listed = new Set(s.externalApps.map((a) => appKeyOf(a.projectId, a.appId, a.machine)))
@@ -176,10 +137,7 @@ export function showsIntro(s: Pick<AppState, 'projects' | 'sessions' | 'introSee
   return Object.keys(s.projects).length === 0 && Object.keys(s.sessions).length === 0 && !s.introSeen
 }
 
-/**
- * The screen on now, as history records it (#374), or null for one that is not a place to return to (nothing
- * picked yet, the intro). Settings is a layer over the screen under it, and counts as a screen of its own.
- */
+/** The screen as history records it (docs/state-management.md §5a); null for nothing picked yet or the intro */
 export function screenOf(
   s: Pick<
     AppState,
@@ -213,7 +171,6 @@ export function screenOf(
   return under
 }
 
-/** The screen under any layer */
 function screenUnder(
   s: Pick<AppState, 'view' | 'focusedApp' | 'focusedSessionId' | 'focusedProjectId' | 'projects'>,
 ): Screen | null {
@@ -239,7 +196,6 @@ function screenUnder(
   }
 }
 
-/** Whether going back or forward to this screen would still find it (#374): the session, project or app is still here */
 export function screenExists(
   s: Pick<AppState, 'sessions' | 'projects' | 'externalApps'>,
   screen: Screen,

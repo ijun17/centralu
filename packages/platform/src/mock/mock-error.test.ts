@@ -2,9 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { mockError } from './mock-error.js'
 
 /*
- * The mock answers as the host's answer reaches a window (#850 item 14). The host builds its coded errors one way
- * (agent-host/src/rpc-error.ts); the mock built about forty by hand, and five carried codes the protocol does not have,
- * which the host's door would have sent as `internal`.
+ * The mock answers as the host's answer reaches a window (#850 item 14): built one way, as agent-host/src/rpc-error.ts
+ * builds them, so none carries a code the protocol lacks (the host would send that as `internal`).
  */
 describe('mockError (#850)', () => {
   it('carries the message and a protocol code, internal unless given', () => {

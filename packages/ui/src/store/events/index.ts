@@ -9,20 +9,10 @@ import { noticeEvent } from './notices.js'
 import { sessionEvent, sessionListEvent } from './sessions.js'
 import { updateEvent } from './updates.js'
 
-/**
- * `dispatchEvent`: every event the host sends goes through here. App-wide events first, then the
- * session guard, then a session's own life, its notices and its conversation, each in its family's
- * file. The order is the order these were handled in when they were one function.
- */
+// A handler that answers true ends the dispatch, so the order of the calls is part of the behavior.
 export const eventActions = (set: StoreSet, get: StoreGet): Pick<AppState, 'dispatchEvent'> => ({
   dispatchEvent(e, id) {
-    /*
-     * Events that do not belong to a session are handled **before the session guard** (issue #43).
-     *
-     * The `if (!sessionId) return` below is the widest door in this file, and anything caught by it
-     * vanishes silently — placing the update status handling after it would make the host's message
-     * arrive and do nothing, the worst kind of defect to trace.
-     */
+    // App-wide events go before the session guard, which drops anything without a session silently (#43)
     if (updateEvent(e, set, get) || rereadFor(e, set, get) || machineEvent(e, set, get) || mailEvent(e, set, get) || appEvent(e, set) || subagentStepEvent(e, set, get)) return
 
     const sessionId = e.sessionId

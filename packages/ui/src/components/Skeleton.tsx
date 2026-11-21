@@ -1,12 +1,7 @@
 /**
- * Placeholders for what a screen is still reading (a session's history, a project's changes, a file).
- *
- * The shape of what will stand there, in quiet surface colours, instead of an empty area or a bare
- * "Loading…": an empty area reads as stalled, and a line of text jumps when the content replaces it.
- * Waiting is not a signal meant to call the person (the palette rule), so nothing here is bright.
- *
- * It fades in after a short delay (`.cc-skeleton`, styles/index.css): a read that answers at once
- * never flashes it, and only a wait the eye would notice shows it.
+ * Placeholders in the shape of what a screen is still reading: an empty area reads as stalled, and a "Loading…" line
+ * jumps when the content replaces it. Quiet colours, since waiting does not call the person. It fades in after a delay
+ * (`.cc-skeleton`), so a read that answers at once never flashes it.
  */
 const BAR = 'animate-pulse rounded-md bg-surface-hover/50'
 
@@ -39,10 +34,7 @@ export function SkeletonLines({
 
 const WIDTHS = [72, 88, 56, 80, 64]
 
-/**
- * A conversation being read: the person's message on the right, the agent's answer on the left, twice.
- * Drawn in the chat's own column and spacing, so the first rows land where the skeleton stood.
- */
+/** A conversation being read, in the chat's own column and spacing, so the first rows land where it stood */
 export function ChatSkeleton({
   testId = 'chat-skeleton',
   late = false,
@@ -59,7 +51,7 @@ export function ChatSkeleton({
     >
       {[0, 1].map((turn) => (
         <div key={turn} className="flex flex-col">
-          {/* The conversation's shapes: the person's bubble on the right, the answer's full-width bubble on the left */}
+          {/* The person's bubble, then the answer's */}
           <div className="flex justify-end pb-4 pt-6">
             <div
               className="h-10 animate-pulse rounded-bubble bg-surface-hover/50"

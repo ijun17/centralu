@@ -5,9 +5,8 @@ import { advanceSplit, piecesOf, wholeSplit, type MarkdownSplit } from './markdo
 import { SLOW } from '../../../../../tooling/test-timing.js'
 
 /*
- * A streamed reply is drawn in pieces (#364): the blocks that can no longer change, each rendered once, and the one
- * still being written. These tests hold the pieces to what one parse of the same text draws, at every point of a
- * stream, over random cuts of replies built to put every block kind next to every other.
+ * A streamed reply's pieces (#364) against one parse of the same text, at every point of a stream, over random cuts of
+ * replies that put every block kind next to every other.
  */
 
 const render = (text: string) => renderToStaticMarkup(<MarkdownBlock text={text} projectRoot={null} projectId={null} />)

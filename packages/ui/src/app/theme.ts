@@ -2,30 +2,19 @@ import { THEME_PRESETS, pickableThemes, THEME_TOKENS, THEME_TOKEN_BY_KEY, type T
 import { readStored, writeStored } from './stored.js'
 
 /**
- * The theme engine (#312 step 3).
- *
- * A theme is a set of values for the tokens in `styles/index.css`. Presets live in the stylesheet:
- * the `@theme` values are the Dark preset, and any other preset is a `[data-theme='…']` block
- * there. A custom theme is a file in the data folder's `themes/` (protocol theme.ts, read and
- * watched by the host); its tokens are applied as inline custom properties on `<html>`, so they
- * override the preset for the same side, and any token it leaves out keeps that preset's value. Everything that
- * reads a token (utilities, `var()` in CSS, xterm via terminalTheme.ts) follows without knowing
- * which theme is on.
+ * The theme engine: docs/themes.md "How it is applied". A custom theme's tokens go inline on `<html>` over its
+ * preset, and a token it leaves out keeps the preset's value.
  */
 
 export type ThemeBase = 'dark' | 'light'
 
-/**
- * The presets the stylesheet defines. Dark is the `@theme` values themselves; the others are
- * `[data-theme='…']` blocks in index.css. The first preset of each base is that side's default.
- * The list is the protocol's (`THEME_PRESETS`), so the host names the same ones (#1219).
- */
+/** The protocol's list, so the host names the same presets (#1219); the first of each base is that side's default */
 export { THEME_PRESETS }
 export type { ThemePreset }
 
 export { THEME_TOKENS, pickableThemes }
 
-/** Whether the browser accepts this value for this token (by its theme-file key). Anything else is never applied. */
+/** By theme-file key; a value the browser rejects is never applied */
 export function isValidTokenValue(key: string, value: string): boolean {
   const token = THEME_TOKEN_BY_KEY.get(key)
   if (!token || !value.trim() || value.length > 400) return false
@@ -34,14 +23,12 @@ export function isValidTokenValue(key: string, value: string): boolean {
   return CSS.supports(property, value)
 }
 
-/** The tokens of a theme file the browser would not take, one sentence each, for Settings to show next to it */
 export function unusableValues(entry: ThemeFileEntry): string[] {
   return Object.entries(entry.tokens)
     .filter(([key, value]) => !isValidTokenValue(key, value))
     .map(([key, value]) => `"${value}" is not a usable value for ${key}; it is ignored.`)
 }
 
-/** What a resolved theme is: the preset under it and the inline tokens on top. */
 export type ResolvedTheme = {
   /** The id the person chose (a preset id or a custom theme's id) */
   id: string
@@ -49,28 +36,21 @@ export type ResolvedTheme = {
   base: ThemeBase
   /** The `[data-theme]` preset block under it */
   preset: string
-  /** Inline overrides: a custom theme's tokens (none for a preset) */
+  /** A custom theme's tokens, inline (none for a preset) */
   tokens: Record<string, string>
 }
 
-/** The preset a side falls back to. A side with no preset of its own (light, until it has one) borrows Dark. */
+/** A side with no preset of its own borrows Dark */
 function presetFor(base: ThemeBase): ThemePreset {
   return THEME_PRESETS.find((p) => p.base === base) ?? THEME_PRESETS[0]!
 }
 
-/**
- * Which side shows. One theme is picked in Settings, and its side is the mode; the app does not follow the OS
- * (owner, 2026-10-19: Dark is the default and nothing switches it behind the person's back). A stored `system`
- * from an older build reads as Dark.
- */
+/** The picked theme's side, never the OS; a stored `system` reads as Dark: docs/themes.md "Choosing" */
 export function activeSide(mode: UiPreferences['themeMode']): ThemeBase {
   return mode === 'light' ? 'light' : 'dark'
 }
 
-/**
- * The theme for one side. An id that names nothing (a deleted custom theme, a preset from a newer
- * build) falls back to that side's preset rather than to nothing.
- */
+/** An id that names nothing (a deleted custom theme, a newer build's preset) falls back to the side's preset */
 export function resolveSide(
   side: ThemeBase,
   id: string,
@@ -82,8 +62,7 @@ export function resolveSide(
     for (const [key, value] of Object.entries(file.tokens)) {
       if (isValidTokenValue(key, value)) tokens[THEME_TOKEN_BY_KEY.get(key)!.cssVar] = value
     }
-    // A border the file leaves out follows the token THEME_TOKENS names (the window line, the panel's edge…): its own `line` or `line-strong`,
-    // never a colour the preset chose and never one mixed from other tokens
+    // A border the file leaves out follows the file's own token, never the preset's: docs/themes.md "The lines"
     for (const token of THEME_TOKENS) {
       const target = token.follows ? THEME_TOKEN_BY_KEY.get(token.follows) : undefined
       if (target && !(token.cssVar in tokens)) tokens[token.cssVar] = `var(${target.cssVar})`
@@ -94,14 +73,10 @@ export function resolveSide(
   return { id: preset.id, name: preset.name, base: preset.base, preset: preset.id, tokens: {} }
 }
 
-/** Both sides resolved, plus the mode — what the cache keeps, so first paint can pick a side before the prefs arrive. */
+/** What the cache keeps, so first paint can pick a side before the preferences arrive */
 export type ThemeChoice = { mode: UiPreferences['themeMode']; dark: ResolvedTheme; light: ResolvedTheme }
 
-/**
- * The stored `accent` is not followed (owner, 2026-10-20): Settings stopped offering it, and a value an older
- * build saved would otherwise colour focus and selection with no switch left to take it back. A theme file can still
- * set the same tokens itself.
- */
+/** A stored `accent` is not applied: docs/themes.md "Choosing" */
 export function resolveChoice(prefs: UiPreferences, themeFiles: readonly ThemeFileEntry[]): ThemeChoice {
   return {
     mode: prefs.themeMode,
@@ -114,17 +89,12 @@ export function pickTheme(choice: ThemeChoice): ResolvedTheme {
   return activeSide(choice.mode) === 'dark' ? choice.dark : choice.light
 }
 
-/** The names this module last wrote inline, so a switch removes exactly those and nothing else on `<html>`. */
+/** What this module last wrote inline, so a switch removes exactly those and nothing else on `<html>` */
 let written: string[] = []
 
-/** Puts a theme on the page. Cheap enough to run on every change: a few attribute and property writes. */
 export function applyTheme(theme: ResolvedTheme, root: HTMLElement = document.documentElement): void {
   for (const name of written) root.style.removeProperty(name)
-  /*
-   * The first-paint script in index.html (#340) put the last theme's floor and colour scheme inline
-   * on <html>, before any stylesheet. From here the stylesheet owns both; left in place, the inline
-   * colour scheme would outrank `html[data-theme-base='light']` after a switch.
-   */
+  // The first-paint script's inline values (#340) would outrank the stylesheet: docs/themes.md "How it is applied"
   root.style.removeProperty('background-color')
   root.style.removeProperty('color-scheme')
   root.dataset.theme = theme.preset
@@ -141,11 +111,7 @@ export function cacheChoice(choice: ThemeChoice): void {
   writeStored(CACHE_KEY, choice)
 }
 
-/**
- * Applies the theme the last run chose, before React draws anything (main.tsx). The real
- * preferences arrive with the host's first answer, which is too late for the first frame: a light
- * theme would open as a dark flash. Anything unreadable leaves the stylesheet's Dark in place.
- */
+/** The last run's theme before React draws: docs/themes.md "How it is applied". Unreadable: the stylesheet's Dark */
 export function applyCachedTheme(): void {
   try {
     const choice = readStored(CACHE_KEY) as ThemeChoice | undefined
@@ -165,11 +131,8 @@ export function applyCachedTheme(): void {
 }
 
 /**
- * The custom themes the last run showed, as theme files, for the store's `lastGoodThemes` before any file has been read.
- * A theme file that is broken when the window starts (half edited, or one the host could not parse) has no clean version
- * in memory yet; without this the window fell back to the Dark preset and wrote that over the cache, so the custom theme
- * was gone from the first paint until the file was fixed. The cache is the page's own writing, re-checked like in
- * `applyCachedTheme`.
+ * The last run's custom themes, for `lastGoodThemes` before any file is read: a file broken at start has no clean
+ * version yet, and Dark would be written over the cache (docs/themes.md "Theme files"). Re-checked like the cache above.
  */
 export function cachedThemeFiles(): Record<string, ThemeFileEntry> {
   const out: Record<string, ThemeFileEntry> = {}
@@ -190,11 +153,7 @@ export function cachedThemeFiles(): Record<string, ThemeFileEntry> {
   return out
 }
 
-/**
- * Reads what a preset sets every token to (by theme-file key), with the custom layer
- * lifted for the moment it takes to read. Used to duplicate a preset into a theme file: the copy
- * starts from exactly what that preset puts on screen.
- */
+/** A preset's tokens (by theme-file key), read with the custom layer lifted: a copy starts from what the preset shows */
 export function readPresetTokens(preset: string, root: HTMLElement = document.documentElement): Record<string, string> {
   const saved = written.map((name) => [name, root.style.getPropertyValue(name)] as const)
   const savedTheme = root.dataset.theme
@@ -214,7 +173,7 @@ export function readPresetTokens(preset: string, root: HTMLElement = document.do
 
 // ── The urgency order ───────────────────────────────────────────────────────────
 
-/** The surfaces text is read on. The order has to hold on every one of them. */
+/** The order has to hold on every one of these */
 export const READING_SURFACES = [
   ['--color-surface-floor', 'the floor'],
   ['--color-surface-side', 'the sidebar'],
@@ -253,11 +212,7 @@ export function contrast(a: Rgba, b: Rgba): number {
   return (hi + 0.05) / (lo + 0.05)
 }
 
-/**
- * Where the urgency order breaks: on each surface, each ink must stand out more than the one
- * after it. "Contrast is urgency" (#312 decision 2) — the same rule as "brightness is urgency" in
- * dark, stated so it also holds in light. Returns one sentence per break, empty when it holds.
- */
+/** One sentence per break of the order on any surface; empty when it holds */
 export function urgencyBreaks(colors: Record<string, Rgba>): string[] {
   const breaks: string[] = []
   for (const [surfaceName, surfaceLabel] of READING_SURFACES) {
@@ -279,11 +234,7 @@ export function urgencyBreaks(colors: Record<string, Rgba>): string[] {
   return breaks
 }
 
-/**
- * Resolves token values to colours the way the page would, by letting the browser compute them
- * on a hidden probe and reading the pixels back from a 1×1 canvas (so any syntax the browser
- * accepts — hex, rgb, oklch, color-mix — ends up as plain sRGB).
- */
+/** Computed on a hidden probe and read back from a 1×1 canvas, so any syntax (oklch, color-mix) ends as plain sRGB */
 export function resolveColors(tokens: Record<string, string>, preset: string, names: readonly string[]): Record<string, Rgba> {
   const root = document.documentElement
   const probe = document.createElement('div')

@@ -1,9 +1,6 @@
 /**
- * A set of subscribers: `add` returns the function that removes it, `emit` hands one value to every subscriber.
- *
- * Each subscriber is isolated: one that throws is reported to `onError` and the rest still get the value, because the
- * sender has already moved past it and nothing would hand it over again. `emit` walks a snapshot, so a subscriber that
- * adds or removes one (itself included) while the value is going round neither skips nor repeats another.
+ * Listeners of one value: one that throws goes to `onError` and the rest still get the value, as nothing would hand it
+ * over again. `emit` walks a snapshot, so adding or removing one mid-emit neither skips nor repeats another.
  */
 export type Listeners<T> = {
   add(listener: (value: T) => void): () => void

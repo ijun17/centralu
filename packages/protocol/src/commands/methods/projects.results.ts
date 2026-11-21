@@ -3,7 +3,7 @@ import { Attachment, GitBranch, GitCommit, GitDiff, GitFileStatus } from '../../
 import { FsEntry, FsFile } from '../files.js'
 import { ProjectInfo, SavedCommand } from '../projects.js'
 
-/** The results of the `projects` methods, which a client reads through `parseRpcResult`. Their parameters, and what each method is for: ./projects.params.ts */
+/** Results of the `projects` methods, read through `parseRpcResult`. Params and what each method does: ./projects.params.ts */
 export const projectsResults = {
   'git.status': z.array(GitFileStatus),
   'git.diff': GitDiff,

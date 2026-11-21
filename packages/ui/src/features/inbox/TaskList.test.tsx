@@ -8,7 +8,7 @@ const list = (unreached: { machineId: string; name: string }[]) =>
     <TaskList groups={groupTasks([])} loaded capped={null} unreached={unreached} cursor={null} doneOpen={false} onToggleDone={() => {}} onOpen={() => {}} />,
   )
 
-// #2268: on a hub, a linked machine whose work could not be read was missing from Tasks without a word
+// #2268: on a hub, a linked machine whose work could not be read must not be missing from Tasks without a word
 describe('Tasks on a hub, with a linked machine that was not reached', () => {
   it('names each such machine, under "No tasks" too, folding in as a change on screen does, and none when every machine answered', () => {
     const html = list([

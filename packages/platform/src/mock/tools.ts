@@ -7,12 +7,10 @@ const NO_ROLE_TEXT: Pick<AdapterCapabilities, 'verbosities' | 'exclusiveWriter' 
 
 /** The agent tools the mock knows: what is detected, their models and capabilities, and the slash command list */
 export class ToolsMock {
-  /** Tells the app a tool's setup changed (`tool_setup`) */
   constructor(private readonly emit: Emit) {}
-  /** The calls a screen made to the setup actions, in order (`install`, `cancelInstall`, `signIn`, `cancelSignIn`), for a test to read */
   setupCalls: { action: string; tool: ToolName; machine?: MachineRef }[] = []
 
-  /** The detected tools — kept outside so a test can build "a tool that is not logged in" */
+  /** Open so a test can build "a tool that is not logged in" */
   detected: ToolStatus[] = [
     {
       // eslint-disable-next-line agent/agent-adapter-checks -- Mock detection depicts this CLI's installed state.
@@ -61,7 +59,7 @@ export class ToolsMock {
       ],
       capabilities: { verbosities: ['low', 'medium', 'high'], exclusiveWriter: true, toolDeferral: false, instructionChannel: 'developer', processModel: 'per-session', builtInSubagents: true, peerMessaging: false },
     }],
-    // Antigravity, Cursor and OpenCode take no role text on the real host (`CAPABILITIES` in each adapter; `mock-capability-parity.test.ts` holds the two together)
+    // No role text on the real host (each adapter's `CAPABILITIES`); mock-capability-parity.test.ts holds them together
     // eslint-disable-next-line agent/agent-adapter-checks -- Fixture catalogue supplies these CLIs' model and capability data.
     ...['antigravity', 'cursor-agent', 'opencode'].map((tool): [ToolName, { models: []; capabilities: typeof NO_ROLE_TEXT }] => [tool, { models: [], capabilities: NO_ROLE_TEXT }]),
   ])
@@ -71,18 +69,17 @@ export class ToolsMock {
     if (!first) throw new Error('no mock agent is registered')
     return first
   }
-  /** For tests: the tools a linked machine has, by machine id (#82) */
+  /** By machine id (#82) */
   machineDetected: Record<string, ToolStatus[]> = {}
 
-  /** For tests: the slash command list (ready=false also reproduces "the tool is not ready yet") */
+  /** `ready: false` stands for "the tool is not ready yet" */
   commandState: { ready: boolean; commands: { name: string; description: string; argumentHint: string }[] } =
     {
       ready: true,
       commands: [],
     }
-  /** For tests: what a tool declares it cannot keep (`presets`, `keepsRepoFilesOut`, `roleText`), by tool */
+  /** What a tool declares it cannot keep (`presets`, `keepsRepoFilesOut`, `roleText`) */
   capabilityLimits: Record<ToolName, Partial<AdapterCapabilities>> = {}
-  /** For tests: when set, the slash command list fails with this reason (a machine away, a call that timed out) */
   commandsError: string | null = null
   /** Moves a tool to a setup and tells the app, as the host's `tool_setup` event does; detect answers it from then on */
   private setSetup(tool: ToolName, setup: ToolSetup, machine?: MachineRef): ToolSetup {

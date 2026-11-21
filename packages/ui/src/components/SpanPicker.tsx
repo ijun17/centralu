@@ -5,17 +5,10 @@ import { useAnchoredPlacement } from './anchored.js'
 import { useDismiss } from './useDismiss.js'
 
 /**
- * Picking an app panel's span on the grid, in cells (#306) — the panel's top bar and Settings → Apps use the same
- * control, so the two never describe a size differently.
- *
- * A small button that says the span ("2×1") and opens a matrix of cells, GRID_SPAN_MAX by GRID_SPAN_MAX: pointing at a
- * cell shows the rectangle from the top-left corner to it, and picking it sets that span. Cells past what the grid has
- * room for at the window's size are drawn dashed and can still be picked — the span is kept and the panel stands at
- * the largest size that fits until there is room (core's `packGrid`). A last line goes back to the default, naming it.
- *
- * Rendered into `document.body` and placed `fixed`, like the background-task list (anchored.ts): a grid panel is
- * overflow-hidden, and the app's view is laid over the panel from outside it, so a popover hung under the button would
- * be clipped by the one and covered by the other.
+ * An app panel's span on the grid, in cells (#306), one control for the panel's top bar and Settings → Apps. A matrix
+ * of GRID_SPAN_MAX cells a side; cells past the grid's room now are dashed and can still be picked: the span is kept
+ * and the panel stands at the largest size that fits (core's `packGrid`). In body and `fixed` (anchored.ts): a grid
+ * panel is overflow-hidden and the app's view is laid over it, so a hung popover would be clipped and covered.
  */
 
 export const spanLabel = (s: GridSpan): string => `${s.cols}×${s.rows}`
@@ -32,13 +25,13 @@ export function SpanButton({
   testId,
   title,
 }: {
-  /** The span asked for — what the button says */
+  /** The span asked for, what the button says */
   value: GridSpan
   /** The span was chosen at this level (bright), not inherited from the one below it (faint) */
   chosen: boolean
   /** What picking "default" falls back to, and in whose words: "from Settings", "the app's", … */
   fallback: { span: GridSpan; label: string }
-  /** The largest span the grid has room for now — cells past it are dashed. Absent in Settings, where no grid is measured */
+  /** The largest span the grid has room for now; absent in Settings, where no grid is measured */
   room?: GridSpan
   /** The panel stands smaller than `value` asks, because the window has no room for it */
   clamped?: boolean
@@ -52,10 +45,7 @@ export function SpanButton({
   const buttonRef = useRef<HTMLButtonElement>(null)
   const popRef = useRef<HTMLDivElement>(null)
 
-  /*
-   * Closes on an outside click, Esc, or the window losing focus — a click into an app's view never reaches this
-   * document as a mousedown, but it takes focus out of it (useDismiss). Esc gives focus back to the button.
-   */
+  // A click into an app's view takes focus without a mousedown here, so blur closes it too (useDismiss)
   useDismiss({ open, onClose: () => setOpen(false), refs: [buttonRef, popRef], returnFocusTo: buttonRef })
 
   const hint = clamped && shown ? `This window fits ${spanWords(shown)}, so it stands at that until there is room` : null
@@ -67,7 +57,7 @@ export function SpanButton({
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        // A plain mousedown on the button must not start the header's drag (the header is draggable)
+        // A mousedown on the button must not start the header's window drag
         draggable={false}
         onDragStart={(e) => e.preventDefault()}
         title={hint ? `${title}: ${spanWords(value)}. ${hint}` : `${title}: ${spanWords(value)}`}

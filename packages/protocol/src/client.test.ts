@@ -3,11 +3,8 @@ import { describe, expect, it } from 'vitest'
 import * as client from './client.js'
 import * as whole from './index.js'
 
-/*
- * The UI's bundle takes the protocol through client.ts (#1648). Every schema in a module it reaches is in the bundle, whether the
- * UI parses it or not, so the modules that only the host reads must stay out of what client.ts imports, directly or through
- * another module. This follows the imports the way a bundler does: a type-only import costs nothing and is left out.
- */
+// The UI bundles every schema in a module client.ts reaches, parsed or not, so modules only the host reads stay out of
+// client.ts's imports, direct or indirect. Imports are followed as a bundler does: a type-only one costs nothing.
 const SOURCES = import.meta.glob<string>('./**/*.ts', { query: '?raw', import: 'default', eager: true })
 const sources = new Map(Object.entries(SOURCES).map(([path, text]) => [path.replace(/^\.\//, ''), text]))
 

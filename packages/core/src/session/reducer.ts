@@ -14,157 +14,77 @@ import type {
 } from '@cc/protocol/client'
 import { stepSessionState } from './state-machine.js'
 
-/**
- * A session's summary state (docs/state-management.md §2).
- * Even a session that is not focused keeps this much — message bodies are not here (§4 windowing).
- */
+/** A session's summary, kept even when not focused; message bodies are windowed (docs/state-management.md §2, §4) */
 export type SessionSummary = {
   id: string
   /** Null only for the Assistant: a session that spans projects belongs to none of them */
   projectId: string | null
-  /**
-   * Whether this is a worker or an Assistant (#13). The six places that used to decide it from projectId
-   * were gathered into this one field. The Assistant that belongs to a project (#13) has since been
-   * dropped, but deciding it in one place is still better.
-   */
+  /** Decided here once rather than from projectId wherever it is asked (#13) */
   kind: 'worker' | 'orchestrator' | 'coordinator' | 'assistant'
-  /**
-   * The tool this session uses.
-   *
-   * It can differ from the project's default tool, because one project can mix claude sessions and codex
-   * sessions. Falling back to the project default when this is missing makes the header and the usage point
-   * at the wrong tool (dogfooding: two sessions with similar titles were taken to be on the wrong tool).
-   */
+  /** Can differ from the project's default tool: one project mixes claude and codex sessions */
   tool: ToolName
   name: string
   autoNamed: boolean
   state: SessionState
-  /**
-   * While busy, what it is busy doing (this refines state; it does not replace it).
-   * Null means it is simply waiting for the reply.
-   */
+  /** Refines `working`; null means simply waiting for the reply */
   activity: SessionActivity | null
   waitingSince: number | null
   lastSeq: number
   lastReadSeq: number
-  /**
-   * Whether the process is alive (FR-10).
-   * Restarting the host keeps the transcript but the process is gone — the UI has to know that state to be
-   * able to suggest "resume". The worst thing is to let someone talk to a dead session and leave them
-   * waiting.
-   */
+  /** Whether the process is alive (FR-10): a host restart keeps the transcript, and the UI offers "resume" */
   live: boolean
-  /** The one-line preview in the sidebar and the inbox */
   preview: string
   pendingApproval: { requestId: string; detail: ApprovalDetail } | null
-  /**
-   * The choices waiting for an answer (AskUserQuestion).
-   *
-   * **It is a list.** Approval is a single field, so a second request overwrote the first and left no way
-   * to answer it — that mistake is not repeated here. Up to four questions arrive at once on one card, and
-   * several cards can be stacked up.
-   */
+  /** A list, unlike pendingApproval, so a second request cannot overwrite the first; a card holds up to four questions */
   pendingQuestions: { requestId: string; questions: Question[] }[]
   usage: TokenUsage | null
   context: { used: number; window: number; exactness: 'exact' | 'estimate' } | null
   limit: { resumeAt?: string; usedPercent?: number; windowMins?: number } | null
   lastError: { code: string; message: string } | null
-  /** The files this session changed, as its events reported them (FR-2): the git changes and the file tree mark them */
+  /** As its events reported them (FR-2) */
   touchedPaths: string[]
-  /** Changed from the session header (FR-7) */
   model: string | null
-  /** Reasoning effort. Null for a model that does not support it (the levels differ from model to model) */
+  /** Null for a model without reasoning effort; the levels differ per model */
   effort: string | null
-  /** Response length (#54). Support is stated in the adapter's capability declaration (verbosities) */
+  /** Response length (#54); the adapter's `verbosities` capability says which are supported */
   verbosity: string | null
-  /** Response speed (codex's service_tier). The model list (ModelOption.tiers) names the supported tiers */
+  /** codex's service_tier; ModelOption.tiers names the supported ones */
   serviceTier: string | null
   permissionPreset: PermissionPreset
-  /**
-   * The worktree this session runs in (an FR-2 option). Null means it runs directly in the project directory.
-   * The screen has to know this, or the person is left asking "why aren't the files in the project folder
-   * changing?".
-   */
+  /** Null: runs directly in the project directory (FR-2) */
   worktree: { path: string; branch: string } | null
-  /**
-   * The manager session this session hangs under (#69). Null means top level.
-   * The sidebar tree is drawn from this one field — a manager is an ordinary session that has children.
-   */
+  /** The sidebar tree is drawn from this one field (#69); null is top level */
   parentSessionId: string | null
-  /**
-   * All the work on this worktree's branch has made it into the project's trunk (#69).
-   * It is drawn as a single badge. Squash and rebase merges cannot be detected locally (measured), so this
-   * can stay false — what a miss costs is a badge, not data.
-   */
+  /** The branch's work is in the trunk (#69). Squash and rebase merges cannot be detected locally (measured): may stay false */
   merged: boolean
-  /**
-   * This branch's pull request (#76 stage 3). A derived fact measured with gh — it sees the endings that
-   * `merged` cannot see locally, such as a squash merge. Null means "unknown" (including no gh, and offline).
-   */
+  /** From gh (#76), so it sees a squash merge `merged` cannot; null is unknown (no gh, offline) */
   pr: { number: number; state: 'open' | 'merged' | 'closed'; url: string } | null
-  /**
-   * The goal set on the session (2026-09-07 — claude /goal · codex thread/goal/*). It is a live fact that the
-   * tool judges, so null means "there is none, or it is not known yet". It is only what the badge stands on;
-   * the judging belongs to the tool.
-   */
+  /** claude /goal, codex thread/goal/*; the tool judges it. Null: none, or not known yet */
   goal: SessionGoal | null
-  /**
-   * The agent's background work (#290): every running task, then the ended ones still listed with how they ended.
-   * Moved only by `background_tasks` events, through the same `applyBackgroundTasks` the host runs.
-   */
+  /** Running tasks, then ended ones still listed (#290); moved only through `applyBackgroundTasks`, as the host does */
   backgroundTasks: BackgroundTask[]
-  /**
-   * The version of the agent CLI this session's process runs (#297), or null when unknown. Compared with the installed
-   * one (the store's `agentVersions`) to say the session runs an older CLI. Only meaningful while `live`.
-   */
+  /** Compared with the store's `agentVersions` to say the session runs an older CLI (#297); meaningful only while `live` */
   agentVersion: string | null
-  /**
-   * The running total of the estimated tokens the model spent thinking in this turn (#58 — claude's thinking
-   * text is encrypted, so this number is all there is to show). Same lifetime as activity: it dies when the
-   * session leaves working.
-   */
+  /** Estimated thinking tokens this turn: claude's thinking text is encrypted, so this is all there is to show (#58) */
   thinkingTokens: number | null
-  /**
-   * The current snapshot of the plan the agent has made (#58 — codex turn/plan/updated).
-   * Same lifetime as activity: it only shows progress, so it dies when the session leaves working.
-   */
+  /** codex turn/plan/updated (#58) */
   plan: { text: string; status: 'pending' | 'inProgress' | 'completed' }[] | null
-  /**
-   * A session on a linked computer started this one (#1273, `SessionInfo.startedFromHub`): its row and header show its
-   * preset. Absent from a host that predates it.
-   */
+  /** A session on a linked computer started this one (#1273): its row and header show its preset */
   startedFromHub?: boolean
-  /**
-   * The app that created this session (#81). Null means it has no owner — then the sidebar takes it.
-   * All the core knows is a single id; only the app knows what it means.
-   */
+  /** The app that created this session (#81); null: the sidebar owns it */
   appId: string | null
-  /**
-   * The session in another project that asked for this one through ask_project (#371 part B), or null. The header
-   * says "asked by" and links back; the caller's conversation finds its delegated session by this.
-   */
+  /** The session that asked for this one through ask_project (#371) */
   askedBy?: string | null
-  /**
-   * The session this one was forked from (#677): another session asked a busy one for work and chose a copy of its
-   * conversation. The sidebar hangs it under that session, ahead of who asked for it.
-   */
+  /** Forked from a busy session asked for work (#677); the sidebar hangs it there, ahead of who asked */
   forkedFrom?: string | null
-  /**
-   * The linked machine this session runs on (#82, docs/plans/remote-hub.md), or null/absent for this computer. Its id
-   * then reads `<machine>.<id>`; nothing parses that, everything groups and labels by this field.
-   */
+  /** Null/absent: this computer (#82). The id then reads `<machine>.<id>`; nothing parses it, everything reads this field */
   machine?: string | null
   /**
-   * The hub could not reach the machine and listed this session from what it last heard (#82): `live` is the last-known
-   * value, not a fact. While its machine is away such a session is shown as away and never woken, and that machine's
-   * `machine_resync` replaces it. The mark is about the answer, not the machine (#1611): `isAway` reads the machine's status.
+   * Listed from what the hub last heard (#82): `live` is not a fact, the session is never woken, `machine_resync`
+   * replaces it. It marks the answer, not the machine (#1611): `isAway` reads the machine's status.
    */
   unreachable?: boolean
-  /**
-   * Why the last turn did not run to its end (#698): the network, a quit, an interrupt nobody here asked for, or a tool
-   * reconnecting for too long. The host decides it (`SessionInfo.interruption`, the `interruption` event); the inbox
-   * and the sidebar show it beside the state, which alone cannot tell a stopped turn from a finished one.
-   */
+  /** Decided by the host (#698); the state alone cannot tell a stopped turn from a finished one */
   interruption?: Interruption | null
 }
 
@@ -182,33 +102,19 @@ export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | '
 const PREVIEW_MAX = 80
 const truncate = (s: string) => (s.length > PREVIEW_MAX ? s.slice(0, PREVIEW_MAX) + '…' : s)
 
-/**
- * The only place the state changes. A pure function — the same input gives the same output.
- * `now` is taken as an argument because recording when a wait started has to be testable.
- */
+/** The only place the state changes; `now` is an argument so when a wait started is testable */
 export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: number): SessionSummary {
-  /*
-   * The state, when the wait began, and what the change takes down with it: the rules both sides run
-   * (`stepSessionState`, protocol session-state.ts), so the state the host keeps for a reconnect is the one shown here.
-   */
+  // The rules the host runs too, so the state it keeps for a reconnect is the one shown here
   const { state, illegal, changed: stateChanged, waitingSince, recovered, cardsDead } = stepSessionState(s, event, now)
 
-  /*
-   * What it is busy with cannot outlive its being busy.
-   *
-   * If the process dies or the turn ends in the middle of compacting, the tool never sends the "done" signal.
-   * If activity were still set then, the screen would claim "Compacting" forever, which is a lie —
-   * so it is cleared along with it the moment the session leaves working.
-   */
+  // Activity, thinking and plan die with `working`: a turn ending mid-compaction never sends the "done" signal
   const activity = event.type === 'activity' ? event.activity : state === 'working' ? s.activity : null
 
-  // The amount of thinking cannot outlive being busy either (the same rule as activity)
   const thinkingTokens =
     event.type === 'reasoning_delta' && event.estTokens ? (s.thinkingTokens ?? 0) + event.estTokens
     : state === 'working' ? s.thinkingTokens
     : null
 
-  // The plan cannot outlive being busy either (#58 — the same rule: left behind, a finished turn's plan lies)
   const plan =
     event.type === 'plan_update' ? event.steps
     : state === 'working' ? s.plan
@@ -219,7 +125,7 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
     : {
         ...s, state, waitingSince, activity, thinkingTokens, plan,
         ...(recovered ? { limit: null, lastError: null } : {}),
-        // A new turn is the end of whatever stopped the last one; the host says so too, a moment later (#698)
+        // The host clears it too, a moment later (#698)
         ...(stateChanged && state === 'working' ? { interruption: null } : {}),
         ...(cardsDead ? { pendingApproval: null, pendingQuestions: [] } : {}),
       }
@@ -230,7 +136,7 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
     case 'tool_call':
       return { ...next, preview: truncate(toolCallLine(event.summary)) }
     case 'question_request':
-      // The same id arriving again replaces its entry; otherwise it is added at the end (never overwritten)
+      // The same id again replaces its entry
       return {
         ...next,
         pendingQuestions: [
@@ -249,11 +155,7 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
       }
     case 'usage_update':
       return { ...next, usage: event.tokens }
-    /*
-     * The tool's reading at a turn's end. A fresh conversation inside the session (#304, Claude Code's /clear) empties
-     * it: "unknown" until the tool reports the new one, the same as a session with no turn yet. A compaction that says
-     * its size moves it there (#1282). The host and the mock run the same rule (`nextContext`, protocol session-state.ts).
-     */
+    // /clear (#304) empties it to unknown; a compaction that says its size moves it (#1282)
     case 'context_update':
     case 'conversation_reset':
     case 'compaction':
@@ -263,17 +165,6 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
         ...next,
         limit: { resumeAt: event.resumeAt, usedPercent: event.usedPercent, windowMins: event.windowMins },
       }
-    /*
-     * An automatic name does not overwrite a name the person gave (FR-18, issue #5).
-     *
-     * The point is that the decision rests on the **event**. It used to be decided by looking only at this
-     * side's own autoNamed, and then the second name the person gave never reached the other screens —
-     * autoNamed had already been turned off there, so the whole event was thrown away.
-     *
-     * A missing `auto` **counts as automatic** — the same decision as the schema's default. Written as
-     * `!event.auto`, an event built by hand without going through the parser (a frame from an old version, a
-     * test fixture) would have its undefined flipped into "the person chose it".
-     */
     case 'worktree_merged':
       return { ...next, merged: true }
     case 'worktree_pr':
@@ -286,9 +177,13 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
       return { ...next, agentVersion: event.version }
     case 'interruption':
       return { ...next, interruption: event.interruption }
-    // The process went to sleep or came back (#568), whoever caused it
     case 'session_live':
       return { ...next, live: event.live }
+    /*
+     * An automatic name never overwrites a given one (FR-18). Decided from the event, not autoNamed alone, or a second
+     * given name never reaches other screens. A missing `auto` is automatic, as the schema's default; `!event.auto`
+     * would turn an unparsed event's undefined into "the person chose it".
+     */
     case 'session_title':
       if (event.auto !== false) return s.autoNamed ? { ...next, name: event.title } : next
       return { ...next, name: event.title, autoNamed: false }
@@ -297,14 +192,13 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
     case 'error':
       return { ...next, lastError: { code: event.error.code, message: event.error.message } }
     case 'turn_complete':
-    case 'state_change': // Banners on recovery (leaving limited, say) are all cleared by recovered above
+    case 'state_change': // `recovered` above clears the banners
       return next
     default:
       return next
   }
 }
 
-/** Advances seq when a message is stored (what read/unread is based on) */
 export function bumpSeq(s: SessionSummary, seq: number): SessionSummary {
   return seq > s.lastSeq ? { ...s, lastSeq: seq } : s
 }

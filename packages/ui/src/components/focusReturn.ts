@@ -1,41 +1,18 @@
 import { useEffect, useState, type RefObject } from 'react'
 
 /**
- * A layer gives focus back to what held it before the layer opened (#115).
+ * A layer gives focus back to what held it before it opened (#115): when the layer closes, its focused element leaves
+ * the DOM and the browser drops focus on `<body>`, so every key typed into the composer lands nowhere (⌘I, ⌘K or
+ * /settings, then Esc).
  *
- * The inbox, the command palette, a dialog and the settings screen each take focus while they are
- * up: the inbox blurs the composer on purpose, the palette focuses its own field, a click inside a
- * dialog focuses whatever was clicked. When the layer closes, the element holding focus leaves the
- * DOM with it, and the browser drops focus on `<body>`. Nothing on screen says so: the composer
- * looks exactly as it did, the person goes on typing, and every key lands nowhere until they click
- * back into the box. That is #115's "the composer sometimes stops accepting keystrokes" — ⌘I then
- * Esc, ⌘K then Esc, /settings then Esc.
+ * Only when focus fell out (it is on `<body>` or nowhere): a layer that moved it somewhere on purpose (a grid pane's
+ * composer) keeps that choice. Only to an element still connected and not inert. What held focus is read while
+ * rendering the render that opens the layer: by the first effect `autoFocus` or a child's effect has moved it inside.
  *
- * Focus only goes back when it **fell out**: it sits on `<body>` (or nowhere) once the layer is
- * gone. A layer that moved focus somewhere real on purpose — choosing a session in the grid
- * focuses that pane's composer — keeps that choice. And only to an element still in the document
- * and not inert: a composer that went away with the session it belonged to is not brought back.
- *
- * What held focus is read **while rendering the render that opens the layer**, before React commits
- * it: by the first effect it is already too late, since `autoFocus` inside a dialog, or a child's
- * effect focusing its own content (the viewer's code view), has moved focus into the layer by then.
- * Remembered through state adjusted during render, React's pattern for keeping something from a
- * previous render.
- *
- * One layer can open another and close with it: Git chosen in the palette opens over the palette's
- * field, which is what held focus when the overlay opened, and which is gone by the time the overlay
- * closes. So what is kept is not one element but the recent ones, most recent last (`recent`, fed by
- * one capture listener on the document), and focus goes to the latest of them still usable: past
- * the palette's field, to the composer it was opened from.
- *
- * Given back in a passive (`useEffect`) cleanup: it runs after React has removed the layer's DOM,
- * so `document.activeElement` already tells whether focus fell out. A layout cleanup runs while the
- * layer and its focused element are still in the document.
- *
- * A layer that stays on screen for its exit (usePresence: the palette, settings, the inbox) is still in
- * the document when it closes, its field or panel holding focus, and goes 150 ms later, dropping focus
- * on `<body>` with nobody left to give it back. Such a layer passes itself as `layer`: focus inside it
- * counts as fallen out the moment it closes, so the keyboard is back before the exit has finished.
+ * The recent holders are kept, not one (`recent`): a layer opened from another (Git from the palette) closes with it,
+ * and focus goes past the palette's field to the composer. Given back in a passive cleanup, which runs after React
+ * removed the layer's DOM (a layout cleanup runs while it is still there). A layer that stays for its exit
+ * (usePresence) passes itself as `layer`: focus inside it counts as fallen out the moment it closes, not 150 ms later.
  */
 export function useFocusReturn(open: boolean, layer?: RefObject<HTMLElement | null>): void {
   const [wasOpen, setWasOpen] = useState(false)
@@ -54,10 +31,7 @@ export function useFocusReturn(open: boolean, layer?: RefObject<HTMLElement | nu
   }, [open, before, layer])
 }
 
-/**
- * The elements that held focus lately, oldest first. Few, and the ones that left the document are
- * dropped on every focus, so this never holds a closed screen's DOM alive for long.
- */
+/** Recent focus holders, oldest first; disconnected ones are dropped on every focus, so no closed screen is kept alive */
 const RECENT = 16
 let recent: Element[] = []
 if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
@@ -80,17 +54,11 @@ function focusedSoFar(): Element[] {
   return now && now !== recent.at(-1) ? [...recent, now] : [...recent]
 }
 
-/**
- * Puts focus back on the latest of `before` still in the document, if focus has fallen to the page
- * since, or is still inside the closing `layer`. Returns whether it did.
- */
+/** Focuses the latest usable of `before` if focus fell to the page or is inside the closing `layer`; whether it did */
 export function returnFocus(before: readonly Element[], layer: Element | null = null): boolean {
   if (typeof document === 'undefined') return false
   const now = document.activeElement
-  /*
-   * Still inside the leaving layer: let go of it first, so whatever asks for the keyboard next (a composer the palette
-   * opened, #528) finds the page holding it rather than the layer's field, and keys typed meanwhile do not land there
-   */
+  // Let go of the leaving layer first, so what asks for the keyboard next (a composer the palette opened, #528) gets it
   if (now instanceof HTMLElement && layer?.contains(now)) now.blur()
   else if (now && now !== document.body && now.isConnected) return false
   for (let i = before.length - 1; i >= 0; i--) {

@@ -1,38 +1,12 @@
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
 
 /**
- * A framed text button: the one look every screen used to spell out in place (owner, 2026-10-18).
+ * A framed text button; the variants and sizes are in docs/design-system.md §11. `subtle` sits in a line of reading
+ * (a conversation row's Stop) as dim as the text around it; `danger` is the only chromatic button.
  *
- * Before this, 97 buttons assembled `rounded-md border border-line px-… py-… text-…` at their call sites, and
- * paddings, sizes, hover colours and the disabled fade drifted between them (`px-2`/`px-2.5`, `py-0.5`/`py-1`,
- * `disabled:opacity-40`/`50`/`60`, a hover that brightened the border here and the fill there). Reading them all, six
- * kinds were in use, and those are the variants:
- *
- * - `primary`: the action a dialog or a card is for (Create, Save, Import). Filled, white ink.
- * - `secondary`: an action that stands beside the main one without being it (Retry, Copy, Edit). Framed, white ink.
- * - `quiet`: a framed action that should not draw the eye (Cancel, Refresh, Remove from a list): grey until hovered.
- * - `subtle`: `quiet` in the faint ink, for a control inside a line of reading (a conversation row's Stop, loading
- *   earlier messages): as dim as the text around it, so it never outshines what the agent wrote.
- * - `danger`: what cannot be taken back (Delete for good). The danger colour, the only chromatic one a button wears.
- * - `ghost`: a word with no frame (Cancel beside a confirmation), grey until hovered.
- * - `choice`: one answer of a list a question offers (`ChoiceList`, owner 2026-11-11, #1630): outlined in the strong line, no fill, `surface-selected` under the
- *   pointer and, with `aria-pressed`, for the one picked (it stays at full strength when the list is locked, where the others fade).
- *
- * And four sizes, from the screens: `lg` for a row of a list (a choice), `md` for a dialog's actions, `sm` for an action inside a card or a row, `xs` for
- * the small chip in a line of text (a conversation row's "show", a picker's span).
- *
- * `onRaised`: the fill of `primary` is the raised surface, so on a card that is itself raised it would vanish into
- * it; there it takes the floor instead, which is what those cards did by hand.
- *
- * `busy`: the action is running. The button is disabled (a second press would start the same thing twice, see
- * InlineConfirm) and, when `busyText` is given, says so ("Creating…").
- *
- * `className` is for placement only (margin, flex, width, text alignment). A colour, padding or size passed there
- * competes with the variant's own, and which one wins in Tailwind is the order of the generated CSS, not of the
- * attribute (IconButton's `lit` says the same): add a variant here instead.
- *
- * Hover reacts only while enabled: a disabled button that still brightened on hover looked pressable. Disabled fades
- * to 50%, the one fade every shared control uses (owner, 2026-10-18).
+ * `className` is for placement only: a colour or size there competes with the variant's, and Tailwind picks by the
+ * order of the generated CSS, not of the attribute, so add a variant here instead. Hover reacts only while enabled
+ * (a disabled button that brightens looks pressable); disabled is the 50% fade (§10).
  */
 export type ButtonVariant = 'primary' | 'secondary' | 'quiet' | 'subtle' | 'danger' | 'ghost' | 'choice'
 export type ButtonSize = 'xs' | 'sm' | 'md' | 'lg'
@@ -69,7 +43,7 @@ export type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'type'> 
   size?: ButtonSize
   /** Sits on a raised card: `primary` fills with the floor so it still reads as a button */
   onRaised?: boolean
-  /** The action is running: disabled, and `busyText` in place of the label when given */
+  /** The action is running: disabled (a second press would start it twice), `busyText` in place of the label */
   busy?: boolean
   busyText?: ReactNode
   type?: 'button' | 'submit'

@@ -13,8 +13,8 @@ import { SkeletonLines } from '../../components/Skeleton.jsx'
  * does) and removes this empty one, which held nothing yet. A conversation already open in Centralu
  * is a jump to that session, never a second copy.
  *
- * It took the place of the sidebar's second button (the chevron that opened the dialog only to
- * offer this list): the choice now sits where the person already is when they start.
+ * The choice sits here, where the person already is when they start, rather than behind a
+ * second button that opens a dialog only to offer this list.
  */
 export function PastConversations({
   sessionId,

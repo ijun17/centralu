@@ -80,7 +80,7 @@ describe('RowApproval', () => {
     expect(button(html, 'approve-allow')).not.toBeNull()
   })
 
-  // #683 review: requests that say nothing on their line, or carry a risk it does not show, open the session
+  // #683: requests that say nothing on their line, or carry a risk it does not show, open the session
   it('an empty, flagged, multi-line or outside-the-folder request shows Open', () => {
     const open = (d: ApprovalDetail) => {
       const { html, text } = render(waiting(d), { settled: true })
@@ -160,7 +160,7 @@ describe('what a row says', () => {
     expect(pathParts('/etc/hosts', null)).toEqual({ name: 'hosts', dir: '/etc/', inside: false })
   })
 
-  // #683 re-review: only the front of an absolute path was compared, so this was "inside" and showed "Edit zshrc src/…"
+  // #683: comparing only the front of an absolute path would call this "inside" and show "Edit zshrc src/…"
   it('normalizes a path before comparing it, so one that climbs out of the folder is outside', () => {
     expect(pathParts('/Users/me/proj/src/../../../../etc/zshrc', '/Users/me/proj')).toEqual({ name: 'zshrc', dir: '/etc/', inside: false })
     expect(pathParts('/Users/me/proj/src/./a/../b.ts', '/Users/me/proj')).toEqual({ name: 'b.ts', dir: 'src/', inside: true })
