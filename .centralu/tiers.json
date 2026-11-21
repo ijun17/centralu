@@ -100,6 +100,16 @@
       "why": "starting, keeping, swapping, updating and stopping hosts and agents, here and on linked machines (keeper, shell, centralu serve, links): bugs show only in the real environment"
     },
     {
+      "id": "deletion",
+      "tier": "deep",
+      "paths": [
+        "packages/agent-host/src/dev-services/{data-folder,fs,git-worktree,worktree-dependencies,worktree-recovery,attachments}.ts",
+        "packages/agent-host/src/sessions/{session-trash,worktree-sessions,project-creation,app-sessions}.ts",
+        "packages/agent-host/src/apps/external/{versions,carry}.ts"
+      ],
+      "why": "code that deletes the person's files and folders for good (worktrees and branches, the trash, saved work and attachments, an app's folder and data, a project folder a failed start leaves), and removeData that most of it goes through: a wrong path or a followed link deletes unsaved work or files outside the folder (#1875). A move to the OS trash can be undone and is left out, and so are the agents' own conversation deletes, which session-trash decides"
+    },
+    {
       "id": "release",
       "tier": "deep",
       "paths": [
