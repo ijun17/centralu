@@ -53,31 +53,10 @@ export function setRareTier(tier: RareTier): void {
 }
 
 /**
- * Which commands are rare, per seat. The Assistant's alone: the other directing seats carry a few tools
- * each, all of them their reason to exist.
- *
- * In: create_app, propose_skill and propose_mcp_server (1,462, 1,144 and 1,098 characters, a third of the
- * Assistant's every request, asked for a few times in a seat's life). The instructions name each of them
- * and say when, which is what a model that cannot see them goes looking with.
- * Out: propose_worktree_session, before it went with the worktree manager (#561 part 3): asked for a branch, the
- * assistant reached it 3 of 3 times as a tool and 0 of 3 deferred or behind centralu_run (tool-cost.md §9).
- * In since #853: start_agent and agent_session. The Assistant hands light work outside any project (a web search, a
- * lookup) to a child the person can watch rather than its CLI's own subagent; their 1,357 characters would put its
- * every request over its ceiling, and the instructions name start_agent.
- * In since #1220: add_project and list_machines, asked for when the person names a folder or a machine, and named in
- * the instructions; the first of the Assistant's window functions to come as commands (#1219). In since #1219's
- * second slice: the six machine commands, which the instructions name in one line. In since the preferences (#1219):
- * get_preferences and set_preferences; the machine commands are found by their name (centralu_commands "machine") and the line names three more (30 characters less).
- * In since #1219's third slice: the trust commands (list_projects, set_project_trust, list_approval_rules,
- * remove_approval_rule, list_app_grants, forget_app_answer, revoke_project_consent, share_app, set_agent_limits), found
- * with the machine commands by the words the line gives (centralu_commands "machine trust rule grant limits app session agent project preferences archive"; the line replaced the three that named the machine, trust, settings and trash commands, and is shorter than they were). In since the fourth slice: the remaining machine calls, delete_session, the app upkeep commands, apply_agent_versions and the housekeeping and reads, all found by the same words.
- * In since #1205: find_apps, attach_app and detach_app, for the root apps it attaches when it needs one rather than
- * carrying each as a server (session-apps.ts `givesApp`). As tools they would put its every request over its ceiling
- * (find_apps alone is 294 characters, and the seat had 219 to spare); the instructions name find_apps.
- * Out: app_guide. It answers the person's own questions about the app, which come often and
- * without warning; deferred, a reader found it 4 of 5 times and never for a question about a setting (§8). Out
- * too: everything the instructions tell the Assistant to reach for first (list, read, recall, send, create
- * a session or a project).
+ * Which commands are rare, per seat. The Assistant's alone: the other directing seats carry a few tools each, all of them
+ * their reason to exist. A command is rare when it is asked for a few times in a seat's life and its definition is a large
+ * share of every request; the instructions name each (or the words to look for with centralu_commands), which is what a
+ * model that cannot see it goes looking with. Which are in and out, with the measures: docs/tool-cost.md "The Assistant's rare commands".
  */
 export const RARE_COMMANDS: Partial<Record<ToolProfile, readonly CommandName[]>> = {
   assistant: [

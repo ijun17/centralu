@@ -1113,3 +1113,57 @@ three (a guessed key), so the overview now names each tool's arguments (`read_di
 first, optional with `?`). The misses after are `gh` run by hand for `read_discussion` (denied) and `set_item_fields`
 sessions that looked the item up and stopped; neither is a choice between two tools, so a second tool would not meet
 them. The samples are small (24 sessions an arm): the drop in reach is possible, not shown.
+
+## 17. The ceilings, how each moved, and which commands are rare
+
+The `*_BUDGET_CHARS` ceilings in `sessions/tool-definitions.ts` and the rare commands in `sessions/tool-seats.ts` carried their history in
+comments; it is kept here, where the numbers and the decisions already are. Every ceiling counts characters, not tokens (§4 has
+the tokens): each tool's full name, description and JSON schema, the deferred ones included since Codex loads them, and
+the instructions. Raising one is a decision about that seat's every request (the top of this document).
+
+### Ceilings
+
+| Ceiling | Counts | Now | How it moved |
+|---|---|---|---|
+| `READER_BUDGET_CHARS` | the reader set, the deferred guide and update definitions included; a line added to `READER_FIRST` counts, `REPO_WORK_FIRST` (#957) does not (it rides only where an app is attached, whose own tools cost more) | 1,960 | 1,400 → 1,750 for #581 (measured 1,709 = 983 existing + 298 `update_centralu` + 428 instructions; 392 before the 36-character pointer; on Claude the update definition is deferred, only the pointer rides) → 1,950 for #1480 (`read_session`'s `tools`, `maxChars`, `before`, `from`, `offset`: +204, the set 1,913) → 1,960 for #1487 (`.int().min(0)` on `offset`, lost in #1489: +12) |
+| `DELEGATE_BUDGET_CHARS` | `DELEGATE_TOOLS`, measured in [agent-host/delegation/start-agent.md](agent-host/delegation/start-agent.md) | 450 | 400 → 450 for #677's `ifBusy` (a bare string: a busy session's answer names the argument and its values); #1948 step 2 took `ifBusy` out again (a busy session is sent the task as mail) and left the ceiling |
+| `AGENT_BUDGET_CHARS` | `AGENT_TOOLS`, both tools, since Codex loads them | 1,330 | 1,000 → 1,100 for #676/#677 (`answer`, `card`, `ifBusy`: 1,060 with them, no words added, the answers that need them name them; Claude defers `agent_session`) → 1,350 for #729 (`start_agent`'s `difficulty` and its words and those on `worktree`: 551 → 798, the set 1,085 → 1,332, loaded on Claude, so every ordinary Claude request carries the 247: 68 tokens, §10; #690's `list` made the set 1,333) → 1,375 for #861's `name` (25 characters) → raised again for #1038's `machine` (a bare string, as `name`; the value is not recorded) → 1,330 for #1948's fold of `send` into mail (owner 2026-11-12): `agent_session` loses `send`, `ifBusy` and "messages," (521 → 449, the set 1,372 → 1,300), the ceiling lowered by what that saves so the reader's sum rises only by the mail tool's net raise |
+| `MAIL_BUDGET_CHARS` | `MAIL_TOOLS`; deferred on Claude, loaded on Codex | 1,175 | 800 → 820 for #1447 (the description names the address; measured 811) → 910 for #1739 (`cite` and when to set it; 907) → 1,110 for #1984 (`to` names `parent`, `assistant`, `person`; 1,109) → 1,170 for #2039 (a name for `to`: a name or id, and what a shared name gets; 1,160) → 1,240 for `find` and its words in `to` (#2067 item 3; 1,231) → 1,355 for #1948 (owner 2026-11-12; 1,350): `ifBusy` moved here from `agent_session` (+55), the sentence on reports (+72, every report an agent writes is mail), and #2133 took " or checkpoint" from `parent` (-14); `AGENT_BUDGET_CHARS` fell by 70 → 1,175 for watches (#1324, [plans/mailbox.md](plans/mailbox.md) §18.2; 1,170): the six thread-era fields no code read and `update` went, `watch` and its words in `to` came |
+| `COMPACT_BUDGET_CHARS` | `COMPACT_TOOLS`; loaded on both tools, so in every request of the two seats | 610 | 460 → 610 for `then` (#2024; 606) |
+| `APP_ACCESS_BUDGET_CHARS` | the app-access set | 900 | The set is 874, about 210 per tool of it the name and schema envelope rather than words: why it is three short tools and not three explained ones. Claude loads `find_apps` (294 characters, 75 tokens) and defers the other two, which cost their names in tool search only |
+| `APP_BUDGET_CHARS` | `APP_TOOLS`, the `app` tool (#2231) | 500 | Measured 467 (§16 gives 462 for the definition). It rides in every profile and each profile's ceiling rises by it: the per-app tools it replaces rode outside every ceiling |
+
+### What each profile carries in every request (`RESIDENT_BUDGET_CHARS`)
+
+The characters of its resident definitions plus the server instructions the model is sent (`residentCost` in `tool-cost.ts`), in the
+default rare-commands tier (#513). Codex carries the same plus the 52-character header its developer instructions put over
+them (#525, `codexToolInstructionsFor`). Each ceiling below, since #2231, has `APP_BUDGET_CHARS` added, and the Assistant's has
+`COMPACT_BUDGET_CHARS` too. The reader's is the sum of its sets' ceilings (#561 added the agent set), so every row above moves it.
+
+| Profile | Now (without the added ceilings) | How it moved |
+|---|---|---|
+| assistant | 10,180 | Measured 2026-10-12 on Claude: 9,317 in the commands tier (7,323 + 1,994); 11,862 with every command resident, against a ceiling of 12,000, before the tier became the default (#512) → 9,500 → 9,700 for #1480 (Codex 9,663) → 9,710 for #1487 → 9,910 for #1447 (the instructions say a session's request is not the person's word and is answered in its thread; measured 9,906 with the commands tier) → 10,030 for #1739 (how to judge a request and its citation, which steps still ask; measured 10,480 with compaction's 460, so 10,020) → 10,180 for #1988 (owner decision 2026-11-05: `create_session` takes `preset`, the default a new session gets, held to the seat, the asker and an untrusted project's `normal`; its enum and one line, with words cut from its description) |
+| scoped | 2,600 | Measured 2026-10-12 on Claude: 2,267; Codex's 52-character header moved it from 2,300 (#525) → 2,350 → 2,400 for `send_to_session`'s `ifBusy` (#677, an enum with no words: 2,330 on Claude, 2,382 on Codex) → 2,600 for #1480 (Codex 2,560). Nothing makes a new coordinator since #372 |
+| builder | 1,500 | Measured 2026-10-12 on Claude: 1,432; Codex's header moved it from 1,450 (#525). The worktree manager's seat went with the role (#561 part 3) |
+| reader | the sum | 3,700 → 4,050 for #581 (Claude 2,295 resident = 1,867 definitions + 428 instructions, with 1,673 deferred; Codex's possible loaded set 4,020 = 3,540 + 480, none marked deferred) → 4,200 (the agent set, #561; the step is not recorded) → 4,450 for #729 (Claude 2,313 → 2,560, Codex 4,150 → 4,397) → +200 #1480, +10 #1487, +20 #1447, +90 #1739, +200 #1984, +60 #2039, +115 less 70 #1948 (measured +41 on Codex; Claude defers both), -180 #1324 |
+
+### The Assistant's rare commands
+
+A command is rare when it is asked for a few times in a seat's life and its definition is a large share of the every-request cost. It
+leaves the tool list and runs behind `centralu_run` (§9), and the instructions name each (or the words to look for with
+`centralu_commands`), which is what a model that cannot see it goes looking with. The Assistant's alone: the other directing seats
+carry a few tools each, all of them their reason to exist.
+
+| Commands | In or out | Why |
+|---|---|---|
+| `create_app`, `propose_skill`, `propose_mcp_server` | in | 1,462, 1,144 and 1,098 characters, a third of the Assistant's every request |
+| `propose_worktree_session` | out, with the worktree manager (#561 part 3) | Asked for a branch, the assistant reached it 3 of 3 times as a tool and 0 of 3 deferred or behind `centralu_run` (§9) |
+| `start_agent`, `agent_session` | in, #853 | The Assistant hands light work outside any project (a web search, a lookup) to a child the person can watch rather than its CLI's own subagent; their 1,357 characters would put its every request over its ceiling; the instructions name `start_agent` |
+| `add_project`, `list_machines` | in, #1220 | Asked for when the person names a folder or a machine; the first of the Assistant's window functions to come as commands (#1219) |
+| the six machine commands | in, #1219 second slice | The instructions name them in one line |
+| `get_preferences`, `set_preferences` | in, #1219 | The machine commands are found by their name (`centralu_commands "machine"`) and the line names three more (30 characters less) |
+| the trust commands: `list_projects`, `set_project_trust`, `list_approval_rules`, `remove_approval_rule`, `list_app_grants`, `forget_app_answer`, `revoke_project_consent`, `share_app`, `set_agent_limits` | in, #1219 third slice | Found with the machine commands by the words the line gives (`centralu_commands "machine trust rule grant limits app session agent project preferences archive"`); the line replaced the three that named the machine, trust, settings and trash commands, and is shorter than they were |
+| the remaining machine calls, `delete_session`, the app upkeep commands, `apply_agent_versions`, the housekeeping and reads | in, #1219 fourth slice | Found by the same words |
+| `find_apps`, `attach_app`, `detach_app` | in, #1205 | For the root apps it attaches when it needs one rather than carrying each as a server (`session-apps.ts` `givesApp`); as tools they would put its every request over its ceiling (`find_apps` alone is 294 characters, and the seat had 219 to spare); the instructions name `find_apps` |
+| `app_guide` | out | It answers the person's own questions about the app, which come often and without warning; deferred, a reader found it 4 of 5 times and never for a question about a setting (§8) |
+| list, read, recall, send, create a session or a project | out | The instructions tell the Assistant to reach for these first |

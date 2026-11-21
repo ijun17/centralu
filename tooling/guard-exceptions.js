@@ -323,7 +323,6 @@ export const COMMENTS_LEFT = [
   'packages/agent-host/src/sessions/session-events.ts',
   'packages/agent-host/src/sessions/session-start.ts',
   'packages/agent-host/src/sessions/tool-definitions.ts',
-  'packages/agent-host/src/sessions/tool-seats.ts',
   'packages/agent-host/src/sessions/turn-answer.ts',
   'packages/agent-host/src/sessions/turn-continue.ts',
   'packages/agent-host/src/transport/limited-token.test.ts',
