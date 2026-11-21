@@ -113,7 +113,7 @@ export class CodexClient {
       if (this.finished) return
       this.finished = true
       this.closed = true
-      // ENOENT: no codex where the lookup looked (`toolCommand` starts `notOnPath` then), whatever path it names
+      // ENOENT means no codex where the lookup looked: `toolCommand` starts `notOnPath` when it found none
       this.pending.rejectAll(new Error(`codex app-server failed to start: ${errnoCode(err) === 'ENOENT' ? 'codex CLI not found' : err.message}`))
       this.handlers.onExit(null, false)
     })

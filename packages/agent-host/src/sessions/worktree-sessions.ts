@@ -67,12 +67,12 @@ export const STOPPING_WAIT_MS = 10_000
  * which is the person's (a pull request's, the trunk). An app setting, so a build before it reads nothing new and the
  * store needs no step; it goes with the session when it is deleted for good.
  */
+export const branchWasThereKey = (sessionId: string) => `worktree_branch_was_there:${sessionId}`
+
 /** Sessions by name, quoted, for a refusal that names who is still in a worktree */
 function sessionNames(sessions: readonly { name: string }[]): string {
   return sessions.map((s) => `"${s.name}"`).join(', ')
 }
-
-export const branchWasThereKey = (sessionId: string) => `worktree_branch_was_there:${sessionId}`
 
 /** A branch a new worktree starts on that was there already (#1662): where it starts, and whether a local branch of that name exists */
 type TakenBranch = ForkBase & { sha: string; existing: boolean }
