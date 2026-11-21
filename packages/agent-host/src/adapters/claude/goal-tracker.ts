@@ -11,8 +11,7 @@ function textOfContent(content: unknown): string {
 /**
  * What a Claude session's `/goal` is doing, read off the stream so it draws a Codex goal's badge (`active_goal` does not reach a
  * headless session, see `normalizeMessage`; the SDK has no goal API). Measured 2026-10-03 with `query()` and CLI 2.1.282 (SDK 0.3.263):
- *   not met at Stop   a user message with isSynthetic: true, "Stop hook feedback:
-[<condition>]: <reason>"; the CLI goes on with
+ *   not met at Stop   a user message with isSynthetic: true, "Stop hook feedback:\n[<condition>]: <reason>"; the CLI goes on with
  *                     the same turn, one result at the end. Read only while its bracket holds the condition we know (a person's
  *                     own prompt Stop hook has the same shape)
  *   met               **nothing** before the result (includeHookEvents adds nothing: the goal hook is a prompt hook)

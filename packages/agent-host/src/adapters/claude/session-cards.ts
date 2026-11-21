@@ -233,8 +233,8 @@ export class ClaudeCards {
   /**
    * Closes a card when the CLI withdraws its question. The SDK aborts the callback's `signal` when the CLI sends
    * `control_cancel_request` for that permission request (the tool was aborted, or the turn ended without our Stop)
-   * and when the query closes; nothing else tells us, and an open card would answer a promise nobody waits on. A card already answered or released is no longer in its map, so
-   * this closes nothing twice.
+   * and when the query closes; nothing else tells us, and an open card would answer a promise nobody waits on. A card already answered or released is no longer in its map,
+   * so this closes nothing twice.
    */
   private releaseOnCancel(requestId: string, signal: AbortSignal | undefined): void {
     if (!signal) return

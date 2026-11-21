@@ -97,8 +97,8 @@ export function resultOutput(content: unknown): string {
 
 /**
  * What an Edit, Write or NotebookEdit call would do to its file, as Codex's file changes are read (#843). An Edit is its
- * removed and its added lines; a notebook cell is its new source. A Write is its content: as added lines when it makes a new file (`isNew`, which the adapter finds out, since
- * it knows the working folder), under a line saying it replaces the whole file when one is there, and under a line
+ * removed and its added lines; a notebook cell is its new source. A Write is its content: as added lines when it makes a new file (`isNew`, which the adapter finds out, since it
+ * knows the working folder), under a line saying it replaces the whole file when one is there, and under a line
  * saying it writes the whole file when that is not known. A Write's content is not marked as added to a file it
  * replaces, since nothing says which of its lines are new.
  */

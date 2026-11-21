@@ -9,15 +9,7 @@ import { realOs } from '../../os/real.js'
 /**
  * Where a Claude process is started from on Windows, and whether what npm left there can run at all: the steps and
  * their reasons are docs/agent-host/host-process.md "How a Claude process is started on Windows (#353)".
- * Measured on Windows 11 / NTFS with Node 24 (#353, a copy of PING.EXE standing in):
- *
- *   running from                 delete the platform name   delete bin\claude.exe   new file at bin\claude.exe
- *   npm's bin\claude.exe         OK                         EPERM                   EBUSY
- *   Centralu's hard link         OK                         OK                      OK
- *
- * Writing over one of npm's names in place still fails while the link runs (EBUSY: the same file), but an update
- * never does that: npm and `install.cjs` delete, then create. macOS and Linux replace a running executable, so nothing
- * here runs there.
+ * The measurements (#353) are in that section. macOS and Linux replace a running executable, so nothing here runs there.
  */
 
 /** Smaller than any real Claude Code binary (about 250 MB) and larger than any placeholder (500 bytes in 2.1.x) */

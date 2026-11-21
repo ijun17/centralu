@@ -34,6 +34,7 @@ export function fileEditDetail(changes: readonly FileChange[]): ApprovalDetail {
   }
 }
 
+/** Text as diff lines, each prefixed with `-` or `+`; nothing for empty text */
 export function diffLines(prefix: '-' | '+', text: string): string {
   if (!text) return ''
   return text

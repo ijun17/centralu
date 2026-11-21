@@ -524,7 +524,7 @@ export async function browserFolder(home: AgyHome, platform: Platform = HOST_PLA
   const node = places.node ?? process.execPath
   // A path holding the separator the launcher splits `BROWSER` at, or `%s`, cannot be in it (#1688): a data folder with one
   // falls back to `spareFolder`; that one too (or unwritable), or on Windows a Node path with one, leaves no helper. Each
-  // path is judged as made and absolute (the agent runs in the session's folder, where a relative path names another file)
+  // path is judged as made and absolute (the agent runs in the session's folder, where a relative path names another file), and that string is the one used
   const sep = platform === 'win32' ? ';' : ':'
   const nodeBad = platform === 'win32' ? unusableIn(node, sep) : ''
   if (nodeBad) return noHelper(`the Node program Centralu runs on is at ${node}, and Antigravity cannot be given a path with ${nodeBad} in it. Install Centralu (or that Node) in a folder whose path has none.`)
