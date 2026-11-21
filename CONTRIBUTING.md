@@ -620,8 +620,9 @@ running, possibly the very session doing the work.
   suppression with its reason, public API docs, issue or RFC links, and the non-obvious why; a
   number learned by measuring stays beside it. A long justification without one of these means the
   code should change instead. In the folders already swept (`COMMENTS_SWEPT`), `guard/comments`
-  (tooling/eslint-guards.js) reports "used to", a sentence opening with "Previously", a file header
-  over 3 lines of text, a comment block over 10, a source file over 35% comment lines, and a
+  (tooling/eslint-guards.js) reports "used to", a sentence opening with "Previously", a review
+  tag (`#N review`, `#N's review`, `review of #N`, `#N re-check`), a file header over 3 lines of text, a
+  comment block over 10, a source file over 35% comment lines, and a
   paragraph that runs two list items into its text (`Holds: - a - b`, `1. x 2. y`: one item per line); a file
   over that share when its folder was swept may not go above its line in `COMMENT_SHARE_HELD`
   (tooling/guard-exceptions.js).

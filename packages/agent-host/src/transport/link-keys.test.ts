@@ -116,7 +116,7 @@ const FORGED = Buffer.concat([encodePoint(1n, false), Buffer.alloc(32)])
  */
 const RAW_VERIFY_TAKES_SMALL_ORDER = rawVerifyTakesSmallOrder()
 
-/** The probe, in a `try`: a Node that throws on importing a small-order key has no hazard, and the file still loads (#1714 recheck) */
+/** The probe, in a `try`: a Node that throws on importing a small-order key has no hazard, and the file still loads (#1714) */
 function rawVerifyTakesSmallOrder(): boolean {
   try {
     return Array.from({ length: 16 }, (_, i) => verify(null, Buffer.from(`probe ${i}`), SPKI(encodePoint(1n, false)), FORGED)).some(Boolean)

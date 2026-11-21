@@ -868,7 +868,7 @@ describe('the remote command per shell (#82)', () => {
     // The XML's escapes are read back, and text around and between blocks is kept
     expect(lastLine('#< CLIXML\r\n<Objs Version="1.1.0.1"><S S="Error">the &lt;thing&gt; &amp; _x005F_its file could not be read_x000D__x000A_</S></Objs>')).toBe('the <thing> & _its file could not be read')
     expect(lastLine(`before\n#< CLIXML\r\n${progress}\nafter the progress\n#< CLIXML\r\n${progress}`)).toBe('after the progress')
-    // A position line is known by its whole shape: a message that only ends like one is the message (review of #1116)
+    // A position line is known by its whole shape: a message that only ends like one is the message (#1116)
     expect(lastLine('#< CLIXML\r\n<Objs Version="1.1.0.1"><S S="Error">could not write b.log:12 col:5_x000D__x000A_</S></Objs>')).toBe('could not write b.log:12 col:5')
     expect(lastLine('#< CLIXML\r\n<Objs Version="1.1.0.1"><S S="Error">download node_x000D__x000A_</S><S S="Error">At C:\\Program Files\\x\\install.ps1:12 char:5_x000D__x000A_</S></Objs>')).toBe('download node')
     // A stream that ends inside the XML keeps its whole records and drops the rest
@@ -905,7 +905,7 @@ describe('the remote command per shell (#82)', () => {
   )
 
   /*
-   * Review of #1116: PowerShell 7 (a Windows machine whose OpenSSH shell is pwsh) writes an error in its ConciseView, the
+   * #1116: PowerShell 7 (a Windows machine whose OpenSSH shell is pwsh) writes an error in its ConciseView, the
    * place in the script as a gutter around the message, and colours it with terminal escapes, which CLIXML carries as
    * `_x001B_`. Not measured here (no PowerShell 7 on this PC): the shape is ConciseView's as documented.
    */
@@ -1001,7 +1001,7 @@ describe('serve --revoke over ssh (#1405)', () => {
     expect(credentialsOf({ not: 'a list' })).toBeNull()
   })
 
-  // #1717 recheck, F1: a key entry (one with a public key) has no check; it is never the verifier credential the hub holds under its id
+  // #1717: a key entry (one with a public key) has no check; it is never the verifier credential the hub holds under its id
   it('reads an entry with a public key as never the hub’s own verifier credential, whatever else it carries, in a connection line or a host.credentials answer alike', () => {
     const base = { v: 1, port: 17175, token: 't', version: '1', protocolVersion: 1, dataDir: '/d', hostRunning: true }
     const publicKey = 'K'.repeat(43)

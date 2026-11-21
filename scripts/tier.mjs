@@ -66,6 +66,19 @@ export function globToRegExp(glob, flags = '') {
   return new RegExp(`^${re}$`, flags)
 }
 
+/**
+ * A glob with each `{a,b}` list of names spelled out, one glob per name, so a test can find a name that no longer matches a
+ * file. A list in a name with a wildcard (`*.{md,txt}`) is a set of kinds, not of files, and stays.
+ */
+export function globNames(glob) {
+  for (const m of glob.matchAll(/\{([^}]*)\}/g)) {
+    const end = glob.indexOf('/', m.index)
+    if (/[*?]/.test(glob.slice(glob.lastIndexOf('/', m.index) + 1, end < 0 ? undefined : end))) continue
+    return m[1].split(',').flatMap((name) => globNames(glob.slice(0, m.index) + name + glob.slice(m.index + m[0].length)))
+  }
+  return [glob]
+}
+
 const escape = (s) => s.replace(/[.+^$()|[\]\\}]/g, '\\$&')
 
 /** The rules file's contents, checked; throws with what is wrong. */

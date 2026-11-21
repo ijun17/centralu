@@ -411,7 +411,7 @@ async function stop(child: OsChild, graceMs: number, o: { sweep?: boolean } = {}
 
 /**
  * `stop` for several children at once, each swept after. On Windows one reading of the table before and one sweep after
- * serve them all (#2142 re-check): a PowerShell per child, twice, made a shutdown with many git calls slow
+ * serve them all (#2142): a PowerShell per child, twice, made a shutdown with many git calls slow
  */
 async function stopAll(children: readonly OsChild[], graceMs: number): Promise<void> {
   if (traits.hasProcessGroups) {

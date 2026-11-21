@@ -202,7 +202,7 @@ describe.skipIf(process.platform === 'win32')('the login-shell probe', () => {
  */
 describe('finding a tool on Windows', () => {
   /*
-   * Review of #1073: a tool not found here is no longer spawned by its bare name, so whichTool may not be narrower than
+   * #1073: a tool not found here is no longer spawned by its bare name, so whichTool may not be narrower than
    * Windows' own search. Windows reads a quoted PATH entry as the folder inside the quotes.
    */
   it('reads a quoted PATH entry as the folder inside the quotes', () => {

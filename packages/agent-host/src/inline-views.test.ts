@@ -247,7 +247,7 @@ describe('calling a tool with a view attaches the view under a card', () => {
 })
 
 /*
- * Owner decision 2026-11-05 (deep review of #1993): a call a view inline in a conversation makes is rooted at that
+ * Owner decision 2026-11-05 (#1993): a call a view inline in a conversation makes is rooted at that
  * conversation's session, so an agent its app starts runs no higher than that session; a fixed view's call is the person's.
  */
 describe("a view's calls and the session they are rooted at", () => {

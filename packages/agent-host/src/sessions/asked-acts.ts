@@ -53,7 +53,7 @@ const READS: ReadonlySet<string> = new Set([
 /**
  * The CLI's own tools that start work which goes on after the turn that started it, or start a turn of the CLI's own later: a subagent, a prompt
  * scheduled for later, a stream of events from a watched command. The person's card belongs to the request's turn; what runs on after it would run
- * with no asker and no card (found by the review of #1516: a subagent's later steps, a cron prompt's, ran unasked under auto). So a request's turn is
+ * with no asker and no card (#1516: a subagent's later steps, a cron prompt's, ran unasked under auto). So a request's turn is
  * refused them outright, not asked about
  */
 const OUTLIVES_THE_TURN: ReadonlySet<string> = new Set(['Agent', 'Task', 'CronCreate', 'ScheduleWakeup', 'Workflow', 'Monitor', 'RemoteTrigger'])

@@ -255,7 +255,7 @@ function sortKeys(v: unknown): unknown {
  * An object to copy keys into with no prototype, so every key is kept as its own property. On a plain `{}`, a key
  * `__proto__` (an own key of parsed JSON, which an app's result or an agent's arguments can hold) went to the
  * prototype setter: `{"__proto__":{…},"isError":true}` was kept as `{"isError":true}`, and two manifests that differed
- * only under that key hashed the same (review of #1075).
+ * only under that key hashed the same (#1075).
  */
 function keyed(): Record<string, unknown> {
   return Object.create(null) as Record<string, unknown>
