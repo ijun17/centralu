@@ -48,7 +48,7 @@ describe('a linked machine’s session asks the hub’s projects (#550)', () => 
       session: { id: 'h1' },
     })
     const r = await call
-    expect(r).toMatchObject({ ok: true, state: 'done', project: `${hub.id}/${hub.projectName}`, sessionId: `${hub.id}.h1`, readable: [] })
+    expect(r).toMatchObject({ ok: true, state: 'done', project: `hub-mac/${hub.projectName}`, sessionId: 'hub-mac.h1', readable: [] })
     expect(lastWords(r)).toContain('[A session in the project "remote-project on Remote box" asks this project')
     // On the hub it is a task from that session on that machine (#1948 step 6), never from the person or an Assistant
     const task = hub.store.mailbox.feedOf(sessionAddress(hub.id, 'h1'), { limit: 5 }).find((m) => m.kind === 'task')!
@@ -57,6 +57,19 @@ describe('a linked machine’s session asks the hub’s projects (#550)', () => 
     expect(hub.store.machines.listMachineAskConsents()).toEqual([expect.objectContaining({ machineId: 'm1', sessionId: 'w1', projectId: 'p-hub' })])
     // The asked session worked one level below the asker, and the mark went with its turn (#867)
     await eventually(() => hub.store.settings.appSetting('hub_ask_depth:h1') === null)
+  })
+
+  it('reads back the project and session it printed, and the hub-id forms an older build printed', async () => {
+    const { machine, hub } = await rig()
+    const first = machine.ask({ project: hub.projectName, task: 'one' })
+    await hub.answer('allow')
+    const r = (await first) as { project: string; sessionId: string }
+    expect(r).toMatchObject({ project: `hub-mac/${hub.projectName}`, sessionId: 'hub-mac.h1' })
+    for (const [project, session] of [[r.project, r.sessionId], [`${hub.id}/${hub.projectName}`, `${hub.id}.h1`], [`${hub.id}.p-hub`, 'h1']] as const) {
+      const again = await machine.ask({ project, session, task: `again ${project}` })
+      expect(again, project).toMatchObject({ ok: true, state: 'done', sessionId: 'hub-mac.h1' })
+      expect(lastWords(again)).toContain(`again ${project}`)
+    }
   })
 
   it('passes an approved pair with no card, until the person withdraws it', async () => {
@@ -204,7 +217,7 @@ describe('several hubs, and builds from before the reverse direction (#550)', ()
     // The other hub still answers
     const call = machine.ask({ project: 'Hub mac/alpha', task: 'hello' })
     await a.answer('allow')
-    expect(await call).toMatchObject({ ok: true, state: 'done', sessionId: `${a.id}.h1` })
+    expect(await call).toMatchObject({ ok: true, state: 'done', sessionId: 'hub-mac.h1' })
   })
 
   it('a machine that does not take the offer: the hub’s row says it is told again, while the switch is on', async () => {
@@ -230,6 +243,13 @@ describe('several hubs, and builds from before the reverse direction (#550)', ()
     await expect(machine.server.call(client, 'hub.projects', {}, { timeoutMs: 300 })).rejects.toThrow('did not answer hub.projects in time')
   })
 
+  it("shows a hub under a label none of this host's own machines has, in mail and in ask_project alike", async () => {
+    const hubs = new LinkedHubs({ call: async () => ({ projects: [{ id: 'p-web', name: 'web' }] }), machines: () => ['studio'] })
+    hubs.offer(7, { hub: { id: 'hub-00000001', name: 'Studio', label: 'studio' }, on: true, mail: true, you: 'm1' })
+    expect(hubs.peer('hub-00000001')?.label).toBe('studio-2')
+    expect((await hubs.projects()).projects).toEqual([expect.objectContaining({ id: 'studio-2.p-web', label: 'studio-2' })])
+  })
+
   it('a hub that offered but lacks the call is named as needing an update', async () => {
     const hubs = new LinkedHubs({ call: async () => Promise.reject(new Error('Unknown method: hub.askProject')) })
     hubs.offer(7, { hub: { id: 'hub-00000001', name: 'Old hub' }, on: true })
@@ -237,6 +257,6 @@ describe('several hubs, and builds from before the reverse direction (#550)', ()
       ok: false,
       error: 'Old hub runs a Centralu from before this, so it cannot be asked. Update it there.',
     })
-    expect((await hubs.projects()).away).toEqual([{ hubId: 'hub-00000001', hub: 'Old hub', why: 'it runs a Centralu from before this; update it there' }])
+    expect((await hubs.projects()).away).toEqual([{ hubId: 'hub-00000001', hub: 'Old hub', label: 'old-hub', why: 'it runs a Centralu from before this; update it there' }])
   })
 })

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { SessionId } from '@cc/protocol'
-import { decodeNumber, encodeNumber, findMachine, hubLabel, qualifiedMachine, newMachineId, qualify, splitQualified } from './machine-ids.js'
+import { decodeNumber, encodeNumber, findMachine, hubLabel, labelHere, qualifiedMachine, newMachineId, qualify, splitQualified } from './machine-ids.js'
 
 describe('machine-qualified ids (#82)', () => {
   it('a qualified id is still a valid session id, and splits back at its first dot', () => {
@@ -46,6 +46,13 @@ describe('machine-qualified ids (#82)', () => {
     expect(hubLabel('Person', [])).toBe('person-2')
     expect([hubLabel('서버', ['m1']), hubLabel('서버', ['m1'])]).toEqual(['hub', 'hub'])
     expect(hubLabel('서버', ['hub'])).toBe('hub-2')
+  })
+
+  it("shows a hub here under the label it offered, suffixed as a hub's own when one of this host's machines has that id, the same each time", () => {
+    expect(labelHere('studio', 'Studio', ['m1'])).toBe('studio')
+    expect([labelHere('studio', 'Studio', ['m1', 'studio']), labelHere('studio', 'Studio', ['studio', 'm1'])]).toEqual(['studio-2', 'studio-2'])
+    // An older hub offers none: made from its name, never this machine's id there
+    expect(labelHere(null, 'M1', ['m1'])).toBe('m1-2')
   })
 })
 

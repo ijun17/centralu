@@ -53,12 +53,14 @@ export type AcrossMachine = AcrossPeer & { id: string; tasks?: boolean; mail?: b
 export type AcrossPeers = {
   /** A hub, by its id, as it offered here; `you` is this machine's id there, null for a hub from before item 2 */
   hub?(id: string): (AcrossPeer & { you: string | null }) | undefined
-  /** `label`: the prefix the hub's own sessions go under here (`hubLabel`) */
+  /** `label`: the prefix the hub's own sessions go under here (`LinkedHubs.peer`) */
   hubs?(): (AcrossPeer & { id: string; label: string; you: string | null })[]
   /** The hub that started a session here (`startingHub`), for `parent` */
   startingHub?(sessionId: string): { id: string; name: string } | null
   /** A machine this hub links, by its id */
   machine?(id: string): AcrossMachine | undefined
+  /** The prefix this hub's own sessions go under on its machines (`ownHubLabel`) */
+  label?(): string | null
   /** A linked machine's session as `<name> on <machine>`, from this hub's mirror of it */
   machineSession?(machineId: string, sessionId: string): string | undefined
   /** Its state as that mirror last had it (`waiting_input`, `idle`, …) */
@@ -165,6 +167,7 @@ export class AcrossCore {
   refComputers(): RefComputers {
     return {
       machine: (id) => this.peers?.machine?.(id) !== undefined,
+      label: () => this.peers?.label?.() ?? null,
       hubs: () => this.peers?.hubs?.() ?? [],
       mirrored: (name) => named(this.peers?.machineDirectory?.().entries ?? [], name),
     }
@@ -279,11 +282,11 @@ export class AcrossCore {
     return { ok: true, messageId: oneLineText(r.messageId, 200), to: oneLineText(r.to, 120), ...(r.address ? { address: r.address } : {}) }
   }
 
-  /** A session here as the other side's answer names it; written whatever its label */
-  protected label(to: string): string {
+  /** A session here as the other side's answer names it, to `reader` there in its terms; written whatever its label */
+  protected label(to: string, reader?: string): string {
     if (to === PERSON) return 'the person'
     try {
-      return oneLineText(this.d.reach.labelOf(to), 120)
+      return oneLineText(this.d.reach.labelOf(to, reader), 120)
     } catch {
       return to
     }

@@ -76,13 +76,28 @@ machine it runs on.
      read_session, agent_session) reads one set of forms (`SessionRefs`): an id here,
      `<computer>.<id>`, a name, or `assistant`, `parent`, `person`, and prints a session in the
      first two forms (`SessionRefs.shown`). A session's mail address is internal: a tool refuses
-     it, whole or cut short, with the id to write, and never looks it up as a name.
+     it, whole or cut short, with the id to write, and never looks it up as a name. A linked
+     machine's session whose name is shaped like an address is still found by that name on its
+     hub; on a machine, a hub's such session is reached by its id. ask_project prints a hub's
+     project and session under the hub's label too (`<label>/<name>`, `<label>.<id>`); the
+     `<hub id>` forms older builds printed are still read.
    - **A hub's label.** On a machine, a hub's own sessions go under the label the hub sends in
-     `host.hubOffer` (`hubLabel`): made from its name, never one of its machines' ids or a role
+     `host.hubOffer` (`ownHubLabel`): made from its name, never one of its machines' ids or a role
      word. An older hub sends none, and the machine makes one from the name, never its own id
      there; it cannot see that hub's other machines, so the label may be one of theirs, and that
      machine's sessions are then read as the hub's own and refused (ids are random: never
      delivered to the wrong session). Two hubs with one label are refused as ambiguous.
+   - **A host that is a machine and a hub.** It shows a hub that links it under the label offered,
+     suffixed (`studio-2`) when one of its own machines has that id (`labelHere`): worked out from
+     the kept offer and its machines at each read, never stored. Text that hub writes for it still
+     says `studio.<id>`, which reads here as its own machine's session, where there is none:
+     refused. Another machine of that hub goes under the label too when one of its own machines
+     has that machine's id.
+   - **Text for the other side.** A notice or an answer written on one computer for a session on
+     the other names sessions as that session's tools print them (`SessionRefs.shown` with the
+     reader): a machine writes its own as `<its id there>.<id>`, a hub its own as `<its label>.<id>`
+     and its other machines' as `<label>.<machine>.<id>`, which a machine reads back whether one
+     hub links it or several. A report crosses as facts, and the reading side words it.
    - **Labels are for display only.** Mail stores and sends addresses (`session:<host>/<id>`), so a
      renamed hub breaks no stored reference, only the ids an agent was shown before.
 4. **One orchestrator, apps from every machine.** A remote host's orchestrator and coordinators are

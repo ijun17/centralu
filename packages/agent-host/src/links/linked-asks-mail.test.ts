@@ -135,7 +135,7 @@ describe("a machine session's ask_project of a hub's project (#1948 step 6)", { 
     expect(task).toMatchObject({ origin: 'ask_project', facts: { agentDepth: 1 } })
     expect(hub.store.mailbox.recipient(task.id, at.hub('h1'))?.deliveredAt).toBeNull()
     free()
-    expect(await call).toMatchObject({ ok: true, state: 'done', sessionId: `${hub.id}.h1`, answer: expect.stringContaining('review the branch') })
+    expect(await call).toMatchObject({ ok: true, state: 'done', sessionId: 'hub-mac.h1', answer: expect.stringContaining('review the branch') })
     // The answer carried the report: none crosses after it, and the machine keeps no copy
     expect(machine.store.mailbox.message(task.id)).toBeUndefined()
     const [report] = hub.store.mailbox.reportsOn(task.id)
@@ -147,7 +147,7 @@ describe("a machine session's ask_project of a hub's project (#1948 step 6)", { 
     pairApproved()
     const free = await busy(hub.mgr, 'h1')
     const r = await machine.ask({ project: 'hub-project', task: 'review the branch' })
-    expect(r).toMatchObject({ ok: true, state: 'working', sessionId: `${hub.id}.h1` })
+    expect(r).toMatchObject({ ok: true, state: 'working', sessionId: 'hub-mac.h1' })
     const task = taskTo(hub, at.hub('h1'), at.hub('m1.w1'))!
     expect(machine.store.mailbox.message(task.id)).toMatchObject({ kind: 'task', origin: 'ask_project', sender: at.machine('w1') })
     expect(machine.store.mailbox.recipients(task.id)).toEqual([expect.objectContaining({ recipient: at.hub('h1') })])
@@ -182,7 +182,7 @@ describe("a machine session's ask_project of a hub's project (#1948 step 6)", { 
       { ok: true, state: 'done', project: 'web', sessionId: 'h1', sessionName: 'Helper', answer: 'reviewed' },
     ]
     const ask = vi.fn(async () => answers.shift()!)
-    machine.mgr.useLinkedHubs({ projects: async () => ({ projects: [{ id: 'hub-0000000b.p-web', projectId: 'p-web', name: 'web', hub: 'Old hub', hubId: 'hub-0000000b' }], away: [] }), ask })
+    machine.mgr.useLinkedHubs({ projects: async () => ({ projects: [{ id: 'old-hub.p-web', projectId: 'p-web', name: 'web', hub: 'Old hub', hubId: 'hub-0000000b', label: 'old-hub' }], away: [] }), ask })
     expect(await machine.ask({ project: 'web', task: 'review it' })).toMatchObject({ ok: true, state: 'working' })
     expect(machine.store.mailbox.feedOf(sessionAddress('hub-0000000b', 'h1'), { limit: 5 })).toEqual([])
     expect(await machine.ask({ project: 'web' })).toMatchObject({ ok: true, state: 'done', answer: 'reviewed' })
