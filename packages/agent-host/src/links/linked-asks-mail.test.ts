@@ -60,11 +60,12 @@ describe("a hub session's ask_project of a machine's project (#1948 step 6)", { 
   })
 
   // #2357 and #2349: the one condition for a message to one's task's giver holds across too, for an asker named by its id
-  it('the session asked, mailing its asker by its id while on the task, sends a message that needs no reply there, and is told how to ask', async () => {
+  it('the session asked, mailing its asker by its id while on the task (its address is refused with that id), sends a message that needs no reply there, and is told how to ask', async () => {
     const { machine, hub, at, project } = await asksRig()
     const call = hub.mgr.askProject('h1', { project, task: 'please approve my command' })
     await hub.answer('allow')
     await eventually(() => machine.mgr.listSessions().find((s) => s.id === 'w1')?.state === 'waiting_approval')
+    expect((await machine.mail!.tool.call('w1', { action: 'send', to: at.hub('h1'), text: 'Found the cause.' })).text).toContain('For that session, write "hub-mac.h1".')
     const plain = await machine.mail!.tool.call('w1', { action: 'send', to: 'hub-mac.h1', text: 'Found the cause.' })
     expect(plain.text).toContain('It needs no reply. When you ask whoever gave you your task something')
     expect(hub.store.mailbox.message(/^Sent (\S+) /.exec(plain.text)?.[1] ?? '')).toMatchObject({ needsReply: false })
