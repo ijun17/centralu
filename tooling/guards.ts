@@ -68,6 +68,9 @@ export const GUARDS: readonly Guard[] = [
   // The modules the app's build reaches from its entries, held to what may load first and to the calls left out of what ships
   { test: 'tooling/startup-bundle.test.ts', reads: ['tooling/window-build.test-helpers.ts'] },
   { test: 'tooling/pure-calls.test.ts', tests: 'the window bundle', reads: ['tooling/pure-calls.mjs', 'tooling/window-build.test-helpers.ts'] },
+  // The board app's folder holds no data file of the person's
+  { test: 'tooling/project-board-contribute.test.ts', tests: 'the private word list in the data folder', reads: [] },
+  { test: 'tooling/project-board-reader.test.ts', tests: 'on this computer only', reads: [] },
 ]
 
 /** The tests under tooling/ that are not guards, by why: no file another pull request adds is held to a rule of theirs */
@@ -163,16 +166,12 @@ export const NOT_GUARDS: Readonly<Record<string, readonly string[]>> = {
     'tooling/test-data-dir-checks.test.ts',
     'tooling/test-time-limits-checks.test.ts',
   ],
-  'lists packaging/npm only to copy or serve what the code under test reads there, which lists the same folder': [
+  'lists packaging/npm, itself or through the code under test, only to copy or serve what that code reads there': [
     'tooling/local-update.test.ts',
     'tooling/project-board-release.test.ts',
     'tooling/stamp-version.test.ts',
   ],
-  "lists the board app's folder only to see that the tool run it tests wrote no data file there": [
-    'tooling/project-board-contribute.test.ts',
-    'tooling/project-board-reader.test.ts',
-  ],
-  "reads tooling/guards.ts through the reader it tests, which takes every guard as changed from the empty tree whatever else is there": ['tooling/pre-pr.test.ts'],
+  'reads tooling/guards.ts through the reader it tests; from the empty tree every guard is changed, whatever else is there': ['tooling/pre-pr.test.ts'],
   'a fixture: a tooling test runs it in a vitest of its own': [
     'tooling/fixtures/leak/leak-probe.test.ts',
     'tooling/fixtures/listed/inner.test.ts',

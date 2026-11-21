@@ -838,16 +838,17 @@ describe('pre-pr on a stack of two pull requests', () => {
     try {
       writeFileSync(join(deps, 'keep.js'), 'keep')
       const killed = leave(`killed-${process.pid}`, 999_999)
-      // A run's refs whose folder is gone: --cleanup of any run takes them too
+      const dead = leave(`dead-${process.pid}`, 999_998)
+      const living = leave(`living-${process.pid}`, process.pid)
+      // A run's refs whose folder is gone: --cleanup of any run takes them too, and leaves those of a run with a folder
       git(repo, 'update-ref', `${GUARD_REFS}/gone-${process.pid}/22`, 'top')
       execFileSync(process.execPath, [fileURLToPath(new URL('../scripts/pre-pr.mjs', import.meta.url)), '--cleanup', `killed-${process.pid}`], { cwd: repo, env: GIT_ENV })
       expect(existsSync(killed)).toBe(false)
-      expect(guardRefs()).toBe('')
-      expect(git(repo, 'worktree', 'list', '--porcelain').match(/^worktree /gm)).toHaveLength(1)
+      expect(guardRefs()).toBe([`${GUARD_REFS}/dead-${process.pid}/21`, `${GUARD_REFS}/living-${process.pid}/21`].join('\n'))
+      // The checkout's own, the dead run's and the living one's
+      expect(git(repo, 'worktree', 'list', '--porcelain').match(/^worktree /gm)).toHaveLength(3)
       expect(readFileSync(join(deps, 'keep.js'), 'utf8')).toBe('keep')
 
-      const dead = leave(`dead-${process.pid}`, 999_998)
-      const living = leave(`living-${process.pid}`, process.pid)
       const swept = sweepStale(root, { isAlive: (pid: number) => pid === process.pid })
       expect(swept).toEqual([dead])
       expect(existsSync(living)).toBe(true)

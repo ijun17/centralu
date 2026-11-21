@@ -192,7 +192,9 @@ export const removeGuardRefs = (root, runId) => deleteRefs(root, refsUnder(root,
 
 /**
  * Deletes the guard refs of every run whose folder is gone: a run killed after it fetched, whose folder was removed by
- * hand. A run makes its folder before it fetches and removes its refs before its folder. Answers those runs' ids.
+ * hand. A run makes its folder before it fetches and removes its refs before its folder. The folder is looked for in this
+ * process's temporary folder: a run started with another TMPDIR on the same checkout would be taken for gone. Answers
+ * those runs' ids.
  */
 export function sweepGuardRefs(root) {
   const byRun = Map.groupBy(refsUnder(root, GUARD_REFS), (ref) => ref.slice(GUARD_REFS.length + 1).split('/')[0])

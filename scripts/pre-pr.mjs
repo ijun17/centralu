@@ -487,8 +487,8 @@ export function runGuards({ root, remote, runId, runners, prs, head, guards, mak
   return { failing, skipped, unchecked }
 }
 
-/** Whether the test named `name` (ancestors and title, as {@link vitestTests} names it) is one of the guard `g`'s */
-const isGuardTest = (g, name) => !g.tests || new RegExp(g.tests).test(name)
+/** Whether the test named `name` (as {@link vitestTests} names it) is one of the guard `g`'s: its pattern read as vitest's `-t` reads it */
+const isGuardTest = (g, name) => !g.tests || new RegExp(g.tests).test(name.replaceAll(' > ', ' '))
 
 /** A failure of {@link failuresOf} as a line names it: its file, and its test when it has one. */
 const failureLabel = (f) => `${f.file}${f.name ? ` > ${f.name}` : ''}`
