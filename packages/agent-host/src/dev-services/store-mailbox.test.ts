@@ -206,6 +206,28 @@ describe('delivery', () => {
     expect(box.recipient(unsure, B)).toMatchObject({ attemptAt: null, attempts: 0 })
   })
 
+  it('a task given again loses its mark whenever it stops waiting for that delivery: dismissed, released, or moved with the role (#2369)', () => {
+    const { box, send } = world()
+    const givenAgain = (recipient: string, over: Partial<NewRecipient> = {}) => {
+      const id = send({ sender: A, kind: 'task' }, to(recipient, over))
+      box.markDelivered(recipient, [id], NOW, 3)
+      expect(box.undeliver(recipient, [id], NOW, { at: NOW + 1 })).toEqual([id])
+      expect(box.recipient(id, recipient)?.givenAgainAt).toBe(NOW + 1)
+      return id
+    }
+    const failed = givenAgain(B)
+    box.hold(B, [failed], 'failed')
+    expect(box.dismiss(B, [failed])).toBe(1)
+    expect(box.recipient(failed, B)?.givenAgainAt).toBeNull()
+    const stopped = givenAgain(B)
+    expect(box.markReleased(stopped, B, NOW + 2, 'error')).toBe(true)
+    expect(box.recipient(stopped, B)?.givenAgainAt).toBeNull()
+    const NEW = 'session:h1/orc2'
+    const role = givenAgain(ORC, { via: 'orchestrator' })
+    expect(box.moveRole(NEW)).toEqual([role])
+    expect(box.recipient(role, NEW)?.givenAgainAt).toBeNull()
+  })
+
   it('deleteHeld drops policy rows and a message left with none', () => {
     const { box, send } = world()
     const both = send({ sender: A }, to(B, { held: 'policy' }), to(C, { held: 'policy' }))

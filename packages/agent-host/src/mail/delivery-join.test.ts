@@ -168,6 +168,26 @@ describe('mail joins a running turn (§10.6.2)', () => {
     expect(w.rowOf(task.id, B).deliveredAt).toEqual(expect.any(Number))
   })
 
+  it('a task given again and handed over is not given again to its heir, which ran no turn with it (#2369)', async () => {
+    const w = started()
+    w.send(A, { to: [B], text: 'start on #12' })
+    await w.advance(2_000)
+    w.states.set('b', inTurn)
+    const task = w.mail.task(A, B, { text: 'and review #13', origin: 'agent_session', delivered: false })
+    await w.advance(5_000)
+    w.delivery.turnInputs(B, { took: w.to('b').slice(1).map((d) => d.input.id!), finished: true })
+    w.endTurn('b')
+    expect(w.rowOf(task.id, B).givenAgainAt).toEqual(expect.any(Number))
+    w.mail.handOver(B, C, 'all')
+    expect(w.rowOf(task.id, C)).toMatchObject({ deliveredAt: null, givenAgainAt: null })
+    w.states.set('c', { kind: 'ready', live: true, quiet: false })
+    w.delivery.poke('c')
+    await w.advance(31_000)
+    const frame = w.to('c').at(-1)!.input.text
+    expect(frame).toContain(`id="${task.id}"`)
+    expect(frame).not.toContain('givenAgain')
+  })
+
   it('a task the running turn took in stays with it when that turn is stopped or cut, and is not given again (#2369)', async () => {
     const w = started()
     w.send(A, { to: [B], text: 'start on #12' })

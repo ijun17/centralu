@@ -59,7 +59,7 @@ export type RecipientRow = {
   held: string | null
   attempts: number
   lastError: string | null
-  /** When a turn that took this task in while it ran ended and it was given again at rest (`undeliver` with `again`, #2369); null once delivered again */
+  /** When a turn that took this task in while it ran ended and it was given again at rest (`undeliver` with `again`, #2369); null once it no longer waits for that delivery: delivered, dismissed, released or moved */
   givenAgainAt: number | null
   turnSeq: number | null
   settled: Settled | null
@@ -587,7 +587,7 @@ export class MailboxRecords {
 
   /**
    * A delivery the tool failed late: the rows that delivery marked delivered at `deliveredAt` are unread and undelivered again, unless held since.
-   * `again`: a task a turn took in while it ran, given again at rest (#2369): due at `at`, marked `given_again_at` until it is delivered again,
+   * `again`: a task a turn took in while it ran, given again at rest (#2369): due at `at`, marked `given_again_at` (`RecipientRow.givenAgainAt`),
    * unless settled since. Returns the ids put back
    */
   undeliver(recipient: string, ids: readonly string[], deliveredAt: number, again?: { at: number }): string[] {
@@ -742,7 +742,7 @@ export class MailboxRecords {
   markReleased(messageId: string, recipient: string, at: number, why: ReleaseWhy): boolean {
     return (
       this.db
-        .prepare(`UPDATE mail_recipients SET released_at = ?, released_why = ? WHERE message_id = ? AND recipient = ? AND released_at IS NULL`)
+        .prepare(`UPDATE mail_recipients SET released_at = ?, released_why = ?, given_again_at = NULL WHERE message_id = ? AND recipient = ? AND released_at IS NULL`)
         .run(at, why, messageId, recipient).changes > 0
     )
   }

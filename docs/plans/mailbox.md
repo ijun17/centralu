@@ -777,7 +777,7 @@ sends.
 | `settled_at`, `answer_id` | when, and the reply that settled it (`answered`); `answer_id` set with `settled` null is an answer still held (D8) |
 | `reminded`, `reminded_at` | how many delivered reminders named this row (0 to 2), and the last one's time |
 | `released_at`, `released_why`, `told_at` | when the row was released (D25) and why (§5.4's `why` words), and when its sender's gathered notice listed it; null until then |
-| `given_again_at` | when a task a turn took in while it ran was given again at rest (§10.6.3, #2369, v77); null once delivered again |
+| `given_again_at` | when a task a turn took in while it ran was given again at rest (§10.6.3, #2369, v77); null once it no longer waits for that delivery: delivered, dismissed, released or moved |
 
 Only watched rows (§4) count for waiting (§10.3), and only those of `needsReply` messages to sessions are reminded. A
 task is never reminded: its report settles it.
