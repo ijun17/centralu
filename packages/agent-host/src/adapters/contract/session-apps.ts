@@ -45,9 +45,9 @@ export type AttachedApp = {
 }
 
 /**
- * The external apps of this session (M4 A-5) as its adapter sees them. Since #2231 no adapter attaches an app itself:
+ * The external apps of this session (M4 A-5) as its adapter sees them. No adapter attaches an app itself (#2231):
  * the agent reaches every app through Centralu's own `app` tool, and the host decides, calls and asks at the call. What
- * the adapter still does is tell the host which conversation card a call is (B-1), and stop the calls with the session.
+ * the adapter does is tell the host which conversation card a call is (B-1), and stop the calls with the session.
  *
  * **Which apps a session has is not decided here** — the manager decides it from the session kind and the project
  * (decision 4). One per handle: closing the handle closes this with it via `close()`.

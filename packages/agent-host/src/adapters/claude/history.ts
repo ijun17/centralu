@@ -11,16 +11,10 @@ import { isCentraluInputId, isCentraluNote } from '../input-receipts.js'
 /**
  * Reads past sessions Claude Code has kept.
  *
- * **Only the official SDK API is used** (`listSessions` / `getSessionMessages` / `importSessionToStore`).
- * `~/.claude/projects/**\/*.jsonl` is never parsed directly — that file format is not a
- * documented contract, so an update to the tool can break it silently, and there would be no
- * way to know the parsing broke. The SDK reads the transcripts its own version wrote, so version
- * compatibility becomes the SDK's problem, not ours.
- *
- * That said, **the SDK itself can be old** (an environment installed with an old lockfile).
- * So this reaches it through a dynamic import plus a function-existence check instead of a
- * named import: if the function is missing, the module load does not blow up — this falls back
- * to "not supported" instead.
+ * **Only the official SDK API is used** (`listSessions` / `getSessionMessages` / `importSessionToStore`), never a parse
+ * of `~/.claude/projects/**\/*.jsonl`: that format is no documented contract and could break silently, while the SDK
+ * reads what its own version wrote. **The SDK itself can be old** (an old lockfile), so it is reached through a dynamic
+ * import and a function-existence check: a missing function falls back to "not supported" instead of a failed load.
  */
 
 export const UNSUPPORTED =
@@ -71,16 +65,9 @@ export async function listClaudeSessions(cwd: string, limit: number): Promise<Ex
   const sdk = await sessionApi()
   if (!sdk?.listSessions) throw new Error(UNSUPPORTED)
   /*
-   * includeProgrammatic:true — this also includes sessions created through the SDK (i.e., the
-   * ones Centralu itself created).
-   *
-   * We originally filtered with false. The reasoning was "sessions we created are already in the
-   * sidebar, so this would be a duplicate" — but **that premise broke once "hidden" came to mean
-   * "removed from the list"**: a hidden session is not in the sidebar, and if it also does not
-   * show up here, there is no way back for it.
-   * (Measured: a session we created returned 0 rows with false, 1 row with true.)
-   *
-   * The duplicate case is filtered out using the list's `imported` flag instead.
+   * includeProgrammatic:true also lists the sessions Centralu created through the SDK (measured: 0 rows with false, 1
+   * with true). A hidden session is not in the sidebar, so this list is its way back; the duplicates of sessions that
+   * are in the sidebar are filtered by the list's `imported` flag.
    */
   const rows = await sdk.listSessions({ dir: cwd, limit, includeProgrammatic: true })
   if (!Array.isArray(rows)) return []
@@ -119,9 +106,8 @@ export async function readClaudeTranscriptTail(externalId: string, cwd: string, 
  * The opening of the summary a compaction leaves as a user turn (#843). The transcript marks that row
  * `isCompactSummary` and writes a `compact_boundary` system row before it, but the SDK's `getSessionMessages` keeps
  * neither (SDK 0.3.263: a row is cut to `type`, `uuid`, `message`; a system row has no `message`, so even
- * `includeSystemMessages` cannot tell a compaction from any other). So an imported conversation showed the whole
- * summary as if the person had typed it, and no marker, where a Codex import has one (#303). The CLI's own words are
- * the one sign left (measured in transcripts of CLI 2.1.228 to 2.1.289).
+ * `includeSystemMessages` cannot tell a compaction from any other). The CLI's own words are the one sign left (measured
+ * in transcripts of CLI 2.1.228 to 2.1.289); read by them, an import gets a marker as a Codex import does (#303).
  */
 const COMPACT_SUMMARY = /^This session is being continued from a previous conversation that ran out of context\./
 
@@ -133,10 +119,9 @@ export async function readClaudeHistory(
   const sdk = await sessionApi()
   if (!sdk) throw new Error(UNSUPPORTED)
   /*
-   * Read whole, and the newest lines kept (#1006). The SDK's `limit` counts rows from the start (it reads the whole
-   * transcript, then slices `offset..offset + limit`), so passing it gave the oldest rows: an import showed how a long
-   * conversation began, and a catch-up of one over 600 rows never found our last message and never attached anything
-   * again. It also counted every row, a tool result's included. The lines are kept as Codex keeps them (`lastLines`).
+   * Read whole, and the newest lines kept as Codex keeps them (`lastLines`, #1006). The SDK's `limit` counts every row,
+   * a tool result's included, from the start (it slices `offset..offset + limit`): it would give the oldest rows, and a
+   * catch-up of a conversation over 600 rows would never find our last message.
    */
   const { rows, byTheCli } = await readTranscript(sdk, externalId, cwd)
   if (!Array.isArray(rows)) return []
@@ -144,7 +129,7 @@ export async function readClaudeHistory(
   const agents = new Set<string>()
   for (const r of rows) {
     /*
-     * One row the reader cannot read costs that row, not the import (#843 review): the live normalizer expects the
+     * One row the reader cannot read costs that row, not the import: the live normalizer expects the
      * SDK's shapes, and a transcript another build wrote may not have them. A failed import says "Could not load past
      * conversation" and a failed catch-up retries, and fails, at every wake.
      */
@@ -228,8 +213,7 @@ function readableMessage(message: unknown): AssistantBody {
 
 /**
  * A model message read back: its words, then its tool calls, as the live normalizer reads the same message when it
- * arrives whole (#843). Tool calls used to be dropped, leaving only the tool's name as a line of the model's words, so
- * an imported conversation showed `Bash` where a watched one showed the command and its output. Its thinking, usage
+ * arrives whole (#843), so an import shows a call's command and output as a watched one does. Its thinking, usage
  * and plan are not part of a conversation read back (`historyEvents`). A call that launches a subagent is noted in
  * `agents`, for its result (`userLines`).
  */
@@ -252,7 +236,7 @@ const FOR_THE_MODEL = /^(Async agent launched successfully|\[Subagent hand-back\
 export const AGENT_REPORT_NOT_RECORDED = "the agent's report is not in this record"
 
 /**
- * An agent call's result read back (#843 review). Live, the card is closed from the SDK's `tool_use_result`: a
+ * An agent call's result read back. Live, the card is closed from the SDK's `tool_use_result`: a
  * foreground agent's report without the model-directed hand-back, a background one by its `task_notification` while the
  * launch's own result only says it started. `getSessionMessages` keeps neither (SDK 0.3.263: `type`, `uuid`, `message`,
  * the parent ids), so the result is the text meant for the model: "Async agent launched successfully … never quote …"
@@ -266,9 +250,9 @@ function agentResult(e: Extract<NormalizedEvent, { type: 'tool_result' }>, agent
 
 /**
  * The line the CLI writes as a user turn where a turn was stopped (measured in transcripts of CLI 2.1.296, also "… for
- * tool use" when a tool call was cut). Live it is never shown, Centralu says the turn stopped; read back it was a
- * message of the person's they never wrote (#1618 review). The CLI's own words are the one sign: the row has no id
- * of ours and the SDK keeps no other field of it.
+ * tool use" when a tool call was cut). Live it is never shown, Centralu says the turn stopped; read back it is not a
+ * message of the person's (#1618). The CLI's own words are the one sign: the row has no id of ours and the SDK keeps no other
+ * field of it.
  */
 const INTERRUPT_LINE = /^\[Request interrupted by user( for tool use)?\]$/
 
@@ -284,7 +268,7 @@ function userLines(message: AssistantBody, agents: ReadonlySet<string>, sent: bo
   const text = cli || INTERRUPT_LINE.test(raw) ? '' : stripInjectedBlocks(raw)
   /*
    * Centralu's own Continue note is known by its exact text too, where the line lacks the id (another CLI version, a
-   * transcript a crash left without it): never the person's message (#1626 review). The log says why it is known by its text
+   * transcript a crash left without it): never the person's message (#1626). The log says why it is known by its text
    */
   const note = isCentraluNote(text)
   if (note && !sent) console.error("[claude] Centralu's Continue note is in the transcript without the input id Centralu gave it: this CLI does not keep it. The catch-up recognises the note by its text")
@@ -309,13 +293,8 @@ function userText(message: unknown): string {
 }
 
 /**
- * Deletes the original conversation on the tool's side (the "actually delete" case surfaced by
- * dogfooding).
- *
- * The reason we do not `rm` the files (`~/.claude/projects/**`) ourselves is the same as for
- * reading — where the transcript lives, and with which attachments (subagent folders, etc.), is
- * the SDK's own business, and the SDK's `deleteSession` knows its own layout. If it is missing
- * (an old version), this throws UNSUPPORTED — the manager tells the person, with the reason.
+ * Deletes the original conversation on the tool's side, through the SDK's `deleteSession`, never an `rm` of
+ * `~/.claude/projects/**`: the layout (subagent folders and the like) is the SDK's. An old SDK without it throws UNSUPPORTED.
  */
 export async function deleteClaudeSession(externalId: string, cwd: string): Promise<void> {
   const sdk = await sessionApi()

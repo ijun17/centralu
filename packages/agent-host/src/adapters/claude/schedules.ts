@@ -19,21 +19,15 @@ const clock = (t: number) => {
 
 /**
  * The timers Claude Code holds for a session inside its process (#568): `/loop`'s dynamic wake-ups (`ScheduleWakeup`)
- * and scheduled prompts (`CronCreate`). They are not background tasks to the CLI, which reports none of them, but they
- * are work a person would lose: a process that ends (a sleep, a restart) takes its timers with it, silently, and the
- * loop just stops. So they are listed with the background tasks, and a session that has one is not idle
- * (`sessionIdle`, idle.ts): it is not put to sleep and not restarted on a new CLI while it waits.
- *
- * Read from the calls and their results, conservatively where they say less than wanted:
- *
+ * and scheduled prompts (`CronCreate`). The CLI reports none as background tasks, but a process that ends takes them
+ * silently, so they are listed with the tasks and a session holding one is not idle (`sessionIdle`, idle.ts): not put to
+ * sleep, not restarted on a new CLI. Read from the calls and results, conservatively where they say less than wanted:
  *   ScheduleWakeup   pending until its time (`scheduledFor` from the result, else the asked delay, else the runtime's
  *                    one-hour maximum); `stop: true` (or a result saying `stopped`) ends every pending wake-up
- *   CronCreate       pending until `CronDelete` names its id, or until it auto-expires (seven days). A one-shot job
- *                    (`recurring: false`) deletes itself after firing, at a time not worked out here from the cron
- *                    expression: it is kept as long as a recurring one, unless a `CronList` shows it gone
+ *   CronCreate       pending until `CronDelete` names its id, or it auto-expires (seven days); a one-shot job deletes
+ *                    itself after firing at a time not worked out here, so it is kept as long, unless `CronList` drops it
  *   CronList         its answer replaces the cron jobs known
- *
- * A failed call sets nothing. A call made by a subagent counts as well: the timer lives in the same process.
+ * A failed call sets nothing. A subagent's call counts too: the timer lives in the same process.
  */
 export class ClaudeSchedules {
   /** Calls not answered yet, by tool_use id */

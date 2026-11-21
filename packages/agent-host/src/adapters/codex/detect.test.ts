@@ -46,8 +46,8 @@ describe('the settings folder codex detect() looks at', () => {
   })
 
   /*
-   * The home folder is a temporary one here (#845): this used to read the person's real `~/.codex`, so it could only
-   * check that detect() answered, whatever this machine's login state was.
+   * The home folder is a temporary one here (#845): the person's real `~/.codex` would let it check only that detect()
+   * answered, whatever this machine's login state was.
    */
   it('treats an empty string as unset — falls back to the home folder', async () => {
     const home = temp('codex-user-home-')

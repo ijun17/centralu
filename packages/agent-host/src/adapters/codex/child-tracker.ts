@@ -7,11 +7,9 @@ import { codexItemOk } from './items.js'
 import { goalFromCodex, messageIdOf, normalizeNotification, type Notification } from './normalize.js'
 
 /**
- * A child thread's notification, as steps of the subagent a `spawnAgent` call launched (#222).
- *
- * Measured live (scripts/probe-codex-subagent.mts, codex-cli 0.160.0 and 0.153.4 in #222): the child's
- * `item/started` and `item/completed` arrive on the parent's connection with the child's `threadId`, for its prompt
- * (`userMessage`), its reasoning, its commands and its `agentMessage`. Steps are read from them alone:
+ * A child thread's notification, as steps of its `spawnAgent` call (#222). Measured (scripts/probe-codex-subagent.mts,
+ * codex-cli 0.160.0 and 0.153.4): the child's `item/started` and `item/completed` (its `userMessage`, reasoning,
+ * commands, `agentMessage`) arrive on the parent's connection with the child's `threadId`; steps are read from them alone:
  *
  *   - text and reasoning from the **completed** item (`text`, `summary`), whole. The child's deltas are not read:
  *     a step is one row (see `SubagentStep`), and the completed item carries the same text again
@@ -19,9 +17,8 @@ import { goalFromCodex, messageIdOf, normalizeNotification, type Notification } 
  *     `output` included, #221)
  *   - its prompt is not a step: it is the launch call's own `prompt`, already on the parent's card
  *
- * A file a child changed is still a file changed in this session's folder, so `files_touched` goes out as the
- * parent's, as Claude's subagents do (#98). Everything else a child sends (its turn and status, usage, images) is
- * not part of its record here.
+ * A child's changed file is in this session's folder, so `files_touched` goes out as the parent's, as Claude's subagents
+ * do (#98). Everything else a child sends (its turn and status, usage, images) is not part of its record here.
  */
 export function childSteps(sessionId: string, parentCallId: string, n: Notification): NormalizedEvent[] {
   if (n.method !== 'item/started' && n.method !== 'item/completed') return []
@@ -51,38 +48,17 @@ export function launchedThreads(n: Notification): string[] {
 const GOAL_ID = 'goal'
 
 /**
- * A Codex session's background work: its child agents (#290), and what its own thread keeps going once a turn has ended
- * (#2027): a command still running, and an active goal. The list is what keeps the session from being put to sleep or
- * restarted on a new CLI (`sessionIdle`), since both end the app-server and its work with it.
+ * A Codex session's background work: its child agents (#290; measured in docs/agent-host/adapters/contract.md), and what
+ * its own thread keeps going after a turn (#2027). The list keeps the session from sleep or a CLI swap (`sessionIdle`).
  *
- * **A command kept past its turn.** A command's item stays `inProgress` until its process exits, waits for output
- * included (recorded: `long-command`, codex-cli 0.160.0), and a command running when the app-server ends goes with it
- * (measured below for a child's). So a command item the turn's `turn/completed` leaves open is still running, and it is
- * listed (kind `shell`) until its `item/completed` comes, in a later turn or between turns, or the process ends.
- *
- * **An active goal.** Codex works toward a goal (`thread/goal/set`) in turns it starts itself, which a sleep would end.
- * So a goal whose status is `active` is listed (kind `other`) until it is cleared, completed or paused. The goal itself
- * lives in the thread and outlives the process (the adapter reads it back on resume), so the process ending does not end
- * it as a task. **A stopped turn leaves it idle**: measured live (#2248 review, codex-cli 0.160.0), a Stop of a goal's
- * turn left the goal `active` and Codex started no turn for it in 90 s, so a goal still listed then held the session
- * busy until the person cleared it. After a turn that ends interrupted the goal is not listed, until Codex says more
- * of it (`thread/goal/updated`) or a turn starts; a sleep then loses nothing, as a wake reads the goal back.
- *
- * A child runs on its own thread, and its notifications arrive on the parent's connection (#222). It is live while
- * its thread is active. Measured (scripts/probe-codex-background.mts, codex-cli 0.160.0, gpt-5.6-luna, 2026-10-04):
- *
- *   - the child's `thread/status/changed {active}` and `turn/started` arrive in the same millisecond as the parent's
- *     `spawnAgent` `item/completed` that names it, and sometimes before it — so a thread's state is kept from its
- *     first notification, and it is listed once a launch call names it (the same link #222 keys its steps by)
- *   - it ends with `{idle}` and `turn/completed`, in either order within a millisecond; the turn's `status`
- *     (`completed`, `interrupted`, `failed`) is how it ended. `{systemError}` is a failure
- *   - **interrupting the parent's turn does not stop it** (it went on reasoning, still active 20 s later), so every
- *     child says `stopsWithTurn: false`
- *   - `turn/interrupt` on the child's own turn stops it (`turn/completed {interrupted}`), which is the per-task stop.
- *     It needs the child's turn id, so a child is stoppable only while one is known
- *
- * Nested children (a child's own `spawnAgent`) are linked the same way and listed alongside. A child that started
- * before this process (a resumed thread's) is never named by a launch call here, so it is not listed.
+ * - A command item stays `inProgress` until its process exits (recorded: `long-command`, codex-cli 0.160.0), so one the
+ *   `turn/completed` leaves open is listed (kind `shell`) until its `item/completed` comes or the process ends.
+ * - An `active` goal is listed (kind `other`) until cleared, completed or paused: Codex runs its turns itself, which a sleep
+ *   would end; the goal lives in the thread (a wake reads it back). A Stop leaves it `active` with no turn started in 90 s
+ *   (codex-cli 0.160.0), so after an interrupted turn it is unlisted until `thread/goal/updated` or a turn starts (#2248).
+ * - A child's first notification can come before the `spawnAgent` `item/completed` that names it, so its state is kept and it
+ *   is listed once named. It ends with `{idle}` and `turn/completed` in either order (`{systemError}` is a failure); stoppable
+ *   only while its turn id is known. Nested children are listed alike; one from a resumed thread is never named here: not listed.
  */
 export class CodexChildTracker {
   private readonly threads = new Map<string, { active: boolean; turnId: string | null }>()

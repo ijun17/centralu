@@ -17,18 +17,12 @@ import { agyStderrLine } from './shape.js'
  * it runs on, hands a Google address to the platform's browser launcher, and answers once the person has signed in there
  * (measured: 14 s after the address was opened) or after 300 s ("Timed out waiting for the authentication flow").
  *
- * So the sign-in is a process of its own, tied to no session: `initialize`, then `authenticate` with a bound past the
- * agent's own (330 s), and the process kept until it answers. The agent never opens the browser itself, on any OS: its
- * `BROWSER` is a helper in a private folder that writes the address it is given to a file there (`browserFolder`), and
- * the host opens the browser (`openUrl`). On Windows that is through what opens things for the person outside the host's
- * job object (the terminal broker, `main.ts`), so the browser outlives a Stop, the sign-in's end and the host (review of
- * #1685: the agent's own launcher had started it as its child, inside the job). The agent's stderr line `Open the
- * following link to authenticate the ACP server: <url>` is a second source of the same address, read here and left out
- * of the log (`agyStderrLine`). The address reaches the host, never host.log.
- *
- * The address is opened once, and only the agent's own login request (`agentSignInUrl`). Where no helper can be written
- * the sign-in is refused, not started, saying which path holds what (`BrowserFolder.why`). A cancel ends the process, and with it the
- * listener (ACP cannot cancel `authenticate`, spike §4).
+ * So the sign-in is a process of its own, tied to no session, kept until `authenticate` answers (`SIGN_IN_TIMEOUT_MS`). The
+ * agent never opens the browser, on any OS (`browserFolder`); the host does (`openUrl`), on Windows outside its job object
+ * (the terminal broker, `main.ts`), so it outlives a Stop, the sign-in's end and the host (#1685). The stderr line `Open the following
+ * link to authenticate the ACP server: <url>` is a second source of the address, read here and kept out of host.log
+ * (`agyStderrLine`). The address is opened once, only the agent's own login request (`agentSignInUrl`). No helper: the
+ * sign-in is refused, not started (`BrowserFolder.why`).
  */
 
 /** Past the agent's own 300 s, so its "timed out" answer is the one heard */
@@ -86,7 +80,7 @@ export function googleAuthorizeUrl(raw: string): URL | null {
  * The agent's own login request, and nothing else Google serves: `https://accounts.google.com/o/oauth2/v2/auth` with
  * `response_type=code`, the agent's client (`AGY_RELEASE.oauthClient`, pinned with the version) and a `redirect_uri` on this machine's loopback (its
  * one-shot listener), each named once. `BROWSER` reaches every command the agent runs, so a Google address alone says
- * nothing (deep review of #1687: `gcloud auth login` opens Google's authorize page with gcloud's own client, a script may
+ * nothing (#1687: `gcloud auth login` opens Google's authorize page with gcloud's own client, a script may
  * open a Google Doc); only this one is the agent asking for a sign-in. The address passed on is `signInUrl`'s rebuilt one
  */
 export function agentSignInUrl(raw: string): string | null {
@@ -121,7 +115,7 @@ export async function runSignIn(home: AgyHome, archive: AgyArchive, signal: Abor
   const offer = (raw: string) => {
     if (opened) return
     // Only the agent's own login request (`agentSignInUrl`): the folder is under the data folder, where an agent of
-    // another session could write (deep review of #1687, follow-up 5)
+    // another session could write (#1687)
     const url = agentSignInUrl(raw)
     if (!url) {
       console.error('[Antigravity] the sign-in was handed an address that is not its own login request; not opened')
@@ -151,6 +145,7 @@ export async function runSignIn(home: AgyHome, archive: AgyArchive, signal: Abor
     'Antigravity sign-in',
     agyStderrLine,
   )
+  // A cancel ends the process and its listener: ACP cannot cancel `authenticate` (spike §4)
   const abort = () => void conn.dispose(500)
   signal.addEventListener('abort', abort, { once: true })
   try {

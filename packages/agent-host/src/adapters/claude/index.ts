@@ -51,47 +51,23 @@ const PROBE_EXIT_WAIT_MS = 10_000
  * Three constraints:
  *  1. Bare tool names are not allowed in allowedTools (it would shadow canUseTool).
  *  2. `includePartialMessages: true` (streaming deltas).
- *  3. In a trusted project, `settingSources` is left unspecified, which means **the user's
- *     settings, project settings, hooks and CLAUDE.md are all loaded.** (A comment here once said
- *     the opposite. Measured: omitting it actually ran three global hooks.) This is intentional —
- *     this app does not force a workflow. Settings a person tuned for their own tool have to keep
- *     working the same way inside this app.
- *     There are two exceptions (`settingSourcesFor`): assistant/coordination sessions
- *     (`settingSources: []` — an instruction arriving through a file is itself a privilege-
- *     escalation channel) and untrusted projects (`['user']` — files from the repo must not be
- *     able to decide approvals, #92).
+ *  3. In a trusted project `settingSources` is left unspecified, so **the user's and project settings, hooks and
+ *     CLAUDE.md all load** (measured: omitting it ran three global hooks): a person's own setup works the same here.
+ *     Exceptions (`settingSourcesFor`): assistant/coordination sessions (`[]`: an instruction arriving through a file
+ *     is a privilege-escalation channel) and untrusted projects (`['user']`: repo files must not decide approvals, #92).
  */
 
 /**
  * Asks the CLI **directly** whether it is logged in (`claude auth status --json`).
  *
- * `claude --version` does not check authentication at all — it succeeds with zero credentials
- * configured. So this used to treat "installed" as "logged in", and the UI always drew a Claude
- * that was not logged in as a green dot. The failure only showed up once a session was actually
- * started (#11).
- *
- * **Why this does not fire a real query with `claude -p`:**
- * `detect()` runs every time the app starts and every time the new-session dialog opens. Firing
- * even one inference call here would mean **simply launching the app gets billed.** That is not a
- * price worth paying to learn whether the person is authenticated.
- *
- * **Why this does not check for a credentials file, the way the codex adapter does:**
- * Claude Code's credentials do not live in one place — they can be the macOS keychain, an OAuth
- * token, `ANTHROPIC_API_KEY`, `apiKeyHelper`, or Bedrock/Vertex, and `CLAUDE_CONFIG_DIR` can move
- * that whole location elsewhere. If we tried to reimplement that list ourselves, our own judgment
- * would go wrong every time the CLI changed. **What the CLI knows is asked of the CLI.**
- *
- * Measured (2.1.223): this never touches the network — the answer is the same even with a dead
- * proxy configured, and it finishes in 0.2 seconds. The CLI picks up both `CLAUDE_CONFIG_DIR` and
- * `ANTHROPIC_API_KEY` on its own.
- *
- * When not logged in, it exits with **code 1**, but the JSON still comes out on stdout as usual.
- * So this also reads the stdout attached to the thrown error.
- *
- * When the answer cannot be determined, this **passes it through** (true). A wrong "not logged
- * in" would push the person to fix something that is not broken, which is worse than the status
- * quo. An old CLI without an `auth` subcommand prints an error message instead of JSON, and that
- * means "unknown", not "not logged in".
+ * `claude --version` succeeds with no credentials, so it cannot tell "installed" from "logged in" (#11). Not `claude -p`:
+ * `detect()` runs at every app start and new-session dialog, and an inference call would bill a mere launch. Not a
+ * credentials file as Codex does: Claude's can be the macOS keychain, an OAuth token, `ANTHROPIC_API_KEY`,
+ * `apiKeyHelper` or Bedrock/Vertex, moved by `CLAUDE_CONFIG_DIR`; what the CLI knows is asked of the CLI.
+ * Measured (2.1.223): no network (the same answer with a dead proxy), 0.2 seconds, and it picks up `CLAUDE_CONFIG_DIR`
+ * and `ANTHROPIC_API_KEY` itself. Not logged in exits **1** with the JSON still on stdout, so the thrown error's stdout
+ * is read. An undetermined answer **passes** (true): a wrong "not logged in" sends the person to fix what is not
+ * broken. An old CLI without `auth` prints an error instead of JSON, which means "unknown".
  */
 async function claudeAuthStatus(bin: ToolLaunch): Promise<unknown> {
   let out = ''

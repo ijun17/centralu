@@ -7,17 +7,9 @@ import { OpenCodeAdapter } from './opencode/index.js'
 import type { AgentAdapter } from './contract.js'
 
 /**
- * The one place that names the vendors this build ships with.
- *
- * It used to be several. `ToolName` was an enum in `@cc/protocol` and `TOOL_META` beside it
- * held each vendor's label, glyph and install command, so a tool existed in the shared
- * protocol, in the adapter, and in every screen that drew a row per tool. Adding a third
- * (#59) meant finding all of them.
- *
- * Now an adapter introduces itself — `descriptor` rides along with `agents.detect` — and
- * this list is the only thing that has to change. Keeping it one function also gives the
- * descriptor tests something to hold: the rules that used to live in the protocol's shape
- * (marks are distinct, the commands are real) can only be checked across the whole set.
+ * The one place that names the vendors this build ships with (#59): an adapter introduces itself (`descriptor` rides along
+ * with `agents.detect`), so neither the shared protocol nor a screen lists them, and a new tool changes only this list. One
+ * function gives the descriptor tests the whole set, the only place their rules (distinct marks, real commands) can be checked.
  */
 export function createAdapters(opts: { openUrl?: (url: string) => void } = {}): Map<ToolName, AgentAdapter> {
   // `openUrl`: the host's way to open an address for the person outside its work (Antigravity's sign-in, `main.ts`)

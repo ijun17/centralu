@@ -26,10 +26,8 @@ function atLeast(m: InitMsg, since: string): boolean {
 
 /** Whether the CLI that sent this init message can track a parent's notes (`sendTracked`) */
 export function tracksInputs(m: InitMsg): boolean {
-  // 2.1.289's result UUID array includes inputs folded between tool rounds (verified in
-  // the installed CLI and pinned SDK schema). The single UUID only names the first input.
-  // Refuse older/unknown protocols before a note is recorded, rather than guessing from
-  // results: background task notifications legitimately produce results without IDs.
+  // The single UUID names only the first input. Older or unknown CLIs are refused before a note is recorded, not
+  // guessed from results: background task notifications produce results without ids.
   return atLeast(m, TRACKED_INPUT_SINCE) && Array.isArray(m.capabilities) && m.capabilities.includes('interrupt_receipt_v1') && m.capabilities.includes('interrupt_cancel_queued_v1')
 }
 

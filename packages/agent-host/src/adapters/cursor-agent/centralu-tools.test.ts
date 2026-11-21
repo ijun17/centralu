@@ -8,8 +8,8 @@ import { loadRecording } from '../frames/replay.test-helpers.js'
 import { centraluToolOfCall } from './index.js'
 
 /**
- * A call to Centralu's own tools (the stdio bridge) is answered without a card, as Claude and Codex take the bridge (#1562
- * review: every call from Cursor was a raw-JSON card that could not be set to always). The request is Cursor's own, as
+ * A call to Centralu's own tools (the stdio bridge) is answered without a card, as Claude and Codex take the bridge (else
+ * every call from Cursor is a raw-JSON card that cannot be set to always). The request is Cursor's own, as
  * recorded on a temporary host (`recordings/cursor-agent-2026.10.22/centralu-tool.jsonl`, the `recall` tool).
  */
 

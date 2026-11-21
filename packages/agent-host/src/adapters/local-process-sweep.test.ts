@@ -4,7 +4,7 @@ import { realOs } from '../os/real.js'
 import { spawnLocalAgent } from './local-process.js'
 
 /**
- * The sweep after an agent CLI exits is given the exit time the host recorded (#1650 review): `sweepLeftovers` reads
+ * The sweep after an agent CLI exits is given the exit time the host recorded (#1650): `sweepLeftovers` reads
  * what it left as what was created between its spawn and that exit, never up to the time of the sweep, by which Windows
  * may have given the pid to another program. `grouped-child.test.ts` holds the window; this holds that the caller hands
  * the recorded exit over, and does not stand in "now" for it.

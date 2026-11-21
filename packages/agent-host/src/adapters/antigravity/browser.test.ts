@@ -10,7 +10,7 @@ import { agentSignInUrl, googleAuthorizeUrl, runSignIn } from './sign-in.js'
 import { chmodPath, driven, fakeInstall, fakeSignIn, folder, HOST_TEST_ARCHIVE, HOST_TEST_PLATFORM, inFolder, isAbsolutePath, leftovers, linkTo, pathIn, relativeTo, runBrowser, sessionOpts, tempData, TEST_ARCHIVE, write } from './agent-files.test-helpers.js'
 
 /**
- * The agent's browser (review of #1685): every Antigravity process gets its own `BROWSER` helper, so the agent never opens
+ * The agent's browser (#1685): every Antigravity process gets its own `BROWSER` helper, so the agent never opens
  * a browser itself, on any OS, and the person's own `BROWSER` never reaches it. In a sign-in the host opens the address the
  * helper hands over; in a session the helper running means the stored sign-in stopped working, and the session fails as
  * not signed in at once rather than waiting on a browser nobody asked for.
@@ -25,7 +25,7 @@ import { chmodPath, driven, fakeInstall, fakeSignIn, folder, HOST_TEST_ARCHIVE, 
  */
 const ADDRESS = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${AGY_RELEASE.oauthClient}&redirect_uri=http%3A%2F%2F127.0.0.1%3A60382%2F&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcloud-platform+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email&state=s&code_challenge=c&code_challenge_method=S256&access_type=offline&prompt=consent`
 
-/** What `gcloud auth login` opens (deep review of #1687): Google's authorize page, with gcloud's own public client */
+/** What `gcloud auth login` opens (#1687): Google's authorize page, with gcloud's own public client */
 const GCLOUD = 'https://accounts.google.com/o/oauth2/auth?response_type=code&client_id=32555940559.apps.googleusercontent.com&redirect_uri=http%3A%2F%2Flocalhost%3A8085%2F&scope=openid'
 /** A page a script the agent runs may open */
 const DOC = 'https://docs.google.com/document/d/abc/edit'
@@ -245,7 +245,7 @@ describe('a stored sign-in that stopped working, in a session', () => {
     expect(leftovers(w.home, '.sign-in-')).toEqual([])
   })
 
-  // Every command the agent runs inherits BROWSER (deep review of #1687): only the agent's own login request is a sign-in
+  // Every command the agent runs inherits BROWSER (#1687): only the agent's own login request is a sign-in
   it.each([
     ['gcloud auth login', GCLOUD],
     ['a Google Doc', DOC],

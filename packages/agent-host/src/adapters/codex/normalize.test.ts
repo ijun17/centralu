@@ -586,7 +586,7 @@ describe('state and gauges', () => {
 
   /*
    * #303: the completed item is the only sign of a finished compaction Codex sends (no `thread/compacted` on 0.147.0,
-   * 0.153.4 or 0.160.0). The marker used to come only from that notification, so no Codex compaction left one.
+   * 0.153.4 or 0.160.0), so a marker read only from that notification would never appear for Codex.
    */
   it('a completed compaction item clears the activity and leaves the compaction marker', () => {
     expect(real('compact', 'item/completed', (p) => dig(p, 'item.type') === 'contextCompaction').out).toEqual([
@@ -763,7 +763,7 @@ describe('approval request conversion (the basis for approving right from the ba
     expect(d).toEqual({ kind: 'file_edit', path: '(no path)', diffPreview: '', multi: false })
   })
 
-  // #683 review: these were dropped, so a network approval drew `Run ` and nothing, and a delete read as an edit
+  // #683: without these fields a network approval draws `Run ` and nothing, and a delete reads as an edit
   it('keeps what a command approval says beyond its command: the network host, stdin, the reason', () => {
     expect(
       approvalDetailFrom('item/commandExecution/requestApproval', {

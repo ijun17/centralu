@@ -209,7 +209,7 @@ describe('installing the pinned agent', () => {
 })
 
 /**
- * A local server that answers the way Google's download server did (deep review of #1680, measured): gzip whenever the
+ * A local server that answers the way Google's download server was measured to answer: gzip whenever the
  * request allows it, with `content-length` the gzipped size. `always` gzips even a request that asked for `identity`
  */
 async function gzipServer(body: Buffer, always = false): Promise<{ url: string; asked: IncomingHttpHeaders[]; close(): Promise<void> }> {

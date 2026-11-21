@@ -48,8 +48,8 @@ export function diffLines(prefix: '-' | '+', text: string): string {
  * The paths a call changes, reported as `files_touched` only once the call went through (#843).
  *
  * Claude's paths are known when the call is made and Codex's when its item completes, but either way a file is
- * marked "edited by agent" (conflict detection and highlighting, FR-2, FR-5) only by a result that is ok: Claude
- * used to mark it when the call was made, so an edit the person denied still marked the file. A call whose result
+ * marked "edited by agent" (conflict detection and highlighting, FR-2, FR-5) only by a result that is ok: marking
+ * it when the call is made would mark a file whose edit the person denied. A call whose result
  * never comes leaves nothing marked. Bounded: a session's calls are many, its open edits few.
  */
 export class TouchedFiles {
@@ -57,7 +57,6 @@ export class TouchedFiles {
 
   constructor(private readonly sessionId: string) {}
 
-  /** A call that would change these paths was made */
   call(callId: string, paths: readonly string[]): void {
     if (!callId || paths.length === 0) return
     this.open.set(callId, [...paths])

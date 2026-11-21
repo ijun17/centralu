@@ -293,7 +293,7 @@ describe('tool calls (the actual shape from the spike)', () => {
   })
 
   it('an image that is too large explains why instead of rendering it', () => {
-    // One byte over the ceiling an image read from disk is held to (#843: the two used to differ)
+    // One byte over the ceiling an image read from disk is held to: the two ceilings are one (#843)
     const big = 'a'.repeat(Math.ceil(((IMAGE_MAX_BYTES + 1) * 4) / 3) + 4)
     const out = n({
       type: 'user',
@@ -363,7 +363,7 @@ describe('normalizing an approval request (input to the banner\'s judgment)', ()
     expect(approvalDetail('WebFetch', { url: 'http://x' }, '/p').kind).toBe('other')
   })
 
-  // #683 review: a Bash call that turns the sandbox off was a plain command card, answerable from a list row
+  // A Bash call that turns the sandbox off is not a plain command card, so no list row answers it (#683)
   it('keeps a Bash call that runs outside the sandbox, and an edit that names no file says so', () => {
     expect(approvalDetail('Bash', { command: 'curl x', dangerouslyDisableSandbox: true }, '/p')).toEqual({
       kind: 'command', command: 'curl x', cwd: '/p', unsandboxed: true,
@@ -378,10 +378,8 @@ describe('a limit (M0 finding: rate_limit_event)', () => {
   })
 
   /*
-   * These three are all the SDK ever says ('allowed' | 'allowed_warning' | 'rejected'). This test
-   * used to pass using `status: 'blocked'`, a value that **does not exist** — so nobody noticed
-   * that the `!== 'allowed'` check was also swallowing `allowed_warning`. Making up a tool's own
-   * vocabulary only means the test protects our own imagination.
+   * These three are all the SDK ever says ('allowed' | 'allowed_warning' | 'rejected'): a made-up status such as
+   * 'blocked' would hide a `!== 'allowed'` check that also swallows `allowed_warning`.
    */
   it('a warning is not a limit — no event for allowed_warning', () => {
     // The run on 2.1.296, made while the account was near a limit (on 2.1.316's it was not, and the CLI said `allowed`)

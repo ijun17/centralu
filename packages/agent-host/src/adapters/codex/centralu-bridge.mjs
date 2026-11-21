@@ -1,27 +1,16 @@
 #!/usr/bin/env node
 /**
- * The Codex <-> Centralu bridge (an stdio MCP server).
+ * The Codex <-> Centralu bridge (an stdio MCP server); Claude's tools are in-process. Codex attaches only an **stdio
+ * server** through per-thread config: an HTTP (url) server never received a request (codex-cli 0.147.0).
+ * **It makes no decisions**: it passes a tool name and arguments (an app's call too, #2231) to the host and relays the
+ * answer, so the two adapters' tools cannot drift. codex runs it as `node <path>`, so it stays a plain .mjs file.
  *
- * Codex can only attach an **stdio server** through per-thread config — measured, the HTTP (url)
- * approach never received a single request (codex-cli 0.147.0). So one extra process ends up
- * attached. Claude does not need this file, since it is in-process.
- *
- * **This bridge makes no decisions.** It only passes a tool name and arguments to the host and
- * relays back whatever text it receives. Access scope, listing rules and presentation all stay on
- * the host — copying even a little of that logic here would let the two adapters' tools drift apart.
- *
- * codex launches this file directly with `node <path>`, so it **must stay a plain .mjs file**
- * (it goes through neither tsx nor a bundler).
- *
- * What it receives through environment variables:
+ * Environment:
  *   CC_HOST_URL       the host's WS address (under the keeper, its front door: stable across host swaps)
- *   CC_BRIDGE_TOKEN   this session's bridge credential (transport/bridge-token.ts). Not the host's
- *                     token: any process of the same user can read this environment (`ps eww`), so
- *                     it opens only the calls below, and only for CC_SESSION_ID (#382)
+ *   CC_BRIDGE_TOKEN   this session's bridge credential (transport/bridge-token.ts), not the host's token: any process
+ *                     of the same user can read this environment (`ps eww`), so it opens only the calls below,
+ *                     and only for CC_SESSION_ID (#382)
  *   CC_SESSION_ID     this session's id (the host judges permission by this)
- *
- * External apps come through here too, as Centralu's `app` tool (#2231): the host lists, checks,
- * asks and calls; an app's own result is relayed as the host gives it.
  */
 import { WebSocket } from 'ws'
 

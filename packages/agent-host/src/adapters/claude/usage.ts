@@ -4,17 +4,9 @@ import { withTimeout } from '../../timing.js'
 import { filled, finite, isObj } from '../../json-value.js'
 
 /**
- * Claude usage and limits (FR-9).
- *
- * **Only subscription limits are handled here.** `extra_usage` (extra paid credits) is out of
- * scope and is not read.
- *
- * The SDK marks this API as unstable in its own name
- * (`usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET`).
- * We use it anyway, because it is still better than scraping files. If it disappears, the call
- * throws, so we **find out**, and at that point we only need to collapse that one card. Silently
- * showing a wrong number would be far worse.
- *
+ * Claude usage and limits (FR-9): **subscription limits only**; `extra_usage` (extra paid credits) is not read.
+ * The SDK names this API unstable (`usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET`); still better than
+ * scraping files: if it disappears the call throws, and only that card collapses, never a silently wrong number.
  * Measured windows (max plan):
  *   kind=session       group=session   8%  → 5-hour window
  *   kind=weekly_all    group=weekly   15%  → weekly, all models

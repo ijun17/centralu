@@ -103,7 +103,7 @@ export class CodexSession implements SessionHandle {
   ) {
     this.sessionId = opts.sessionId
     this.livePreset = opts.permissionPreset
-    // An app's mark only for an app attached here (#730 review): a repository's own server may be named `app-<x>`
+    // An app's mark only for an app attached here (#730): a repository's own server may be named `app-<x>`
     const sink = emit
     this.emit = (e) => {
       // Whatever ends the open row, or a row of another kind (an answer), also ends the reasoning part before it (#1464)
@@ -281,20 +281,15 @@ export class CodexSession implements SessionHandle {
 
   private onNotification(n: { method: string; params?: unknown }): void {
     /*
-     * **A notification from another thread does not belong to this session** (the codex side of #98).
+     * **A notification from another thread does not belong to this session** (the codex side of #98). A child agent
+     * (spawn_agent) runs on its own thread, and app-server attaches every new thread's listener to every initialized
+     * connection (codex source app-server/src/lib.rs try_attach_thread_listener; spawn.rs notify_thread_created), so a
+     * child's notification arrives here differing only in threadId. Unfiltered, its tool calls and text land in the
+     * parent's conversation, its turn/started takes the target of stop (turnId) and its turn/completed flips the parent
+     * to "finished" — which is why this check runs before turnId is recorded.
      *
-     * A child agent spawned by the model via spawn_agent runs on a separate thread, and
-     * app-server attaches that thread's listener to every initialized connection whenever a new
-     * thread is created (codex source app-server/src/lib.rs -> try_attach_thread_listener; a
-     * new-thread notification is only sent from notify_thread_created in spawn.rs). So a child's
-     * notification arrives on this same connection, differing only in threadId. Without
-     * filtering, the child's tool calls and text get stuck into the parent's conversation, the
-     * child's turn/started hijacks the target of stop (turnId), and the child's turn/completed
-     * flips the parent to "finished" — which is why this check runs before turnId is recorded.
-     *
-     * We do not filter server **requests** (approvals) (onServerRequest) — if nobody answers an
-     * approval the child is asking for, the child gets stuck. While the thread is still unknown
-     * (before the thread/start response), a child cannot exist yet, so we let it through.
+     * Server **requests** (approvals, onServerRequest) are not filtered: an approval nobody answers leaves the child
+     * stuck. While the thread is still unknown (before the thread/start response) no child can exist, so all pass.
      */
     // Before the thread filter: a child thread's approval requests do reach us (see above), and its card needs its changes too
     this.serverRequests.noteFileChange(n)
@@ -397,7 +392,7 @@ export class CodexSession implements SessionHandle {
         if (request) {
           /*
            * Codex's token count does not say which model served it, and a session on the tool's default has none recorded: the
-           * price ratios of the cache (`cache-cost.ts`) and the usage history need the one the thread runs (#1504 review).
+           * price ratios of the cache (`cache-cost.ts`) and the usage history need the one the thread runs (#1504).
            * What the turns ask for first, else what the thread answered when it opened
            */
           const model = this.shown?.model ?? this.opts.model ?? this.threadSettings?.model ?? null
@@ -462,7 +457,7 @@ export class CodexSession implements SessionHandle {
   /**
    * A note steered into the regular turn that is running, starting nothing (#1492). `turn/start` would do it only while a turn is
    * running: with none, it starts a turn of its own (Codex sends a request's token count just before `turn/completed`, so a note for
-   * the last request of a turn went out after the turn had ended and ran as a turn nobody asked for, #1504 review), and behind a
+   * the last request of a turn went out after the turn had ended and ran as a turn nobody asked for, #1504), and behind a
    * compact or review turn it queues the note and runs it as a turn. `turn/steer` names the turn it is for (`expectedTurnId`) and
    * is refused by Codex when that turn is not the one running, so a note for a turn that has ended starts nothing. The answer says
    * whether it was taken: a refused note is not told, and waits for a later request of a running turn (`ContextNudges`).
@@ -532,8 +527,8 @@ export class CodexSession implements SessionHandle {
   /**
    * A turn belonging to an agent that an app gave a schema and asked for (M4 D-1). Codex receives
    * the schema **per turn** — the installed 0.153.4's generated type is
-   * `TurnStartParams.outputSchema` ("Optional JSON Schema used to constrain the final assistant
-   * message for this turn"). So it is loaded onto every turn of this session: leaving it out even
+   * `TurnStartParams.outputSchema` (an optional JSON Schema that constrains the final assistant
+   * message for this turn). So it is loaded onto every turn of this session: leaving it out even
    * once means that turn's last message is free text outside the schema. The answer is the last
    * message itself — the manager reads and validates that text as JSON. We could not re-verify by
    * running it while logged out (confirmed only from the generated type).

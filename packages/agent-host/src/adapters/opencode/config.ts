@@ -14,16 +14,14 @@ export const NO_CONFIGS: OpenCodeConfigs = { layers: [], agentFiles: [] }
  * How a session's preset reaches OpenCode (docs/plans/acp-adapter.md §0.7): an inline config, `OPENCODE_CONFIG_CONTENT`,
  * merged by OpenCode after the person's global and project files, so it is read last but for a managed config.
  *
- * - `safe` asks before every edit (OpenCode's `edit` covers `write` and `patch`), command and web fetch, and before
- *   handing work to an agent it cannot see.
- * - `normal` asks before edits and commands, as Claude and Codex do, under whatever the person's own rules say:
- *   OpenCode's own default asks nothing.
+ * - `safe` asks before every edit (`edit` covers `write` and `patch`), command, web fetch, and `task` (work handed to an agent it cannot see).
+ * - `normal` asks before edits and commands, as Claude and Codex do, under the person's own rules (OpenCode's default: none).
  * - `edits` starts as `normal`; the adapter allows the edits inside the folder itself (`launchPreset`).
  * - `auto` adds nothing, and the adapter answers whatever OpenCode asks.
  *
  * Only the agent Centralu runs can ask: OpenCode 1.19.4 drops an ask from a subagent's session (one `task` started)
  * without a word over ACP, since its ACP side knows only the sessions it opened, and the subagent then waits on it until
- * the turn is stopped (#1565 Mac re-check, case E). So under `safe` and `normal`, what would ask under any other agent
+ * the turn is stopped (#1565, case E). So under `safe` and `normal`, what would ask under any other agent
  * is denied: the subagent is told so and its turn ends, and the agent Centralu runs, which can ask, may try itself.
  */
 export function presetEnv(preset: PermissionPreset, env: Readonly<Record<string, string | undefined>>, configs: OpenCodeConfigs, platform: Platform = HOST_PLATFORM): Record<string, string> {

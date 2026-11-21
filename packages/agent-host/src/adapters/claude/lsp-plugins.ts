@@ -7,21 +7,15 @@ import { isObj } from '../../json-value.js'
 /**
  * Claude Code's code intelligence, turned off for one session (#686, `CreateSessionOpts.noCodeIntelligence`).
  *
- * **How it starts (measured 2026-10-14).** Claude Code has no built-in language server: a plugin brings it. The one
- * measured on the owner's machine is `typescript-lsp@claude-plugins-official`, enabled in `~/.claude/settings.json`
- * (`enabledPlugins`), which declares `lspServers.typescript = typescript-language-server --stdio`. It starts lazily,
- * on the first code-navigation call, and runs `tsserver` (0.5–1.1 GB in this monorepo).
- *
- * **How it is turned off.** The SDK's `settings` option is the CLI's `--settings` flag layer, the highest of the layers
- * a person controls, so `{ enabledPlugins: { <id>: false } }` there disables a plugin for this process alone. Nothing
- * is written to the person's settings files.
- *
- * **Which plugins.** Every enabled plugin that declares language servers, read from the same files the CLI reads: the
- * installed copy's manifest (`.claude-plugin/plugin.json` with `lspServers`, or a `.lsp.json` beside it) and the
- * marketplace's entry for the plugin (`.claude-plugin/marketplace.json`, where Anthropic's official LSP plugins declare
- * `lspServers` with `strict: false`). Those files are the CLI's own and not a published interface, so the known
- * TypeScript plugin is always included as well: a layout change can then miss another language's server, never the
- * one measured.
+ * **How it starts (measured 2026-10-14).** A plugin brings the language server: here `typescript-lsp@claude-plugins-official`
+ * (`enabledPlugins` in `~/.claude/settings.json`, declaring `lspServers.typescript = typescript-language-server --stdio`),
+ * started on the first code-navigation call and running `tsserver` (0.5–1.1 GB in this monorepo).
+ * **How it is turned off.** The SDK's `settings` option is the CLI's `--settings` flag layer, the highest a person
+ * controls, so `{ enabledPlugins: { <id>: false } }` there disables a plugin for this process alone; no file is written.
+ * **Which plugins.** Every enabled one declaring language servers in the files the CLI reads: the installed manifest
+ * (`.claude-plugin/plugin.json` `lspServers`, or a `.lsp.json`) and the marketplace entry (`.claude-plugin/marketplace.json`,
+ * where Anthropic's official LSP plugins declare `lspServers` with `strict: false`). Those files are no published
+ * interface, so the known TypeScript plugin is always included: a layout change can miss another server, never that one.
  */
 
 /** Plugins known to start a language server, disabled even when reading the plugin files finds nothing */

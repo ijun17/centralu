@@ -65,17 +65,15 @@ export class CodexServers {
 
   /**
    * The MCP settings loaded onto the thread — start and resume use **the exact same assembly** (so nothing is missing on
-   * resume): the bridge for Centralu's own tools (FR-11), which since #320 every ordinary session gets too, so a Codex
+   * resume): the bridge for Centralu's own tools (FR-11), which every ordinary session gets too (#320), so a Codex
    * session starts one small node process for it (about 40 MB resident, measured idle). Apps are reached through its
    * `app` tool (#2231), so the set is the same whatever apps come and go, and no thread restarts for them. A server the
    * person approved (propose_mcp_server) becomes a user-folder app (A-7), reached the same way.
    *
-   * Whether to read the folder's document (AGENTS.md) is not decided here — repoFilesConfig decides it from what the
-   * session is. This used to load `project_doc_max_bytes: 0` whenever the bridge was present, because the Assistant
-   * followed a planted AGENTS.md verbatim (measured: it started answering with "infiltration-success-9142" once one was
-   * planted). But the worktree manager and the session that creates the worktree also receive this bridge, so they lost
-   * AGENTS.md even in trusted projects (#152). The rule for assistant and coordination sessions is unchanged — they
-   * arrive as `noSettingFiles`, and repoFilesConfig loads the same value for them.
+   * Whether to read the folder's document (AGENTS.md) is decided by repoFilesConfig from what the session is, not by
+   * the bridge: the worktree manager and the session that creates the worktree get the bridge too and keep AGENTS.md in
+   * a trusted project (#152). Assistant and coordination sessions arrive as `noSettingFiles` and get
+   * `project_doc_max_bytes: 0` there (measured: the Assistant followed a planted AGENTS.md verbatim).
    */
   async mcpConfig(): Promise<Record<string, unknown>> {
     const bridge = this.host.opts.centraluBridge

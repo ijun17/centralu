@@ -80,9 +80,9 @@ describe('claude — SDK listSessions/getSessionMessages', () => {
   })
 
   /*
-   * #843: an imported conversation used to keep only a tool's name, as a line of the model's words (`Bash`), where a
-   * watched one showed the call and its output. The rows are read by the live normalizer now, so each call and result
-   * is the event the same message gives live. Shapes as getSessionMessages gives them (SDK 0.3.263: `type`, `message`).
+   * #843: an imported conversation shows each call and its output as a watched one does, not only a tool's name as a line
+   * of the model's words (`Bash`). The rows are read by the live normalizer, so each call and result is the event the same
+   * message gives live. Shapes as getSessionMessages gives them (SDK 0.3.263: `type`, `message`).
    */
   // Hand-written: the SDK reads a conversation from its transcript on disk (listSessions, getSessionMessages), which no frame recording holds
   it('reads tool calls and their results back as the live normalizer reads the same messages (#843)', async () => {
@@ -225,7 +225,7 @@ describe('claude — SDK listSessions/getSessionMessages', () => {
   })
 
   /*
-   * #843 review: getSessionMessages keeps no `tool_use_result`, so an agent's result read back is the text meant for
+   * #843: getSessionMessages keeps no `tool_use_result`, so an agent's result read back is the text meant for
    * the model (the launch notice of a background agent, the hand-back preamble of a foreground one; shapes from
    * claude/subagent.test.ts). The card says the report is not in the record instead, keeping nothing as output.
    */

@@ -7,41 +7,9 @@ import { execText, isExecFailure } from '../../os/exec.js'
 import { realOs } from '../../os/real.js'
 
 /**
- * Where a Claude process is started from on Windows (#353), and whether what npm left there can
- * run at all.
- *
- * Since #307 the host reads npm's `claude.cmd` and starts the program it names directly: npm's
- * `node_modules\@anthropic-ai\claude-code\bin\claude.exe`, which `install.cjs` made a second name
- * (a hard link) of the platform package's `claude.exe`. Windows lets a running program's names be
- * renamed, and deleted as long as another name remains, but never deletes the last name and never
- * writes over it. An npm update removes both of npm's names; with a Centralu session running from
- * one of them, the second removal is the last name and fails, and so does putting a new file there.
- * Claude Code's `install.cjs` then leaves npm's 500-byte placeholder and only sets an exit code:
- * the broken `claude` the owner found after an update (#353), which Windows reports as a 16-bit
- * program.
- *
- * So on Windows the host starts Claude from its own hard link, `<data>\tools\claude\<key>\claude.exe`,
- * a third name npm never touches. Measured on Windows 11 / NTFS with Node 24 (#353, a copy of
- * PING.EXE standing in):
- *
- *   running from                 delete the platform name   delete bin\claude.exe   new file at bin\claude.exe
- *   npm's bin\claude.exe         OK                         EPERM                   EBUSY
- *   Centralu's hard link         OK                         OK                      OK
- *
- * Writing over one of npm's names in place still fails while the link runs (EBUSY: it is the same
- * file), but nothing in an update does that: npm and `install.cjs` delete, then create. A link costs
- * no disk; when the data folder is on another volume (`EXDEV`) or the file system has no links
- * (`EPERM`) the program is copied instead. macOS and Linux replace a running executable without
- * complaint, so nothing here runs there.
- *
- * Finding the placeholder, the host runs the package's own `install.cjs` (#1645), once per package
- * per host start, with its own Node and a time limit, beside the host's loop (every start path awaits
- * `ClaudeLinks.ensure`): it is the step npm meant to run, nothing else. What it leaves is believed only
- * when it is the size of the platform program it was copied from (or runs `--version`): a copy cut
- * short by the limit is large, starts with `MZ` and is still not the program.
- * Measured on Claude Code 2.1.296: on a placeholder it links the platform program over it and prints
- * nothing; when a running program holds the file it prints `Failed to place binary: EBUSY` and exits
- * 1 with the placeholder untouched. A held file is reported, never freed: no process is stopped.
+ * Where a Claude process is started from on Windows, and whether what npm left there can run at all: the steps and
+ * their reasons are docs/agent-host/host-process.md "How a Claude process is started on Windows (#353)".
+ * The measurements (#353) are in that section. macOS and Linux replace a running executable, so nothing here runs there.
  */
 
 /** Smaller than any real Claude Code binary (about 250 MB) and larger than any placeholder (500 bytes in 2.1.x) */

@@ -11,21 +11,15 @@ const HOOK_TIMEOUT_SECONDS = 3600
 
 /**
  * The person's card for every step of the CLI's own in a turn that a session's request is (docs/plans/mailbox.md §9.7, #1447).
- *
- * A `PreToolUse` hook sees every tool call the CLI makes, in every permission mode, and its decision stands in for the CLI's own question. Running
- * the turn under a narrower mode was not enough: a tool that needs no permission (Agent, CronCreate, ScheduleWakeup, TaskStop, SendMessage) never
- * reaches `canUseTool` there, and the SDK's own warning on `bypassPermissions` says to use this hook to gate every call. So the host's
- * `RequestTurn` decides each call: a read goes on to the CLI's own flow, a step the person allowed goes on without a second question, and a refused
- * one does not run and gives the model the reason.
- *
+ * A `PreToolUse` hook sees every tool call in every permission mode, and its decision stands in for the CLI's question. Not a
+ * narrower mode: a tool needing no permission (Agent, CronCreate, ScheduleWakeup, TaskStop, SendMessage) never reaches
+ * `canUseTool`, and the SDK's warning on `bypassPermissions` says to gate every call with this hook. `RequestTurn` decides
+ * each call: a read goes on to the CLI's flow, an allowed step goes on unasked again, a refused one gives the model the reason.
  * Left to their own gates, which ask in the call itself: Centralu's own tools (`runParsed`), the `app` tool among them, whose call the host asks
  * about knowing the app's tool (`SessionApps.call`, #2231), and only on a session given our server, never by name alone (#93).
- *
- * Fails closed: a question that cannot be asked, or a turn that cannot be told, refuses the step (a hook that throws would let the tool run). Nothing
- * else here runs in a turn that is not a request.
- *
- * A step let through as asked is recorded once the CLI has run it (`PostToolUse`, which the CLI sends only for a call that did not fail; a failed
- * one, a command that exits non-zero included, gets `PostToolUseFailure`: measured with the real CLI, 2026-11-03), not when the person allowed it.
+ * Fails closed: a question that cannot be asked, or a turn that cannot be told to be a request, refuses the step (a hook that
+ * throws would let the tool run). Nothing else here runs in a turn that is not a request. A step let through as asked is recorded once the CLI has run it (`PostToolUse`, which the CLI sends only for a call that did
+ * not fail; a failed one, a command that exits non-zero included, gets `PostToolUseFailure`: measured with the real CLI, 2026-11-03), not when the person allowed it.
  */
 export function requestTurnHooks(opts: Pick<CreateSessionOpts, 'requestTurn'>, ownServer: () => boolean): { PreToolUse: HookCallbackMatcher[]; PostToolUse: HookCallbackMatcher[] } | undefined {
   const request = opts.requestTurn

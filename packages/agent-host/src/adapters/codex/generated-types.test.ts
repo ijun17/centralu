@@ -1,5 +1,5 @@
 /**
- * generated/ is what `pnpm codex:bindings` wrote, unedited (#1339, #1383 review).
+ * generated/ is what `pnpm codex:bindings` wrote, unedited (#1339, #1383).
  *
  * The adapter is compiled against these types, and they are light tier, so a hand edit (a field renamed to make
  * the build pass, say) would otherwise land unseen until the weekly drift run. `codex:bindings` writes the hash of

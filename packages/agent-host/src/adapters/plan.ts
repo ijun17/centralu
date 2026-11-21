@@ -28,8 +28,8 @@ export function planUpdate(sessionId: string, raw: unknown, textField: string): 
 
 /**
  * Claude Code's plan: its `TodoWrite` call, whose input is the whole list (`{todos: [{content, status, activeForm}]}`,
- * measured in transcripts of CLI 2.1.233 to 2.1.289). Codex's `turn/plan/updated` was the only plan the panel ever
- * showed; a Claude session's todo list stayed a tool card. An emptied list clears the panel.
+ * measured in transcripts of CLI 2.1.233 to 2.1.289), shown in the plan panel as Codex's `turn/plan/updated` is. An
+ * emptied list clears the panel.
  */
 export function todoWritePlan(sessionId: string, name: string, input: unknown): NormalizedEvent[] {
   if (name !== 'TodoWrite') return []

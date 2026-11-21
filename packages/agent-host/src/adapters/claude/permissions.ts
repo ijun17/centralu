@@ -5,11 +5,8 @@ import type { CreateSessionOpts } from '../contract.js'
 import { CENTRALU_MCP_NAME } from './centralu-mcp.js'
 
 /**
- * AskUserQuestion's arguments to our own `Question[]`.
- *
- * This reads the raw shape directly rather than trusting the SDK's type (a boundary rule). If the
- * shape is off, it returns an empty array and **lets it fall through the ordinary path** — better
- * than presenting a half-drawn set of choices.
+ * AskUserQuestion's arguments to our own `Question[]`, read from the raw shape (a boundary rule). A shape that is off
+ * gives `[]` and **falls through the ordinary path** rather than a half-drawn set of choices.
  */
 export function parseQuestions(input: unknown): Question[] {
   const raw = (input as { questions?: unknown })?.questions
@@ -42,19 +39,13 @@ function ownServerTool(toolName: string): { server: string; tool: string } | nul
 }
 
 /**
- * Is this tool one belonging to **our own in-process server** (the judgment behind the approval
- * exception)?
+ * Is this tool one belonging to **our own in-process server** (the judgment behind the approval exception)?
  *
- * An MCP tool name has the shape `mcp__<server>__<tool>`, with `__` as the separator. So a prefix
- * check (`startsWith('mcp__centralu__')`) cannot see the server name itself — a server named
- * `centralu__pw` producing `mcp__centralu__pw__navigate` also passed that check, and that tool
- * bypassed `canUseTool` entirely (measured, #93).
- *
- * This reads the name the one way the screen does (`mcpNameParts`) and judges by **the full server name** instead.
- * None of our own tool names contain `__` (list_sessions, propose_mcp_server, and so on all use a single underscore),
- * so a name whose tool part has one is another server's (`ownServerTool`). The name is already blocked on the naming side
- * (`mcpServerNameError`), but a place that grants trust must not rely on another layer's check —
- * it has to be correct on its own.
+ * Not a prefix check (`startsWith('mcp__centralu__')`): a server named `centralu__pw` makes `mcp__centralu__pw__navigate`,
+ * which passes it and bypasses `canUseTool` (measured, #93). This reads the name as the screen does (`mcpNameParts`) and
+ * judges by **the full server name**; none of our tool names contain `__`, so a tool part with one is another server's
+ * (`ownServerTool`). The naming side blocks such names too (`mcpServerNameError`), but a place that grants trust must
+ * be correct on its own.
  */
 export function isCentraluToolName(toolName: string): boolean {
   return ownServerTool(toolName)?.server === CENTRALU_MCP_NAME
@@ -119,12 +110,10 @@ const PERMISSION_MODES: readonly PermissionMode[] = ['default', 'acceptEdits', '
 /**
  * The person's own default mode, for a session that reads no settings files (#382, owner decision 2026-10-11).
  *
- * The Assistant and coordinators read no files (`settingSourcesFor`: `[]`), so under normal the CLI found no
- * `defaultMode` and the person's global bypass did not reach them: app tools and their own commands asked. On Codex
- * the same sessions load `~/.codex` and the bypass applies. The owner chose the direction of decision 1 (the person's
- * policy applies), so the two now agree: the person's mode is carried, and nothing else is. Their `CLAUDE.md`, hooks
- * and rules stay out, because an instruction arriving through a file is what `[]` exists to keep away from a session
- * that directs others.
+ * The Assistant and coordinators read no files (`settingSourcesFor`: `[]`), so the CLI would find no `defaultMode` and
+ * the person's global bypass would not reach them, while Codex's same sessions load `~/.codex`. The person's policy
+ * applies (decision 1): their mode is carried and nothing else. Their `CLAUDE.md`, hooks and rules stay out: an
+ * instruction arriving through a file is what `[]` keeps away from a session that directs others.
  *
  * Read with the SDK's own merge engine (`resolveSettings`, "the same engine as the CLI") from the user tier only,
  * which honours `CLAUDE_CONFIG_DIR` and the managed policy tier the way the CLI does. A mode the SDK does not know,
@@ -141,46 +130,16 @@ export async function personsDefaultMode(): Promise<PermissionMode | null> {
 }
 
 /**
- * Which settings files get read (M4 decision 3, #92, #152) — **so that a file committed to the
- * repo cannot be able to decide an approval.**
- *
- *   assistant/coordination sessions (noSettingFiles)   []        reads no files at all (see the comment on the query option below)
- *   trusted project / a user-folder app's session          omitted   user, project and local, all of it — the CLI's own default
- *   untrusted project                                       ['user'] only the user's own settings (~/.claude)
- *
- * **Which row applies is decided by the manager, based on the session's kind and project, and
- * passed down** (launch-inputs.ts `settingFilesFor`). This must never be inferred from whether the
- * session receives tools — it once was: `centraluTools` being set used to mean `[]`, but the
- * worktree manager and builder sessions also receive those tools. A builder session in a trusted
- * project could then read neither CLAUDE.md nor the user's own ~/.claude (the global bypass),
- * which popped an approval card the person had turned off everywhere else. Measured (launching a
- * builder session through this adapter and having it run `touch`, normal, CLI 2.1.282, haiku,
- * 2026-09-25): before (`[]`) — card popped up, project hooks did not run, CLAUDE.md was not read;
- * now (omitted) — no card (the user's own bypass), hooks ran, CLAUDE.md was read. The Assistant
- * still reads nothing; since #382 it is given the person's own mode instead (`personsDefaultMode`), so it
- * no longer pops a card the person turned off everywhere else.
- *
- * A `.claude/` planted in the repo was able to disable our own approval card. Measured
- * (probe-project-trust.mts, CLI 2.1.282, SDK 0.3.263, planted into a temp folder standing in for
- * a checked-out repo and had it run `touch`; the user's own settings were left untouched):
- *
- *   planted                                    preset  omitted (reads everything)    ['user']
- *   permissions.allow in settings.json          safe    callback called               callback called
- *   allow in settings.local.json                safe    **not called**                callback called
- *   PreToolUse hook (allow) in settings.json    safe    **not called**, hook runs      callback called, hook does not run
- *   the same hook                               normal  not called                    not called ← decided by the user's own settings (bypass)
- *   CLAUDE.md, .claude/commands                 -       read, shows up in the list     not read, does not show up
- *
- * The CLI already did not honor allow rules from a committed settings.json. The actual holes were
- * settings.local.json (usually excluded from git, but it can still be committed) and hooks, and
- * both disabled the card **even in safe**. A hook is itself an arbitrary command as well.
- *
- * Why normal still follows the person's settings in an untrusted project: decision 3
- * disables files from the repo, not the person's own choice. If the user set bypass in their own
- * ~/.claude, that wins (see the last row of the table) — that is the person's own decision, made
- * to apply everywhere. Overriding even the user's own `defaultMode` to force 'default' and always
- * ask, just because the folder is untrusted, would turn this app into something that forces a
- * workflow. Someone who wants a card everywhere already has safe for that.
+ * Which settings files get read (M4 decision 3, #92, #152): **a file committed to the repo must not decide an approval**.
+ * The rules and the measured holes: docs/security-boundaries/project-trust.md "Repository configuration and project trust".
+ *   assistant/coordination sessions (noSettingFiles)   []        no files (only the person's mode: `personsDefaultMode`)
+ *   trusted project / a user-folder app's session      omitted   user, project and local: the CLI's own default
+ *   untrusted project                                   ['user'] only the user's own settings (~/.claude)
+ * The row is the manager's (launch-inputs.ts `settingFilesFor`), never inferred from whether the session receives tools:
+ * builder and worktree-manager sessions get them too, and with `[]` in a trusted project they read no CLAUDE.md or hooks
+ * and popped a card the person's own bypass had turned off (measured, normal, CLI 2.1.282, haiku, 2026-09-25).
+ * Normal still follows the person's own ~/.claude in an untrusted project (their bypass wins, measured): decision 3
+ * disables the repo's files, not the person's choice, and safe is there for a card everywhere.
  */
 export function settingSourcesFor(opts: Pick<CreateSessionOpts, 'noSettingFiles' | 'projectTrusted'>): Record<string, unknown> {
   if (opts.noSettingFiles) return { settingSources: [] }

@@ -30,7 +30,7 @@ export interface AgentProcess {
   /**
    * Remembers the process groups its tree has now (macOS and Linux), so what it started in a group of its own is ended
    * with it even after it has gone: once a CLI has died, its helpers are under init and no longer found under it. An
-   * adapter calls it when the tool runs a command (#1562 review: Cursor's shell outlived Cursor). It reads `ps` without
+   * adapter calls it when the tool runs a command (#1562: Cursor's shell outlives Cursor). It reads `ps` without
    * holding up the host, and drops a group once no one is left in it, so a sweep hours later reaches no reused number
    */
   noteTree?(): Promise<void>
@@ -38,7 +38,7 @@ export interface AgentProcess {
 
 /**
  * `endsWithHost`: the process must end when this host does, even killed outright, whatever it does with stdin's end
- * (#1562 review: Cursor with Centralu's bridge attached outlived a SIGKILLed host on macOS). A process the keeper holds
+ * (#1562, seen on macOS: Cursor with Centralu's bridge attached outlives a SIGKILLed host). A process the keeper holds
  * outlives the host by design and ignores it.
  */
 export type AgentSpawnSpec = { command: string; args: string[]; cwd?: string; env: Record<string, string | undefined>; endsWithHost?: boolean }

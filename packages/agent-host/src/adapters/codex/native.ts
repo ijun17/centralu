@@ -3,25 +3,17 @@ import { HOST_PLATFORM, pathsOf, programFile, rustTarget } from '../../os.js'
 import { launchFor, type ToolLaunch } from '../../tool-launch.js'
 
 /**
- * The program a Codex app-server is started from (#568): the platform binary the npm package ships,
- * not the package's `node` wrapper around it.
+ * The program a Codex app-server is started from (#568): the platform binary the npm package ships, not the package's
+ * `node` wrapper (`bin/codex.js`, which finds the binary in `@openai/codex-<platform>` and stays alive forwarding signals).
+ * Measured (#561, codex-cli 0.160): an idle `codex app-server` is about 160 MB, of which about 43 MB is that wrapper, in
+ * every session and short-lived client (usage, models, history, fork, delete).
  *
- * `npm i -g @openai/codex` installs `bin/codex.js`, a Node script that finds the native binary in the
- * platform package (`@openai/codex-darwin-arm64`, …), starts it with stdio inherited, and stays alive
- * forwarding signals until it exits. Measured (#561, codex-cli 0.160): an idle `codex app-server` is
- * about 160 MB, of which about 43 MB is that wrapper. Every Codex session (and every short-lived
- * client: usage, models, history, fork, delete) paid for a second process that does nothing.
+ * The host finds the binary as the wrapper does and sets the wrapper's two variables: `CODEX_MANAGED_BY_<NPM|PNPM|BUN>`
+ * (how to update it) and `CODEX_MANAGED_PACKAGE_ROOT` (without it, `codex doctor` reports "npm-managed launch is missing
+ * package-root provenance"). The binary finds its helpers next to itself through `codex-package.json`.
  *
- * So the host does what the wrapper does: it finds the binary the same way and sets the two variables
- * the wrapper sets, then starts the binary directly. The binary reads them to say how to update it
- * (`CODEX_MANAGED_BY_<NPM|PNPM|BUN>`) and to check its install's provenance
- * (`CODEX_MANAGED_PACKAGE_ROOT`; without it, `codex doctor` reports "npm-managed launch is missing
- * package-root provenance"). It finds its own helpers (`codex-path/rg`, `codex-resources`) next to
- * itself through `codex-package.json`, so nothing else is needed.
- *
- * Anything that is not that npm layout (a Homebrew cask, a native install, a binary on PATH, a
- * wrapper whose platform package is missing) starts as before, through `launchFor`. So does
- * everything when `CC_CODEX_NATIVE=0`, the switch back to the wrapper.
+ * Anything that is not that npm layout (a Homebrew cask, a native install, a binary on PATH, a missing platform package)
+ * starts through `launchFor`, as does everything when `CC_CODEX_NATIVE=0`, the switch back to the wrapper.
  */
 export type CodexLaunch = ToolLaunch & {
   /** The environment to start it with, from the host's own */

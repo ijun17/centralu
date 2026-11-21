@@ -8,11 +8,11 @@ export type InputReceipt = { id: ReturnType<typeof randomUUID>; done: Promise<vo
 const CENTRALU_INPUT_MARK = 'ce47a1ce47a1'
 
 /**
- * An id for an input Centralu writes into a tool's conversation, carrying Centralu's mark (#1618 review). Claude Code
+ * An id for an input Centralu writes into a tool's conversation, carrying Centralu's mark (#1618). Claude Code
  * keeps the id a stream-json input names as that line's `uuid` in its transcript, and the SDK's `getSessionMessages`
  * gives it back (measured with CLI 2.1.296 and SDK 0.3.263), so a catch-up tells the lines Centralu wrote (the person's
  * messages, its mail and notes) from the ones written elsewhere by the id alone. A note sent through Centralu's channel
- * leaves no row of its words, and anchoring on the words alone read it as the person's and stored what followed it
+ * leaves no row of its words, and anchoring on the words alone would read it as the person's and store what followed it
  * twice. Still a version 4 UUID, which the CLI takes, with 74 random bits.
  */
 export function centraluInputId(): ReturnType<typeof randomUUID> {
@@ -56,7 +56,7 @@ export const LIMIT_NOTE = `${LIMIT_NOTE_HEAD} ended your last turn before it fin
  * with: Centralu's own, which the person does not type. The update's note can go on with what else the update stopped (`updateNote`), so
  * a note is not matched whole. The sign for the tools that keep no id of ours (Codex, a Claude Code version that does not keep it, a
  * transcript a crash left without it): the read-back marks that line as Centralu's input all the same (`sent`), so the
- * catch-up anchors after it and never stores it as the person's message (#1626 review).
+ * catch-up anchors after it and never stores it as the person's message (#1626).
  */
 export function isCentraluNote(text: string): boolean {
   const t = text.trim()

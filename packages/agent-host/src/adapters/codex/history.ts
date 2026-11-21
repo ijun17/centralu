@@ -72,17 +72,13 @@ const NOT_MATERIALIZED = /unavailable before first user message|not materialized
 /**
  * The last `limit` lines of a thread, newest pages first (#342).
  *
- * `thread/read` with `includeTurns` returned the whole history in one response, and Codex 0.160.0 deprecates that for
+ * `thread/read` with `includeTurns` returns the whole history in one response, which Codex 0.160.0 deprecates for
  * paginated threads: measured on a five-turn scratch thread (gpt-5.6-luna, 2026-10-05), 1,205 KB in one line and a
- * `deprecationNotice` ("Full-history hydration is deprecated for paginated threads; omit `includeTurns`…") that #304
- * put in the conversation. A 775-turn thread was 48.6 MB (manager.ts). `thread/turns/list` pages backwards from the
- * newest turn, so reading stops once `limit` lines are in hand: an import (200 lines) of a long thread reads its tail,
- * not all of it.
+ * `deprecationNotice` that #304 puts in the conversation; a 775-turn thread was 48.6 MB (manager.ts). `thread/turns/list`
+ * pages backwards from the newest turn, so reading stops once `limit` lines are in hand: an import (200 lines) reads a long thread's tail only.
  *
- * `itemsView: 'full'`, not `summary`: measured, `summary` gives a turn's user message and final answer but leaves the
- * `contextCompaction` item out (a manual compaction's turn came back empty), and the compaction marker on read-back is
- * #323's. `full` gives the same items `thread/read` did, in the same order, so `turnsToHistory` is unchanged.
- *
+ * `itemsView: 'full'`, not `summary`: measured, `summary` leaves the `contextCompaction` item out (#323's marker on
+ * read-back). `full` gives the same items as `thread/read`, in the same order, so `turnsToHistory` reads both.
  * A Codex without `thread/turns/list` (it answers "method not found", or "not supported" for a thread its store cannot
  * page) is read the old way, `thread/read` with turns: only paginated threads draw the deprecation.
  */
@@ -197,8 +193,7 @@ function turnLines(turns: unknown): HistoryMessage[] {
  * completed while the app watched (#843), so it leaves what it would have left live: a tool card (a command, a file
  * change, an MCP call, a search, an agent launch, a kind Codex adds later) with its input and result, and a compaction
  * marker for a `contextCompaction` (#303). Reasoning and the review and image-view items leave nothing that is kept
- * (`historyEvents`). Before #843 only the words and compactions came back, so an imported thread showed none of its
- * tool calls where a watched one did.
+ * (`historyEvents`).
  *
  * A compaction's place is right: measured (codex-cli 0.147.0, 0.153.4 and 0.160.0, 2026-10-04), `thread/read` returns
  * it as `{ type: 'contextCompaction', id }` in the turn where it ran — a turn of its own for a manual compaction, and
@@ -212,7 +207,7 @@ function itemToMessages(item: unknown, ts?: number): HistoryMessage[] {
   }
   if (it.type === 'userMessage') {
     const text = stripInjectedBlocks(userInputText(it.content))
-    // Codex keeps no id of ours: Centralu's own Continue note is known by its text, so it is never the person's message (#1626 review)
+    // Codex keeps no id of ours: Centralu's own Continue note is known by its text, so it is never the person's message (#1626)
     return text ? [{ role: 'user', text, ts, ...(isCentraluNote(text) ? { sent: true as const } : {}) }] : []
   }
   const live = (method: string) => normalizeNotification(HISTORY_SESSION, { method, params: { item: it } })
