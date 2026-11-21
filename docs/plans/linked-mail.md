@@ -505,7 +505,7 @@ outbox it already has for Centralu's own notices and reports (§6).
 - **Who acts on it.** The sender, never the person: the person's held list (`heldRows`) leaves `link` out, and a task
   held so is not in a machine's offer (`openTasksToward`), which would read it as lost there (§10). The sender's `inbox`
   lists it as held. However it ends before it goes, it ends one way: settled, a row is held no more and never goes
-  (`MailboxRecords.settle`). So `handled` on it (`MailAcross.dropHeld`) withdraws a question or task as `mail done`
+  (`linkHoldEnds`, in every store write that settles a row, also one the other side's receipts settle). So `handled` on it (`MailAcross.dropHeld`) withdraws a question or task as `mail done`
   withdraws one sent, and so do a stop or deletion of the child a held task is for and the sender going to the trash;
   a message no one watches is deleted, as nothing went. A withdrawal is told across as any is; a side that never got
   the message has no row to take it. `handled` is refused `busy` while it is going or once a send of it lost its

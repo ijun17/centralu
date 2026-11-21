@@ -549,6 +549,20 @@ describe("a hub's copy of a task across (#1948 step 6)", () => {
     await vi.waitFor(() => expect(noticesTo(w)).toEqual([expect.stringContaining('held while the link was down, may have arrived there, from a send whose answer was lost, and is not sent again: That computer is no longer linked')]))
   })
 
+  it('a held question whose resend lost its answer, answered there as the receipts tell: settled here and held no more, so it never goes again', async () => {
+    const { w, across, answers, machine, child } = hubWorld({ tasks: true, clock: true })
+    machine.reachable = false
+    const held = await across.send('orc', { to: child, text: 'which branch?', needsReply: true })
+    const id = held.ok ? held.messageId : ''
+    machine.reachable = true
+    across.changed()
+    await vi.waitFor(() => expect(answers).toHaveLength(1))
+    answers[0]!({ nonsense: true })
+    await vi.waitFor(() => expect(() => across.dropHeld(addr('orc'), id)).toThrow(/may have arrived there already/))
+    await across.rows([{ messageId: id, recipient: child, deliveredAt: 1, readAt: 1, settled: 'done', settledAt: 2, answerId: null, releasedAt: null, releasedWhy: null }], { machine: 'm1' })
+    expect(w.records.recipient(id, child)).toMatchObject({ settled: 'done', held: null })
+  })
+
   it('held mail waits for a machine to answer the offer of this connection: one still connecting is sent nothing', async () => {
     const { w, across, answers, machine, child } = hubWorld({ clock: true })
     machine.reachable = false

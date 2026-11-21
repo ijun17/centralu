@@ -197,6 +197,9 @@ export const RECIPIENT_HOLDS = `(${RECIPIENT_HOLD_WORDS.map((w) => `'${w}'`).joi
 /** The hold of a sender's copy of mail across while its link is down (docs/plans/linked-mail.md §12): its sender acts on it, never the person */
 export const LINK_HOLD = 'link' as const
 
+/** The `SET` term every writer of `settled` carries: a row settled (`after`, the value it ends with) is held for its link no more, as it never goes */
+const linkHoldEnds = (after: string): string => `held = CASE WHEN held = '${LINK_HOLD}' AND ${after} IS NOT NULL THEN NULL ELSE held END`
+
 /** Holds that keep a message from its recipient altogether: it was not told of it, so it reads as a phantom (§5.5) */
 export const HIDDEN_HOLDS = ['policy', 'loop'] as const
 const HIDDEN_SQL = HIDDEN_HOLDS.map((w) => `'${w}'`).join(', ')
@@ -554,7 +557,7 @@ export class MailboxRecords {
    * sender is gone. A row settled `legacy` or `answered` says done from now: what the person marks is theirs to mark
    */
   closeFor(recipient: string, ids: readonly string[], at: number): number {
-    return this.update(`settled = 'done', settled_at = ?`, [at], recipient, ids, `COALESCE(settled, '') IN ('', 'legacy', 'answered')`)
+    return this.update(`settled = 'done', settled_at = ?, ${linkHoldEnds("'done'")}`, [at], recipient, ids, `COALESCE(settled, '') IN ('', 'legacy', 'answered')`)
   }
 
   /** How the person closed the chain rooted at `rootId` (`facts.closed`): the last close stands */
@@ -656,14 +659,13 @@ export class MailboxRecords {
 
   /**
    * Settles watched rows not settled yet: one recipient's, or every row of the message with `'all'` (no address). A row moved from an older build
-   * (`legacy`) is answered or marked done too: its recipient's act ends it as it would have there (§6.3). A row held for its link (`LINK_HOLD`) is
-   * held no more: settled, it never goes, however it was settled. Returns how many
+   * (`legacy`) is answered or marked done too: its recipient's act ends it as it would have there (§6.3). A row held for its link is
+   * held no more (`linkHoldEnds`). Returns how many
    */
   settle(messageId: string, recipient: string, how: Settled, at: number, answerId?: string): number {
     return this.db
       .prepare(
-        `UPDATE mail_recipients SET settled = @how, settled_at = @at, answer_id = COALESCE(@answerId, answer_id),
-            held = CASE WHEN held = '${LINK_HOLD}' THEN NULL ELSE held END
+        `UPDATE mail_recipients SET settled = @how, settled_at = @at, answer_id = COALESCE(@answerId, answer_id), ${linkHoldEnds('@how')}
           WHERE message_id = @messageId AND (@recipient = 'all' OR recipient = @recipient)
             AND (settled IS NULL OR (settled = 'legacy' AND @how IN ('answered', 'done')))
             AND EXISTS (SELECT 1 FROM mail m WHERE m.id = @messageId AND ${WATCHED})`,
@@ -828,7 +830,7 @@ export class MailboxRecords {
           `UPDATE mail_recipients SET
              delivered_at = COALESCE(@deliveredAt, delivered_at),
              read_at = COALESCE(read_at, @readAt),
-             settled = COALESCE(settled, @settled),
+             settled = COALESCE(settled, @settled), ${linkHoldEnds('COALESCE(settled, @settled)')},
              settled_at = CASE WHEN settled IS NULL THEN @settledAt ELSE settled_at END,
              answer_id = COALESCE(answer_id, @answerId),
              released_at = COALESCE(released_at, @releasedAt),
