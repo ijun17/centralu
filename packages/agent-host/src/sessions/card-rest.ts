@@ -3,18 +3,15 @@ import { parseJson } from '../dev-services/store/json.js'
 import { asObj } from '../json-value.js'
 
 /**
- * The rest an adapter's card was raised in, so answering it goes back there (#428).
- *
- * A card blocks the session wherever it comes from (waiting_approval), and answering the last one reads as "back to
- * work" (working). Inside a turn that is true: the tool call that asked goes on, and the turn's end follows. A card
- * raised while no turn ran (a background agent asking after its turn ended, say) has no turn to go back to, and the
- * session sat in working with nothing to end it: busy to the keeper, an update and sleep, and "stopped by quit" at the
- * next start. The host's own cards already close into their rest (`restAfterCard`, host-cards.ts); this does the same
- * for an adapter's.
- *
- * The rests are written down (`RestRecord`, one app setting) because the card outlives a host swap: the keeper keeps
- * the process, the next host adopts it with the session still waiting_approval, and the tool raises the card again.
- * Remembered only in memory, that card read as one inside a turn, and answering it ended in working once more.
+ * The rest an adapter's card was raised in, so answering it goes back there (#428). A card blocks the session wherever it comes
+ * from (waiting_approval), and answering the last one reads as "back to work" (working). Inside a turn that is true: the tool
+ * call that asked goes on, and the turn's end follows. A card raised while no turn ran (a background agent asking after its
+ * turn ended, say) has no turn to go back to, and the session would sit in working with nothing to end it: busy to the keeper,
+ * an update and sleep, and "stopped by quit" at the next start. The host's own cards close into their rest (`restAfterCard`,
+ * host-cards.ts); this does the same for an adapter's. The rests are written down (`RestRecord`, one app setting) because the
+ * card outlives a host swap: the keeper keeps the process, the next host adopts it with the session still waiting_approval, and
+ * the tool raises the card again; remembered only in memory, that card would read as one inside a turn, and answering it would
+ * end in working once more.
  */
 export class CardRests {
   private rests = new Map<string, SessionState>()

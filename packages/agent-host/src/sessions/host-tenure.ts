@@ -53,9 +53,8 @@ export type HostTenureHost = Pick<DelegationHost, 'adapters' | 'children' | 'emi
   }
 
 /**
- * The host's tenure: what it takes over at its start (the sessions as the last host left them, the turns an update cut), and how it lets
- * them go (a quit, or a stop for an update). Moved out of the session manager as it was (#1143); what it reaches of the
- * manager is `HostTenureHost`.
+ * The host's tenure: what it takes over at its start (the sessions as the last host left them, the turns an update cut), and
+ * how it lets them go (a quit, or a stop for an update). What it reaches of the manager is `HostTenureHost`.
  */
 export class HostTenure {
   constructor(private readonly host: HostTenureHost) {}
@@ -63,7 +62,7 @@ export class HostTenure {
   /**
    * The turns this host continues because an update cut them, and when its start took them up (#1618): said in every hello,
    * for a hub's callers. Taken at the start, before this host answers any hello, so a hub that connects while a Continue is
-   * still on its way is told of it too (#1626 review); one that turns out lost leaves it (`turnLostInSwap`)
+   * still on its way is told of it too (#1626); one that turns out lost leaves it (`turnLostInSwap`)
    */
   private continuedAfterUpdate: { sessionId: string; at: number }[] = []
   /** The lists of the turns an update cut that the stops before this start left (#1618), each removed once dealt with */
@@ -135,7 +134,7 @@ export class HostTenure {
     this.updateLists?.done(sessionId, step === 'dropped')
   }
 
-  /** A host leaving for an update writes no line for a note the tool took meanwhile: the host after it writes the one (#1626 review) */
+  /** A host leaving for an update writes no line for a note the tool took meanwhile: the host after it writes the one (#1626) */
   leavingForUpdate(): boolean {
     return this.disposing && this.stoppingForUpdate
   }
@@ -191,7 +190,7 @@ export class HostTenure {
 
   private async disposeEverything(): Promise<void> {
     // The cards it closes below are not the person's answers: a standing start_agent request stays stored (#673)
-    // An update's wake not answered yet is listed again below, as it was woken (#2264 review): read before the engine lets its wakes go
+    // An update's wake not answered yet is listed again below, as it was woken (#2264): read before the engine lets its wakes go
     const woken = this.stoppingForUpdate ? this.host.turnContinue.unanswered() : []
     // A retry waiting for the provider's capacity ends its turn with the error it stood in for: no later host would hear it again (#1693). Before the host is marked as leaving: the end is the error's, not a stop of the quit's. A stop's wait is stored, for the next host (#1415)
     this.host.turnContinue.stopAll()

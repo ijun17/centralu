@@ -18,26 +18,18 @@ export type AskingMachine = { id: string; name: string }
 
 /**
  * The reverse direction, on the hub (#550, docs/plans/remote-hub.md §12.7, owner decision 2026-10-18): a linked machine's
- * session asks a project of this computer, as `ask_project` does here, behind this computer's card for the pair.
- *
- *   - Only while that machine's switch is on (Settings → Machines), read at every step that waits: before the card,
- *     after it, and when a pair is remembered.
- *   - The card is this computer's, in the session here that would get the task, so only this computer's windows can
- *     answer it; it names the machine and the asking session there. Approving it is remembered for the pair (that
- *     session, this project) until withdrawn in Settings → Machines, or until the switch goes off; a remembered pair
- *     passes with no card. Deny is not remembered.
- *   - The target is an existing ordinary session, as for an ask here (#614): never created, never an app's or a
- *     builder's.
- *   - The task is mail (#1948 step 6): a task from that session on that machine (its address here, `<machine>.<id>`),
- *     framed as from it (never the person and never an assistant), which this host's delivery gives the session, held
- *     while it is busy as any task is, and whose turn its engine reports. The session works on it one level deeper than
- *     the asker (#867, the task's `depth`), so it cannot ask on.
- *   - The call waits for that report up to the bound and answers with the session's words, cut to size; past the bound
- *     it answers `working` with the task's id, and the report goes to the machine when it comes (`MailAcross.passReport`).
- *     Paths in it are this computer's: the machine lists them and opens none.
+ * session asks a project of this computer, as `ask_project` does here, behind this computer's card for the pair. Only while
+ * that machine's switch is on (Settings → Machines), read at every step that waits. The card is this computer's, in the session
+ * here that would get the task, so only this computer's windows can answer it; approving it is remembered for the pair (that
+ * session, this project) until withdrawn in Settings → Machines or the switch goes off; Deny is not remembered. The target is
+ * an existing ordinary session, as for an ask here. The task is mail (#1948 step 6) from that session (its address here,
+ * `<machine>.<id>`), framed as from it (never the person, never an assistant), held while the session is busy; the session
+ * works on it one level deeper than the asker (#867, the task's `depth`), so it cannot ask on. The call waits for the report up
+ * to the bound and answers with the session's words, cut to size; past it, `working` with the task's id, and the report goes to
+ * the machine when it comes (`MailAcross.passReport`). Paths in it are this computer's: the machine lists them and opens none.
  */
 export class MachineAsks {
-  /** What closes the cards standing for each machine (#550 review): turning its switch off, or removing it */
+  /** What closes the cards standing for each machine (#550): turning its switch off, or removing it */
   private readonly standing = new Map<string, Set<AbortController>>()
 
   constructor(
@@ -129,7 +121,7 @@ export class MachineAsks {
         },
         closing.signal,
         /*
-         * Raised whatever the target session's preset (#550 review): its `auto` is its own, and answers no card of another
+         * Raised whatever the target session's preset (#550): its `auto` is its own, and answers no card of another
          * machine, as start_agent's on another computer is asked every time (#1038). The machine's call waits on the person,
          * so its limit stops while the person cannot see the card (#2271): their own turn in that session hides it until the
          * turn ends (#673), or another card stands in its place
@@ -160,7 +152,7 @@ export class MachineAsks {
   }
 
   /**
-   * Closes every card still standing for a machine (#550 review): its switch went off, or it was removed. The asks
+   * Closes every card still standing for a machine (#550): its switch went off, or it was removed. The asks
    * answer with the switch's refusal; nothing is delivered and nothing is remembered. Its tasks not given yet are
    * withdrawn, so none reaches a session after the switch went off; one given already runs on, as it did
    */

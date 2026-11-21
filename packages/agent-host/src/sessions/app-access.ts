@@ -8,36 +8,16 @@ import { LinkedApps } from '../links/linked-apps.js'
 import { matchProjects, projectChoice } from './ask-project.js'
 
 /**
- * Another project's app tools, on demand (#371 part A) — `find_apps`, `attach_app` and `detach_app`.
- *
- * Decision 4 (apps/attaching.md "Which session gets which apps") gives a project's session its own project's apps and nothing else. The
- * owner's decision for #371 keeps that, and lets a session reach further **only while it needs to**:
- * it searches the apps it could attach, attaches one (its tools join this session), and detaches it
- * (they leave). An app that is not attached costs no context.
- *
- * Auto opens project trust and pair consent through the manager's caller-preset policy (#603),
- * without changing sharing or remembered grants. Otherwise, what may be attached, decided here and asked again on every count of a session's apps:
- *
- *   a project app of another project   only if the person shares it (`apps.setShared`, off by default),
- *                                      and only once the person allowed this pair of projects (the
- *                                      consent card, `ensureProjectAccess`, shared with part B)
- *   a user-folder app                  always: the person put it in their own folder for use across
- *                                      projects, so it needs neither a share switch nor a card
- *   another project's root app         the same (#1141): a project that is an app takes the user-folder
- *                                      app's place, so it is reached as one was — its project trusted
- *   from an untrusted project          nothing: its repository's text could be the one asking, and an
- *                                      untrusted project runs none of its own apps either
- *
- * The Assistant (#1205) belongs to no project. It is given the user-folder apps (decision 4), and attaches the root
- * apps of trusted projects here, the one it needs when it needs it, so its tool list does not grow with every project
- * the person trusts. Nothing else: a project's inner apps, shared or not, are that project's.
- *
- * The attachment is kept per session in the store's settings table (a JSON list under one key), so
- * it survives a host restart and the session's resume, and lasts until `detach_app` or the session
- * is deleted. Nothing about the app changes: it runs where it lives (its own folder, its own data),
- * and every call goes through the runtime's one path with the calling session recorded (§5).
- *
- * This module knows the runtime only through the hub (`host-core-blind-to-apps`).
+ * Another project's app tools, on demand (#371 part A): `find_apps`, `attach_app` and `detach_app`. A session reaches further
+ * than its own project's apps only while it needs to: it searches the apps it could attach, attaches one (its tools join this
+ * session) and detaches it (they leave); an app not attached costs no context. Which app goes to which session (project, share
+ * switch, consent, trust): apps/attaching.md "Which session gets which apps"; an untrusted project's apps attach nowhere, as
+ * its repository's text could be the one asking. Decided here and asked again on every count of a session's apps; `auto` opens
+ * project trust and pair consent through the caller-preset policy (#603), never sharing or remembered grants. The attachment is
+ * kept per session in the store's settings table (a JSON list under one key), so it survives a host restart and the session's
+ * resume, and lasts until `detach_app` or the session is deleted. The app is unchanged: it runs where it lives, and every call
+ * goes through the runtime's one path with the calling session recorded (§5). This module knows the runtime only through the
+ * hub (`host-core-blind-to-apps`).
  */
 
 /** One app a session attached itself — kept in the store, so it outlives the host process */

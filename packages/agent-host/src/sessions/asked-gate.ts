@@ -3,28 +3,16 @@ import type { Asker } from '../mail/asked-by.js'
 import { askedAct, askedQuestion, outlivesTheTurn, stepKind, type AskedStep } from './asked-acts.js'
 
 /**
- * The Assistant's steps in a turn a session's request started (#1447, #1739, docs/plans/cited-requests.md §2).
- *
- * Every tool and command of the Assistant runs through `when`, and every step of its CLI through `askCli`. In any turn that is not a request
- * they run at once, as before. In a request's turn the Assistant judges, from the request and the person's message it may cite (checked by the
- * host at send), what to do, and these hold whatever it judges:
- *
- * - **A step that can be undone** (`stepKind` `undoable`: a project added, a session renamed, a setting changed), and work handed on to a session
- *   no looser than the asking one (`handsOn`, `noLooser`), run without the request's card. The cards such a step raises itself ask as in the
- *   person's own turn (a trust card, a project's card, a start's consent): a request's turn is never looser than the person's.
- * - **Every other step** (`asks`: a delete, an uninstall, an OS entry, a command, a file written, an app's step, work handed to a session looser
- *   than the asking one, a name no list holds) raises the person's card first, naming who asked, under every preset (`alwaysAsk`). Allow runs it, Deny
- *   does not.
- * - **A step that would outlive the turn** (a subagent, a scheduled prompt, a background command) is refused without a question.
- * - **Every step that changed something leaves a record** in the asking session (`done`), once it has run and not failed, so the person can see
- *   afterwards what a session's request had done and on which message of theirs, if any. A step of the CLI's own is recorded when the CLI says it
- *   ran (`cliDone`), not when it is allowed.
- *
- * **A turn with requests of two sessions** (`Asker.also`; the drain never makes one) fails closed: nothing can tell whose request a step is for, so
- * every step but a read asks, the answer in a request's own thread included, and the card names every asker.
- *
- * One card for one asked step. The person's Allow on the request's card is for exactly this call, so the cards it would raise itself meanwhile (a
- * delete card) are not raised a second time: they have an "always" this turn must not offer, and the answer to them is the one just given.
+ * The Assistant's steps in a turn a session's request started (#1447, #1739; the rules: docs/plans/cited-requests.md §2). Every
+ * tool and command of the Assistant runs through `when`, every step of its CLI through `askCli`; outside a request's turn they
+ * run at once. In one: an undoable step (`stepKind` `undoable`) and work handed to a session no looser than the asking one
+ * (`handsOn`, `noLooser`) run without the request's card, and the cards such a step raises itself ask as in the person's own
+ * turn; every other step (`asks`) raises the person's card first, naming who asked, under every preset (`alwaysAsk`); a step
+ * that would outlive the turn is refused without a question; a step that changed something is recorded in the asking session
+ * once it has run and not failed (`done`; a CLI's own step when the CLI says it ran, `cliDone`). A turn with requests of two
+ * sessions (`Asker.also`) fails closed: nothing can tell whose request a step is for, so every step but a read asks and the
+ * card names every asker. One card per asked step: Allow is for exactly this call, so the cards it would raise itself meanwhile
+ * (a delete card) are not raised again, as they have an "always" this turn must not offer.
  */
 
 export type AskedGateHost = {

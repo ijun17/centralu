@@ -12,31 +12,26 @@ import type { Store } from '../dev-services/store.js'
 import { isCentraluNote } from '../adapters/input-receipts.js'
 
 /**
- * Maximum number of lines of conversation to load. The older side is cut off first.
- * Pushing a session with hundreds of turns in whole makes the first render noticeably slow,
- * and what the person actually looks at is the last few turns anyway.
+ * Maximum number of lines of conversation to load, the older side cut first: pushing a session with hundreds of turns in whole
+ * makes the first render noticeably slow, and the person looks at the last few turns anyway.
  */
 const HISTORY_LIMIT = 200
 
 /**
- * How much is read to catch up. Set more generously than the restore limit (200) — if the person
- * has been working outside for a while and comes back, the gap can exceed 200 lines, and if we
- * cannot find the last message we know, we cannot attach anything.
+ * How much is read to catch up. More generous than the restore limit (200): after a while outside, the gap can exceed 200
+ * lines, and if the last message we know is not found, nothing can be attached.
  */
 const SYNC_LIMIT = 600
 
 /**
- * **Up to what point** this session's external transcript has been read (exactly the `updatedAt`
- * the tool gave us).
- *
- * It does not matter that the unit differs between tools — the comparison is always between
- * values given by the same tool.
+ * **Up to what point** this session's external transcript has been read (exactly the `updatedAt` the tool gave). Only ever
+ * compared with values from the same tool, so it does not matter that the unit differs between tools.
  */
 const externalSyncedKey = (sessionId: string) => `external_synced:${sessionId}`
 
 /**
- * Centralu's own Continue note read back (`isCentraluNote`). It went in through Centralu's channel and left its notice
- * line, so it is never stored as a message of the person's, wherever the anchor falls (#1626 review)
+ * Centralu's own Continue note read back (`isCentraluNote`). It went in through Centralu's channel and left its notice line, so
+ * it is never stored as a message of the person's, wherever the anchor falls.
  */
 const ownNote = (h: HistoryMessage): boolean => h.role === 'user' && isCentraluNote(h.text)
 
@@ -88,28 +83,24 @@ export type ExternalConversationsHost = {
 }
 
 /**
- * The conversations a tool keeps on its own side (#28, FR-10): the list of them in a folder, which session holds one,
- * whether one is gone, and the turns taken there outside Centralu, imported at creation and caught up at a wake.
- * Moved out of the session manager as it was (#428); what it reaches of the manager is `ExternalConversationsHost`.
+ * The conversations a tool keeps on its own side (#28, FR-10): the list of them in a folder, which session holds one, whether
+ * one is gone, and the turns taken there outside Centralu, imported at creation and caught up at a wake. What it reaches of the
+ * manager is `ExternalConversationsHost`.
  */
 export class ExternalConversations {
   constructor(private readonly host: ExternalConversationsHost) {}
 
   /**
-   * Conversation a tool holds -> when it was last changed (a short-lived cache).
-   *
-   * Used to be a Set holding only ids — because all we asked was whether it was alive or dead. But
-   * the list also gives `updatedAt` (ExternalSessionSummary), and discarding that meant the very
-   * next step asked "did anything change outside" by **re-reading the whole conversation**. That
-   * was an answer we already had.
+   * Conversation a tool holds -> when it was last changed (a short-lived cache). It keeps the `updatedAt` the list gives
+   * (ExternalSessionSummary), not just the ids: without it, asking "did anything change outside" meant re-reading the whole
+   * conversation.
    */
   private readonly externalIndex = new Map<string, { ids: Map<string, number>; complete: boolean; at: number }>()
 
   /**
-   * List of past sessions the tool has kept (including ones created from a terminal).
-   *
-   * Does not throw on failure — failing to fetch the list and failing to create a session are
-   * different problems. Someone on an older tool version should still be able to use "new session".
+   * List of past sessions the tool has kept (including ones created from a terminal). Does not throw on failure: failing to
+   * fetch the list and failing to create a session are different problems, and someone on an older tool version should still be
+   * able to use "new session".
    */
   async listExternalSessions(
     projectId: string,
@@ -127,16 +118,11 @@ export class ExternalConversations {
     try {
       const rows = await adapter.listExternalSessions(project.path, limit)
       /*
-       * Opening a conversation that is already in the list again would create two of the same
-       * session, so it is flagged to prevent that.
-       *
-       * Two things are preserved:
-       *  - The check is done against the **original session it was resumed from**. It must not be
-       *    done by externalId — if the tool issues a new identifier on resume, it would differ from
-       *    the original and the check would say "not imported" every single time.
-       *  - **A hidden session is not counted.** Hiding means "remove from my list", and the data
-       *    still exists in the tool. If this check treated it as "already imported", there would be
-       *    no way back.
+       * Opening a conversation that is already in the list again would create two of the same session, so it is flagged. The
+       * check is against the **original session it was resumed from**, not by externalId: a tool that issues a new identifier
+       * on resume would differ from the original and the check would say "not imported" every single time. **A hidden session
+       * is not counted:** hiding means "remove from my list" while the data still exists in the tool, so counting it as already
+       * imported would leave no way back.
        */
       const known = new Map<string, string>()
       for (const s of this.host.meta.values()) {
@@ -166,12 +152,9 @@ export class ExternalConversations {
   }
 
   /**
-   * Is there a **living session already holding on to** this tool conversation?
-   *
-   * The tool refuses when two writers try to write to one conversation (codex: "thread … already
-   * has an active writer"). Even with different session ids, they conflict if they point at the
-   * same original, so we block it on our side first and say **who is holding it**. The tool's own
-   * raw error explains nothing to the person.
+   * Is there a **living session already holding** this tool conversation? The tool refuses two writers on one conversation
+   * (codex: "thread … already has an active writer"), also with different session ids that point at the same original, so we
+   * block it on our side first and say **who is holding it**: the tool's own raw error explains nothing to the person.
    */
   holderOf(externalId: string, exceptSessionId?: string): SessionInfo | null {
     for (const s of this.host.meta.values()) {
@@ -182,60 +165,36 @@ export class ExternalConversations {
   }
 
   /**
-   * Catches our record up to a conversation that continued on the tool's own side.
-   *
-   * Why this is needed: someone can start in Centralu, move to working with Claude or Codex in a
-   * terminal, and come back. Whatever was exchanged in between piles up only in the tool while our
-   * screen stays frozen (a dogfooding finding). The model remembers everything on resume, so **only
-   * the screen is out of sync** — which makes it more confusing, not less.
-   *
-   * The rule for attaching: find **the last message we know about** in the tool's record and pull
-   * in only what comes after it. Anything we ourselves sent also passed through the tool, so the
-   * tool's record is the complete version — appending only the tail keeps it aligned without
-   * duplicates. If it cannot be found, nothing is attached: staying out of sync is better than
-   * stacking the same message twice.
+   * Catches our record up to a conversation that continued on the tool's own side (started in Centralu, continued in a terminal
+   * with Claude or Codex, then back): what was exchanged in between piles up only in the tool and the screen stays frozen,
+   * though the model remembers everything on resume, so **only the screen is out of sync**. The rule for attaching: find **the
+   * last message we know about** in the tool's record and pull in only what comes after it. Anything we sent also passed
+   * through the tool, so its record is the complete version, and appending only the tail keeps it aligned without duplicates.
+   * If it cannot be found, nothing is attached: out of sync is better than the same message twice.
    */
   async syncImportedHistory(info: SessionInfo, adapter: AgentAdapter): Promise<number> {
     const externalId = info.externalId ?? info.importedFrom
     if (!adapter.readExternalHistory || !externalId) return 0
     /*
-     * **The session decides where to read from** (M4 P-6). Back when the caller passed
-     * `project.path`, only the list lookup below asked for the session's real cwd, while history
-     * was read from the project path — two keys inside one function. Claude keeps history under the
-     * cwd the session actually ran in. Measured with SDK 0.3.263: asking with the project path, the
-     * SDK managed to find a worktree session by searching `git worktree list` (2 cases), but a
-     * session born in a folder that is not a worktree of that repository got 0 hits. A builder
-     * session for a user-folder app in M4 is exactly that kind of session. cwd is no longer taken as
-     * an argument now — it is decided once here, so the list lookup and the history read use the
-     * same value.
+     * **The session decides where to read from** (M4 P-6): Claude keeps history under the cwd the session actually ran in.
+     * Measured with SDK 0.3.263: asking with the project path found a worktree session by searching `git worktree list` (2
+     * cases), but a session born in a folder that is not a worktree of that repository got 0 hits (a builder session for a
+     * user-folder app in M4 is exactly that). cwd is decided once here, so the list lookup and the history read use the same
+     * value.
      */
     const cwd = this.host.cwdFor(info)
 
     /*
-     * **A record that has not changed is not read again.**
-     *
-     * This catch-up is a correction for "if this conversation continued outside the app (in a
-     * terminal's tool), bring that in too". But when nothing was ever written outside, there was
-     * nothing to read, and yet the full transcript was read every single time — and its size grows
-     * with the conversation's length. Measured on a 775-turn codex thread: **48.6MB / 8.9 seconds.**
-     * Worse, that 8.9 seconds is paid before the first message even goes out (the resume path below
-     * awaits this). This is exactly what made waking a sleeping session and sending a message take 9
-     * seconds.
-     *
-     * The tool cannot be asked to "give a little less". codex's thread/read has no notion of a count
-     * — measured: passing a limit is simply ignored and it still returns the same 48.6MB. It is all
-     * or nothing. So instead of receiving less, **we simply stop asking.** (Since #342 the codex
-     * reader pages `thread/turns/list` from the newest turn and stops at the limit, so a read that
-     * does happen costs the tail; not reading at all is still cheaper.)
-     *
-     * There is already something to ask instead: the `updatedAt` the list gives us, which the
-     * externalGone check right before this already fetched and cached — free to use here.
-     *
-     * It matters that no tool name appears anywhere in this. This is not a special case for codex
-     * but a rule of catch-up itself, so it applies to claude unchanged, and the next adapter added
-     * simply inherits it. An adapter with no `listExternalSessions` has no way to know the time, so
-     * it reads every time as before — **not knowing is never treated as skip** (the same direction
-     * every other optional feature in this file degrades in).
+     * **A record that has not changed is not read again.** This catch-up corrects for a conversation that continued outside the
+     * app; when nothing was written outside there was nothing to read, yet the full transcript was read every time, its size
+     * growing with the conversation. Measured on a 775-turn codex thread: **48.6MB / 8.9 seconds**, paid before the first
+     * message goes out (the resume path below awaits it), which made waking a sleeping session and sending a message take 9
+     * seconds. The tool cannot be asked for less: codex's thread/read has no notion of a count (measured: a limit is ignored
+     * and it returns the same 48.6MB), so **we stop asking** (the codex reader pages `thread/turns/list` from the newest turn
+     * and stops at the limit, #342, so a read that does happen costs the tail; not reading is still cheaper). What we ask
+     * instead is the `updatedAt` the list gives, already fetched and cached by the `externalGone` check right before. No tool
+     * name appears here: it is a rule of catch-up, so Claude and the next adapter inherit it. An adapter with no
+     * `listExternalSessions` cannot know the time and reads every time: **not knowing is never treated as skip**.
      */
     /* The externalGone check right before this already filled the cache under the same key
        (`cwdFor`) — using a different key here would cost an extra list lookup that this was meant to
@@ -265,10 +224,9 @@ export class ExternalConversations {
 
     const ours = this.host.store.messages.loadMessages(info.id, SYNC_LIMIT)
     /*
-     * loadMessages gives one row as one message (#77) — neighboring assistant rows are not merged
-     * either. This restore loop stitches them back together the same way: it reconciles against the
-     * tool's record using the same text that the reader used to merge. Not merging is a rule of the
-     * screen, and it is not meant to also change the standard catch-up compares against.
+     * loadMessages gives one row as one message (#77), neighboring assistant rows are not merged; this restore loop stitches
+     * them back together the same way, reconciling against the tool's record with the text the reader merged. Not merging is a
+     * rule of the screen, not meant to change the standard catch-up compares against.
      */
     const lastMessageText = (): string | undefined => {
       const parts: string[] = []
@@ -287,12 +245,12 @@ export class ExternalConversations {
     const lastText = lastMessageText()?.trim()
 
     /*
-     * Everything new starts right after the last line we know about: our last message, found by its words, or the last
-     * input Centralu itself wrote there, known by the id it gave the line (`HistoryMessage.sent`), whichever is later
-     * (#1618 review). A note or mail goes in through Centralu's channel and leaves no row of its words, so the words
-     * alone anchored on the message before it: the note was attached as the person's message, and the calls after it,
-     * already stored live, a second time. Words we hold that the record lacks still attach nothing, as before: the id
-     * only moves the anchor later, never past words of ours it cannot place.
+     * Everything new starts right after the last line we know about: our last message, found by its words, or the last input
+     * Centralu itself wrote there, known by the id it gave the line (`HistoryMessage.sent`), whichever is later (#1618). A note
+     * or mail goes in through Centralu's channel and leaves no row of its words, so the words alone would anchor on the message
+     * before it: the note would be attached as the person's message, and the calls after it, already stored live, a second
+     * time. Words we hold that the record lacks still attach nothing: the id only moves the anchor later, never past words of
+     * ours it cannot place.
      */
     const said = lastText ? history.findLastIndex((h) => h.role !== 'system' && h.text.trim() === lastText) : -1
     const wrote = history.findLastIndex((h) => h.role === 'user' && h.sent === true)
@@ -305,16 +263,15 @@ export class ExternalConversations {
     }
 
     /*
-     * The events after that line may already be ours (#303, #843): a compaction or a tool call that ran while this host
-     * was watching left its row live, and the tool's record has the same event. Each one our record holds is skipped, as
-     * many times as it holds it, so the row is stored once; the rest is attached. The two need not be in the same order
-     * or complete: parallel calls finish in another order live than the record lists them, a background agent's launch
-     * result is in the record but came later live (or never), and a row an older host did not store can come first.
-     * Stopping at the first event we lack stored every later one a second time. A tool call or result is the same
-     * record by its id wherever it falls, so one our record holds is never stored again, also behind a line we did not
-     * store (#1618 review: the CLI's own "No response requested." where it resumed a cut turn). A compaction has no id:
-     * only one our record holds after its last message is taken for one right after the anchor. An event that ran
-     * outside the app is not in our record and is attached like any other line.
+     * The events after that line may already be ours (#303, #843): a compaction or a tool call that ran while this host was
+     * watching left its row live, and the tool's record has the same event. Each one our record holds is skipped, as many times
+     * as it holds it, so the row is stored once; the rest is attached. The two need not be in the same order or complete:
+     * parallel calls finish in another order live than the record lists them, a background agent's launch result is in the
+     * record but came later live (or never), and a row an older host did not store can come first, so stopping at the first
+     * event we lack would store every later one twice. A tool call or result is the same record by its id wherever it falls,
+     * also behind a line we did not store (#1618: the CLI's own "No response requested." where it resumed a cut turn). A
+     * compaction has no id: only one our record holds after its last message is taken for one right after the anchor. An event
+     * that ran outside the app is attached like any other line.
      */
     const known = new Map<string, number>()
     let trailing = true
@@ -347,12 +304,9 @@ export class ExternalConversations {
   }
 
   /**
-   * Restores past conversation for display on screen.
-   *
-   * This is a **display snapshot.** The context the model actually remembers lives in the tool
-   * (resume carries that forward); what is saved here is the conversation record for a person to
-   * read. The session is kept alive even on failure — failing to read the record is no reason to
-   * block the conversation too.
+   * Restores past conversation for display on screen. A **display snapshot:** the context the model remembers lives in the tool
+   * (resume carries that forward); what is saved here is the conversation record for a person to read. The session is kept
+   * alive even on failure: failing to read the record is no reason to block the conversation.
    */
   async importHistory(
     info: SessionInfo,
@@ -379,10 +333,8 @@ export class ExternalConversations {
     history = history.filter((h) => !ownNote(h))
     if (history.length === 0) return
 
-    // nextSeq is based on MAX(seq) in the DB, so it **keeps returning the same value until something is
-    // inserted.**
-    // Fetched once and incremented locally (otherwise every row would land on the same seq and overwrite each
-    // other).
+    // nextSeq is based on MAX(seq) in the DB, so it **keeps returning the same value until something is inserted:** fetched
+    // once and incremented locally, or every row would land on the same seq and overwrite each other.
     const base = this.host.store.messages.nextSeq(info.id)
     const rows: StoredMessage[] = history.map((h, i) => historyRow(info.id, base + i, h, info.createdAt))
     this.host.store.messages.appendMessages(rows)
@@ -399,23 +351,14 @@ export class ExternalConversations {
   }
 
   /**
-   * The moment a handle is set aside, stamps "everything up to here is something I already know".
-   *
-   * The skip marker (externalSyncedKey) used to be updated only when catch-up actually read it. But
-   * talking inside the app also bumps the tool's own updatedAt, so **the more a session was used every
-   * day**, the more its next wake tripped the "did it change outside?" check and re-read the whole
-   * transcript — even though every bit of it was something we ourselves had said. The skip ended up
-   * never triggering for exactly the most common case: the first wake of the morning.
-   *
-   * A tool with a writer lock (capabilities.exclusiveWriter — codex) cannot be written to from outside
-   * while we hold the handle. So stamping the moment the handle is set aside means: any change older
-   * than that is entirely ours (skip it), and anything after it is genuinely external (read it). If a
-   * crash prevents this from ever running, the marker stays stale, and a stale marker falls on the
-   * side of reading — the safe direction.
-   *
-   * A tool with no lock at all (claude) never gets stamped: doing so would mean a message written
-   * from outside while it was alive could never come in at all. The split is made on the declared
-   * capability, not on the tool's name.
+   * The moment a handle is set aside, stamps "everything up to here is something I already know". The skip marker
+   * (externalSyncedKey) cannot be updated only when catch-up read: talking inside the app also bumps the tool's own updatedAt,
+   * so **the more a session was used**, the more its next wake would trip the "did it change outside?" check and re-read the
+   * whole transcript, though all of it was ours. A tool with a writer lock (capabilities.exclusiveWriter — codex) cannot be
+   * written to from outside while we hold the handle, so stamping at that moment means any change older than it is entirely
+   * ours (skip it) and anything after it is genuinely external (read it); if a crash prevents the stamp, the stale marker falls
+   * on the side of reading, the safe direction. A tool with no lock (claude) never gets stamped: a message written from outside
+   * while it was alive could then never come in. The split is made on the declared capability, not on the tool's name.
    */
   stampExternalSynced(sessionId: string): void {
     const m = this.host.meta.get(sessionId)
@@ -425,12 +368,9 @@ export class ExternalConversations {
   }
 
   /**
-   * Whether a conversation to resume from still exists on the tool's side.
-   *
-   * Even the list lookup itself is not free (codex spins up an app-server for it), so this is cached
-   * briefly. **When it cannot be determined, it is never treated as gone** — failing to fetch the list
-   * and treating a perfectly fine session as deleted would break the conversation just because the
-   * tool did not respond for a moment.
+   * Whether a conversation to resume from still exists on the tool's side. Cached briefly, as even the list lookup is not free
+   * (codex spins up an app-server for it). **When it cannot be determined, it is never treated as gone:** treating a perfectly
+   * fine session as deleted because the tool did not respond for a moment would break the conversation.
    */
   async externalGone(m: SessionInfo, cwd: string): Promise<boolean> {
     const id = m.externalId ?? m.importedFrom
@@ -441,22 +381,19 @@ export class ExternalConversations {
     // If the resumed-from original is still alive, that counts too (resume may have issued a new id)
     if (ids.has(id) || (m.importedFrom && ids.has(m.importedFrom))) return false
     /*
-     * **A full list means "unknown", not "gone"** (#165). The list only holds the most recent
-     * EXTERNAL_LIST_LIMIT entries, so someone with a lot of conversation history in the same folder
-     * would have an old conversation blocked with "no history" even though its file was perfectly
-     * intact (clicking again just brings back the same 200). Codex never deletes threads, and
-     * Claude's list even counts worktree conversations from the same repository together with it.
+     * **A full list means "unknown", not "gone"** (#165): the list holds only the most recent EXTERNAL_LIST_LIMIT entries, so
+     * an old conversation in a folder with a lot of history would be blocked with "no history" though its file is intact
+     * (clicking again just brings back the same 200). Codex never deletes threads, and Claude's list counts worktree
+     * conversations from the same repository too.
      */
     return complete
   }
 
   /**
-   * The tool's list of stored conversations -> `external id -> when it was last changed`.
-   *
-   * Needed twice along the wake path (does it still exist? / did it change outside?). Asked once and
-   * held for 30 seconds — codex spins up an app-server for even this one line (measured at 0.27
-   * seconds). If the list could not be fetched, this is `null`: **not knowing and not existing are
-   * never conflated.** When neither caller can tell, the direction taken is to never block anything.
+   * The tool's list of stored conversations -> `external id -> when it was last changed`. Needed twice along the wake path
+   * (does it still exist? did it change outside?), so asked once and held for 30 seconds: codex spins up an app-server for even
+   * this one line (measured at 0.27 seconds). If the list could not be fetched this is `null`: **not knowing and not existing
+   * are never conflated**, and where neither caller can tell, nothing is blocked.
    */
   private async externalIndexOf(
     tool: ToolName,

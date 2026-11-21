@@ -176,9 +176,9 @@ describe('attaching and detaching', () => {
   })
 
   /*
-   * #1141, third review: attach_app counted only the names the session held at that moment. With this project's board
-   * gone for a moment (its manifest mid-edit), Beta's board took `app-board`; when this project's came back, `app-board`
-   * meant it again and Beta's dropped out
+   * #1141: counting only the names the session held at that moment, with this project's board gone for a moment (its manifest
+   * mid-edit), Beta's board would take `app-board`; when this project's came back, `app-board` would mean it again and Beta's
+   * would drop out
    */
   it("never gives a name the session saw another app under, even while that app is gone for a moment", async () => {
     w.plant('p1', 'board')
@@ -275,9 +275,9 @@ describe('consent per pair of projects', () => {
 
 describe('how long an attachment lasts', () => {
   /*
-   * The row is read and written by more than one build (#384). An attachment a newer build stored with a consent this
-   * one does not know is not used (a consent that cannot be read grants nothing), and it used to be dropped by the next
-   * attach or detach, which rewrote the list with only what this build could read.
+   * The row is read and written by more than one build (#384). An attachment a newer build stored with a consent this one does
+   * not know is not used (a consent that cannot be read grants nothing), and the next attach or detach, which rewrites the
+   * list, keeps it.
    */
   it('an attachment stored with a consent this build does not know grants nothing, and is kept through an attach and a detach', async () => {
     session('w1', 'p1')
@@ -309,9 +309,8 @@ describe('how long an attachment lasts', () => {
 })
 
 /**
- * A project that is an app (#1141) takes the user-folder app's place: the Assistant and another project's session
- * find and attach it without a share switch or a card (the Assistant since #1205; it was given every one before), and
- * its own project's sessions get it with the rest of their project's apps.
+ * A project that is an app (#1141) takes the user-folder app's place: the Assistant (#1205) and another project's session find
+ * and attach it without a share switch or a card, and its own project's sessions get it with the rest of their project's apps.
  */
 describe('a project that is an app (#1141)', () => {
   it("another project's root app is found and attached without a share switch or a card, as a user-folder app is, and its tools work", async () => {
@@ -386,8 +385,8 @@ describe('a project that is an app (#1141)', () => {
 })
 
 /**
- * A name a session's agent has called never comes to mean another app (#1141, second review): two projects with root apps
- * of one id, the second sorting first, used to take `app-kit` from the first.
+ * A name a session's agent has called never comes to mean another app (#1141): two projects with root apps of one id, the
+ * second sorting first, must not take `app-kit` from the first.
  */
 describe('stable app names (#1141)', () => {
   it('a name a session has seen stays with its app: a later app of the same id, sorting first, gets a name of its own', async () => {
@@ -423,8 +422,8 @@ describe('stable app names (#1141)', () => {
   })
 
   /*
-   * #1141: a name qualified by its project (`app-<id>-<project>`) or numbered stays unique. Since #2231 a name is no
-   * longer part of a tool's name (the `app` tool takes it as an argument), so a long id or project name is kept whole
+   * #1141: a name qualified by its project (`app-<id>-<project>`) or numbered stays unique. A name is no part of a tool's name
+   * (the `app` tool takes it as an argument, #2231), so a long id or project name is kept whole
    */
   it('a qualified or numbered name keeps a long id whole, and stays unique by its number', async () => {
     const id = 'quarterly-planning-board-for-tea'

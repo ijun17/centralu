@@ -39,14 +39,11 @@ import { realOs } from '../os/real.js'
 const builderKey = (ref: AppRef): string => appKeyOf(ref)
 
 /**
- * One builder session per app (M4 C-2) — `<projectId | _user>/<appId>` -> session id. A single JSON
- * field in app_settings.
- *
- * Why this does not get its own column on the session row: a session's `appId` stands for "the
- * session this app owns", which exists beyond builder sessions too (D-1's agent session called by
- * the app uses the same column). "That app's builder session" is a relation the app side points at,
- * and if the pointed-to session is deleted it is fine for it to quietly go stale (`builderOf`
- * checks the session). There is also no schema to migrate.
+ * One builder session per app (M4 C-2): `<projectId | _user>/<appId>` -> session id, a single JSON field in app_settings. It
+ * has no column on the session row: a session's `appId` stands for "the session this app owns", which also exists beyond
+ * builder sessions (D-1's agent session called by the app uses the same column). "That app's builder session" is a relation the
+ * app side points at, and if the pointed-to session is deleted it may quietly go stale (`builderOf` checks the session). There
+ * is no schema to migrate either.
  */
 const APP_BUILDERS_KEY = 'apps.builders'
 
@@ -76,41 +73,36 @@ export type AppSessionsHost = {
   readonly record: SessionRecord
   rename: (sessionId: string, name: string) => void
   /**
-   * The way a finished app-agent session goes (#378): to the session archive if still unused (`SessionTrash.trashIf`), then deleted
-   * for good unless a delete the person asked for joined it (`joined`)
+   * The way a finished app-agent session goes (#378): to the session archive if still unused (`SessionTrash.trashIf`), then
+   * deleted for good unless a delete the person asked for joined it (`joined`)
    */
   trashIf: (sessionId: string, removeExternal: boolean, onlyIf: () => boolean) => Promise<'moved' | 'joined' | false>
   purgeSession: (sessionId: string) => Promise<void>
   emit: (e: NormalizedEvent) => void
   readonly running: Map<string, { model: string | null; effort: string | null; verbosity: string | null; serviceTier: string | null; permissionPreset: PermissionPreset; }>
   readonly store: Store
-  /** Sessions waking right now (#378 review: a finished app-agent session that is waking is in use) */
+  /** Sessions waking right now (a finished app-agent session that is waking is in use) */
   readonly resuming: ReadonlyMap<string, unknown>
-  /** Restarts applied at a turn's end and still under way (#378 review: a finished app-agent session restarting is in use) */
+  /** Restarts applied at a turn's end and still under way (a finished app-agent session restarting is in use) */
   readonly restartPolicy: { readonly deferredRestarts: ReadonlyMap<string, unknown> }
 }
 
 /**
- * The sessions an external app owns (#428): its builder session and the slot that names it (M4 C-1b, C-3), the check
- * it runs, the agents it asks for and the answer they give back (M4 D-1), and the host data it reads. Moved out of the
- * session manager as it was; what it reaches of the manager is `AppSessionsHost`.
+ * The sessions an external app owns (#428): its builder session and the slot that names it (M4 C-1b, C-3), the check it runs,
+ * the agents it asks for and the answer they give back (M4 D-1), and the host data it reads. What it reaches of the manager is
+ * `AppSessionsHost`.
  */
 export class AppSessions {
   constructor(private readonly host: AppSessionsHost) {}
 
   /**
-   * Creates a new app (M4 C-1b) — the single path both `apps.create` and the Assistant's
-   * `create_app` go through.
-   *
-   *   With a project      an app inside it, `.centralu/apps/<id>/` (`ExternalApps.createApp`)
-   *   Without one         a new app project (#1141): a new folder `<parent>/<id>` (`~/Centralu` unless a parent is
-   *                       given, as for a new project), the template written there, registered as a trusted project
-   *                       whose root is the app. A folder that fails to register is removed again: it held only the
-   *                       template
-   *
-   * Checking the name, trust and whether an id already exists is the runtime's own gate's job
-   * (`ExternalApps.createApp`, `writeAppProject`). Writing that check a second time here would produce two sets of
-   * rules, and whichever one is looser becomes the hole (#93).
+   * Creates a new app (M4 C-1b), the one path both `apps.create` and the Assistant's `create_app` go through. With a project:
+   * an app inside it, `.centralu/apps/<id>/` (`ExternalApps.createApp`). Without one: a new app project (#1141), a new folder
+   * `<parent>/<id>` (`~/Centralu` unless a parent is given, as for a new project) with the template written there, registered
+   * as a trusted project whose root is the app; a folder that fails to register is removed again, as it held only the template.
+   * Checking the name, trust and whether an id already exists is the runtime's own gate's job (`ExternalApps.createApp`,
+   * `writeAppProject`): writing that check a second time here would produce two sets of rules, and whichever one is looser
+   * becomes the hole (#93).
    */
   async createApp(params: {
     projectId: string | null
@@ -199,22 +191,13 @@ export class AppSessions {
   }
 
   /**
-   * Stands up an app's builder session (M4 C-2) — returns the existing one if there already is one (one per
-   * app).
-   *
-   *   Project app       cwd = **the project root**. Handoff notes, file links and history catch-up all
-   *                     assume the project root — using the app's folder as cwd breaks all of them
-   *                     (the plan's C-2). Where the app lives and what its rules are is told to it
-   *                     through the role text.
-   *   User-folder app   cwd = the app's own folder. There is no project to fall back to (P-6 already
-   *                     made this kind of session possible).
-   *
-   * The caller picks the tool, and if it does not, the project's default tool is used (for a
-   * user-folder app, the Assistant's own tool). The session's app slot (`appId`) is set to that
-   * app — it stands under the app in the sidebar. The preset is `auto`, the default every new session
-   * gets (owner decision 2026-11-05; it was `normal`, so a session that edits an app's code asked the person). No builder is stood up for an
-   * app in an untrusted project — that app cannot even launch, so there is nothing to test even if a builder
-   * existed.
+   * Stands up an app's builder session (M4 C-2); returns the existing one if there is one (one per app). A project app: cwd is
+   * **the project root**, as handoff notes, file links and history catch-up all assume it (the plan's C-2) and break with the
+   * app's folder as cwd; the role text tells it where the app lives and what its rules are. A user-folder app: cwd is the app's
+   * own folder, as there is no project to fall back to (P-6). The caller picks the tool, else the project's default is used
+   * (for a user-folder app, the Assistant's own). The session's app slot (`appId`) is set to the app, so it stands under the
+   * app in the sidebar. The preset is `auto`, the default every new session gets (owner decision 2026-11-05). No builder is
+   * stood up for an app in an untrusted project: that app cannot launch, so there is nothing to test.
    */
   async createAppBuilder(ref: AppRef, tool?: ToolName): Promise<SessionInfo> {
     const existing = this.builderOf(ref)
@@ -358,34 +341,15 @@ export class AppSessions {
   }
 
   /**
-   * Runs an agent an app asked for (M4 D-1, plan decision 6) — stands up **a new session per
-   * request** under that app, and returns the answer once the turn ends.
-   *
-   * Why a new one is stood up per request: Claude's structured output (`outputFormat`) is only ever
-   * fixed at the start of a query. Different requests can have different schemas, and if several
-   * requests piled up in one session, an earlier request would bleed into a later answer.
-   *
-   *   Location  That project (cwd is the project root) for a project app; for a user-folder app, the
-   *             Assistant's own empty folder with no project, the same as a coordinator session.
-   *             The session's app slot (`appId`) is set to that app.
-   *   Preset    **`auto`**, the default every new session gets (owner decision 2026-11-05), but never
-   *             above any session with a call open into the app (`appAgentPreset`); it was always
-   *             `safe` before (see the comment where the session is made).
-   *   Text      Sent as the app's own text, not the person's — recorded in the conversation as a
-   *             message the app sent (`fromApp`), and reaches the agent wrapped in the same frame as
-   *             an inline view's message (`appMessageFrame`, every line contained in a quote) with the
-   *             "work an app asked for" header (the rule from #120).
-   *   Apps      None are attached (see the comment on `appsFor`).
-   *
-   * **When it finishes, its process is closed and it is left `idle`**, never `waiting_input`, so it never appears in
-   * the inbox: a turn whose answer an app has already collected is not a turn waiting on a person's reply. Once the
-   * desk has closed the run as `ok`, the session is deleted and its record kept in the session archive (`agentRunEnded`, #378),
-   * unless the person took part in it. (The plan's "archive it" went with the archive, FR-20: a hidden session was
-   * indistinguishable from a deleted one. An app calling run_agent a few dozen times a day then filled the sidebar.)
-   *
-   * A cancellation (the requesting call was canceled, or something upstream in the chain stopped)
-   * interrupts that session. If the person stops or deletes that session directly, the wait also ends,
-   * carrying a reason.
+   * Runs an agent an app asked for (M4 D-1, plan decision 6): stands up **a new session per request** under that app and
+   * returns the answer once the turn ends. New per request: Claude's structured output (`outputFormat`) is fixed at the start
+   * of a query, and requests can have different schemas, so several piled up in one session would bleed an earlier request into
+   * a later answer. Its cwd is the project root for a project app, the Assistant's own empty folder for a user-folder app; its
+   * app slot (`appId`) is that app, and no apps are attached (`appsFor`). Its text is the app's own, not the person's
+   * (`fromApp`, framed by `appMessageFrame`, #120). **When it finishes its process is closed and it is left `idle`**, never
+   * `waiting_input`: a turn whose answer an app has collected is not a turn waiting on a person, so it never appears in the
+   * inbox; what becomes of the session is `agentRunEnded`'s. A cancellation (the call canceled, or something upstream stopped)
+   * interrupts it; the person stopping or deleting it ends the wait too, with a reason.
    */
   async runAppAgent(
     req: AgentRunRequest,
@@ -428,18 +392,16 @@ export class AppSessions {
     }
 
     /*
-     * **The preset is `auto`**, the default every new session gets (owner decision 2026-11-05), **never above the lowest
-     * preset among the sessions with a call open into the app now** (`appAgentPreset`, `AppCalls.agentCallers`), whatever
-     * run id the app cites: while a `safe` session's call is open, every agent the app starts is `safe`, so no session
-     * gains through an app what its own preset withholds. An inline view counts as its conversation's session; through
-     * `call_app` an app is held as its caller is. Only calls from a screen opened in the window, with no session's call
-     * open, give `auto`; a call whose chain can no longer be followed, or nothing open at all, gives `safe`.
-     *
-     * It was always `safe` before (and `normal` before that, the plan's decision 6), because this prompt was never written
-     * by the person: the app's code sent it, and data the app pulled in from outside can be mixed into it (a prompt
-     * injection channel). What holds it besides the preset: no Centralu server and no apps (`session-app-wiring.ts`), no
-     * Centralu updates (`updates-asked.ts`), the project's trust for its files (`launch-inputs.ts`), and no other session
-     * answers a card raised here (`answersApproval`, routed-cards.ts). The person may lower it in the session's settings.
+     * **The preset is `auto`**, the default every new session gets (owner decision 2026-11-05), **never above the lowest preset
+     * among the sessions with a call open into the app now** (`appAgentPreset`, `AppCalls.agentCallers`), whatever run id the
+     * app cites: no session gains through an app what its own preset withholds. An inline view counts as its conversation's
+     * session; through `call_app` an app is held as its caller is. Only calls from a screen opened in the window, with no
+     * session's call open, give `auto`; a call whose chain can no longer be followed, or nothing open at all, gives `safe`. Not
+     * `safe` always, though the prompt is not the person's (the app's code sent it, and data pulled in from outside can be
+     * mixed into it: a prompt injection channel): it is held besides by no Centralu server and no apps
+     * (`session-app-wiring.ts`), no Centralu updates (`updates-asked.ts`), the project's trust for its files
+     * (`launch-inputs.ts`), and no other session answering a card raised here (`answersApproval`, routed-cards.ts). The person
+     * may lower it in the session's settings.
      */
     const info = await this.host.createSession({
       projectId: req.app.projectId,
@@ -483,9 +445,9 @@ export class AppSessions {
       else await this.host.deliver(id, req.prompt, undefined, undefined, false, { appId: req.app.appId, projectId: req.app.projectId, name: req.appName }, 'request')
       const { output } = await wait.done
       /*
-       * Held from the answer until the desk says how the run ended (`agentRunEnded`) and the delete that may follow is
-       * final: only an answer can end it cleanly, and the person opening or writing to the session at any moment in
-       * between (its process's close included, which takes a real CLI up to seconds) makes it theirs (#378 review)
+       * Held from the answer until the desk says how the run ended (`agentRunEnded`) and the delete that may follow is final:
+       * only an answer can end it cleanly, and the person opening or writing to the session at any moment in between (its
+       * process's close included, which takes a real CLI up to seconds) makes it theirs
        */
       this.answeredRuns.set(id, { appName: req.appName, wait })
       // The answer is read from the store — what a person sees in that session and what the app receives are
@@ -516,10 +478,11 @@ export class AppSessions {
   }
 
   /**
-   * A run_agent run is over (#378): its session is deleted when the run ended cleanly and nobody took part in it, and
-   * what it did is kept in the session archive as the run's record (the app's request, the answer, the whole conversation). It
-   * stays, as before, when the run failed, was stopped or cancelled (the person needs to see what went wrong), when a
-   * card was shown during it, or when the person opened it or wrote to it.
+   * A run_agent run is over (#378): its session is deleted when the run ended cleanly and nobody took part in it, and what it
+   * did is kept in the session archive as the run's record (the app's request, the answer, the whole conversation). It stays
+   * when the run failed, was stopped or cancelled (the person needs to see what went wrong), when a card was shown during it,
+   * or when the person opened it or wrote to it. It is deleted, not hidden (FR-20): a hidden session was indistinguishable from
+   * a deleted one, and an app calling run_agent a few dozen times a day filled the sidebar.
    */
   async agentRunEnded(run: { runId: string; sessionId: string; status: string }): Promise<void> {
     const answered = this.answeredRuns.get(run.sessionId)
@@ -620,10 +583,9 @@ export class AppSessions {
 }
 
 /**
- * What an app's `git.status` answers for a project's git summary (`HOST_CAPABILITIES`).
- *
- * A summary git did not answer (`unknown`, #850 review) is an error with its reason, not "no branch, no changes": an
- * app would act on a clean tree that is not known to be clean. A count the host stopped at its cap says so (`more`).
+ * What an app's `git.status` answers for a project's git summary (`HOST_CAPABILITIES`). A summary git did not answer
+ * (`unknown`, #850) is an error with its reason, not "no branch, no changes": an app would act on a clean tree that is not
+ * known to be clean. A count the host stopped at its cap says so (`more`).
  */
 export async function gitStatusForApp(
   summary: GitSummary,

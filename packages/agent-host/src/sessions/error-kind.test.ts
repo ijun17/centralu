@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { errorKind, planLimitResetAt } from './error-kind.js'
 
-// The kind is all of an error's text another session's model reads (#1186 review); the rest is the tool's words
+// The kind is all of an error's text another session's model reads (#1186); the rest is the tool's words
 describe('the kind of an error', () => {
   it.each([
     ['API Error: 529 {"type":"overloaded_error"}', 'overloaded'],
