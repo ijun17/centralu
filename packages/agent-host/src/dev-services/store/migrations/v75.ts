@@ -68,6 +68,20 @@ export class StepsV75 extends MigrationRange {
           if (cols.some((c) => c.name === 'mail_args')) this.db.exec(`ALTER TABLE sessions DROP COLUMN mail_args`)
         },
       },
+      {
+        to: 77,
+        breaksOlderReaders: false,
+        /**
+         * When a task a turn took in while it ran was given again at rest (#2369, docs/plans/mailbox.md §10.6.3): `mail_recipients.given_again_at`,
+         * null once the task is delivered again. Its next frame says so (`givenAgain="1"`), and a call waiting on it reads the turn it joined as still
+         * working. A column of its own: `last_error` is the last delivery's error, which a failed try overwrites while the task waits.
+         *
+         * **Expand only (#292's rule).** One nullable column. An older build names its columns in every write of `mail_recipients` and reads them by
+         * name, so it never sees it: it opens the store, and a task it finds given again goes as a plain task and keeps the mark. Nothing is
+         * backfilled: no build marked one.
+         */
+        run: () => this.addColumn('mail_recipients', 'given_again_at', 'INTEGER'),
+      },
     ]
   }
 

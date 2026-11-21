@@ -329,15 +329,17 @@ export class SessionEvents {
     // The end of a turn an update cut, before its Continue is in, is not the work's stop: the continued turn's end answers
     const continuing = !!e.sessionId && this.host.restartPolicy.continuingTurns.has(e.sessionId)
     const stopWhy = workEnded && e.sessionId && !continuing ? stopOf(e, nowInterrupted) : null
+    // It ended as a turn does: its work's end, not stopped
+    const ended = workEnded && !stopWhy
     // The mail given into the turn that it did not take waits in the tool for a turn after, and is not this turn's (§10.6.3); one whose process went took all with it
-    if (endedTurn && e.sessionId) this.host.mailTurnInputs(e.sessionId, { took: processWent ? undefined : taken, finished: workEnded && !continuing && !stopWhy })
+    if (endedTurn && e.sessionId) this.host.mailTurnInputs(e.sessionId, { took: processWent ? undefined : taken, finished: ended && !continuing })
     if (stopWhy && e.sessionId) {
       this.host.reports.turnStopped(e.sessionId)
       // A stop Centralu waits to continue is told when the wait ends (#1415: told once, when the work continues)
       const held = heldToContinue(nowInterrupted)
       this.host.mailStopped(e.sessionId, stopWhy, { ...this.stopTold(e.sessionId, waited, delegation?.callerId), ...(held ? { held } : {}) })
-    } else if (workEnded && e.sessionId) {
-      // It ended as a turn does: the requests it carried are answered (S12), and at rest its last response answers the tasks it did not reply to
+    } else if (ended && e.sessionId) {
+      // The requests it carried are answered (S12), and at rest its last response answers the tasks it did not reply to
       // (docs/plans/mailbox.md §10.6.3). A call still waiting reads its own answer as it returns, which marks the report read (`answerRecorder`)
       this.host.mailRequestTurnEnded(e.sessionId)
       this.host.reports.turnEndedAtRest(e.sessionId, !!owned?.cut)

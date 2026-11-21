@@ -59,6 +59,8 @@ export type RecipientRow = {
   held: string | null
   attempts: number
   lastError: string | null
+  /** When a turn that took this task in while it ran ended and it was given again at rest (`undeliver` with `again`, #2369); null once delivered again */
+  givenAgainAt: number | null
   turnSeq: number | null
   settled: Settled | null
   settledAt: number | null
@@ -156,6 +158,7 @@ type RecipientSql = {
   held: string | null
   attempts: number
   last_error: string | null
+  given_again_at: number | null
   turn_seq: number | null
   settled: string | null
   settled_at: number | null
@@ -169,9 +172,6 @@ type RecipientSql = {
 
 /** A `LIKE … ESCAPE '\'` pattern for what starts with `prefix` */
 const likePrefix = (prefix: string) => `${prefix.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
-
-/** The `last_error` of a task a turn took in while it ran, given again at rest (`undeliver` with `again`, #2369) */
-export const GIVEN_AGAIN = 'given_again'
 
 /** A row watched for an answer: of a needsReply message or a task (§4). `m` is the message, `r` the row */
 const WATCHED = `(m.needs_reply = 1 OR m.kind = 'task')`
@@ -511,7 +511,7 @@ export class MailboxRecords {
 
   /** The tool took them, in the turn `turnSeq` started or joined (null: delivered quietly outside a turn) */
   markDelivered(recipient: string, ids: readonly string[], at: number, turnSeq: number | null): void {
-    this.update('delivered_at = ?, last_error = NULL, turn_seq = ?', [at, turnSeq], recipient, ids)
+    this.update('delivered_at = ?, last_error = NULL, given_again_at = NULL, turn_seq = ?', [at, turnSeq], recipient, ids)
   }
 
   /** Sets why mail waits for the person (`policy`, `loop`, `failed`, `uncertain`), or clears it with null */
@@ -564,7 +564,7 @@ export class MailboxRecords {
 
   /** The person's Dismiss of `uncertain` or `failed` mail: never delivered, held against no one */
   dismiss(recipient: string, ids: readonly string[]): number {
-    return this.update(`held = 'dismissed', attempt_at = NULL, last_error = NULL, attempts = 0`, [], recipient, ids, `held IN ${RECIPIENT_HOLDS}`)
+    return this.update(`held = 'dismissed', attempt_at = NULL, last_error = NULL, given_again_at = NULL, attempts = 0`, [], recipient, ids, `held IN ${RECIPIENT_HOLDS}`)
   }
 
   /** The tool did not take them: tried again at `retryAt`, the error kept for the Inbox */
@@ -587,16 +587,16 @@ export class MailboxRecords {
 
   /**
    * A delivery the tool failed late: the rows that delivery marked delivered at `deliveredAt` are unread and undelivered again, unless held since.
-   * `again`: a task a turn took in while it ran, given again at rest (#2369): due at `dueAt`, its next frame saying it came during the turn
-   * before (`given_again`), unless settled since. Returns the ids put back
+   * `again`: a task a turn took in while it ran, given again at rest (#2369): due at `at`, marked `given_again_at` until it is delivered again,
+   * unless settled since. Returns the ids put back
    */
-  undeliver(recipient: string, ids: readonly string[], deliveredAt: number, again?: { dueAt: number }): string[] {
+  undeliver(recipient: string, ids: readonly string[], deliveredAt: number, again?: { at: number }): string[] {
     const where = `recipient = ? AND delivered_at = ? AND (held IS NULL OR held = 'released')${again ? ' AND settled IS NULL' : ''} AND message_id IN (SELECT value FROM json_each(?))`
     const args: [string, number, string] = [recipient, deliveredAt, idList(ids)]
-    const set = again ? `, attempt_at = NULL, last_error = '${GIVEN_AGAIN}', due_at = ?` : ''
+    const set = again ? `, attempt_at = NULL, given_again_at = ?, due_at = ?` : ''
     return this.transaction(() => {
       const put = this.db.prepare<[string, number, string], { message_id: string }>(`SELECT message_id FROM mail_recipients WHERE ${where}`).all(...args).map((r) => r.message_id)
-      this.db.prepare(`UPDATE mail_recipients SET delivered_at = NULL, read_at = NULL, turn_seq = NULL${set} WHERE ${where}`).run(...(again ? [again.dueAt, ...args] : args))
+      this.db.prepare(`UPDATE mail_recipients SET delivered_at = NULL, read_at = NULL, turn_seq = NULL${set} WHERE ${where}`).run(...(again ? [again.at, again.at, ...args] : args))
       return put
     })
   }
@@ -967,7 +967,7 @@ export class MailboxRecords {
              delivered_at = CASE WHEN read_at IS NULL THEN NULL ELSE delivered_at END,
              attempt_at = CASE WHEN read_at IS NULL THEN NULL ELSE attempt_at END,
              attempts = CASE WHEN read_at IS NULL THEN 0 ELSE attempts END,
-             last_error = CASE WHEN read_at IS NULL THEN NULL ELSE last_error END,
+             last_error = CASE WHEN read_at IS NULL THEN NULL ELSE last_error END, given_again_at = NULL,
              held = CASE WHEN read_at IS NULL AND held IN ${RECIPIENT_HOLDS} THEN NULL ELSE held END
            WHERE recipient = @from AND message_id IN (SELECT value FROM json_each(@ids))`,
         )
@@ -1007,7 +1007,7 @@ export class MailboxRecords {
         to,
       )
       const move = this.db.prepare(
-        `UPDATE OR IGNORE mail_recipients SET recipient = ?, delivered_at = NULL, read_at = NULL, attempt_at = NULL, turn_seq = NULL, attempts = 0, last_error = NULL,
+        `UPDATE OR IGNORE mail_recipients SET recipient = ?, delivered_at = NULL, read_at = NULL, attempt_at = NULL, turn_seq = NULL, attempts = 0, last_error = NULL, given_again_at = NULL,
            held = CASE WHEN held IN ${RECIPIENT_HOLDS} THEN NULL ELSE held END
          WHERE message_id = ? AND recipient = ?`,
       )
@@ -1382,6 +1382,7 @@ function toRecipient(r: RecipientSql): RecipientRow {
     held: r.held,
     attempts: r.attempts,
     lastError: r.last_error,
+    givenAgainAt: r.given_again_at,
     turnSeq: r.turn_seq,
     settled: r.settled === null ? null : (SETTLED.find((s) => s === r.settled) ?? 'legacy'),
     settledAt: r.settled_at,

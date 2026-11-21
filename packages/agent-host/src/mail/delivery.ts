@@ -643,7 +643,7 @@ export class MailDelivery {
        * stopped keeps it, so its giver is told of the stop; a turn cut to be continued keeps it for the turn that continues
        */
       const now = this.now()
-      if (turn.finished) for (const g of given.filter((g) => named.includes(g.id))) this.records.undeliver(recipient, g.ids.filter((id) => this.records.message(id)?.kind === 'task'), g.at, { dueAt: now })
+      if (turn.finished) for (const g of given.filter((g) => named.includes(g.id))) this.records.undeliver(recipient, g.ids.filter((id) => this.records.message(id)?.kind === 'task'), g.at, { at: now })
     }
     const ran = queued.filter((q) => named?.includes(q.id))
     const ids = ran.flatMap((q) => q.ids)

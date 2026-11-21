@@ -156,8 +156,8 @@ describe("a child's turn and the call waiting on it", () => {
   let cards: RoutedCard[] = []
   let raiseCard: () => void = () => {}
   let interrupted: string[] = []
-  /** What the calls said they answered of a caller's task (`ChildOwnership.answered`): `how` absent, the task is left open */
-  let answered: { callerId: string; childId: string; how?: AnswerGiven }[] = []
+  /** What the calls said they answered of a caller's task (`ChildOwnership.answered`): `how` absent, the task is left open; `taskId`, the task waited on */
+  let answered: { callerId: string; childId: string; how?: AnswerGiven; taskId?: string }[] = []
   /** The mailbox says the caller's task joined the turn and is given again (`answerRecorder`, #2369): that turn's answer is not the task's */
   let givenAgain = false
   let agentRuns: Map<string, AgentRunWait>
@@ -171,8 +171,8 @@ describe("a child's turn and the call waiting on it", () => {
     interrupted = []
     answered = []
     givenAgain = false
-    children.onAnswered((callerId, childId, how) => {
-      answered.push({ callerId, childId, ...(how ? { how } : {}) })
+    children.onAnswered((callerId, childId, how, taskId) => {
+      answered.push({ callerId, childId, ...(how ? { how } : {}), ...(taskId ? { taskId } : {}) })
       return !givenAgain
     })
     agentRuns = new Map()
@@ -247,9 +247,12 @@ describe("a child's turn and the call waiting on it", () => {
     givenAgain = true
     const flow = flowWith()
     const d = flow.startDelegation('caller>child', 'caller', 'child', target(), true)
+    d.taskId = 't2'
     finishes('Done with the work the turn began with.')
     expect(await flow.awaitAgent('caller>child', d)).toMatchObject({ ok: true, state: 'working', reported: true })
     expect(readGrants.size).toBe(0)
+    // The mailbox is asked of the task this call gave, not the caller's newest (an earlier call's task may have started that turn)
+    expect(answered).toEqual([{ callerId: 'caller', childId: 'child', how: { ok: true, text: 'Done with the work the turn began with.' }, taskId: 't2' }])
   })
 
   it('a turn that fails mid-way answers that it did not finish, and the call records that it told its caller', async () => {

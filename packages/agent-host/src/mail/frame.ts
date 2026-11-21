@@ -133,7 +133,7 @@ export type MessageFrameItem = {
   /** The body, only when the words flow down */
   inline?: string
   maybeRepeated?: boolean
-  /** A task the receiver's last turn took in while it ran, given again at rest (`MailboxRecords.undeliver` with `again`, #2369) */
+  /** A task a turn of the receiver took in while it ran, given again at rest (`RecipientRow.givenAgainAt`, #2369) */
   givenAgain?: boolean
 }
 

@@ -6,7 +6,7 @@ import { asObj, tryParseJson } from '../json-value.js'
 import { isHubSender } from './hub-sender.js'
 import { isSessionId } from '../mail/address.js'
 import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
-import type { AnswerGiven } from '../mail/delegation.js'
+import type { AnswerGiven, GivenTask } from '../mail/delegation.js'
 import type { TurnSource, TurnStart } from '../mail/turns.js'
 import type { AgentStartRecord } from './agent-start-record.js'
 
@@ -33,6 +33,8 @@ export type Delegation = {
   stop(why: string): void
   /** A child start_agent started in the caller's own project (#561), rather than ask_project's delegated session */
   agent?: boolean
+  /** The caller's task this delegation gave, when the mailbox wrote it down: the one its calls wait on (`ChildOwnership.answered`) */
+  taskId?: string
   /** How many of the caller's calls are waiting on it right now (`awaitAgent`, `awaitDelegation`) */
   waiters?: number
   /** The owner's calls waiting on it now, ended when a handoff gives it to another session (#693) */
@@ -169,7 +171,7 @@ export class ChildOwnership {
   constructor(private readonly store: OwnershipStore) {}
 
   /** The mailbox's way of hearing that a session gave another one work (docs/plans/mailbox.md §8.1), set by the host when it has one */
-  private delegatedHook: ((callerId: string, childId: string, origin: ThreadOrigin, task: string) => (() => void) | undefined) | undefined
+  private delegatedHook: ((callerId: string, childId: string, origin: ThreadOrigin, task: string) => GivenTask | undefined) | undefined
   onDelegated(hook: ChildOwnership['delegatedHook']): void {
     this.delegatedHook = hook
   }
@@ -245,7 +247,7 @@ export class ChildOwnership {
   }
 
   /** The mailbox's way of hearing that a call returned the answer of work it gave (§8.1), set by the host when it has one */
-  private answeredHook: ((callerId: string, childId: string, how?: AnswerGiven) => boolean) | undefined
+  private answeredHook: ((callerId: string, childId: string, how?: AnswerGiven, taskId?: string) => boolean) | undefined
   onAnswered(hook: ChildOwnership['answeredHook']): void {
     this.answeredHook = hook
   }
@@ -253,12 +255,13 @@ export class ChildOwnership {
   /**
    * A call of `callerId` returned what `childId` answered (`how`: it finished with this text, or its turn failed with this reason), or
    * read where it stands without one: the reports the mailbox holds for the caller are settled, and the thread is reported on by the call.
-   * Returns false when that turn does not answer the caller's task (it joined the turn and is given again, #2369). Never throws
+   * Returns false when that turn does not answer the task the call waited on (`taskId`, else the caller's newest): it joined the turn and is given
+   * again (#2369). Never throws
    */
-  answered(callerId: string, childId: string, how?: AnswerGiven): boolean {
+  answered(callerId: string, childId: string, how?: AnswerGiven, taskId?: string): boolean {
     if (callerId === childId || !this.answeredHook) return true
     try {
-      return this.answeredHook(callerId, childId, how)
+      return this.answeredHook(callerId, childId, how, taskId)
     } catch (e) {
       console.error(`[mail] could not settle what ${callerId.slice(0, 8)} read of ${childId.slice(0, 8)} (${errorMessage(e)})`)
       return true
@@ -267,23 +270,26 @@ export class ChildOwnership {
 
   /**
    * `callerId` gave `childId` this task by `origin`, delivered by the host: the mailbox writes it down, in step with the old path
-   * (a thread the caller owns and the child is assigned, `running`). Returns how to withdraw it, for a task written before its words go in
-   * (start_agent's) that could not go in. Neither throws: the mailbox must not break a delegation
+   * (a thread the caller owns and the child is assigned, `running`). Returns the task's id, none when nothing was written, and how to withdraw it,
+   * for a task written before its words go in (start_agent's) that could not go in. Neither throws: the mailbox must not break a delegation
    */
-  delegated(callerId: string, childId: string, origin: ThreadOrigin, task: string): () => void {
-    if (callerId === childId || !this.delegatedHook) return () => {}
+  delegated(callerId: string, childId: string, origin: ThreadOrigin, task: string): GivenTask {
+    if (callerId === childId || !this.delegatedHook) return { withdraw: () => {} }
     try {
-      const withdraw = this.delegatedHook(callerId, childId, origin, task)
-      return () => {
-        try {
-          withdraw?.()
-        } catch (e) {
-          console.error(`[mail] could not withdraw the work ${callerId.slice(0, 8)} gave ${childId.slice(0, 8)} (${errorMessage(e)})`)
-        }
+      const given = this.delegatedHook(callerId, childId, origin, task)
+      return {
+        ...(given?.taskId ? { taskId: given.taskId } : {}),
+        withdraw: () => {
+          try {
+            given?.withdraw()
+          } catch (e) {
+            console.error(`[mail] could not withdraw the work ${callerId.slice(0, 8)} gave ${childId.slice(0, 8)} (${errorMessage(e)})`)
+          }
+        },
       }
     } catch (e) {
       console.error(`[mail] could not write down the work ${callerId.slice(0, 8)} gave ${childId.slice(0, 8)} (${errorMessage(e)})`)
-      return () => {}
+      return { withdraw: () => {} }
     }
   }
 

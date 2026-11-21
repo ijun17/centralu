@@ -1,4 +1,4 @@
-import { GIVEN_AGAIN, type MailRow, type MailboxRecords } from '../dev-services/store/mailbox.js'
+import type { MailRow, MailboxRecords } from '../dev-services/store/mailbox.js'
 import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
 import { PERSON, isPerson, parseAddress } from './address.js'
 import type { DelegationOrigin, MessageService } from './messages.js'
@@ -15,14 +15,17 @@ import { ANSWER_KEPT_CHARS, answerKept, clipped, reportWords } from './last-resp
  * started is that task's. Each delegation is its own task. Both are sessions of this host: work for a session on a linked machine crosses as a task (`LinkedTasks`).
  * Returns how to withdraw the task when its words could not go in after all (start_agent writes it before they go in, §10.6.3).
  */
-export function delegationRecorder(mail: MessageService, turns?: MailTurns): (callerId: string, childId: string, origin: ThreadOrigin, task: string) => () => void {
+export function delegationRecorder(mail: MessageService, turns?: MailTurns): (callerId: string, childId: string, origin: ThreadOrigin, task: string) => GivenTask {
   return (callerId, childId, origin, task) => {
     const caller = mail.sessionAddress(callerId)
     const written = mail.task(caller, mail.sessionAddress(childId), { text: task, origin: delegationOrigin(origin), delivered: true })
     turns?.attach(childId, written.id, callerId)
-    return () => void mail.done(caller, written.id)
+    return { taskId: written.id, withdraw: () => void mail.done(caller, written.id) }
   }
 }
+
+/** The task a session gave another, by its id (none when nothing was written down), and how to withdraw it when its words could not go in */
+export type GivenTask = { taskId?: string; withdraw: () => void }
 
 /** How a task given a session on another computer stands, as its copy here says (`LinkedTasks.standing`) */
 export type TaskStanding =
@@ -217,11 +220,12 @@ export type AnswerGiven = { ok: true; text: string } | { ok: false; error: strin
 /**
  * What the mailbox does when a call returns the answer of work a session gave another, or reads where it stands (§9.6): the reports on the caller's
  * tasks to the child are read. A call that returned how the turn ended is the report: it is written on the task as told (delivered and read), which
- * settles it, so nothing wakes the caller for news the call already gave. Returns false when that turn does not answer the task: it joined the turn
- * and is given again (`MailboxRecords.undeliver` with `again`, #2369), so only a turn it starts answers it, and the call reads as still working
+ * settles it, so nothing wakes the caller for news the call already gave. `taskId`: the task the call waited on, else the caller's newest open one.
+ * Returns false when that turn does not answer the task: it joined the turn and is given again (`RecipientRow.givenAgainAt`, #2369), so only a turn
+ * it starts answers it, and the call reads as still working, whatever else the turn left (its own background work, work handed on)
  */
-export function answerRecorder(mail: MessageService, records: MailboxRecords): (callerId: string, childId: string, how?: AnswerGiven) => boolean {
-  return (callerId, childId, how) => {
+export function answerRecorder(mail: MessageService, records: MailboxRecords): (callerId: string, childId: string, how?: AnswerGiven, taskId?: string) => boolean {
+  return (callerId, childId, how, taskId) => {
     const owner = mail.sessionAddress(callerId)
     // A hub's session a machine asked (`LinkedTasks.keep`), by its address
     const child = childId.startsWith('session:') ? childId : mail.sessionAddress(childId)
@@ -229,13 +233,15 @@ export function answerRecorder(mail: MessageService, records: MailboxRecords): (
     const reports = records.unreadFor(owner).filter((p) => p.message.kind === 'report' && reportOnTaskTo(records, p.message, owner, child)).map((p) => p.message.id)
     records.markDelivered(owner, reports, now, null)
     records.markRead(owner, reports, now)
-    const task = records.newestTask(owner, child)
+    const id = taskId ?? records.newestTask(owner, child)?.id
+    const row = id === undefined ? undefined : records.recipient(id, child)
+    if (!row || row.settled !== null) return true
+    if (row.givenAgainAt !== null) return false
     // Work the child handed on in it is still open (§9.4): the task stays open, and the turn that work's answer starts answers it (§10.6.3)
-    if (!how || !task || (how.ok && records.handedOn(task.id).length > 0)) return true
-    if (records.recipient(task.id, child)?.lastError === GIVEN_AGAIN) return false
+    if (!how || (how.ok && records.handedOn(row.messageId).length > 0)) return true
     const outcome = how.ok ? ('finished' as const) : ('failed' as const)
     const answer = how.ok ? clipped(how.text, ANSWER_KEPT_CHARS) : undefined
-    const written = mail.report(task.id, {
+    const written = mail.report(row.messageId, {
       outcome,
       body: reportWords(childId, { outcome, answer: answerKept(answer, ANSWER_KEPT_CHARS), ...(how.ok ? {} : { kind: how.error }) }),
       ...(how.ok ? { answer } : { error: how.error }),
