@@ -21,8 +21,8 @@
 export const EXCEPTIONS = {
   comments: {
     'packages/protocol/src/semver.ts': {
-      counts: { header: 1 },
-      reason: { header: 'It names eslint.config.js, so scripts/tier.mjs reads it as a comment a tool reads and any edit is judged as code; it shrinks when the judge stops matching a bare mention of eslint (#2355)' },
+      counts: { block: 1 },
+      reason: { block: 'It names eslint.config.js, so scripts/tier.mjs reads it as a comment a tool reads and any edit is judged as code; it shrinks when the judge stops matching a bare mention of eslint (#2355)' },
     },
     'packages/ui/src/app/useLoad.ts': {
       counts: { block: 1 },
