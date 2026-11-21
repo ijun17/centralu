@@ -20,9 +20,9 @@ import { removeTree } from '../temp-dir.test-helpers.js'
  * managed `centralu.cmd` launcher all run for real (windows-remote.test-helpers.ts says what is a stand-in).
  */
 
-export const SERVE_MJS = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../packaging/npm/centralu/bin/serve.mjs')
+const SERVE_MJS = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../packaging/npm/centralu/bin/serve.mjs')
 export const SERVE_SHIM = `export { managedLauncherScript } from ${JSON.stringify(pathToFileURL(SERVE_MJS).href)}\n`
-export const RUN_IT = (version: string) => `console.log(JSON.stringify({ ran: '${version}', argv: process.argv.slice(2), managed: process.env.CENTRALU_MANAGED ?? null }))\n`
+const RUN_IT = (version: string) => `console.log(JSON.stringify({ ran: '${version}', argv: process.argv.slice(2), managed: process.env.CENTRALU_MANAGED ?? null }))\n`
 
 /** The fake registry, the Windows "remote" and the commands the hub runs there; call it inside the suite that uses them (it adds that suite's hooks) */
 export function windowsRemote() {

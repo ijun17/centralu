@@ -10,9 +10,9 @@ import { rpcError } from '../rpc-error.js'
  * open the RPC door. WebSocket upgrades never pass here: `ws` takes the `upgrade` event, with its own origin check and handshake (server.ts)
  */
 
-export type HttpMethod = 'GET' | 'HEAD' | 'POST' | 'PUT' | 'DELETE'
+type HttpMethod = 'GET' | 'HEAD' | 'POST' | 'PUT' | 'DELETE'
 
-export type HttpRequest = {
+type HttpRequest = {
   method: string
   // Percent-encoding is not decoded
   path: string
@@ -21,7 +21,7 @@ export type HttpRequest = {
   params: readonly string[]
 }
 
-export type HttpResponse = {
+type HttpResponse = {
   status: number
   headers?: Readonly<Record<string, string>>
   body?: string | Buffer
@@ -46,7 +46,7 @@ export type HttpGate = {
  * The minimum secret length: a 32-byte random value in base64url is 43 characters (main.ts). This door entrusts all its
  * authentication to this one segment
  */
-export const SECRET_MIN_LENGTH = 32
+const SECRET_MIN_LENGTH = 32
 const SECRET_CHARS = /^[A-Za-z0-9_-]+$/
 
 /**

@@ -14,7 +14,7 @@ import { tryParseJson } from '../json-value.js'
 export type AutostartAction = 'on' | 'off' | 'remove' | 'status'
 
 /** Why a machine could not be asked at all, as opposed to a refusal: uninstall goes on past these */
-export type AutostartUnasked = 'not_found' | 'too_old'
+type AutostartUnasked = 'not_found' | 'too_old'
 
 /** `{ v: 1, autostart: { ok, on, how, linger, message? } }`, the line `serve --autostart` prints; null when there is none */
 export function parseAutostartLine(stdout: string): { ok: boolean; state: RemoteAutostart; message: string | null } | null {

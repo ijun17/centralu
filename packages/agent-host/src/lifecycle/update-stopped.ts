@@ -8,7 +8,7 @@ import { isObj } from '../json-value.js'
  * person. All of it dies with the process and none of it is anything the person chose, so the agent is told which, in
  * Centralu's own note, and decides what to start or ask again. Kept in the update-resume list beside the turns
  */
-export type StoppedTask = { kind: BackgroundTaskKind; description: string; command?: string }
+type StoppedTask = { kind: BackgroundTaskKind; description: string; command?: string }
 
 /** One session as the stop left it: `seq` is the last row of its conversation then, the mark the turns are continued by */
 export type Stopped = { id: string; seq: number; tasks: StoppedTask[]; approvals: boolean; questions: string[] }

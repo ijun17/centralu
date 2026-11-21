@@ -60,7 +60,7 @@ const SETUP_TIMEOUT_MS = 90_000
  * How long deleting a hub's child waits for a turn the hub just stopped to end (#1161 item 3): an interrupt reaches the
  * tool at once, and its turn's end comes a moment later. Past it the worktree stays, said as such.
  */
-export const STOPPING_WAIT_MS = 10_000
+const STOPPING_WAIT_MS = 10_000
 
 /**
  * A worktree session started on a branch that was there before it (#1662), by session id: its cleanup keeps that branch,

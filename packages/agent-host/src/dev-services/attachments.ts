@@ -68,7 +68,7 @@ export async function attachmentBytes(sessionId: string): Promise<number> {
 }
 
 /** The cap on total size — once images started persisting (#40), they could accumulate without limit. The owner's decision: 500MB */
-export const ATTACHMENTS_MAX_BYTES = 500 * 1048576
+const ATTACHMENTS_MAX_BYTES = 500 * 1048576
 
 /**
  * Once the cap is exceeded, **the oldest files are deleted first.** The database's path reference

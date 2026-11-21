@@ -31,7 +31,7 @@ export function bridgeSessionOf(hostToken: string, given: string): string | null
 }
 
 /** Every RPC the bridge sends (centralu-bridge.mjs) and nothing more: each names its `sessionId`, and the host judges what that session may do */
-export const BRIDGE_METHODS: ReadonlySet<string> = new Set([
+const BRIDGE_METHODS: ReadonlySet<string> = new Set([
   'orchestrator.tools',
   'orchestrator.tool',
   'assistant.tools',

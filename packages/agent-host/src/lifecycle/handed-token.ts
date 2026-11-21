@@ -12,7 +12,7 @@ import { asObj, tryParseJson } from '../json-value.js'
  */
 
 /** How long the host waits for the line before it gives up: the launcher writes it right after the spawn */
-export const HANDED_TOKEN_WAIT_MS = 10_000
+const HANDED_TOKEN_WAIT_MS = 10_000
 
 /** The longest line taken as the token line; a token is 32 hex characters */
 const MAX_TOKEN_LINE = 4096

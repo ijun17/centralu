@@ -8,7 +8,7 @@ import type { Os } from '../../os/port.js'
  * How long a copy is kept (#2304, the owner's decision): long enough to notice what an update broke and go back, short
  * enough that a file the size of the store does not stay for good.
  */
-export const COPY_KEPT_MS = 14 * 24 * 60 * 60 * 1000
+const COPY_KEPT_MS = 14 * 24 * 60 * 60 * 1000
 
 /** The free space a copy is made with, in store sizes: the copy itself and as much again for the store to keep working */
 const FREE_STORE_SIZES = 2

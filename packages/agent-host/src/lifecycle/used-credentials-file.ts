@@ -15,7 +15,7 @@ import { encodeUsedRecord, parseUsedRecords, type UsedCredentials, type UsedReco
  * hello goes on, since refusing it would stop the person's own window and every agent's work (the owner ruled it out); the
  * in-memory record and the event to the hubs still happen.
  */
-export const USED_CREDENTIALS_FILE = 'serve-used.jsonl'
+const USED_CREDENTIALS_FILE = 'serve-used.jsonl'
 
 /** The file of used credentials that sits beside the `serve.json` at `serveState` */
 export function usedCredentialsPath(serveState: string, os: Os): string {
@@ -31,7 +31,7 @@ const REWRITE_AT = 4
  * report must not hold the host's event loop for it: past this, the older part is skipped (and said) and the newest read. A
  * record is under 300 bytes, so this holds thousands
  */
-export const READ_AT_MOST = 1 << 20
+const READ_AT_MOST = 1 << 20
 
 const NEWLINE = 0x0a
 

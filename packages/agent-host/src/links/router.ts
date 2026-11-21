@@ -111,7 +111,7 @@ export class MachineUnreachableError extends Error {
   }
 }
 
-export class NotOnRemoteError extends Error {
+class NotOnRemoteError extends Error {
   readonly code = 'internal'
   readonly retryable = false
   constructor(method: string) {
@@ -119,7 +119,7 @@ export class NotOnRemoteError extends Error {
   }
 }
 
-export class AcrossMachinesError extends Error {
+class AcrossMachinesError extends Error {
   readonly code = 'internal'
   readonly retryable = false
   constructor(method: string) {

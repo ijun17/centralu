@@ -87,7 +87,7 @@ export const SYSTEM_END_LEAD_MS = 30_000
 export const SYSTEM_END_TAIL_MS = 2 * 60_000
 
 /** Whether something stamped `ts` happened in the system's end */
-export const inSystemEnd = (end: SystemEnd | null | undefined, ts: number): boolean =>
+const inSystemEnd = (end: SystemEnd | null | undefined, ts: number): boolean =>
   !!end && ts >= end.at - SYSTEM_END_LEAD_MS && ts <= end.at + SYSTEM_END_TAIL_MS
 
 /**

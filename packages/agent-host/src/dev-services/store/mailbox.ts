@@ -20,9 +20,9 @@ import { oneRow } from './rows.js'
 
 export const MAIL_KINDS = ['message', 'task', 'report', 'notice'] as const
 export type MailKind = (typeof MAIL_KINDS)[number]
-export const SETTLED = ['answered', 'done', 'withdrawn', 'reported', 'gone', 'legacy'] as const
+const SETTLED = ['answered', 'done', 'withdrawn', 'reported', 'gone', 'legacy'] as const
 export type Settled = (typeof SETTLED)[number]
-export { MailFacts, RELEASE_WHY, type ReleaseWhy }
+export { MailFacts, type ReleaseWhy }
 
 export type MailRow = {
   id: string
@@ -193,9 +193,9 @@ export const isRoleVia = (via: unknown): boolean => (ROLE_VIA_WORDS as readonly 
 const ROLE_VIAS = `(${ROLE_VIA_WORDS.map((w) => `'${w}'`).join(', ')})`
 
 /** Holds about one recipient's delivery: let go when a row moves to another recipient, for delivery to judge again */
-export const RECIPIENT_HOLD_WORDS = ['uncertain', 'failed', 'loop', 'policy'] as const
+const RECIPIENT_HOLD_WORDS = ['uncertain', 'failed', 'loop', 'policy'] as const
 /** `RECIPIENT_HOLD_WORDS` as an SQL list, for `held IN ...` */
-export const RECIPIENT_HOLDS = `(${RECIPIENT_HOLD_WORDS.map((w) => `'${w}'`).join(', ')})`
+const RECIPIENT_HOLDS = `(${RECIPIENT_HOLD_WORDS.map((w) => `'${w}'`).join(', ')})`
 
 /** The hold of a sender's copy of mail across while its link is down (docs/plans/linked-mail.md §12): its sender acts on it, never the person */
 export const LINK_HOLD = 'link' as const
@@ -1413,7 +1413,7 @@ function toRecipient(r: RecipientSql): RecipientRow {
  * known key whose value is not the shape §5.4 gives is left out, alone; a key a newer build added is kept. A v61
  * `waitingOn` (the thread ids still going, §6.3) reads as their count
  */
-export function factsFrom(raw: unknown): MailFacts {
+function factsFrom(raw: unknown): MailFacts {
   if (!isObj(raw)) return {}
   const out: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(raw)) {
@@ -1425,7 +1425,7 @@ export function factsFrom(raw: unknown): MailFacts {
 }
 
 /** A question's choices as stored (`mail.choices`, #1630): a JSON array of 2 to 6 strings; null, or anything that does not read as that, is none (stored-shapes.md rule 3) */
-export function choicesFrom(raw: string | null): MailChoices | null {
+function choicesFrom(raw: string | null): MailChoices | null {
   if (raw === null) return null
   const parsed = MailChoices.safeParse(parseJson(raw))
   return parsed.success ? parsed.data : null

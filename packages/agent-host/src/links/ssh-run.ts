@@ -65,9 +65,9 @@ export type SshRunOptions = {
 }
 
 /** The most characters an asking ssh may print on stdout before it is stopped: the answers read from it are a line or a log tail */
-export const SSH_STDOUT_LIMIT = 1024 * 1024
+const SSH_STDOUT_LIMIT = 1024 * 1024
 /** How much of the end of an asking ssh's stderr is kept */
-export const SSH_STDERR_KEEP = 64 * 1024
+const SSH_STDERR_KEEP = 64 * 1024
 /**
  * Stops an ssh and what it started (a `ProxyCommand`, `ProxyJump`'s second ssh) with the shared stop (TERM to the tree, KILL
  * to what is left after `graceMs`, the default the one every run uses). Resolves once it has exited; a child that has already

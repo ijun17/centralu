@@ -19,7 +19,7 @@ import { lastLine } from './tunnel.js'
  */
 
 /** One concrete alias, where it is declared */
-export type ConfigHost = { alias: string; file: string; line: number }
+type ConfigHost = { alias: string; file: string; line: number }
 
 export type ConfigRead = {
   hosts: ConfigHost[]
@@ -138,7 +138,7 @@ export function expandGlob(path: string): string[] {
 }
 
 /** `~` for the home folder, for what the person reads */
-export function tildePath(path: string, home: string): string {
+function tildePath(path: string, home: string): string {
   return path === home ? '~' : path.startsWith(home + sep) ? `~${path.slice(home.length)}` : path
 }
 

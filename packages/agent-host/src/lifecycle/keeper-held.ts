@@ -5,7 +5,7 @@
  */
 
 /** One child as the keeper lists it; `exit` is null while it runs. */
-export type HeldChild = { id: string; pid: number; kind: string; exit: unknown }
+type HeldChild = { id: string; pid: number; kind: string; exit: unknown }
 
 /** One row of the process table: a process, its group, and its controlling terminal (null for none) */
 export type ProcRow = { pid: number; pgid: number; tty: string | null }

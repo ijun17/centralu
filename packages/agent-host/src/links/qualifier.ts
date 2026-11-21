@@ -21,7 +21,7 @@ export const onMachine = (name: string, machine: string): string => `${name} on 
  */
 export type MailTerms = { hub: string; own: string | null; computer: () => string }
 
-export class CrossMachineError extends Error {
+class CrossMachineError extends Error {
   readonly code = 'internal'
   constructor(what: string, machine: string) {
     super(`${what} belongs to another machine than ${machine}; one call reaches one machine`)

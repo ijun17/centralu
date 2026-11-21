@@ -609,7 +609,7 @@ export async function gitStatusForApp(
  * (`presetWithin`). A screen opened in the window adds nothing below `auto`; a session that is gone, a chain that can no
  * longer be followed, or no open call at all gives `safe`: nothing says who asked.
  */
-export function appAgentPreset(callers: AgentRunRequest['callers'], presetOf: (sessionId: string) => PermissionPreset | undefined): PermissionPreset {
+function appAgentPreset(callers: AgentRunRequest['callers'], presetOf: (sessionId: string) => PermissionPreset | undefined): PermissionPreset {
   if (callers.length === 0) return 'safe'
   return lowestPreset(...callers.map((c): PermissionPreset => (c.kind === 'person' ? 'auto' : c.kind === 'session' ? (presetOf(c.sessionId) ?? 'safe') : 'safe')))
 }
