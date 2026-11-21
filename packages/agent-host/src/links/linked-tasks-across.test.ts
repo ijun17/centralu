@@ -458,7 +458,7 @@ describe("a hub's copy of a task across (#1948 step 6)", () => {
     across.changed()
     expect(noticesTo(w)).toHaveLength(1)
     expect(across.dropHeld(addr('orc'), ids[1]!)).toBe(true)
-    expect(w.records.message(ids[1]!)).toBeUndefined()
+    expect(w.records.recipients(ids[1]!)).toMatchObject([{ settled: 'withdrawn', held: null }])
     expect(sent).toHaveLength(1)
   })
 
@@ -535,6 +535,20 @@ describe("a hub's copy of a task across (#1948 step 6)", () => {
     await vi.waitFor(() => expect(w.records.recipient(id, child)).toMatchObject({ held: null }))
   })
 
+  it('held mail whose resend lost its answer, then refused as its computer is no longer linked: its sender is told it may have arrived there', async () => {
+    const { w, across, answers, machine, child } = hubWorld({ tasks: true, clock: true })
+    machine.reachable = false
+    const held = await across.send('orc', { to: child, text: 'ping', needsReply: false })
+    machine.reachable = true
+    across.changed()
+    await vi.waitFor(() => expect(answers).toHaveLength(1))
+    answers[0]!({ nonsense: true })
+    await vi.waitFor(() => expect(() => across.dropHeld(addr('orc'), held.ok ? held.messageId : '')).toThrow(/may have arrived there already/))
+    across.usePeers({ selfName: () => 'Hub box', machine: () => undefined })
+    across.changed()
+    await vi.waitFor(() => expect(noticesTo(w)).toEqual([expect.stringContaining('held while the link was down, may have arrived there, from a send whose answer was lost, and is not sent again: That computer is no longer linked')]))
+  })
+
   it('held mail waits for a machine to answer the offer of this connection: one still connecting is sent nothing', async () => {
     const { w, across, answers, machine, child } = hubWorld({ clock: true })
     machine.reachable = false
@@ -589,6 +603,17 @@ describe("a hub's copy of a task across (#1948 step 6)", () => {
     await vi.waitFor(() => expect(answers).toHaveLength(1))
     expect(sent.map((m) => m.id)).toEqual([note.ok ? note.messageId : ''])
     expect(noticesTo(w)).toEqual([])
+  })
+
+  it('a held task whose child its sender stops, and a held question its sender drops, end withdrawn and no longer held, as when the sender goes to the trash', async () => {
+    const { w, across, machine, child } = hubWorld()
+    machine.reachable = false
+    const task = await across.sendTask('orc', child, 'review the branch', { origin: 'start_agent' })
+    const question = await across.send('orc', { to: child, text: 'which branch?', needsReply: true })
+    expect(linkedTasksOf(w.mail, w.records, across, () => () => {}).withdraw('orc', 'm1.w1')).toBe(1)
+    expect(across.dropHeld(addr('orc'), question.ok ? question.messageId : '')).toBe(true)
+    for (const sent of [task, question]) expect(w.records.recipients(sent.ok ? sent.messageId : '')).toMatchObject([{ settled: 'withdrawn', held: null }])
+    expect(w.mail.inbox(addr('orc')).held).toEqual([])
   })
 
   it('a held reply settles what it answers when it goes, not when it is held (#2354)', async () => {

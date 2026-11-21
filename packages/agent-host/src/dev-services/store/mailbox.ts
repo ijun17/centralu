@@ -656,12 +656,14 @@ export class MailboxRecords {
 
   /**
    * Settles watched rows not settled yet: one recipient's, or every row of the message with `'all'` (no address). A row moved from an older build
-   * (`legacy`) is answered or marked done too: its recipient's act ends it as it would have there (§6.3). Returns how many
+   * (`legacy`) is answered or marked done too: its recipient's act ends it as it would have there (§6.3). A row held for its link (`LINK_HOLD`) is
+   * held no more: settled, it never goes, however it was settled. Returns how many
    */
   settle(messageId: string, recipient: string, how: Settled, at: number, answerId?: string): number {
     return this.db
       .prepare(
-        `UPDATE mail_recipients SET settled = @how, settled_at = @at, answer_id = COALESCE(@answerId, answer_id)
+        `UPDATE mail_recipients SET settled = @how, settled_at = @at, answer_id = COALESCE(@answerId, answer_id),
+            held = CASE WHEN held = '${LINK_HOLD}' THEN NULL ELSE held END
           WHERE message_id = @messageId AND (@recipient = 'all' OR recipient = @recipient)
             AND (settled IS NULL OR (settled = 'legacy' AND @how IN ('answered', 'done')))
             AND EXISTS (SELECT 1 FROM mail m WHERE m.id = @messageId AND ${WATCHED})`,

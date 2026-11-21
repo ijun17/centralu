@@ -181,7 +181,7 @@ describe('mail across linked machines, both ways (#2067 item 2)', () => {
     const { hub } = await rig()
     await hub.router.handle('machines.disconnect', { machineId: 'm1' })
     await eventually(() => !hub.links.get('m1')!.reachable)
-    const id = /^Held (\S+) /.exec((await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'ping' })).text)?.[1] ?? ''
+    const id = /^Held (\S+) /.exec((await tool(hub, 'h1', { action: 'send', to: at(hub, 'm1.w1'), text: 'ping', kind: 'note' })).text)?.[1] ?? ''
     expect(await tool(hub, 'h1', { action: 'send', thread: id, text: 'pong' })).toMatchObject({ isError: true, text: expect.stringContaining(`Refused (field_not_allowed): ${id} goes with the words it was written with`) })
     expect(await tool(hub, 'h1', { action: 'send', thread: `${id}x`, text: 'hi' })).toMatchObject({ isError: true, text: expect.stringContaining('to is needed') })
     expect((await tool(hub, 'h1', { action: 'handled', thread: id })).text).toBe(`Dropped: ${id} was held for its link and is not sent.`)

@@ -360,13 +360,16 @@ export class MailAcross extends AcrossReceipts {
     return this.d.records.heldForLink(sender).filter((h) => h.message.id === id)
   }
 
-  /** `handled` on the sender's mail held for its link: deleted here, since nothing went, and nothing is told across. False when `id` is none of it */
+  /**
+   * `handled` on the sender's mail held for its link: a question or task is withdrawn as `mail done` withdraws one sent, which ends its hold
+   * (`MailboxRecords.settle`); a message watched by no one is deleted, as nothing went. False when `id` is none of it
+   */
   dropHeld(sender: string, id: string): boolean {
     const held = this.heldOf(sender, id)
     if (held.length === 0) return false
     if (this.sending.has(id)) throw refuse('busy', `${id} is being sent now, so it can no longer be dropped.`)
     if (this.mayHaveGone.has(id)) throw refuse('busy', `${id} may have arrived there already, so it can no longer be dropped: it is sent again under its id when the link is back, which never writes it twice.`)
-    this.d.records.deleteRows(held.map((h) => ({ messageId: id, recipient: h.row.recipient })))
+    if (this.d.service.done(sender, id).settled === 0) this.d.records.deleteRows(held.map((h) => ({ messageId: id, recipient: h.row.recipient })))
     return true
   }
 
@@ -428,12 +431,12 @@ export class MailAcross extends AcrossReceipts {
     return { ok: true, messageId: m.id, to: r.to, address: to, computer: peer.name }
   }
 
-  /** Held mail the other side refused, or that can no longer go there: deleted here, as nothing was written there, and its sender told why */
+  /** Held mail the other side refused, or that can no longer go there: deleted here, and its sender told why, and that it may have arrived when a send's answer was lost */
   private refusedHeld(m: MailRow, to: string, r: { why: string; text: string }): AcrossSent {
-    this.mayHaveGone.delete(m.id)
+    const fate = this.mayHaveGone.delete(m.id) ? 'may have arrived there, from a send whose answer was lost, and is not sent again' : 'was not sent'
     this.d.records.deleteRows([{ messageId: m.id, recipient: to }])
     const name = oneLineText(this.foreignName(to)?.name ?? to, 200)
-    this.d.service.notice(m.sender, { body: `[Centralu] ${m.id} to ${name}, held while the link was down, was not sent: ${r.text}`, facts: {}, dedupeKey: `held-refused:${m.id}` })
+    this.d.service.notice(m.sender, { body: `[Centralu] ${m.id} to ${name}, held while the link was down, ${fate}: ${r.text}`, facts: {}, dedupeKey: `held-refused:${m.id}` })
     return { ok: false, why: r.why, text: r.text }
   }
 
