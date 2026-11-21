@@ -11,6 +11,14 @@ export function git(cwd, args, env = {}) {
   return runTool('git', args, { cwd, encoding: 'utf8', env: { ...ENV, ...env }, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024 })
 }
 
+/** The files that differ from `from` to `to` (commits), each `{ status, path }` with git's one-letter status; renames as a deletion and an addition. */
+export function nameStatus(root, from, to) {
+  const parts = git(root, ['diff', '--name-status', '--no-renames', '-z', from, to]).split('\0').filter(Boolean)
+  const out = []
+  for (let i = 0; i + 1 < parts.length; i += 2) out.push({ status: parts[i][0], path: parts[i + 1] })
+  return out
+}
+
 /**
  * A path as the file system names it: links followed, and on Windows the 8.3 short names
  * (`RUNNER~1`) written out. tsc compares files by the path it reached them by, so one folder reached by two
@@ -24,6 +32,10 @@ export function canonical(path) {
     return path
   }
 }
+
+/** The lockfile a checkout's last `pnpm install` installed: pnpm's copy of it. */
+export const INSTALLED_LOCK = 'node_modules/.pnpm/lock.yaml'
+
 /** The folders named node_modules in a checkout: its root's and each workspace package's (two levels down). */
 export function nodeModulesDirs(root) {
   const found = []
@@ -174,7 +186,7 @@ const alive = (pid) => {
   }
 }
 
-/** Where a run keeps the heads of the open pull requests it fetched (runGuards, pre-pr.mjs): `<GUARD_REFS>/<run id>/<number>` */
+/** Where a run keeps the heads of the open pull requests it fetched (runGuards, pre-pr-open-prs.mjs): `<GUARD_REFS>/<run id>/<number>` */
 export const GUARD_REFS = 'refs/centralu-pre-pr-guards'
 
 /** The refs of the checkout at `root` under `prefix`; none when the checkout is gone */
