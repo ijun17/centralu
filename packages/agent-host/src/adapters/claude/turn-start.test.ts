@@ -199,6 +199,19 @@ describe('the first input of a new process (#2377)', () => {
     await handle.dispose()
   })
 
+  it('one recorded at spawn as sending the receipt whose init says an older version is not waited for: a long turn is left alone', async () => {
+    vi.useFakeTimers()
+    const { handle, events } = await session('spawn-newer-init-older', cli.version)
+    // The binary is older than the version recorded: its init says so, it sends no receipt, and its turn runs past the wait
+    cli.answer = (_input, say) => say({ type: 'system', subtype: 'init', claude_code_version: '2.1.280' })
+    handle.send('hello', { origin: { kind: 'human' } })
+    await vi.advanceTimersByTimeAsync(TURN_START_MS * 2)
+    // Not said undelivered: sent again, it would run twice
+    expect(events.some((e) => e.type === 'error')).toBe(false)
+    expect(handle.queuedInputs!()).toBe(1)
+    await handle.dispose()
+  })
+
   it('one of an unknown version is not waited for before its init says', async () => {
     vi.useFakeTimers()
     const { handle, events } = await session('unknown-version')

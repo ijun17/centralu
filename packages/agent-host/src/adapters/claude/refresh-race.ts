@@ -124,12 +124,12 @@ export class ClaudeRaceRetry {
     return true
   }
 
-  /** An input's own id for the id the CLI names it by: the same id but for a resent input */
+  /** An input's own id for the id the CLI has it under: the same id but for a resent input */
   ownId(id: string): string {
     return this.sentAs.get(id) ?? id
   }
 
-  /** The message with the inputs it names read back by their own ids (`ownId`). Nothing names an input after its result, so a result lets its names go */
+  /** The message with the input ids it carries read back as their own ids (`ownId`). No message carries an input's id after its result, so a result lets its ids go */
   ownIds<M extends { type?: unknown; user_message_uuid?: unknown; user_message_uuids?: unknown }>(m: M): M {
     if (this.sentAs.size === 0) return m
     const own = (id: unknown) => (typeof id === 'string' ? this.ownId(id) : id)
@@ -145,7 +145,7 @@ export class ClaudeRaceRetry {
 
   /**
    * A resend still waiting out its delay is called off; returns how many messages it would have sent. The ids resent inputs went under
-   * stay: a Stop's receipt names the inputs it cancelled by them, after this
+   * stay: a Stop's receipt gives the inputs it cancelled by them, after this
    */
   cancel(): number {
     if (!this.retry) return 0
