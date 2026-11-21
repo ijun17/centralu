@@ -22,7 +22,7 @@ costs the most when missed, and says which document holds the rules for what you
 | Everything that has to pass | `pnpm verify` (lint, dependency rules, types, tests); CI runs it too |
 | Before a pull request | `pnpm pre-pr`, then `pnpm tier` for the review it needs |
 | UI scenarios, all or one spec | `CI=1 pnpm e2e [filter]` (`E2E_BROWSER=webkit` or `=chromium`: one engine, as CI runs it) |
-| UI scenarios the branch changed | `CI=1 pnpm e2e --affected` (Chromium, then WebKit, under one lock) |
+| UI scenarios the branch changed | `CI=1 pnpm e2e --affected` (Chromium, then WebKit, under one lock; Chromium alone on Windows) |
 | Tests while other agents run tests | `pnpm exec vitest run --maxWorkers=4 <files>` |
 | Rust shell and keeper | `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib` (run `pnpm bundle:host` first if `resources/host` is missing) |
 | The UI without a host | `pnpm dev`, then `?mock=1` (empty) or `?demo` / `?demo=grid` (a seeded scene) |

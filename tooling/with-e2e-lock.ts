@@ -21,8 +21,8 @@
  */
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { resolve } from 'node:path'
-import { AFFECTED, affectedEngines, changedFiles, engineOutput, listedSpecs, mergeBase, reachesScreen, runAffected, specFilter, specsReaching } from './e2e-affected.js'
+import { relative, resolve } from 'node:path'
+import { AFFECTED, affectedEngines, changedFiles, configOf, configReached, engineOutput, listedSpecs, mergeBase, reachesScreen, runAffected, specFilter, specsReaching } from './e2e-affected.js'
 import { acquireLock, passesSignalOn, runsInTurn, signalExit, withoutSeparator, type Held } from './e2e-lock.js'
 
 const [program, ...rest] = process.argv.slice(2)
@@ -118,12 +118,14 @@ const code = base
   ? await (async () => {
       const root = process.cwd()
       const changed = changedFiles(base, root)
+      const changedPaths = changed.map((f) => resolve(root, f))
       return runAffected({
         base,
         engines: affectedEngines(),
+        config: () => configReached(resolve(root, configOf(commandArgs)), changedPaths, root).map((f) => relative(root, f)),
         list: listing,
-        pick: (specs) => specsReaching(specs, changed.map((f) => resolve(root, f)), root),
-        run: (engine, specs) => runOnce([engineOutput(commandArgs, engine), ...specs.map(specFilter)], { E2E_BROWSER: engine }),
+        pick: (specs) => specsReaching(specs, changedPaths, root),
+        run: (engine, specs) => runOnce([engineOutput(commandArgs, engine), ...(specs ?? []).map(specFilter)], { E2E_BROWSER: engine }),
         stopCode: () => (passedOn === null ? null : signalExit(passedOn)),
         screen: () => reachesScreen(changed, root),
         say: (line) => console.error(line),

@@ -1,13 +1,14 @@
 // CI: ci_status, mark_ready and read_failed_job.
 import { z } from './runtime/centralu-app-runtime.mjs'
 import { detailInput, itemOf, itemRef, REF_HELP, refOf, repoInput, repoOf } from './board.mjs'
-import { cleanLog, clip, evaluateChecks, failureLineIndex, firstFailure, matchKnownFailure, workflowCheckNames } from './ci.mjs'
+import { cleanLog, clip, evaluateChecks, failureLineIndex, firstFailure, workflowCheckNames } from './ci.mjs'
 import { CI, config } from './config.mjs'
-import { FATAL, GitHubError, markReady, postComment, readChecks, readIssueText, readJobLog, readPr, readRepo, readRequired, readWorkflowChecks, resolveRef, sameRepo } from './github.mjs'
+import { FATAL, GitHubError, markReady, postComment, readChecks, readJobLog, readPr, readRepo, readRequired, readWorkflowChecks, resolveRef, sameRepo } from './github.mjs'
 import { answering, serially } from './handlers.mjs'
 import { answer, asError, linesAnswer, reason } from './reply.mjs'
 import { publicTextProblems } from './rules.mjs'
 import { forgetThread } from './threads.mjs'
+import { readKnownFailures } from './known-failures.mjs'
 import { privateWords } from './words-tools.mjs'
 import { short } from './util.mjs'
 import { freshCache } from './cache.mjs'
@@ -21,7 +22,7 @@ const MAX_LOGS = 4
 const known = freshCache({ ttlMs: 5 * 60_000 })
 
 /** The issue listing known intermittent failures (project.json ci.knownFailuresIssue), kept 5 minutes. */
-const knownFailures = () => known.get('issue', () => readIssueText(config.repository, CI.knownFailures))
+const knownFailures = () => known.get('issue', readKnownFailures)
 
 function rowState(r) {
   const c = r.check
@@ -69,8 +70,8 @@ async function failureDetails(repo, checks) {
           issueError = reason(e)
         }
       }
-      const match = issue ? matchKnownFailure(f, issue.text) : null
-      if (match) tail = ` | known intermittent failure? #${CI.knownFailures}${issue.state === 'CLOSED' ? ' (closed)' : ''} quotes "${match}"`
+      const match = issue ? issue.quote(f) : null
+      if (match) tail = ` | known intermittent failure? #${issue.issue}${issue.closed ? ' (closed)' : ''} quotes "${match}"`
       else if (issueError) tail = ` | #${CI.knownFailures} could not be read: ${clip(issueError, 120)}`
     }
     lines.push(`${head} ${f.line ?? 'no failing test line found'}${f.error ? ` | ${f.error}` : ''}${tail}`)

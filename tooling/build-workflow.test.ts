@@ -996,6 +996,12 @@ describe('every file the UI scenarios render or read reaches the screen (#1538)'
     return { files, dirs }
   }
 
+  /**
+   * Code a run loads only to say something after it, whose answer reaches no page: the walk stops at it. The local report
+   * (e2e/flaky-report.ts) asks the board's known-failures reader which failures #368 lists, and prints the answer.
+   */
+  const AFTER_THE_RUN = new Set(['.centralu/apps/project-board/known-failures.mjs'])
+
   /** Every file reached from `e2e/`, `apps/web` and the dev server script, with how */
   function reach(): Map<string, string> {
     const seen = new Map<string, string>()
@@ -1014,7 +1020,7 @@ describe('every file the UI scenarios render or read reaches the screen (#1538)'
     const rels = new Set<string>()
     while (queue.length > 0) {
       const f = queue.shift()!
-      if (!CODE.test(f)) continue
+      if (!CODE.test(f) || AFTER_THE_RUN.has(f)) continue
       const src = readFileSync(join(ROOT, f), 'utf8')
       for (const i of imports(f, src)) add(i, `imported by ${f}`)
       if (rootSet.has(f)) {
@@ -1049,9 +1055,9 @@ describe('every file the UI scenarios render or read reaches the screen (#1538)'
   })
 
   it('names every file it reaches, except documents and tests, as a change to the screen', () => {
-    // Strings a fixture shows as data (a command line in heavy-store.ts) and never reads: the only reached files left out
+    // Strings a fixture shows as data (a command line in heavy-store.ts) and never reads: the only other reached files left out
     const TEXT_ONLY = new Set(['apps/desktop/src-tauri/Cargo.toml'])
-    const files = [...reached.keys()].filter((f) => !isDoc(f) && !isTest(f) && !TEXT_ONLY.has(f))
+    const files = [...reached.keys()].filter((f) => !isDoc(f) && !isTest(f) && !TEXT_ONLY.has(f) && !AFTER_THE_RUN.has(f))
     const hit = new Set(screenFiles(files) as string[])
     const missed = files.filter((f) => !hit.has(f)).map((f) => `${f} (${reached.get(f)})`)
     expect(missed).toEqual([])

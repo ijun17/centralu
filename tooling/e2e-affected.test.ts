@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { affectedEngines, changedFiles, engineOutput, listedSpecs, mergeBase, noSpecLines, reachesScreen, runAffected, specFilter, specsReaching, type Engine } from './e2e-affected.js'
+import { affectedEngines, changedFiles, configOf, configReached, engineOutput, listedSpecs, mergeBase, noSpecLines, reachesScreen, runAffected, specFilter, specsReaching, type Engine } from './e2e-affected.js'
 import { NO_GIT_MAINTENANCE } from './git-fixture.test-helpers.js'
 
 /* `pnpm e2e --affected` (tooling/e2e-affected.ts): which specs, and what a run that picks none says. */
@@ -27,11 +28,15 @@ function write(dir: string, files: Record<string, string>): void {
 }
 
 describe('the affected specs', () => {
-  it('run in both engines, or in the one E2E_BROWSER names', () => {
-    expect(affectedEngines({})).toEqual(['chromium', 'webkit'])
-    expect(affectedEngines({ E2E_BROWSER: 'chromium' })).toEqual(['chromium'])
-    expect(affectedEngines({ E2E_BROWSER: 'webkit' })).toEqual(['webkit'])
-    expect(affectedEngines({ E2E_BROWSER: 'firefox' })).toEqual(['chromium', 'webkit'])
+  it('run in the engine pnpm e2e runs in, or in both where that is the mixed run: Chromium alone on Windows', () => {
+    expect(affectedEngines({}, 'darwin')).toEqual(['chromium', 'webkit'])
+    expect(affectedEngines({}, 'linux')).toEqual(['chromium', 'webkit'])
+    expect(affectedEngines({ E2E_BROWSER: 'firefox' }, 'darwin')).toEqual(['chromium', 'webkit'])
+    // Playwright's WebKit on Windows cannot drag (#2022), so an unset run there is Chromium's (e2e/engine.ts)
+    expect(affectedEngines({}, 'win32')).toEqual(['chromium'])
+    expect(affectedEngines({ E2E_BROWSER: 'chromium' }, 'darwin')).toEqual(['chromium'])
+    expect(affectedEngines({ E2E_BROWSER: 'webkit' }, 'darwin')).toEqual(['webkit'])
+    expect(affectedEngines({ E2E_BROWSER: 'webkit' }, 'win32')).toEqual(['webkit'])
   })
 
   it("keep each engine's results apart, beside the config, where Playwright would put them", () => {
@@ -39,6 +44,46 @@ describe('the affected specs', () => {
     expect(engineOutput(['test', '--config=e2e/ux/playwright.config.ts'], 'chromium')).toBe(`--output=${join('e2e', 'ux', 'test-results', 'chromium')}`)
     expect(engineOutput(['test', '-c', 'e2e/playwright.config.ts', 'grid'], 'webkit')).toBe(`--output=${join('e2e', 'test-results', 'webkit')}`)
     expect(engineOutput(['test'], 'webkit')).toBe(`--output=${join('test-results', 'webkit')}`)
+    expect(configOf(['test', '-c', 'e2e/ux/playwright.config.ts'])).toBe('e2e/ux/playwright.config.ts')
+  })
+
+  it("are every spec when the change reaches this repository's config or a file it names, read from the config itself", () => {
+    const root = join(dirname(fileURLToPath(import.meta.url)), '..')
+    const reached = (config: string, ...changed: string[]) => configReached(join(root, config), changed.map((f) => join(root, f)), root).map((f) => relative(root, f).split(sep).join('/'))
+    const e2e = 'e2e/playwright.config.ts'
+    expect(reached(e2e, e2e)).toEqual([e2e])
+    // What it imports, its setup and what that imports, its teardown, its reporter, and the script its web servers' commands name
+    expect(reached(e2e, 'e2e/engine.ts')).toEqual([e2e])
+    expect(reached(e2e, 'e2e/warm-engine.ts')).toEqual(['e2e/warm-engine.ts'])
+    expect(reached(e2e, 'e2e/browser-sandbox.ts')).toEqual(['e2e/warm-engine.ts'])
+    expect(reached(e2e, 'e2e/web-server-report.ts')).toEqual(['e2e/web-server-report.ts'])
+    expect(reached(e2e, 'e2e/flaky-report.ts')).toEqual(['e2e/flaky-report.ts'])
+    expect(reached(e2e, 'scripts/e2e-web-server.mjs')).toEqual(['scripts/e2e-web-server.mjs'])
+    // Not a spec, a fixture, the window's code, or a package the reporter takes a helper from
+    expect(reached(e2e, 'e2e/grid.spec.ts', 'e2e/fixtures/usage-donut-gap.ts', 'packages/ui/src/App.tsx', 'packages/protocol/src/index.ts')).toEqual([])
+    expect(reached('e2e/ux/playwright.config.ts', 'e2e/ux/reporter.ts', 'e2e/ux/klm.ts')).toEqual(['e2e/ux/reporter.ts'])
+    expect(reached('e2e/no-such.config.ts', 'e2e/engine.ts')).toEqual([])
+  })
+
+  it('name a file the config names in any string, a command included, once it is there', () => {
+    inTemp((repo) => {
+      write(repo, {
+        'tsconfig.json': JSON.stringify({ compilerOptions: { module: 'ESNext', moduleResolution: 'bundler' } }),
+        'e2e/pw.config.ts': [
+          'const at = (p: number) => `node ../scripts/serve.mjs --port ${p} --`',
+          "export default { globalSetup: './setup.ts', webServer: [{ command: at(1) }], reporter: [['list'], ['./gone.ts']] }",
+        ].join('\n'),
+        'e2e/setup.ts': "import { warm } from './warm.js'\nexport default warm\n",
+        'e2e/warm.ts': 'export const warm = () => {}\n',
+        'scripts/serve.mjs': '\n',
+      })
+      const reached = (...changed: string[]) => configReached(join(repo, 'e2e/pw.config.ts'), changed.map((f) => join(repo, f)), repo).map((f) => relative(repo, f).split(sep).join('/'))
+      expect(reached('scripts/serve.mjs')).toEqual(['scripts/serve.mjs'])
+      expect(reached('e2e/warm.ts')).toEqual(['e2e/setup.ts'])
+      expect(reached('e2e/gone.ts')).toEqual([])
+      write(repo, { 'e2e/gone.ts': '\n' })
+      expect(reached('e2e/gone.ts')).toEqual(['e2e/gone.ts'])
+    })
   })
 
   it("are the files of Playwright's JSON listing, by its top-level suites, not by the file a test is defined in", () => {
@@ -167,13 +212,16 @@ describe('one --affected run', () => {
   const A = join(tmpdir(), 'repo', 'e2e', 'a.spec.ts')
   const B = join(tmpdir(), 'repo', 'e2e', 'b.spec.ts')
   type Listed = { specs: string[] } | { why: string }
-  function affected(o: { listed?: Partial<Record<Engine, Listed>>; pick?: string[]; codes?: Partial<Record<Engine, number>>; stopAfter?: `list-${Engine}` | Engine; screen?: boolean } = {}) {
+  function affected(
+    o: { config?: string[]; listed?: Partial<Record<Engine, Listed>>; pick?: string[]; codes?: Partial<Record<Engine, number>>; stopAfter?: `list-${Engine}` | Engine; screen?: boolean } = {},
+  ) {
     const said: string[] = []
-    const ran: [Engine, string[]][] = []
+    const ran: [Engine, string[] | null][] = []
     let stop: number | null = null
     const result = runAffected({
       base: '0123456789abcdef',
       engines: ['chromium', 'webkit'],
+      config: () => o.config ?? [],
       list: (engine) => {
         if (o.stopAfter === `list-${engine}`) stop = 130
         return Promise.resolve(o.listed?.[engine] ?? { specs: [A, B] })
@@ -204,6 +252,24 @@ describe('one --affected run', () => {
     expect(await affected({ codes: { webkit: 2 } })).toMatchObject({ code: 2 })
     // An engine whose listing leaves the spec out (a twin, a WebKit-only spec) runs nothing
     expect(await affected({ listed: { webkit: { specs: [B] } } })).toEqual({ code: 0, ran: [['chromium', [A]]], said: ['e2e: 1 affected spec(s) in chromium: a.spec.ts', 'e2e: no affected spec runs in webkit'] })
+  })
+
+  it('runs every spec in each engine, listing none, when the change reaches the config', async () => {
+    const config = ['e2e/warm-engine.ts']
+    expect(await affected({ config, pick: [] })).toEqual({
+      code: 0,
+      ran: [
+        ['chromium', null],
+        ['webkit', null],
+      ],
+      said: [
+        'e2e: the change reaches e2e/warm-engine.ts: the config, or a file it imports or names (setup, teardown, a reporter, a web server), which every spec runs through.',
+        'e2e: every spec in chromium',
+        'e2e: every spec in webkit',
+      ],
+    })
+    expect(await affected({ config, listed: { chromium: { why: 'not asked' } } })).toMatchObject({ code: 0, ran: [['chromium', null], ['webkit', null]] })
+    expect(await affected({ config, stopAfter: 'chromium', codes: { chromium: 1 } })).toMatchObject({ code: 1, ran: [['chromium', null]] })
   })
 
   it('starts no engine when no engine picked a spec, and says why', async () => {

@@ -248,15 +248,18 @@ one HTML report per engine (`e2e-report/<engine>/`), with traces of the failed t
 leaves it out (`tooling/e2e-webkit-twins.test.ts` checks this): a scenario that only means
 something in WebKit goes in the shared fixture and skips itself in other engines.
 
-`CI=1 pnpm e2e --affected` runs the specs a branch changed in Chromium and then in WebKit under one lock (#2373), or in the
-one engine `E2E_BROWSER` names; each engine keeps its results in `e2e/test-results/<engine>`. A spec is picked when it, or a
-file it imports through the repository's own files at any depth (its fixture, a helper, a package's source), differs from
-where the branch left main, uncommitted and untracked files included; a file a spec reads without importing it (a JSON
-fixture) is not followed. Each engine runs the picked specs Playwright lists for it, so a `-webkit.spec.ts` twin is left
-out as in any one-engine run. Only a few specs import the window's or the host's code (the theme, for one), so most changes
-to the UI pick no spec; the run then says so and, when the change reaches the screen by CI's definition (`screenFiles`),
-asks for the specs near it by name (`CI=1 pnpm e2e <filter>`). `--affected` takes no filter of its own: one given with it
-widens the run. On Windows, WebKit fails the scenarios that drag (#2022, above). Any local run with failures also says which
+`CI=1 pnpm e2e --affected` runs the specs a branch changed under one lock (#2373), in the engines `pnpm e2e` runs in: the
+one `E2E_BROWSER` names, else Chromium alone on Windows (WebKit there fails the scenarios that drag, #2022, above), else
+Chromium and then WebKit; each engine keeps its results in `e2e/test-results/<engine>`. A spec is picked when it, or a file
+it imports through the repository's own files at any depth (its fixture, a helper, a package's source), differs from where
+the branch left main, uncommitted and untracked files included. Not followed: a file read without an import (a JSON
+fixture), an imported asset (a `.png`), a module loaded through `createRequire`, and an `import()` of a path built at run
+time. Each engine runs the picked specs Playwright lists for it, so a `-webkit.spec.ts` twin is left out as in any
+one-engine run. A change that reaches the config or a file it imports or names (its setup and teardown, its reporters, the
+web server script its commands name; read from the config itself) runs every spec. Only a few specs import the window's or
+the host's code (the theme, for one), so most changes to the UI pick no spec; the run then says so and, when the change
+reaches the screen by CI's definition (`screenFiles`), asks for the specs near it by name (`CI=1 pnpm e2e <filter>`).
+`--affected` takes no filter of its own: one given with it widens the run. Any local run with failures also says which
 of them the known intermittent failures issue lists (#368, the board's project.json `ci.knownFailuresIssue`), read and
 matched by the board as `ci_status` reads and matches it (its body and comments), each with the quote it matched, and
 whether the issue is closed; they are still failures. When the issue cannot be read the run says "known-failures list

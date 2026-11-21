@@ -1,19 +1,23 @@
 /**
- * `pnpm e2e --affected` (#2373): the UI scenarios a branch changed, in Chromium and then WebKit (or the one engine
- * `E2E_BROWSER` names), under one e2e lock (tooling/with-e2e-lock.ts). A spec is affected when it, or a file it imports
+ * `pnpm e2e --affected` (#2373): the UI scenarios a branch changed, in the engines `pnpm e2e` runs in (affectedEngines),
+ * one after the other under one e2e lock (tooling/with-e2e-lock.ts). A spec is affected when it, or a file it imports
  * through the repository's own files at any depth, differs from where the branch left main, uncommitted and untracked
- * files included (specsReaching). Each engine's specs are the ones Playwright lists for it, so a `-webkit.spec.ts` twin,
- * which a one-engine run leaves out (playwright.config.ts), is left out here too. A spec drives a browser: it imports e2e/
- * helpers, and only a few of those import the window's or the host's code (the theme, for one), so most changes to the
- * window pick no spec. When none is picked and CI's screen check (screenFiles, .github/scripts/ci-changes.mjs) says the
- * change reaches the screen, the run says to pick the specs near it by name. `--affected` takes no filter of its own: a
- * filter given with it widens the run (Playwright runs what any filter matches).
+ * files included (specsReaching); every spec is when the change reaches the config or a file it names (configReached).
+ * Not followed, as they name no file TypeScript resolves: a file read without an import (a JSON fixture read from disk),
+ * an imported asset (`import url from './a.png'`), a module loaded through `createRequire`, and an `import()` of a path
+ * built at run time (a template string). Each engine's specs are the ones Playwright lists for it, so a `-webkit.spec.ts`
+ * twin, which a one-engine run leaves out (playwright.config.ts), is left out here too. A spec drives a browser: it
+ * imports e2e/ helpers, and only a few of those import the window's or the host's code (the theme, for one), so most
+ * changes to the window pick no spec. When none is picked and CI's screen check (screenFiles,
+ * .github/scripts/ci-changes.mjs) says the change reaches the screen, the run says to pick the specs near it by name.
+ * `--affected` takes no filter of its own: a filter given with it widens the run (Playwright runs what any filter matches).
  */
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
+import { e2eEngine } from '../e2e/engine.js'
 
 /** The flag `pnpm e2e` takes for this; Playwright never sees it. */
 export const AFFECTED = '--affected'
@@ -21,11 +25,13 @@ export const AFFECTED = '--affected'
 export type Engine = 'chromium' | 'webkit'
 
 /**
- * The engines the affected specs run in, one after the other: both, as CI runs every spec in each (build.yml), unless
- * `E2E_BROWSER` names one (e2e/engine.ts), as a sandbox without WebKit has it.
+ * The engines the affected specs run in, one after the other: the one `pnpm e2e` runs in (e2e/engine.ts: the one
+ * `E2E_BROWSER` names, else Chromium alone on Windows, where Playwright's WebKit cannot drag), or both where that is the
+ * mixed run, since CI runs every spec in each (build.yml).
  */
-export function affectedEngines(env: NodeJS.ProcessEnv = process.env): Engine[] {
-  return env.E2E_BROWSER === 'chromium' || env.E2E_BROWSER === 'webkit' ? [env.E2E_BROWSER] : ['chromium', 'webkit']
+export function affectedEngines(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): Engine[] {
+  const one = e2eEngine(env, platform)
+  return one ? [one] : ['chromium', 'webkit']
 }
 
 /** Where the branch left main, or null when main is not in this checkout. */
@@ -49,12 +55,17 @@ export function changedFiles(base: string, cwd = process.cwd()): string[] {
  * would keep only the last engine's.
  */
 export function engineOutput(args: string[], engine: string): string {
+  return `--output=${join(dirname(configOf(args)), 'test-results', engine)}`
+}
+
+/** The config a Playwright command line names (`--config`, `--config=` or `-c`), as given; Playwright's default without one. */
+export function configOf(args: string[]): string {
   let config = 'playwright.config.ts'
   for (const [i, a] of args.entries()) {
     if (a.startsWith('--config=')) config = a.slice('--config='.length)
     else if (a === '--config' || a === '-c') config = args[i + 1] ?? config
   }
-  return `--output=${join(dirname(config), 'test-results', engine)}`
+  return config
 }
 
 /**
@@ -93,10 +104,17 @@ const keyOf = (path: string): string => (process.platform === 'win32' ? resolve(
  * The files of `specs` that are one of `changed`, or import one through the repository's own files at any depth (all
  * absolute paths; `root` the repository's). Imports resolve as tsc resolves them; one into node_modules is not followed
  * (a workspace package resolves to its source through tsconfig's `paths`). A spec's tests are often defined in a fixture
- * the spec imports, so the file a test is defined in does not say which spec a change reaches. A file a spec reads
- * without importing it (a JSON fixture read from disk) is not followed.
+ * the spec imports, so the file a test is defined in does not say which spec a change reaches.
  */
 export function specsReaching(specs: string[], changed: string[], root: string): string[] {
+  return reaching(specs, changed, root, () => true)
+}
+
+/**
+ * The files of `starts` that are one of `changed` or import one at any depth, following the imports `follow` takes
+ * (by the specifier as written), resolved as tsc resolves them and never into node_modules (all absolute paths).
+ */
+function reaching(starts: string[], changed: string[], root: string, follow: (specifier: string) => boolean): string[] {
   const options = compilerOptions(root)
   const touched = new Set(changed.map(keyOf))
   const imports = new Map<string, string[]>()
@@ -107,7 +125,8 @@ export function specsReaching(specs: string[], changed: string[], root: string):
     try {
       found = ts
         .preProcessFile(readFileSync(file, 'utf8'), true, true)
-        .importedFiles.map((i) => ts.resolveModuleName(i.fileName, file, options, ts.sys).resolvedModule?.resolvedFileName)
+        .importedFiles.filter((i) => follow(i.fileName))
+        .map((i) => ts.resolveModuleName(i.fileName, file, options, ts.sys).resolvedModule?.resolvedFileName)
         .filter((f): f is string => f !== undefined)
         .map((f) => resolve(f))
         .filter((f) => !/[\\/]node_modules[\\/]/.test(f))
@@ -117,9 +136,9 @@ export function specsReaching(specs: string[], changed: string[], root: string):
     imports.set(keyOf(file), found)
     return found
   }
-  return specs.filter((spec) => {
+  return starts.filter((start) => {
     const seen = new Set<string>()
-    const queue = [resolve(spec)]
+    const queue = [resolve(start)]
     for (let file = queue.pop(); file !== undefined; file = queue.pop()) {
       const key = keyOf(file)
       if (touched.has(key)) return true
@@ -129,6 +148,40 @@ export function specsReaching(specs: string[], changed: string[], root: string):
     }
     return false
   })
+}
+
+/**
+ * The files of the Playwright config `config` (absolute) that a change in `changed` reaches (`root` the repository's): the
+ * config and the files it imports, and each file it names by a relative path in a string (its setup and teardown, its
+ * reporters, a web server's script in its command) with the files that one imports by a relative path. Every spec runs
+ * through them, so a change to one reaches every spec. Read from the config's own source, so a file it starts naming
+ * counts at once. A named file's imports of workspace packages are not followed: a spec that uses that code imports it
+ * itself (the reporter's error text helper would otherwise make every protocol change a run of every spec). A config that
+ * cannot be read reaches nothing here: Playwright's listing then says why.
+ */
+export function configReached(config: string, changed: string[], root: string): string[] {
+  const named = new Set<string>()
+  const visit = (node: ts.Node): void => {
+    if (ts.isStringLiteralLike(node) || ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node)) {
+      for (const word of node.text.split(/\s+/)) {
+        if (!word.startsWith('./') && !word.startsWith('../')) continue
+        const file = resolve(dirname(config), word)
+        if (statSync(file, { throwIfNoEntry: false })?.isFile()) named.add(file)
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  let source: string
+  try {
+    source = readFileSync(config, 'utf8')
+  } catch {
+    return []
+  }
+  visit(ts.createSourceFile(config, source, ts.ScriptTarget.Latest, true))
+  return [
+    ...reaching([config], changed, root, () => true),
+    ...reaching([...named], changed, root, (specifier) => specifier.startsWith('.')),
+  ]
 }
 
 /**
@@ -163,21 +216,29 @@ export function reachesScreen(files: string[], cwd = process.cwd()): boolean {
 }
 
 /**
- * One `--affected` run under the lock: each engine's specs listed first (which starts no browser and no server) and the
- * affected ones picked (`pick`); nothing more when no engine has one; then each engine with any, in turn, given its specs.
- * `stopCode` is the exit code a signal that reached the runner asks for, or null: once there is one, nothing further
- * starts. Answers the exit code: of several runs, the first failing one's; 1 when a listing fails.
+ * One `--affected` run under the lock. When the change reaches the config (`config`: the config's files it reaches, as shown),
+ * every spec, in each engine in turn. Otherwise each engine's specs are listed first (which starts no browser and no
+ * server) and the affected ones picked (`pick`); nothing more when no engine has one; then each engine with any, in turn,
+ * given its specs (`run` given null: every spec). `stopCode` is the exit code a signal that reached the runner asks for,
+ * or null: once there is one, nothing further starts. Answers the exit code: of several runs, the first failing one's; 1
+ * when a listing fails.
  */
 export async function runAffected(o: {
   base: string
   engines: Engine[]
+  config: () => string[]
   list: (engine: Engine) => Promise<{ specs: string[] } | { why: string }>
   pick: (specs: string[]) => string[]
-  run: (engine: Engine, specs: string[]) => Promise<number>
+  run: (engine: Engine, specs: string[] | null) => Promise<number>
   stopCode: () => number | null
   screen: () => boolean
   say: (line: string) => void
 }): Promise<number> {
+  const config = o.config()
+  if (config.length) {
+    o.say(`e2e: the change reaches ${config.join(', ')}: the config, or a file it imports or names (setup, teardown, a reporter, a web server), which every spec runs through.`)
+    return runEach(o.engines.map((engine) => [engine, null]), o)
+  }
   const picked: [Engine, string[]][] = []
   for (const engine of o.engines) {
     const listed = await o.list(engine)
@@ -193,15 +254,23 @@ export async function runAffected(o: {
     for (const line of noSpecLines(o.base, o.screen())) o.say(line)
     return 0
   }
+  return runEach(picked, o)
+}
+
+/** Each engine's run in turn (null: every spec), none started once a signal came; the first failing run's exit code. */
+async function runEach(
+  runs: [Engine, string[] | null][],
+  o: { run: (engine: Engine, specs: string[] | null) => Promise<number>; stopCode: () => number | null; say: (line: string) => void },
+): Promise<number> {
   let code = 0
-  for (const [engine, specs] of picked) {
+  for (const [engine, specs] of runs) {
     const stop = o.stopCode()
     if (stop !== null) return code || stop
-    if (!specs.length) {
+    if (specs?.length === 0) {
       o.say(`e2e: no affected spec runs in ${engine}`)
       continue
     }
-    o.say(`e2e: ${specs.length} affected spec(s) in ${engine}: ${specs.map((s) => basename(s)).join(', ')}`)
+    o.say(specs ? `e2e: ${specs.length} affected spec(s) in ${engine}: ${specs.map((s) => basename(s)).join(', ')}` : `e2e: every spec in ${engine}`)
     const ran = await o.run(engine, specs)
     if (code === 0) code = ran
   }
