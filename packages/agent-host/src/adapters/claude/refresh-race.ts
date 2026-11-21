@@ -129,12 +129,6 @@ export class ClaudeRaceRetry {
     return this.sentAs.get(id) ?? id
   }
 
-  /** The id the CLI holds an input under (`ownId` the other way) */
-  sentId(id: string): string {
-    for (const [sent, own] of this.sentAs) if (own === id) return sent
-    return id
-  }
-
   /** The message with the inputs it names read back by their own ids (`ownId`). Nothing names an input after its result, so a result lets its names go */
   ownIds<M extends { type?: unknown; user_message_uuid?: unknown; user_message_uuids?: unknown }>(m: M): M {
     if (this.sentAs.size === 0) return m
@@ -149,8 +143,9 @@ export class ClaudeRaceRetry {
     return read
   }
 
-  /** A resend still waiting out its delay is called off; returns how many messages it would have sent */
+  /** A resend still waiting out its delay is called off, and what went again is let go; returns how many messages it would have sent */
   cancel(): number {
+    this.sentAs.clear()
     if (!this.retry) return 0
     clearTimeout(this.retry.timer)
     const n = this.retry.texts.length

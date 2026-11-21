@@ -42,7 +42,7 @@ describe('the host log file', () => {
   it('stamps a line once though it comes in parts, and leaves a blank line blank', () => {
     const stamp = lineStamps(() => new Date(0))
     const at = new Date(0).toISOString()
-    expect([stamp('[a] st'), stamp('arts\n\n[b] '), stamp('ends\n')].join('')).toBe(`${at} [a] starts\n\n${at} [b] ends\n`)
+    expect([stamp('[a] st'), stamp('arts\n\n[b] '), stamp('ends\n'), stamp(''), stamp('[c]\n')].join('')).toBe(`${at} [a] starts\n\n${at} [b] ends\n${at} [c]\n`)
   })
 
   /*

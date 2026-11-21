@@ -116,14 +116,17 @@ describe('input the CLI starts no turn for (#2377)', () => {
     await handle.dispose()
   })
 
-  it('a turn that began in time is left alone, past the wait', async () => {
+  it('a long turn is left alone once the CLI said it read the input, its init still to come (an MCP server connecting)', async () => {
     vi.useFakeTimers()
     const { handle, events } = await session('in-time')
-    await handle.sendTracked!('the task')
+    // The delivery receipt the CLI says before anything else, then nothing for longer than the wait
+    cli.answer = (input, say) => say({ type: 'command_lifecycle', command_uuid: input.uuid, state: 'queued' })
+    const sent = handle.sendTracked!('the task')
     await vi.advanceTimersByTimeAsync(TURN_START_MS * 2)
     expect(events.some((e) => e.type === 'error')).toBe(false)
-    expect(events.at(-1)).toMatchObject({ type: 'turn_complete' })
+    expect(handle.queuedInputs!()).toBe(1)
     await handle.dispose()
+    await sent.catch(() => {})
   })
 })
 
@@ -131,16 +134,18 @@ describe('the first input of a new process (#2377)', () => {
   it('is tracked before the CLI’s first init: taken when a turn names it, not when written', async () => {
     const { handle } = await session('first')
     let taken = false
+    let named: (() => void) | undefined
     cli.answer = (input, say) => {
-      cli.answer = null
       say({ type: 'system', subtype: 'init', claude_code_version: cli.version, capabilities: ['interrupt_receipt_v1', 'interrupt_cancel_queued_v1'] })
-      void Promise.resolve().then(() => {
-        expect(taken).toBe(false)
-        say({ type: 'result', subtype: 'success', is_error: false, result: 'done', user_message_uuids: [input.uuid], modelUsage: {} })
-      })
+      named = () => say({ type: 'result', subtype: 'success', is_error: false, result: 'done', user_message_uuids: [input.uuid], modelUsage: {} })
     }
     expect(handle.sendTracked).toBeDefined()
-    await handle.sendTracked!('the wake', { accepted: () => (taken = true), complete: () => {}, fail: () => {} })
+    const sent = handle.sendTracked!('the wake', { accepted: () => (taken = true), complete: () => {}, fail: () => {} })
+    await vi.waitFor(() => expect(named).toBeDefined())
+    await new Promise((r) => setTimeout(r, 10))
+    expect(taken).toBe(false)
+    named!()
+    await sent
     expect(taken).toBe(true)
     await handle.dispose()
   })
@@ -148,6 +153,11 @@ describe('the first input of a new process (#2377)', () => {
   it('a CLI whose init says it cannot track took it when written, and is sent untracked after', async () => {
     cli.version = '2.1.200'
     const { handle } = await session('old')
+    // An older CLI names no inputs in its result
+    cli.answer = (_input, say) => {
+      say({ type: 'system', subtype: 'init', claude_code_version: cli.version })
+      say({ type: 'result', subtype: 'success', is_error: false, result: 'done', modelUsage: {} })
+    }
     await handle.sendTracked!('the wake')
     expect(handle.sendTracked).toBeUndefined()
     await handle.dispose()

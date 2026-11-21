@@ -5,8 +5,8 @@ import type { AgentAdapter } from '../contract.js'
  * `vi.mock('@anthropic-ai/claude-agent-sdk', …)`, spread over the module's own exports (`importOriginal`). It imports
  * nothing of the SDK, so the mock can load it. What it does is what Claude Code 2.1.296 was measured to do (raw CLI, stream-json, haiku):
  *
- *   - a process says its `init` only once it read its first input, so the adapter tracks no input before it (`tracksInputs`), and again
- *     at every turn it begins
+ *   - a process says its `init` only once it read its first input, so what the adapter tracks before it waits for that init
+ *     (`tracksInputs`), and again at every turn it begins
  *   - a turn an input begins names it on its first frame (`user_message_uuid`) and in its result (`user_message_uuids`)
  *   - a background task that ended while the session rested makes the CLI run a turn of its own for the notification, which names no input,
  *     before the turn of the input that came with it (`notifyNext`)

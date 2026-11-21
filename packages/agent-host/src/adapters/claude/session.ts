@@ -371,7 +371,7 @@ export class ClaudeSession implements SessionHandle {
   private onMessage(q: QueryHandle, said: ClaudeMessage): void {
     const msg = this.raceRetry.ownIds(said)
     const m = msg as StreamMsg
-    if (m.type === 'assistant' || m.type === 'stream_event' || m.type === 'result' || (m.type === 'system' && m.subtype === 'init')) this.turnStart.heard()
+    this.turnStart.saw(m)
     if ((!this.ledger.turnRunning || !this.turnNamed) && !m.parent_tool_use_id && (m.type === 'assistant' || m.type === 'stream_event')) {
       const opening = !this.ledger.turnRunning
       if (opening) {
@@ -434,8 +434,6 @@ export class ClaudeSession implements SessionHandle {
     // A result ends the open turn: a Stop still waiting is confirmed by it, unless it failed or hit a limit (nothing to confirm)
     if (m.type === 'result') this.ledger.endSaid(events, completedInputs, took)
     else this.ledger.said(events)
-    // An input still waits after the turn ended (one queued behind it): its own turn should begin now
-    if (m.type === 'result' && !retrying && this.queuedInputs() > 0) this.turnStart.expect()
     this.schedules.arm()
     // Once a turn ends, asks what is currently in the context window (FR-14).
     if (m.type === 'result' && !retrying) {
@@ -550,7 +548,12 @@ export class ClaudeSession implements SessionHandle {
    * and the tracked ones (mail, an update's Continue, a parent's note) no turn took yet, which the ledger counts (#2318 review). Quiet inputs start no turn
    */
   queuedInputs(): number {
-    return this.queue.filter((input) => !input.quiet && !input.parentNote).length + this.personInputs.size + this.ledger.untaken
+    return this.untrackedInputs() + this.ledger.untaken
+  }
+
+  /** `queuedInputs` that carry no receipt: the person's, and Centralu's sent untracked */
+  private untrackedInputs(): number {
+    return this.queue.filter((input) => !input.quiet && !input.parentNote).length + this.personInputs.size
   }
 
   /** A note read with the next message or at the running turn's next tool round, starting nothing (#1492): quiet input, stamped as Centralu's */
@@ -748,6 +751,7 @@ export class ClaudeSession implements SessionHandle {
 
   /** What a Stop releases besides the turn, after the tracked inputs failed */
   private releaseForStop(cancelQueued: boolean): void {
+    this.turnStart.stop()
     const held = (cancelQueued ? this.queue.filter((input) => !input.parentNote && !input.quiet).length : 0) +
       this.raceRetry.held.filter((input) => !input.parentNote).length
     // Mail that must not wake stays: it starts nothing, and nobody would send it again
@@ -804,7 +808,7 @@ export class ClaudeSession implements SessionHandle {
     // (SDKControlInterruptResponse). A mixed batch could contain person input, so leave the SDK
     // queue intact when that race is possible; only local notes have been removed above.
     if (!query?.cancelAsyncMessage || this.personInputs.size || this.queue.length || this.raceRetry.held.length || this.sendGate) return
-    for (const id of ids) void query.cancelAsyncMessage(this.raceRetry.sentId(id)).catch((error: Error) => {
+    for (const id of ids) void query.cancelAsyncMessage(id).catch((error: Error) => {
       this.emit({ type: 'error', sessionId: this.sessionId, error: {
         code: 'internal', message: `Could not cancel the parent note: ${error.message}`, retryable: false,
       } })
@@ -816,8 +820,8 @@ export class ClaudeSession implements SessionHandle {
    * failure (the mailbox sends a wake again), the person's by saying it did not run, and the turn the session reads as running ends
    */
   private notStarted(): void {
-    if (this.closed || this.queuedInputs() === 0) return
-    const untracked = this.queuedInputs() - this.ledger.untaken
+    const untracked = this.untrackedInputs()
+    if (this.closed || untracked + this.ledger.untaken === 0) return
     const within = `in ${TURN_START_MS / 1000} s`
     this.queue = this.queue.filter((input) => input.quiet)
     this.personInputs.clear()
@@ -849,7 +853,7 @@ export class ClaudeSession implements SessionHandle {
    * same way; only swapping the process was missing it.
    */
   async dispose(): Promise<void> {
-    this.turnStart.heard()
+    this.turnStart.stop()
     this.ledger.failTracked(new Error('The session closed before the parent note finished'))
     this.ledger.close()
     this.stopMidTurnRead()

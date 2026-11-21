@@ -138,7 +138,7 @@ export function lineStamps(now: () => Date = () => new Date()): (text: string) =
   return (text) => {
     const at = now().toISOString()
     const out = text.split('\n').map((part, i) => ((i > 0 || atLineStart) && part.trim() !== '' ? `${at} ${part}` : part)).join('\n')
-    atLineStart = text.endsWith('\n')
+    if (text) atLineStart = text.endsWith('\n')
     return out
   }
 }
