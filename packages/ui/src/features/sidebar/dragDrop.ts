@@ -2,14 +2,8 @@ import { useState } from 'react'
 import { dropsBefore } from './reorder.js'
 
 /**
- * Drag-to-reorder.
- *
- * **The kind of thing being dragged is stated as a MIME type.** That is what makes dropping a
- * session onto a project's spot do nothing — without checking the kind, the wrong list gets
- * reordered.
- *
- * The drop spot is shown as a line. Without the line there is no way to know where it will land
- * until the hand lifts, so the person drops it, sees it is wrong, and undoes it, over and over.
+ * Drag-to-reorder. The dragged kind is a MIME type, so a session dropped on a project's spot is refused instead of
+ * reordering the wrong list. The drop spot shows as a line, so the hand knows where it lands before it lifts.
  */
 export function useDropLine(mime: string, onDrop: (draggedId: string, before: boolean) => void) {
   const [edge, setEdge] = useState<'top' | 'bottom' | null>(null)
@@ -39,22 +33,9 @@ export function useDropLine(mime: string, onDrop: (draggedId: string, before: bo
 }
 
 /**
- * The drop-spot indicator — a single thin line is enough.
- *
- * **Must not be drawn with a border.** A border grows an element by 1px, so every time the
- * indicator moves to a different row the whole list shifts by that amount — while dragging, it
- * reads as a constant little jump. Worse, the spot the hand is aiming for keeps moving, which
- * makes dropping harder too.
- *
- * **The line sits on the boundary between rows, not inside a row.** One boundary is shared by two
- * rows — it is the "bottom" for the row above and the "top" for the row below. An inset shadow
- * would draw that on **each row's own inside edge**, so the two indicators pointing at the same
- * boundary land 2-3px apart, and the line jumps by that amount every time the hand crosses the
- * boundary.
- *
- * Placing an absolutely positioned pseudo-element (`after`) right on the boundary (-1px) instead
- * makes the two rows' indicators land on **the same pixel**. It keeps the property of not
- * affecting box size — `absolute` does not claim space in the layout.
+ * The drop-spot line. Not a border: that grows the row by 1px, so the list jumps as the line moves. Not an inset
+ * shadow: the rows on either side of one boundary would draw it 2-3px apart. An absolute `after` at -1px puts both
+ * rows' lines on the same pixel and claims no layout space.
  */
 const DROP_LINE = 'after:pointer-events-none after:absolute after:inset-x-0 after:z-10 after:h-0.5 after:bg-ink-muted after:content-[""]'
 

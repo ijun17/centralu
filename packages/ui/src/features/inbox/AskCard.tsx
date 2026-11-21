@@ -11,23 +11,18 @@ import { choicesLabel, threadStateLabel } from './mailLabels.js'
 import { PartyName } from './PartyName.js'
 
 /**
- * A thread that waits on the person's answer, drawn as a card like the mail held for them (#2229, owner 2026-11-12): its subject in `ink`, who asks, the
- * first lines of the question (four at most, the rest is under Open), its choices as buttons when it offers any, and a field for an answer in the
- * person's own words (#2327, owner 2026-11-17), so a question is answered without opening the thread. Open shows the whole thread. The ordinary threads of
- * the list stay rows (`MailThreadItem`).
- *
- * A press or the field's Send is the answer, and both go the one way, `replyMail(words, 'answer', question, thread)`: it is sent at once, the card says
- * what it was while the host takes it (the picked choice lit with "You chose", or "Answered"), and the card fades out (`leaving`, `useLeavingCards`) once
- * the list no longer has it. One question takes one answer: while either is on its way the other is locked. A refused answer unlocks both, keeps what was
- * typed, and the host's words are in a toast. There is no undo: the session has the answer, and a question is answered once. What the person meant to
- * add goes in the thread, which the session reads as the next message.
+ * A thread waiting on the person's answer, as a card (#2229): the question's first four lines (the rest under Open), its
+ * choices as buttons, and a field for the person's own words (#2327), so it is answered without opening the thread.
+ * A press or Send goes one way, `replyMail(words, 'answer', question, thread)`, sent at once; the card shows the answer
+ * while the host takes it and fades out (`useLeavingCards`) when the list drops it. While one answer is on its way the
+ * other is locked; a refused one unlocks both and keeps the words. No undo: a question is answered once, and anything
+ * more goes in the thread.
  */
 export function AskCard({ thread: t, ask, active, leaving }: { thread: MailThreadRow; ask: NonNullable<MailThreadRow['ask']>; active?: boolean; leaving?: boolean }) {
   const open = useStore((s) => s.openMailThread)
   const reply = useStore((s) => s.replyMail)
   const sendKey = useSendKey()
-  // The answer on its way: the index of the choice pressed, or null for words. It is the question's, not the thread's: once this one is answered the
-  // thread's next question shows on the same card, unpressed
+  // The answer on its way: the choice pressed, or null for words. Keyed by question: the thread's next one shows unpressed
   const [sending, setSending] = useState<{ ask: string; picked: number | null } | null>(null)
   // The words typed, the question's too: words written to one question never go to the next one unseen
   const [draft, setDraft] = useState<{ ask: string; text: string } | null>(null)

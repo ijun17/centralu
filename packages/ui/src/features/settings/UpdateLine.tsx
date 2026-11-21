@@ -5,21 +5,10 @@ import { Pill } from '../../components/Pill.jsx'
 import { installedUpdate, applyOffer, useRelaunchCheck } from './apply-update.js'
 
 /**
- * "A new version is available" — a quiet line on the dashboard (issue #43).
- *
- * **It only appears when it has something to say.** The same reason keeps shortcut chips out
- * of the top bar (issue #33): something that stays on all the time takes attention
- * every time it is seen, and after the first time it has nothing left to tell. This line is the
- * opposite — most of the time it is not there at all, and it only shows up while something new
- * has landed in the registry, then disappears again. That is what earns it a place on the
- * dashboard.
- *
- * **Clicking it is consent.** That is why the label is not "New version available" but "Update
- * to 9.9.9" — the button has to say what it is about to do, because this is not reversible.
- * And once it finishes, **it does not restart on its own** unless the person turned on "Apply
- * updates automatically when idle". Where the desktop app can relaunch into the installed build
- * without cutting anything (#352: the keeper holds every agent through it), the line offers
- * "Apply now"; elsewhere it says to restart.
+ * "A new version is available" (#43), shown only while something new is in the registry: an always-on item costs
+ * attention each time it is seen (as shortcut chips did, #33). A press is consent to an irreversible step, so it says
+ * what it does. It never restarts by itself unless automatic updates are on; where the desktop app can relaunch with
+ * the keeper holding every agent (#352), it offers "Apply now", elsewhere a restart.
  *
  * @param waiting what an automatic apply waits for (`useAutoApplyUpdate`), null when none is pending
  */
@@ -31,11 +20,8 @@ export function UpdateLine({ waiting = null }: { waiting?: string | null }) {
   const update = installedUpdate(reportedUpdate, APP_VERSION, relaunch)
   if (!update) return null
 
-  /*
-   * One small capsule that says "Update" (owner, 2026-10-18), in the inbox capsule's shape; the version and what a
-   * press does are in its tooltip, not written across the top bar. The words change only where they must: while it
-   * installs, and when it failed. The capsule is Pill (components/Pill.tsx).
-   */
+  // One small "Update" capsule (Pill), shaped as the inbox's; the version and what a press does are in its tooltip. The
+  // words change only while it installs and when it failed.
   if (update.phase === 'updating') {
     return (
       <Tooltip content={`Installing ${update.latest ?? 'the new version'}. Nothing restarts until you apply it.`} align="right">
@@ -97,7 +83,7 @@ export function UpdateLine({ waiting = null }: { waiting?: string | null }) {
   if (update.phase === 'failed') {
     return (
       <Tooltip content={update.error ?? 'Something went wrong'} testId="update-error" align="right">
-        {/* A failure waits on the person: the signal ink at full strength, dashed (owner, 2026-10-18) */}
+        {/* A failure waits on the person: the signal ink at full strength, dashed */}
         <Pill edge="dashed" data-testid="update-line">
           <UpdateIcon />
           Update failed

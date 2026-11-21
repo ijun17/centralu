@@ -2,28 +2,14 @@ import { createContext, useContext, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 /**
- * Where the current tab's control buttons live — **the right end of the tab strip** (user request,
- * 2026-09-07).
- *
- * A header bar of each tab's own would, in a vertically narrow panel, put two header bars (the
- * tab strip, then the tab's own bar) back to back, with the actual content only starting in
- * whatever room was left below them. And the bar's label ("Terminal", "Changes") would say
- * exactly what the tab right above it says.
- *
- * Lifting the buttons up onto the strip by hoisting each screen's state upward instead (the
- * terminal's add function, whether ignored files are shown, and so on) would mean the strip has to
- * know every tab's business. So a **portal** is used instead: the button stays declared inside its
- * own screen and keeps using its own state as is, and only where it is rendered is the strip. The
- * strip knows nothing about any tab beyond handing out a slot.
- *
- * Each group has its own separate slot — when the screen splits top and bottom, each half's own
- * strip carries its own tab's buttons.
+ * The current tab's buttons at the right end of its group's tab strip, instead of a second header bar that would repeat
+ * the tab. A portal, so each button keeps its screen's state and the strip knows no tab's business.
  */
 const SlotCtx = createContext<HTMLElement | null>(null)
 
 export const TabActionSlot = SlotCtx.Provider
 
-/** This tab's control buttons. Renders nothing if the strip has no slot (e.g. a standalone render in a test) */
+/** Renders nothing without a slot (a standalone render in a test) */
 export function TabActions({ children }: { children: ReactNode }) {
   const slot = useContext(SlotCtx)
   return slot ? createPortal(children, slot) : null

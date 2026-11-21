@@ -2,23 +2,14 @@ import { appPanelId, arrangePanels, sessionPanelId, withPanel, withOrder, type P
 import { APP_MIME, PANEL_MIME, SESSION_MIME, moveTo, projectItemMime } from '../sidebar/reorder.js'
 
 /**
- * The project screen's side of a drag from the sidebar — kept apart from the DOM events, like
- * reorder.ts, so "is this taken, and where does it land" can be checked without a browser.
- *
- * The screen takes a session or app dropped on it the way the grid takes a session (GridView's
- * `dropSession`), with one difference: only **this project's**. The screen is one project, whole,
- * and a panel from another project would make it something else.
+ * The project screen's side of a sidebar drag, apart from DOM events (like reorder.ts) so it is testable without a
+ * browser. Taken as the grid's `dropSession` takes a session, but only this project's: the screen is one project.
  */
 
 /**
- * What the screen does with a drag, from its types alone — during dragover that is all a page may
- * read (GridView).
- *
- *   panel   one of the screen's own panels, being reordered
- *   add     a session or app of this project: shown, or moved, where it is dropped
- *   refuse  a session or app from anywhere else — another project, the Assistant, a session
- *           with no project. No drop cursor, anywhere on the screen
- *   ignore  anything else (a file, a path, a project row, a panel tab) — another owner's business
+ * What the screen does with a drag, from its types alone (all a page may read in dragover; GridView). `refuse`: a
+ * session or app of another project, the Assistant or no project, with no drop cursor anywhere on the screen.
+ * `ignore`: a file, a path, a project row or a panel tab, another owner's business.
  */
 export type DragVerdict = 'panel' | 'add' | 'refuse' | 'ignore'
 
@@ -29,14 +20,9 @@ export function dragVerdict(types: readonly string[], projectId: string): DragVe
 }
 
 /**
- * The panel a drop from the sidebar stands for, or null when what was dropped is not this
- * project's.
- *
- * Decided again from the data, not from the type that let the drag in: a drop can arrive without
- * the dragover having said yes — one fired by a script, or one that raced the dragover's answer —
- * and the screen must not take another project's then either. An app is matched by its key, which
- * carries its project: two projects can each have an app called `slider`, and the other one's is
- * not this one's.
+ * The panel a sidebar drop stands for, or null when it is not this project's. Decided again from the data: a drop can
+ * come without the dragover's yes (fired by a script, or racing its answer). An app matches by its key, which carries
+ * its project: two projects can each have an app called `slider`.
  */
 export function droppedPanelId(
   read: (type: string) => string,
@@ -51,12 +37,9 @@ export function droppedPanelId(
 }
 
 /**
- * The arrangement after one of the project's panels was dropped on its screen from the sidebar —
- * before or after the panel `target`, or at the end when `target` is null (the padding, a gap, the
- * empty screen). Null when nothing changes, so nothing is written.
- *
- * The grid's rule: an absent panel is added where it lands; a visible one moves there.
- * Dropping a visible panel on padding leaves it in place. Other projects change nothing.
+ * The arrangement after a sidebar drop before or after `target`, or at the end when it is null (padding, a gap, the
+ * empty screen); null when nothing changes. The grid's rule: an absent panel is added where it lands, a visible one
+ * moves there, or stays when dropped on padding.
  */
 export function droppedArrangement(
   present: readonly string[],
@@ -72,7 +55,6 @@ export function droppedArrangement(
     const order = moveTo(visible, id, target, before)
     return order.every((x, i) => x === visible[i]) ? null : withOrder(present, saved, order)
   }
-  // Add at the end, then move to the drop target.
   const shown = withPanel(present, saved, id, true)
   return target ? withOrder(present, shown, moveTo(arrangePanels(present, shown), id, target, before)) : shown
 }

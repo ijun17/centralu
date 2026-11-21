@@ -9,29 +9,11 @@ import { isApp, useStore } from '../../store/store.js'
 import { Badge } from '../../components/Badge.jsx'
 
 /**
- * One app's run history (M4 B-7) — a panel that opens and closes beside the pinned view.
- *
- * This is where the local half of "record who ran what" (A-6) reaches the person's eyes. A call
- * from the view, a call from a session's agent, and a call brokered through another app all pass
- * through the same single path and each leave one row. Someone using the app can see "did what I
- * just pressed actually reach the app" and "what did the agent do with this app" without leaving
- * the app.
- *
- * When it re-reads: when the panel opens, every time a row visible in this panel is created, its
- * session continues, or it ends (the counter on `external_app_runs_changed`), and when the person
- * presses the button. The host emits that signal for every row in the record — a rejected call, a
- * read-only tool call, and the chain it starts too (an agent an app asked for can run for several
- * minutes). The "changed" signal the view listens for (`external_app_state_changed`) is not enough: it
- * does not fire for a read-only tool call (#190), so the chain such a call starts would stay invisible
- * until Refresh is pressed.
- * A failure (the app answered with a failure, the host rejected it) is shown by a bright line on the
- * left of the row and one line stating the reason. Brightness belongs to whatever is blocked, exactly
- * the palette rule.
- *
- * The history is laid out as a chain (M4 D-6): a row for another app this app called, and a row for
- * something this app (or that app) asked Centralu for (an agent, another app, host data) is indented
- * under the row that caused it. A row where an agent was asked for lets a person jump to that session
- * (Open session).
+ * One app's run history (M4 B-7) beside the pinned view: the local half of "record who ran what" (A-6). View, agent
+ * and brokered calls take one path and leave a row each. Re-read on open, on Refresh, and on each
+ * `external_app_runs_changed` for a row here, which covers rejections, read-only calls and their chains;
+ * `external_app_state_changed` skips read-only calls (#190). A failure gets a bright left line and its reason (the
+ * palette rule). Chained rows (M4 D-6) indent under their cause; an agent's row offers Open session.
  */
 /** `machine`: a linked machine's user-folder app (#82), whose runs, answers and agent use are that machine's */
 export function RunsPanel({ appId, projectId, machine }: { appId: string; projectId: string | null; machine?: string | null }) {
@@ -89,16 +71,10 @@ export function RunsPanel({ appId, projectId, machine }: { appId: string; projec
 }
 
 /**
- * The remembered answers to capability questions for this app (M4 D-4) — an answer the person gave
- * once stays here. The question is asked only when a session under `safe` calls into the app (#2237);
- * otherwise what the app declares runs unasked. A decline holds for every caller until it is forgotten
- * here (Forget), after which the app can use that again; forgetting an allow matters only to a `safe`
- * caller, who is asked again. An allow given against older `uses` shows as "outdated" (a `safe` caller
- * is asked again); a decline never does, from a host of this build.
- *
- * When it re-reads: when the panel opens, when this panel's history changes (an answered request's
- * row soon either continues into a session or ends as a decline), when the view's question changes,
- * and after forgetting one.
+ * Remembered capability answers for this app (M4 D-4). Asked only when a `safe` session calls in (#2237); otherwise
+ * the declared uses run unasked. A decline holds for every caller until Forget; forgetting an allow matters only to a
+ * `safe` caller, asked again. An allow given against older `uses` shows "outdated"; a decline never does (this build's
+ * host). Re-read on open, on history changes, on the view's question changing, and after Forget.
  */
 function Permissions({ appId, projectId, machine, changed }: { appId: string; projectId: string | null; machine?: string | null; changed: number }) {
   const platform = usePlatform()
@@ -150,13 +126,8 @@ function Permissions({ appId, projectId, machine, changed }: { appId: string; pr
 }
 
 /**
- * The agent usage this app has asked for (M4 D-5) — how many times, how long, and how many tokens,
- * over the last day and the last 30 days. An app borrows the person's own agent to use — its share
- * is shown here per app. An app stuck in a loop is what this number states first. It does not appear
- * at all for an app that has never asked for an agent.
- *
- * When it re-reads: every time the history is re-read (`runs` changes) — usage changes as soon as an
- * agent's row ends.
+ * The agent usage this app asked for (M4 D-5): count, time and tokens over a day and 30 days, as it borrows the
+ * person's agent; a looping app shows here first. Absent for an app that never asked. Re-read with `runs`.
  */
 function AgentUseSection({ appId, projectId, machine, runs }: { appId: string; projectId: string | null; machine?: string | null; runs: AppRun[] | null }) {
   const platform = usePlatform()
@@ -189,11 +160,8 @@ function UseLine({ label, use, testId }: { label: string; use: AgentUse; testId:
 }
 
 /**
- * Lays the history out as a chain (M4 D-6) — the host provides this app's rows and the chain below
- * them as one list (newest first). A row whose parent is in the list is placed right under that
- * parent; the rest go at the top level. The top level is newest first, but under one parent it is
- * **in the order things happened** — what happens inside one call has to read top to bottom.
- * Indentation depth is provided along with each row.
+ * The history as a chain (M4 D-6), from the host's one newest-first list: a row goes under its listed parent, else at
+ * the top. The top level is newest first; under a parent, in the order things happened, to read top to bottom.
  */
 export function chainRuns(runs: AppRun[]): { run: AppRun; depth: number }[] {
   const ids = new Set(runs.map((r) => r.id))
@@ -209,11 +177,11 @@ export function chainRuns(runs: AppRun[]): { run: AppRun; depth: number }[] {
     if (seen.has(r.id)) return
     seen.add(r.id)
     out.push({ run: r, depth })
-    // The received list is newest first — reversing it puts even rows sharing a timestamp back in the order they happened (the sort is stable)
+    // Reversing the newest-first list puts rows sharing a timestamp back in order (the sort is stable)
     for (const c of [...(kids.get(r.id) ?? [])].reverse().sort((a, b) => a.createdAt - b.createdAt)) walk(c, depth + 1)
   }
   for (const r of roots) walk(r, 0)
-  // Even a row whose parent points at itself (should never happen, but) is not dropped
+  // A row whose parent is itself (never expected) is still kept
   for (const r of runs) walk(r, 0)
   return out
 }

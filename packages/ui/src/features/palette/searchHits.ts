@@ -1,10 +1,7 @@
 /**
- * The palette's conversation-search hits, with the query they answer (#1143 U15).
- *
- * The answer to a search arrives after the person typed more. The rows on screen are the previous query's hits until
- * it does, and Enter on one of those opens something that does not match what is in the box: type "fo", see its hits,
- * type "foz" and press Enter before the answer, and a "fo" hit opens when nothing matches "foz". The composer's
- * `@` list has the same rule (`autocompleteState.ts`): stale rows may stay on screen, but a key never picks one.
+ * Conversation-search hits with the query they answer (#1143 U15): until the answer comes, the rows are an earlier
+ * query's, and Enter would open a "fo" hit for "foz". As in the composer's `@` list (`autocompleteState.ts`), stale rows
+ * may stay on screen, but a key never picks one.
  */
 export type FoundHits<T> = { query: string; list: T[] }
 

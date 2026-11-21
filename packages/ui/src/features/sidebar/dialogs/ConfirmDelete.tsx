@@ -9,12 +9,8 @@ import { useLoad } from '../../../app/useLoad.js'
 import { useStore } from '../../../store/store.js'
 
 /**
- * Delete confirmation.
- *
- * **States plainly what is deleted and what stays behind.**
- * Writing only "this cannot be undone" would not be true — the underlying tool (Claude, Codex)
- * still keeps the conversation, and it can be recovered through '+ → previous conversation.'
- * Making it sound scarier than it is leaves the person unable to clean up, and rows just pile up.
+ * The archive confirmation: says plainly what goes and what stays. Sounding scarier than it is ("cannot be undone")
+ * would be untrue and would keep the person from cleaning up.
  */
 
 export function ConfirmDelete({
@@ -37,37 +33,23 @@ export function ConfirmDelete({
   const platform = usePlatform()
   const toolLabel = useToolMeta(tool).label
   /*
-   * The session goes to the session archive (#204), and both choices below are about what goes with it **when it is deleted
-   * for good** from Settings → Archive. The dialog says so in its first lines: a session that leaves the sidebar with
-   * no word about where it went and how it comes back is the retired hide-a-session feature (FR-20).
-   *
-   * Whether to also delete the original on the tool's side too.
-   * **Defaults to deleting it**: a person pressing delete actually means to clean up, so a
-   * half-delete that "deleted it, but the file is still there" feels wrong. Turning it off swaps the notice
-   * in the same spot to "it stays on the tool's side" (the same grammar as project deletion: the
-   * two sentences are never shown together for the person to pick between).
+   * Both choices apply when it is deleted for good from Settings → Archive (#204). The tool's file defaults to deleted:
+   * the person means to clean up. Off, the notice in the same spot says it stays; the two are never shown together.
    */
   const [deleteExternal, setDeleteExternal] = useState(true)
 
-  /*
-   * Whether this is a worktree session, and whether it has uncommitted changes, is **asked the
-   * moment the dialog opens.** The session list only holds the path, not whether it is dirty —
-   * that is a fact only the filesystem can answer.
-   */
-  // Unknown until the host answers, and when it cannot: the dialog then says nothing about a worktree
+  // Asked as the dialog opens: only the filesystem knows if it is dirty. Until (or unless) the host answers, nothing is said
   const wt = useLoad(() => platform.agents.worktreeStatus(sessionId), [platform, sessionId]).data ?? null
   const [deleteWorktree, setDeleteWorktree] = useState(false)
   /*
-   * What the archive would lose and Undo does not bring back (#1512, #1589, #1595): read from the host when the dialog opens, so the
-   * lines are on screen before the person decides, whichever way the worktree box is ticked; a host without the method says none.
-   * Archive never waits for that read: if it has not come (or came empty), the store asks the host again as it moves the session,
-   * and what that finds shows here, to be confirmed with the next Archive.
+   * What archiving loses for good (#1512, #1589, #1595), read as the dialog opens. Archive never waits for it: if it has not
+   * come, the store asks again as it moves the session, and what it finds shows here for the next Archive to confirm.
    */
   const read = useLoad(() => platform.agents.archiveLosses(sessionId), [platform, sessionId]).data
   const [found, setFound] = useState<string[]>([])
   const losses = found.length > 0 ? found : (read ?? [])
   const asking = useRef(false)
-  // A dialog put away while the host is being asked is an answer of "no more": the answer to that question moves nothing further
+  // A dialog closed while the host is asked means "no more": its answer moves nothing
   const open = useRef(true)
   useEffect(() => {
     open.current = true
@@ -98,7 +80,7 @@ export function ConfirmDelete({
         <p className="text-md text-ink">Archive this session?</p>
         <p className="mt-1.5 truncate text-sm text-ink-muted">{name}</p>
         {losses.length > 0 && (
-          // Opens downward in place (cc-expand, 180ms, none under reduced motion) and takes no press: the answer arrives after the dialog
+          // Opens in place (cc-expand, 180ms; none under reduced motion), no press: the answer arrives after the dialog
           <div className="cc-expand mt-2 grid">
             <div className="min-h-0 overflow-hidden">
               <div className="rounded-md border border-danger bg-danger-bg px-2 py-1.5 text-xs leading-body text-ink" data-testid="delete-losses">
@@ -147,9 +129,7 @@ export function ConfirmDelete({
         </label>
 
         {/*
-          A worktree's **lifetime differs from the session's.** Hours of an agent's work can be
-          sitting there, so it defaults to being kept. Deleting it requires the person to turn it
-          on by hand — and to read first what would be lost.
+          Kept by default: hours of an agent's work may sit there, so deleting it is opted into after reading the loss
         */}
         {wt && (
           <div className="mt-3 rounded-md border border-line bg-surface-raised p-2.5" data-testid="delete-worktree">

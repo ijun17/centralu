@@ -5,15 +5,9 @@ import type { RefObject } from 'react'
 const MIN_THUMB = 24
 
 /**
- * A scrollbar drawn over the content instead of beside it (owner, 2026-10-18): the scroller hides its own bar
- * (`.cc-scroll-overlay`, zero width) and this thumb floats over its right edge. The native bar takes a column of
- * its own, which, with the answer bubble's padding inside the page's, leaves one layer of padding too many on the
- * right.
- *
- * Put it in a `relative` box that holds the scroller and has the same size: it reads the scroller's position on
- * every scroll and its size whenever the scroller or anything in it resizes. Drag the thumb to scroll. `onGrab`
- * runs when the thumb is pressed, for a scroller that has to know a person took over (the conversation's
- * following).
+ * A scrollbar drawn over the content (docs/design-system.md §7): the scroller hides its own (`.cc-scroll-overlay`) and
+ * this thumb floats over its right edge. Put it in a `relative` box the size of the scroller. `onGrab` runs when the
+ * thumb is pressed, for a scroller that must know a person took over (the conversation's following).
  */
 export function OverlayScrollbar({
   scrollRef,

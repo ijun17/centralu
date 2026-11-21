@@ -4,16 +4,8 @@ import { ActionRow } from './ActionRow.jsx'
 import { ReconnectRow } from './ReconnectRow.jsx'
 
 /**
- * The action menu on a project row.
- *
- * The reason it is one labeled list instead of three icons is **that names are needed.** `+` could
- * be learned to mean new session, but there is no way to know before pressing that a branch icon
- * means the worktree manager and a trash icon means deleting the project — and one of those is the
- * kind of thing that must not be pressed just to find out.
- *
- * Delete sits **at the very bottom, below a divider.** The two above it are things done every day,
- * while this is something done once, and they must not sit in the same group when the hand is
- * moving from memory.
+ * The action menu on a project row: a labeled list, not icons, since some actions must not be pressed to find out what
+ * they do. Delete sits below a divider, apart from the everyday actions.
  */
 
 export function ProjectMenu({
@@ -52,25 +44,20 @@ export function ProjectMenu({
   }
   return (
     <RowMenu anchorEl={anchorEl} testId={`project-menu-open-${project.name}`} onClose={onClose}>
-      {/* A project on a machine that is not connected: bringing it back comes first (#1533); nothing here for one that is connected or on this computer */}
+      {/* Bringing a disconnected machine back comes first (#1533) */}
       {project.machine && <ReconnectRow machine={project.machine} projectName={project.name} anchorEl={anchorEl} onClose={onClose} />}
       {/*
-        The only way to start a session from the sidebar (owner, 2026-10-18). It starts one at once:
-        the empty screen switches the tool and offers past conversations, so no window of options is needed here.
+        The sidebar's one way to start a session, at once: the empty screen switches the tool and offers past conversations
       */}
       <ActionRow label="New session" onClick={pick(onNewSession)} testId={`new-session-${project.name}`} />
-      {/* A project whose folder has the app manifest at its root is an app (#1141): its screen, by name */}
+      {/* A project with the app manifest at its root is an app (#1141) */}
       {onOpenApp && <ActionRow label="Open as app" onClick={pick(onOpenApp)} testId={`open-app-${project.name}`} />}
       {/*
-        New app (M4 C-1) — right below new session. Both are "add one more thing to this project,"
-        so they belong in the same group. It shows up even for an untrusted project too: the dialog
-        states why and lets the person trust it right there (if the row disappeared from the menu
-        instead, there would be nowhere to ask why it is missing).
+        M4 C-1. Shown for an untrusted project too: the dialog says why and offers trust, where a missing row would not
       */}
       {onNewApp && <ActionRow label="New app…" onClick={pick(onNewApp)} testId={`new-app-${project.name}`} />}
       {/*
-        The whole project in VS Code, on its own machine (#82). It lives here and not in the file tree's tab strip:
-        there it would take the width the strip counts tabs by, and push the terminal tab into "more" in a narrow panel.
+        On the project's own machine (#82). Not in the file tree's tab strip: it would push tabs into "more"
       */}
       {onOpenInVsCode && (
         <ActionRow
@@ -80,10 +67,7 @@ export function ProjectMenu({
         />
       )}
       {/*
-        Trust (M4, decision 3). Asked once at registration, and changed from here afterward. A
-        single toggle row, not a confirmation dialog: turning it off is the safe direction, which
-        stops apps and ignores settings, and turning it on is something the person did by opening
-        the menu, reading the label and pressing it.
+        Trust (M4, decision 3): a toggle row, no confirmation. Off is the safe direction; on was read and pressed
       */}
       <ActionRow
         label={project.trusted ? 'Stop trusting this project' : trustListsApps ? 'Trust this project…' : 'Trust this project'}
@@ -91,8 +75,7 @@ export function ProjectMenu({
         testId={`toggle-trust-${project.name}`}
       />
       {/*
-        The project's own setting for the agents its sessions start (#1161 item 2). Beside trust, which is the other
-        setting of the project as a whole; a dialog, since it is a text to read and edit, not a toggle.
+        Beside trust, the other project-wide setting (#1161 item 2)
       */}
       <ActionRow
         label="Instructions for agents…"

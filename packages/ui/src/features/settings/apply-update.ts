@@ -6,12 +6,8 @@ import { useWhileVisible } from '../../app/useWhileVisible.js'
 import { applyOffer, installedUpdate, type ApplyOffer } from './apply-offer.js'
 import { trackTyping, typedWithin, TYPING_QUIET_MS } from './typing.js'
 
-/**
- * Applying an installed update (#352): what the update line offers once the host has installed a
- * newer version, and when "Apply updates automatically when idle" relaunches by itself.
- *
- * The decisions are pure so the rules are tested without a window; the hooks below only feed them.
- */
+// Applying an installed update (#352): what the update line offers once installed, and when the automatic apply
+// relaunches by itself. The decisions are pure, tested without a window; the hooks only feed them.
 
 export { applyOffer, installedUpdate, agentApplyVerdict, type ApplyOffer, type AgentApplyVerdict } from './apply-offer.js'
 export { typedWithin, TYPING_QUIET_MS } from './typing.js'
@@ -207,11 +203,8 @@ export function useAutoApplyUpdate(): string | null {
 }
 
 /**
- * "Where things stand right now," in one line.
- *
- * **The order itself is the judgment.** Whatever is in progress comes first, the outcome comes
- * after. In particular, `error` must never come after `latest` — the moment a brief network
- * drop gets read back as "you are up to date," the check erases its own finding (#42).
+ * Where things stand, in one line. The order is the judgment: in progress first, then the outcome, and `error` before
+ * `latest`, or a brief network drop reads as "up to date" and the check erases its own finding (#42).
  */
 export function updateStateText(u: UpdateStatus | null, offer: ApplyOffer | null): string {
   if (!u) return 'Not checked yet'

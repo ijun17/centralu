@@ -13,25 +13,10 @@ import { awayNote, folderNote, type DeleteOutlook } from './deleteNote.js'
 const OUTLOOK_WAIT_MS = 3000
 
 /**
- * Deleting a project.
- *
- * **There are two irreversible actions here, and they are different in scale.** One is this app's
- * own memory disappearing (sessions, conversations, the search index); the other is a folder on
- * disk disappearing. So this dialog does only the first by default, and the person has to turn the
- * second on by hand — and the moment it is turned on, **the description text turns into a warning.**
- * The sentence changes in the same spot, so there is no need to look elsewhere to see what changed.
- *
- * Why typing the name is required: this dialog must have no path a person can slip through by
- * mistake. A dialog with just one confirm button is something the hand can click through from
- * memory, and once through, there is nothing to undo. While typing the name, the person reads once
- * what they are about to delete — that is the entire point of this device.
- *
- * **Its sessions go to Centralu's trash (#204), not with it** — only Settings deletes a conversation for good, and
- * a project must not take every one of its conversations at once. Both sentences below say so, and where to find them.
- *
- * The files go **to the trash.** Exactly the app's own file rule (the fs port: "Not a delete — that
- * is the whole decision"). Leaving the OS one path back is better than calling `rm` ourselves and
- * permanently destroying a person's uncommitted work.
+ * Deleting a project: two irreversible actions of different scale. The app's memory goes by default, the folder only
+ * when ticked, and then the note turns into a warning in the same spot. Typing the name makes the person read what
+ * goes; a lone confirm button gets clicked from memory. Sessions go to Centralu's trash (#204): only Settings deletes
+ * a conversation for good. The folder goes to the OS trash, never `rm` (the fs port's rule).
  */
 export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo; onClose: () => void }) {
   const deleteProject = useStore((s) => s.deleteProject)
@@ -39,16 +24,13 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
   const [withFiles, setWithFiles] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  /*
-   * What deleting may do to the folder, asked of the host once when the dialog opens (#1301): its real-path answer, where the
-   * list's mark goes by spelling. A host that does not answer leaves the mark deciding.
-   */
+  // What deleting may do to the folder, asked once on open (#1301): the host checks real paths, the list's mark only spelling
   const platform = usePlatform()
   const [outlook, setOutlook] = useState<DeleteOutlook | 'pending' | null>('pending')
   useEffect(() => {
     let current = true
-    // The sentence waits for the answer, and so does Delete: a guess shown for a moment could be read, and confirmed. A host that
-    // does not answer in time, or has no such call, leaves the list's mark deciding
+    // The sentence and Delete wait: a guess shown for a moment could be read and confirmed. A host that does not answer
+    // in time, or lacks the call, leaves the list's mark deciding
     const gaveUp = setTimeout(() => current && setOutlook(null), OUTLOOK_WAIT_MS)
     platform.projects.deleteOutlook(project.id).then(
       (r) => current && setOutlook(r.folder),
@@ -59,14 +41,11 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
       clearTimeout(gaveUp)
     }
   }, [platform, project.id])
-  /*
-   * A project on a linked machine that is not connected (#2330): the hub keeps the delete and the machine does it when it
-   * is connected again, so the dialog says that before the person confirms. The call above is refused at once for such a
-   * machine, which leaves the list's mark deciding the folder's sentence
-   */
+  // A linked machine that is not connected (#2330): the hub keeps the delete until it reconnects, and the dialog says so.
+  // The outlook call is refused at once there, so the list's mark decides the folder's sentence.
   const away = useStore((s) => isAway(project, s.machines))
   const machineName = useMachineName(project.machine)
-  // Only whitespace is trimmed off; it must match exactly, including case — a similarly named project may sit right next to it
+  // Exact, case included, only whitespace trimmed: a similarly named project may sit right next to it
   const armed = typed.trim() === project.name
 
   return (
@@ -82,7 +61,7 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
             await deleteProject(project.id, withFiles)
             onClose()
           } catch (err) {
-            // A toast disappears after 2.5 seconds and would look like "nothing happened when pressed" — kept inside the dialog instead
+            // Kept in the dialog: a toast vanishes after 2.5 s and reads as "nothing happened"
             setError(errorMessage(err))
             setBusy(false)
           }
@@ -93,17 +72,10 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
           <span className="text-ink-muted">{project.name}</span>
         </h2>
 
-        {/*
-          The description turns into a warning in the same spot. Showing both sentences together
-          would make the person choose which one describes what is actually about to happen, and
-          that choosing is not something that should happen here.
-        */}
-        {/*
-          The dangerous state is **red**. The color is the danger token,
-          which has the diff's delete values (--color-danger) — red already means "this is disappearing" in this app, so
-          this extends the existing language rather than inventing a new one. The most painful
-          sentence (it reaches even uncommitted work) is the most saturated.
-        */}
+        {/* The note becomes the warning in place;
+            both at once would make the person pick which is true */}
+        {/* Red is the danger token (the diff's delete color): "this disappears".
+            The most saturated for the part that reaches uncommitted work */}
         {withFiles ? (
           <p
             className="mt-2 rounded-md border border-danger bg-danger-bg px-2.5 py-2 text-xs leading-body text-ink"
@@ -130,10 +102,8 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
           </p>
         )}
 
-        {/*
-          The folder goes to this computer's trash through the desktop shell, so a project on a linked machine has no
-          such box (#82): its folder is on the other machine, and stays there.
-        */}
+        {/* No box for a linked machine (#82): the trash is this computer's,
+            through the desktop shell, and the folder stays on the other machine */}
         {!project.machine && (
           <label
             className={`mt-3 flex cursor-pointer items-start gap-2 text-xs ${
@@ -141,7 +111,7 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
             }`}
             data-testid="delete-project-files-toggle"
           >
-            {/* The checkbox turns red the moment it is checked — the same palette as the warning, at the same moment */}
+            {/* Red once checked, with the warning */}
             <input
               type="checkbox"
               className={`mt-0.5 ${withFiles ? 'accent-danger' : 'accent-ink-muted'}`}
@@ -152,11 +122,8 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
           </label>
         )}
 
-        {/*
-          The name field sits **at the very bottom.** The order has to be reading the description
-          (or warning) above and then coming down to it, so typing is an answer to what was just
-          read.
-        */}
+        {/* The name field comes last:
+            typing answers what was just read */}
         <label className="mt-3 block text-xs text-ink-muted" htmlFor="delete-project-name">
           Type <span className="readout text-ink">{project.name}</span> to confirm
         </label>
@@ -189,7 +156,7 @@ export function DeleteProjectDialog({ project, onClose }: { project: ProjectInfo
           >
             Cancel
           </button>
-          {/* The action button is also in the delete palette — the trigger for something irreversible must not be a neutral color */}
+          {/* Danger too: an irreversible trigger is never neutral */}
           <Button type="submit" variant="danger" disabled={!armed || busy || outlook === 'pending'} data-testid="delete-project-confirm">
             {busy ? 'Deleting…' : withFiles ? 'Delete and trash folder' : 'Delete'}
           </Button>

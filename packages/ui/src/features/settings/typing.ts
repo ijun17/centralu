@@ -1,21 +1,14 @@
-/**
- * Whether someone is typing in this window, for what would swap it out under their fingers: the window's own automatic apply
- * (apply-update.ts) and an agent's "Apply now" that went with no card (store/updates.ts, #1509). A module of its own so the store
- * can read it without importing the hook file that imports the store.
- */
+// Whether someone is typing here, for what would swap the window out under them: the automatic apply (apply-update.ts)
+// and an agent's card-less "Apply now" (store/updates.ts, #1509). Its own module, so the store need not import the hooks.
 import { isTextEntry } from '../../app/keys.js'
 
 /**
- * How long after the last keystroke in a text field the window counts as "someone is typing". A
- * relaunch reloads the window; the composer keeps a draft, but a sentence half typed into a dialog
- * would be lost, and a window swapping itself out under someone's fingers reads as a crash.
+ * How long after the last keystroke in a text field the window counts as "someone is typing". A relaunch reloads the
+ * window: a half-typed dialog sentence would be lost (the composer keeps a draft), and it would read as a crash.
  */
 export const TYPING_QUIET_MS = 20_000
 
-/*
- * Typing, seen from the window: the last keydown in an editable field. One capture listener for
- * the whole window, installed on first use; cheap enough to leave on.
- */
+// The last keydown in an editable field: one capture listener for the window, installed on first use, left on
 let lastTypedAt = 0
 let typingTracked = false
 export function trackTyping(): void {

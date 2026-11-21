@@ -24,72 +24,40 @@ import { registerSlottedView } from './slots.js'
 import { registerShieldHost } from './dragShield.jsx'
 
 /**
- * Where a pinned view is drawn.
- *   full    the app view — the main area is this app
- *   slot    laid over its panel on the project screen (#203) or the grid (#288, slots.ts) — the frame and what stands on it, no header
- *   hidden  alive and out of sight
+ * Where a pinned view is drawn: `full` is the app view; `slot` lies over its panel on the project screen (#203) or the
+ * grid (#288, slots.ts), without a header; `hidden` is alive and out of sight.
  */
 type Mode = 'full' | 'slot' | 'hidden'
 
 /**
- * How a hidden view is put out of sight: moved past the window's left edge at the lane's size, and
- * `inert`, so neither the keyboard, the pointer nor assistive tech reaches it.
- *
- * Never `display: none` or `visibility: hidden`, on the view or on anything around it. In WKWebView
- * (the desktop app) a frame hidden either way and shown again stops drawing the native scrollbars
- * of the scrolling areas inside the app's document: the gutter keeps its width, nothing is drawn in
- * it, and scrolling the area from script does not bring it back (#309). Measured with the system
- * WebKit of macOS 27, legacy (always shown) scrollbars, a frame nested the way a view's is: both
- * ways lost them; `opacity: 0`, and moving the frame out of the window and back, kept them. The
- * grid, the project screen and the app view all hide views here, so hidden either way, going to a
- * session and back would leave a board app on the grid with empty gutters. Overlay scrollbars (a
- * trackpad's default) take no gutter, and Playwright's WebKit forces them, which is why e2e does
- * not show this.
- *
- * `-200vw`: the lane starts at the sidebar's edge and is narrower than the window, so the whole box
- * lies left of the window's edge. A negative offset adds nothing anyone can scroll to.
+ * A hidden view: moved past the window's left edge at the lane's size, and `inert`. Never `display: none` or
+ * `visibility: hidden`, on it or around it (docs/apps/views.md "Pinned, in the main area", #309): in WKWebView either
+ * one leaves empty scrollbar gutters once shown again, and scrolling from script does not restore them. Measured with
+ * macOS 27's WebKit, legacy scrollbars, a nested frame; `opacity: 0` and moving out kept them. e2e cannot show it:
+ * Playwright's WebKit forces overlay scrollbars, which take no gutter. `-200vw`: the lane is narrower than the window,
+ * so the box lies wholly left of it, and a negative offset adds nothing to scroll to.
  */
 const OUT_OF_SIGHT = 'absolute inset-y-0 -left-[200vw] flex w-full min-h-0 min-w-0 flex-col'
 
 /**
- * The pinned view (M4 B-2) — an app opened from the sidebar takes over the main area.
- *
- * **Every open view stays mounted.** Only one is visible; the rest are moved out of the window
- * (`OUT_OF_SIGHT`). Going to look at a session and coming back is still the same iframe, the same
- * document, the same instance. The spec's statement that a view holds no state means "it reads fresh
- * when it comes back up," not that it is fine to remount it. Remounting would drop whatever field was
- * being typed in, whatever list was expanded, and the scroll position, and the app would receive
- * `home` all over again. An iframe discards its document the moment it is detached from the DOM (even
- * just moving it causes a fresh read), while merely hiding it keeps the document alive. So this layer
- * is always rendered in App's center lane as **a child that never changes position.**
- *
- * There are exactly three paths down, and all three send the spec's teardown first (AppFrame's
- * contract: called before detaching).
- *   close                    the person pressed ×
- *   the app has disappeared  its folder was deleted, its project was deleted
- *   the app can no longer run  it lost trust, its manifest broke — the view's HTML is also that
- *                              project's code
+ * The pinned view (M4 B-2): an app opened from the sidebar takes the main area. Every open view stays mounted, one
+ * visible: the spec's "a view holds no state" means it reads fresh on return, but a remount loses typed fields, scroll
+ * and expanded lists and resends `home`, and a detached or moved iframe loses its document. So this layer is always
+ * App's center-lane child, never moving. Three ways down, each sending teardown first (AppFrame's contract): close (×),
+ * the app is gone (folder or project deleted), or it can no longer run (its view's HTML is that project's code).
  */
 export function PinnedApps() {
   const pinned = useStore((s) => s.pinnedViews)
   const showing = useStore((s) => s.view === 'app')
   const focusedKey = useStore((s) => (s.focusedApp ? appKeyOf(s.focusedApp.projectId, s.focusedApp.appId, s.focusedApp.machine) : null))
-  /*
-   * The views laid over panels: the project screen's apps, or the grid's (#288). Only one of the two screens shows at a
-   * time, so at most one of these lists is not empty. Joined into one string: a selector that returns a new array on
-   * every call never settles
-   */
+  // The views over panels, the project screen's or the grid's (#288; one screen shows at a time). Joined into a string:
+  // a selector returning a new array each call never settles
   const slotted = useStore((s) => [...projectScreenAppKeys(s), ...gridScreenAppKeys(s)].join('\n'))
   const slots = new Set(slotted ? slotted.split('\n') : [])
   const modeOf = (key: string): Mode => (showing ? (key === focusedKey ? 'full' : 'hidden') : slots.has(key) ? 'slot' : 'hidden')
   return (
-    /*
-      Anywhere but the app view this layer takes no room of its own (`contents`): its slotted views are
-      absolutely placed in the middle lane, over their panels, and its hidden ones out of the window.
-      Never `hidden` (display: none), even with no view in sight — that would hide every frame in it
-      the way OUT_OF_SIGHT says it must not be. Only the class changes, never the parent, so no frame
-      is ever taken out of the document.
-    */
+    // Outside the app view this layer takes no room (`contents`), never `hidden` (see OUT_OF_SIGHT). Only the class
+    // changes, never the parent, so no frame leaves the document.
     <div className={showing ? 'flex min-h-0 min-w-0 flex-1' : 'contents'} data-testid="pinned-apps">
       {pinned.map((pv) => (
         <PinnedAppView key={pv.key} pv={pv} mode={modeOf(pv.key)} />
@@ -114,22 +82,15 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
     if (mode !== 'slot' || !el) return
     return registerShieldHost(pv.key, el)
   }, [mode, pv.key])
-  /*
-   * A view put out of sight lets go of the keyboard (#115). `inert` is meant to see to that, but
-   * WebKit leaves focus inside a frame that turns inert while it holds focus (measured with
-   * Playwright's WebKit: the hidden frame goes on taking every key). When the view is hidden by
-   * something other than a click in the page — a notification, the global shortcut, the store
-   * moving to a session — the person types into a view they cannot see, and the app's own
-   * shortcuts never hear a key. Taking focus off the frame hands the keys back to the page.
-   */
+  // A hidden view lets go of the keyboard (#115): WebKit keeps focus in a frame that turns inert (measured, Playwright's
+  // WebKit), so when a notification, the global shortcut or the store hides it, keys would go into an unseen view.
   useLayoutEffect(() => {
     const el = section.current
     if (mode !== 'hidden' || !el) return
     const held = document.activeElement
     if (!(held instanceof HTMLElement) || !el.contains(held)) return
     held.blur()
-    // In WebKit blurring the frame element leaves focus in the view's own nested frame; focusing
-    // this window takes it back into this document
+    // In WebKit the blur leaves focus in the view's nested frame; focusing this window takes it back
     window.focus()
   }, [mode])
   const app = useExternalApp(pv.projectId, pv.appId, pv.machine)
@@ -139,17 +100,17 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
   const close = useStore((s) => s.closeApp)
   const setToast = useStore((s) => s.setToast)
   const scope = useStore((s) => (pv.projectId ? projectLabelOf(s.projects, pv.projectId) : 'Other apps'))
-  // The Runs panel (B-7) opens independently per view — a person watching one app's runs moving to another app sees that app's own panel state first
+  // The Runs panel (B-7), open per view: another app shows its own state
   const [runsOpen, setRunsOpen] = useState(false)
-  // The Secrets panel (M4 E) — only exists for an app that declares secrets. If any are unset, the header's button states the count
+  // The Secrets panel (M4 E), for an app that declares secrets; the button counts unset ones
   const [secretsOpen, setSecretsOpen] = useState(false)
-  // The Versions panel (M4 E-1) — a snapshot history and a way back for a user-folder app; git's own commits (read-only) for a project app
+  // The Versions panel (M4 E-1): snapshots and a way back for a user-folder app; git's commits (read-only) for a project app
   const [versionsOpen, setVersionsOpen] = useState(false)
   const missing = missingSecrets(app)
-  // The builder session (C-5) — the input row below sends into it, and its conversation opens and closes beside the view (BuilderPane)
+  // The builder session (C-5): the input row sends into it; its conversation opens beside the view (BuilderPane)
   const builder = useAppBuilder(pv.projectId, pv.appId, pv.machine)
   const [builderOpen, setBuilderOpen] = useState(false)
-  // A builder session's conversation opened beside it is a session that is on screen — its turn ending is a breeze, not a card (`isOnScreen`)
+  // A builder's conversation beside the view is on screen: its turn ending is a breeze, not a card (`isOnScreen`)
   const setBuilderPane = useStore((s) => s.setBuilderPane)
   const paneSession = builderOpen && visible && builder.id ? builder.id : null
   useEffect(() => {
@@ -159,19 +120,11 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
       if (useStore.getState().builderPaneSessionId === paneSession) setBuilderPane(null)
     }
   }, [paneSession, setBuilderPane])
-  /*
-   * "Show the conversation" (FixBar, ErrorTail). In the app view the pane opens beside the view. A view laid over a
-   * panel — the grid's or the project screen's — draws no pane (`visible` is false there: a panel is too narrow for a
-   * 380px conversation beside the app), so the link goes to the app view with the pane open, through `openApp`, the
-   * door the panel's Open uses. On the project screen that is this same view; on the grid it is the app's own view,
-   * apart from the grid's (#288). Setting only this view's flag in a slot would do nothing a person can see.
-   */
+  // "Show the conversation" (FixBar, ErrorTail): a slot draws no pane (too narrow for 380px beside the app), so from a
+  // panel it opens the app view with the pane, through `openApp` like the panel's Open (on the grid, the app's own view, #288)
   const openApp = useStore((s) => s.openApp)
-  /*
-   * Both ask for a panel of the app view, so both go through here: in the app view the panel opens in place, and from a
-   * panel the app view is opened with the panel asked for. A linked machine's user-folder app is named by its machine
-   * as well (#82), or the app view would be this computer's app of the same id.
-   */
+  // Builder and Runs open in place in the app view, else open it with the panel asked. A linked machine's user-folder
+  // app names its machine too (#82), or this computer's app of the same id would open
   const showPanel = (panel: 'builder' | 'runs') => {
     if (visible) (panel === 'builder' ? setBuilderOpen : setRunsOpen)(true)
     else openApp(pv.projectId, pv.appId, { builder: panel === 'builder', runs: panel === 'runs', machine: pv.machine })
@@ -192,11 +145,8 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
     setRunsOpen(true)
     takeRunsAsk(pv.key)
   }, [runsAsked, visible, pv.key, takeRunsAsk])
-  /*
-   * A capability question from a chain started by this app's view (M4 D-4) — one at a time, oldest
-   * first. The whole list is selected and filtered here: if the selector itself returned a new
-   * array every time, it would read as a new value on every store change.
-   */
+  // A capability question from this view's chain (M4 D-4), oldest first. Filtered here: a selector returning a new
+  // array would change on every store change
   const questions = useStore((s) => s.appQuestions)
   const asking = useMemo(
     // The questions are this computer's own: another machine's user-folder app of the same id never matches one (`sameApp` reads the machine)
@@ -204,37 +154,25 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
     [questions, pv],
   )
 
-  /*
-   * The view's `ui/message` (B-4) — asks which session to send it to (MessageAsk). Nothing is sent
-   * before the person chooses, and the view's request waits for an answer. If an earlier question is
-   * still pending, it is closed as declined (the same rule as link confirmation, AppFrame). A
-   * message with not a single piece of text is declined without asking — there is nothing to send.
-   */
+  // The view's `ui/message` (B-4) waits while MessageAsk asks which session (useMessageAsk); nothing goes before the pick
   const sendViewMessage = useStore((s) => s.sendViewMessage)
   const { ask, onMessage, take, settle: settleAsk } = useMessageAsk()
   const answer = async (sessionId: string | null) => {
     if (!sessionId) return void settleAsk(false)
     const a = take()
     if (!a) return
-    /*
-     * Sent through **the same path** as an in-conversation view (`apps.viewMessage`) — it lands in
-     * the chosen conversation as a message from the app, and the agent receives it wrapped by the
-     * host as "the app's text." Sending it as the person's own message (`send`) would disguise the
-     * app's text as the person's own instruction. The host builds the frame around it.
-     */
+    // As an in-conversation view sends (`apps.viewMessage`): the host wraps it as the app's text. Sent as the person's
+    // (`send`), the app's text would pose as the person's instruction.
     const sent = pv.instanceId ? await sendViewMessage(sessionId, pv.instanceId, a.text) : false
     if (sent) setToast(`Sent to ${useStore.getState().sessions[sessionId]?.name ?? 'the session'}`)
     a.resolve(sent)
   }
-  // When the view goes down (closed, restarted, loses trust), a pending question closes as declined too — there is no view left to answer it
+  // A view going down (closed, restarted, untrusted) declines a pending ask: nothing is left to answer it
   useEffect(() => {
     if (pv.phase !== 'open') settleAsk(false)
   }, [pv.phase, settleAsk])
 
-  /*
-   * Registers the rendered frame with the store (C-4) — when the app comes back up with new code,
-   * the store reopens this view (reloadPinnedView), but sends teardown through this handle first.
-   */
+  // For the store (C-4): reopening on new code (reloadPinnedView) sends teardown through this handle first
   useEffect(() => {
     if (pv.phase !== 'open' || !pv.instanceId) return
     return registerPinnedFrame(pv.key, { teardown: () => frame.current?.teardown() ?? Promise.resolve('not-connected') })
@@ -247,11 +185,8 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
     if (canOpen && pv.phase === 'idle') void start(pv.key)
   }, [canOpen, pv.phase, pv.key, start])
 
-  /*
-   * The app can no longer run (`viewMustClose`: trust lost, a broken manifest, an import waiting on review, turned off).
-   * The view (the app's own HTML) is also that project's code, so it comes down along with it. The slot is kept and
-   * returned to idle: once the app can run again, it reopens in this same slot.
-   */
+  // The app can no longer run (`viewMustClose`), and its view is that project's code too, so it comes down. The slot
+  // stays, idle, and reopens once the app can run.
   const blocked = !!app && viewMustClose(app.info)
   useEffect(() => {
     if (!blocked || pv.phase !== 'open') return
@@ -265,11 +200,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
     }
   }, [blocked, pv.phase, pv.key, release])
 
-  /*
-   * The app has disappeared. **Only an app seen at least once** is treated as having disappeared —
-   * reading the empty moment between re-reads of the list as a disappearance would close a perfectly
-   * fine view.
-   */
+  // Gone only once seen: the empty moment between list reads would otherwise close a fine view
   const seen = useRef(false)
   if (app) seen.current = true
   const gone = seen.current && !app
@@ -282,10 +213,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
     })()
   }, [gone, pv.key, pv.appId, close, setToast])
 
-  /*
-   * Back to its project's screen, the app is a panel there and keeps this view (#203) — × only leaves. Anywhere else
-   * nothing shows the view any more, so it goes down, teardown first.
-   */
+  // Back on its project's screen it is a panel and keeps this view (#203), so × only leaves; elsewhere it goes down
   const toPanel = useStore((s) => returnsToPanel(s, pv.key))
   const leave = useStore((s) => s.leavePinnedView)
   const onClose = async () => {
@@ -299,7 +227,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
     await frame.current?.teardown()
     await restart(pv.key)
   }
-  // An app keeping itself running for background work (#1236) is stopped from here: its view goes too, or it would hold the app
+  // Stops an app kept running for background work (#1236); its view goes too, or it would hold the app
   const stop = useStore((s) => s.stopApp)
   const onStop = async () => {
     await frame.current?.teardown()
@@ -355,7 +283,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
               </button>
             </>
           )}
-          {/* Reopened with new code (C-4) — a brief note that appears momentarily. If it changed too often to reopen on its own, the person presses it */}
+          {/* Reopened with new code (C-4): a brief note. Changed too often to reopen alone: the person reloads */}
           {pv.phase === 'open' && pv.updatedAt && <UpdatedCue key={pv.updatedAt} at={pv.updatedAt} testId="pinned-updated" />}
           {pv.phase === 'open' && pv.stale && (
             <button
@@ -408,7 +336,7 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
               {missing ? `Secrets · ${missing} missing` : 'Secrets'}
             </button>
           )}
-          {/* Sharing with the person's other projects (#371 part A) — the same switch as Settings → Apps, here where the app is. A root app has none: its project's trust decides (#1141) */}
+          {/* Sharing with other projects (#371 part A), as in Settings → Apps. Not for a root app: its project's trust decides (#1141) */}
           {app?.projectId && !app.info.root && (
             <button
               type="button"
@@ -452,11 +380,8 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
           </button>
         </header>
       )}
-      {/*
-        The view's own box is always this row's first child. Opening and closing a side panel never
-        makes React recreate that box — recreating it would detach the iframe and lose the document
-        (see this file's header comment).
-      */}
+      {/* The view's box is always this row's first child,
+          so a side panel never makes React recreate it (PinnedApps) */}
       <div className="flex min-h-0 flex-1">
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col p-2">
           <Body app={app} pv={pv} frame={frame} onRestart={() => void onRestart()} onMessage={onMessage} />
@@ -471,10 +396,8 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
         {visible && secretsOpen && app && <SecretsPanel app={app} />}
         {visible && versionsOpen && app && <VersionsPanel app={app} />}
       </div>
-      {/*
-        The panel's drag cover goes in here, through a portal from the panel (dragShield.tsx). No box of its own: the
-        cover is placed against this section, over the frame and everything else in it.
-      */}
+      {/* The panel's drag cover, through a portal (dragShield.tsx);
+          no box of its own, it lies against this section */}
       {mode === 'slot' && <div ref={shieldHost} className="contents" data-testid="app-drag-shield-host" />}
     </section>
   )
@@ -495,17 +418,9 @@ function Body({
 }) {
   const connection = useStore((s) => s.connection)
   const title = app?.title ?? pv.appId
-  /*
-   * While the instance is open, the frame is drawn **no matter what.** If the app gets blocked or
-   * disappears, the effect above sends teardown and reverts the slot. Swapping in a notice here
-   * before that would make React detach the iframe first, leaving no window left for teardown to
-   * reach (AppFrame's contract: called before detaching).
-   *
-   * If a running app died (B-6), the reason and a "Restart" button are placed on top of the frame.
-   * The frame itself stays: the app comes back up on its own on the next call (crashed), and whatever
-   * was on screen is still there. A stopped app (failed) does not come back up on its own, so this
-   * button is the only way.
-   */
+  // While open, the frame is always drawn: a notice swapped in first would detach it before the effects above send
+  // teardown (AppFrame's contract). A died app (B-6) gets its reason and Restart above the frame, which stays: a
+  // crashed app comes back on the next call, a failed one only through Restart.
   if (pv.phase === 'open' && pv.instanceId) {
     const down = app?.info.status === 'crashed' || app?.info.status === 'failed'
     return (
@@ -544,7 +459,7 @@ function Body({
     )
   }
   if (!app) return null
-  // An imported app waiting for the person's confirmation (M4 E-3) — confirmation comes first whether or not it has a view. Enabling it opens the app right here
+  // An import awaiting confirmation (M4 E-3), first whether or not it has a view; enabling opens it right here
   if (app.info.status === 'unconfirmed') return <ReviewAndEnable app={app} />
   if (!app.info.home) {
     return (
@@ -564,7 +479,7 @@ function Body({
       </Notice>
     )
   }
-  // A stopped app (failed to start repeatedly) — it does not come back up on its own. The reason and a way to restart are given together
+  // Failed to start repeatedly: it does not come back on its own, so the reason comes with Restart
   if (app.info.status === 'failed') {
     return (
       <Notice testId="pinned-failed" title="This app stopped after failing repeatedly.">
@@ -608,15 +523,9 @@ function RestartButton({ onClick, className = '' }: { onClick: () => void; class
 }
 
 /**
- * The placeholder while an app is starting up (B-6). Decision, 2026-09-14: doing the skeleton well
- * is all the async case needs.
- *
- * An app starts up on first need, so opening an idle app is exactly the moment its process
- * starts (performance budget: the skeleton appears instantly, the first screen within 2 seconds). An
- * empty area or a bare one-line "Loading" is indistinguishable from something stalled. The shape of
- * where the view will stand is shown first, and what it is waiting for is stated in one line
- * (starting up, opening, or restarting). Only quiet colors are used — waiting is not a signal meant
- * to call the person (the palette rule).
+ * The placeholder while an app starts (B-6), on first need (budget: the skeleton at once, the first screen within 2 s).
+ * The view's shape and one line of what it waits for, as a bare "Loading" reads as stalled. Quiet colors: waiting
+ * calls no one (the palette rule).
  */
 function Skeleton({ label }: { label: string }) {
   return (

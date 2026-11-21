@@ -4,10 +4,7 @@ import { LINE_END, TRUNCATED_NOTICE, buildCopyText, selectedText, wholeFileText,
 const file = (n: number): CopyLine[] => Array.from({ length: n }, (_, i) => ({ text: `line ${i}` }))
 
 describe('clipboard payload', () => {
-  /**
-   * The bug this closes. Only ~40 rows are ever mounted, so anything that reads the DOM
-   * hands back a fragment of a selection this size. Line/column coordinates do not care.
-   */
+  // Only ~40 rows are mounted, so reading the DOM would return a fragment of a selection this size
   it('spans rows the DOM never held', () => {
     const out = buildCopyText(file(3000), { line: 10, column: 0 }, { line: 2000, column: LINE_END })
     expect(out.split('\n')).toHaveLength(1991)
@@ -16,8 +13,7 @@ describe('clipboard payload', () => {
   })
 
   it('never carries a line number', () => {
-    // The gutter is a sibling span in the same row; it is not in `lines` at all, so there
-    // is nowhere for `12 const foo` to come from.
+    // The gutter is not in `lines`, so `12 const foo` cannot appear
     const out = buildCopyText([{ text: 'const foo' }, { text: 'return bar' }], { line: 0, column: 0 }, { line: 1, column: LINE_END })
     expect(out).toBe('const foo\nreturn bar')
   })
@@ -48,8 +44,7 @@ describe('clipboard payload', () => {
   })
 
   describe('a diff row keeps its marker', () => {
-    // The marker is drawn in its own span, as a typographic − no patch tool accepts, so the
-    // clipboard gets the ASCII one from the data instead of whatever the screen shows.
+    // The screen draws a typographic − no patch tool accepts; the clipboard gets the data's ASCII one
     const diff: CopyLine[] = [
       { text: '@@ -1,2 +1,2 @@' },
       { text: ' keep', prefix: '' },
@@ -74,10 +69,7 @@ describe('select-all payload', () => {
     expect(wholeFileText('a\nb\n', false)).toBe('a\nb\n')
   })
 
-  /**
-   * ⌘A over a partly-read file claims more than the viewer has. Rather than hand over half
-   * a file that looks whole, the clipboard carries the same sentence the screen does.
-   */
+  // Half a file must not look whole: the clipboard carries the screen's notice
   it('says so when the viewer only holds part of the file', () => {
     expect(wholeFileText('a\nb', true)).toBe(`a\nb\n${TRUNCATED_NOTICE}`)
   })

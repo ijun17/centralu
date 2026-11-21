@@ -1,12 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { overlayTakesEscape } from './Overlay.jsx'
 
-/*
- * #181: the overlay receives Esc in the window's capture phase — before every other element. Without
- * a check of the target, Esc meant for the terminal (vim, less) in the evidence panel next to it
- * never reaches it, and the hidden overlay closes first instead of a settings dialog or a modal
- * open above it.
- */
+// #181: the overlay hears Esc in the capture phase, before the terminal beside it (vim, less) or a layer above it
 describe('overlayTakesEscape — the overlay only claims Esc when it is on top and the key came from its own side (#181)', () => {
   // The overlay itself is open: it does not cover itself
   const none = { openLayers: 0, settingsOpen: false, paletteOpen: false, inboxOpen: false, usageOpen: false, overlay: { kind: 'viewer' } }

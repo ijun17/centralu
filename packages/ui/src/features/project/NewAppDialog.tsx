@@ -14,30 +14,15 @@ import { useToolChoice } from './useToolChoice.js'
 import { ToolSetupLine } from '../tools/ToolSetupLine.jsx'
 
 /**
- * New app (M4 C-1) — asks for a name and the agent that builds it, and the host unpacks the app
- * from a template and starts that app's builder session.
+ * New app (M4 C-1): a name and the builder's tool; the host unpacks a template and starts the builder session. The id
+ * is derived and editable (newAppId.ts). Only its shape is blocked here; a taken id, trust and the template are the
+ * host's, and its refusal is shown as-is so the reason cannot drift. The tool works as in New session (useToolChoice),
+ * and nothing is made with an unusable one: an app whose builder cannot start is an app nobody can fix. An untrusted
+ * project's refusal (an app is code that runs here) is said up front, with a way to trust.
  *
- * Two things are asked for. **The name** (what the person calls it) and **who builds it** (the
- * builder session's tool). The id is derived from the name, shown, and left editable — since it is
- * both a folder name and a session's server name, it has rules (newAppId.ts), and the validation is
- * the same one the host uses (`newAppIdProblem`). All this dialog blocks up front is the shape: an
- * id that already exists, trust, and the template are judged by the host, and if it rejects it, that
- * wording is shown **exactly as-is.** If the dialog rewrote the host's wording in its own words, the
- * day the two drift apart the person would read the wrong reason.
- *
- * The tool follows the same rule as the new session dialog: detected again every time it opens (the
- * person may have just logged in), switched once to whichever is usable if the default tool is not,
- * and if an unusable tool is chosen, the reason and the fix command are stated. Nothing is created
- * with an unusable tool — even if the app itself comes to exist, if its builder session cannot start,
- * the person is left facing an app nobody can fix.
- *
- * The host does not create an app in an untrusted project (an app is code that runs on this
- * machine). That fact is stated before the rejection arrives, with a way to trust it right there.
- *
- * Without a project (#1141) the app is a project of its own, made like a new project: a folder named by its id, in
- * `~/Centralu` unless the person picks another parent, with the same preview and refusals as the new project dialog
- * (`projects.createPreview`), so the folder that will be made stands on the form before anything is made. Importing an
- * app lands the same way, so its door is here too.
+ * Without a project (#1141) the app is a project of its own: a folder named by its id in `~/Centralu` or a picked
+ * parent, previewed as in the new project dialog (`projects.createPreview`). An import lands the same way, so its door
+ * is here too.
  */
 export function NewAppDialog({ projectId, onClose }: { projectId: string | null; onClose: () => void }) {
   const platform = usePlatform()
@@ -46,12 +31,7 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
   const assistantTool = useStore((s) => (s.assistantId ? s.sessions[s.assistantId]?.tool : undefined))
   const createApp = useStore((s) => s.createApp)
   const allTools = useTools()
-  /*
-   * The default tool is guessed to match what the host would choose — a project app defaults to
-   * that project's default, a user-folder app to the Assistant's tool. Even when the guess is
-   * wrong, the dialog **always sends the tool actually selected**: a session never starts with a
-   * different tool than the one shown selected.
-   */
+  // The default guesses the host's (the project's default, else the Assistant's tool); the selected tool is what is sent
   // An app's builder is given its role as text, which a tool that takes none cannot run (`roleText`)
   const { tool, setTool, toolMeta, tools, info, usable, refusal, blocked, detectError, redetect } = useToolChoice(
     (projectId ? project?.defaultTool : assistantTool) ?? allTools[0]?.name ?? '',
@@ -106,7 +86,7 @@ ${parent?.trim() ?? ''}`
             await createApp({ projectId, id, name: name.trim(), tool, ...(projectId === null && parent?.trim() ? { parent: parent.trim() } : {}) })
             onClose()
           } catch (err) {
-            // Exactly the host's own wording — a toast disappears after 2.5 seconds and would look like "nothing happened when pressed." Kept inside the dialog instead
+            // The host's own wording, kept in the dialog: a toast vanishes after 2.5 s and reads as "nothing happened"
             setError(errorMessage(err))
           } finally {
             setBusy(false)
@@ -170,7 +150,7 @@ ${parent?.trim() ?? ''}`
                 dim: !!tools && !usable(t.name),
               }))}
             />
-            {/* The reason it cannot be used is not hidden — a disabled button alone would look like it just does nothing */}
+            {/* Why it cannot be used is said: a disabled button alone looks broken */}
             <ToolSetupLine
               status={info(tool)}
               label={toolMeta.label}

@@ -7,32 +7,17 @@ import { useToolMeta } from '../../store/selectors.js'
 import { useLiveTools, useReloadOnReconnect } from '../tools/useToolSetup.js'
 
 /**
- * Which agent tool a creation dialog (a new session, a new app's builder) starts, and whether it can.
+ * Which agent tool a creation dialog (new session, new app's builder) starts, and whether it can. `tools` is asked
+ * again on every open (an install or login may be new), on `machine` when there is one (#82: its CLIs are its own).
  *
- * `tools` is asked for **again, every time the dialog opens** — the person may have just installed
- * or logged in. It is asked on `machine` when there is one (#82): a session in a project on a linked
- * machine runs that machine's CLIs, so whether one is installed and logged in is that machine's
- * answer, not this computer's.
+ * The app must work with only one usable tool (a product rule): when detection first answers, an unusable default
+ * switches silently to a usable tool, so a Codex-only person never meets a Claude login wall. Later picks are kept.
  *
- * The app has to work normally even when only **one** of the two tools is usable (a product rule).
- * If the default tool is unusable but the other one works fine, this **silently switches to it.**
- * Otherwise, a person who only uses Codex would hit a "log in to Claude" wall every time they
- * opened the dialog, needing to log into a tool they never use just to open it — a direct
- * violation of this app's principle ("do not force a workflow on the person").
+ * A failed detection is not an answer (#850 item 8): `tools` stays null, so nothing is blocked (the host still refuses)
+ * and `detectError` says why, with a retry. Read as empty, it would call every tool not installed. A tool that cannot
+ * keep `demands` is not usable either (`useRefusals`).
  *
- * The switch happens **exactly once**, the moment detection results first arrive. Anything the
- * person picks after that is left untouched.
- *
- * A detection that fails is not an answer (#850 item 8): `tools` stays null, so no tool is called missing and nothing is
- * blocked (the host still refuses a start with a tool it cannot run), and `detectError` says why, for the dialog to show
- * with a retry. Read as an empty list, it would call every tool "not installed" and disable the dialog's create button.
- *
- * A tool that declared it cannot keep what this start asks (`demands`: an untrusted project, role text, a preset) is
- * not usable either, and `refusal` says why in the host's own words (`launchRefusal`, the rule the host refuses the
- * start with). Its capabilities are asked once per detection; until they answer nothing is refused here.
- *
- * @param initial the tool shown selected before detection answers; the dialog always sends the tool
- * actually selected, so a wrong guess never starts a session with another tool than the one shown
+ * @param initial the tool shown before detection; the selected tool is what is sent, so a wrong guess starts nothing
  */
 export function useToolChoice(initial: ToolName, machine?: MachineRef, demands?: LaunchDemands) {
   const platform = usePlatform()

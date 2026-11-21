@@ -6,7 +6,7 @@ import { Pill } from './Pill.jsx'
 import { Segmented, segmentedTabStop, segmentedTarget } from './Segmented.jsx'
 import { TextField, TextInput } from './TextField.jsx'
 
-/** The opening tag of the first element whose attributes match, so a test can read its attributes */
+/** The opening tag of the first element whose attributes match */
 const tag = (html: string, name: string) => new RegExp(`<${name}\\b[^>]*>`).exec(html)?.[0] ?? ''
 /** The opening tag of the element a test id names */
 const byId = (html: string, id: string) => new RegExp(`<[a-z]+\\s[^>]*data-testid="${id}"[^>]*>`).exec(html)?.[0] ?? ''

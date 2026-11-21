@@ -3,12 +3,8 @@ import { ApprovalDetail, NO_PATH, APP_CALL, MACHINE_CHANGE, ASSISTANT_CHANGE, UN
 import { agentStartScope, approvalCardCovered, approvalKeyAction, keyScope, offersAlways } from './ApprovalCard.jsx'
 
 /**
- * `code` having a default value matters.
- *
- * A helper that builds only `key` checks ⌥a with `{ key: 'a', altKey: true }` —
- * **an event a Mac keyboard never actually produces.** On an ABC layout, ⌥A comes through as
- * `å`, so such a test passes while the real shortcut is dead. When testing with a constructed
- * event, the first thing to check is whether that shape is what a real keyboard actually sends.
+ * `code` has a default: `{ key: 'a', altKey: true }` is an event a Mac never sends (ABC sends ⌥A as `å`), so a helper of
+ * `key` alone passes while the real shortcut is dead.
  */
 const key = (
   k: string,
@@ -32,11 +28,7 @@ describe('approvalKeyAction — when the global y/n/a keys become an approval (U
     expect(approvalKeyAction(key('a'), FREE)).toEqual({ decision: 'always', scope: 'session' })
   })
 
-  /**
-   * Exactly what the keyboard reports (UCKeyTranslate): on ABC/U.S., ⌥A comes as `å`; on a
-   * Korean 2-beolsik layout, A comes as `ㅁ`. On Linux and Windows, Alt does not change the
-   * character, so it comes as `a` — all three mean the same thing.
-   */
+  /** What the keyboard reports (UCKeyTranslate): ⌥A is `å` on ABC/U.S., A is `ㅁ` on Korean 2-beolsik, Alt keeps `a` on Linux and Windows */
   it('⌥a is project scope — whatever character the keyboard layout sends', () => {
     const project = { decision: 'always', scope: 'project' }
     expect(approvalKeyAction(key('å', { altKey: true, code: 'KeyA' }), FREE)).toEqual(project) // Mac ABC
@@ -147,11 +139,7 @@ describe('approvalKeyAction — answering from the composer with mod+⇧Y / mod+
   })
 })
 
-/*
- * In the grid, each pane's card attaches its own window listener — without a focus check, with
- * two approvals up at once, a single y approves both of them at once.
- * Keyboard approval always goes to exactly one thing: "the session that is focused."
- */
+// Each grid pane's card listens on the window: without a focus check one y approves every card up at once
 describe('approvalCardCovered — which card accepts a key press', () => {
   const open = {
     inboxOpen: false, usageOpen: false, settingsOpen: false, paletteOpen: false,
@@ -175,12 +163,8 @@ describe('approvalCardCovered — which card accepts a key press', () => {
     expect(approvalCardCovered({ ...open, overlay: { kind: 'viewer' } }, 's1')).toBe(true)
   })
 
-  /*
-   * #158: "Delete this session?", a new session, image zoom, and the command palette all open
-   * via local state and do not show up in the store's five values. Pressing y to confirm in one
-   * of those windows must not approve a command hidden behind it. These windows are counted through
-   * `openLayers` by `Modal` (the command palette counts itself directly).
-   */
+  // #158: windows on local state (delete confirm, new session, image zoom, palette) count in `openLayers` (through
+  // `Modal`, or the palette itself), so a y meant for one never approves the command behind it
   it('even a single window opened via local state blocks the focused card', () => {
     expect(approvalCardCovered({ ...open, openLayers: 1 }, 's1')).toBe(true)
     expect(approvalCardCovered({ ...open, openLayers: 2 }, 's1')).toBe(true)

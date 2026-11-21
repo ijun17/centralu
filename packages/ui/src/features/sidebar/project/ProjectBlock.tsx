@@ -21,48 +21,36 @@ import { ProjectSessionDialogs } from './ProjectSessionDialogs.jsx'
 export function ProjectBlock({ projectId }: { projectId: string }) {
   const project = useStore((s) => s.projects[projectId])
   const sessions = useSessionsOf(projectId)
-  // Whether the dialog is open is held by the store — the first-run screen also needs to open this dialog
+  // In the store: the first-run screen opens this dialog too
   const newSessionOpen = useStore((s) => s.newSessionFor === projectId)
   const openNewSession = useStore((s) => s.openNewSession)
   const [confirming, setConfirming] = useState<string | null>(null)
-  /** The session whose handoff confirmation dialog is open (null when none is) */
   const [handingOff, setHandingOff] = useState<string | null>(null)
-  /** The open session menu — since there are many rows, the anchor is the pressed button element, not a ref */
+  /** Anchored to the pressed button element, as there are many rows */
   const [sessionMenu, setSessionMenu] = useState<{ id: string; el: HTMLElement } | null>(null)
-  /** The session whose name is currently being edited. Only one at a time — with two rows as inputs
-   * simultaneously there is no way to tell which one is active */
+  /** One rename at a time: with two rows as inputs, which one is active is unclear */
   const [renaming, setRenaming] = useState<string | null>(null)
   const reorderProjects = useStore((s) => s.reorderProjects)
-  // Its screen or one of its sessions is on screen — the whole group is tinted (see the section below)
+  // Its screen or one of its sessions is on screen: the whole group is tinted
   const open = useIsProjectOpen(projectId)
-  // New app dialog (M4 C-1) — opened from the project row's menu, like the new session dialog
   const [newAppOpen, setNewAppOpen] = useState(false)
-  // Is trust being asked about right after registration (M4, decision 3)? Asked only once, then dismissed once answered
+  // Trust asked once, after registration (M4, decision 3)
   const askingTrust = useStore((s) => s.trustAsk === projectId)
-  // This project's apps (M4 B-2) — stand below the sessions, in the same row shape
   const apps = useProjectApps(projectId)
-  /*
-   * A root app (#1141) is the project itself: it is marked on the project's own line (ProjectHeader) rather than given a
-   * row under it, and its sessions (its builder, the agents it started) are the project's sessions
-   */
+  // A root app (#1141) is the project itself: marked on its line (ProjectHeader), no row; its sessions are the project's
   const rootApp = apps.find((a) => a.info.root === true)
   const projectApps = useMemo(() => apps.filter((a) => a.info.root !== true), [apps])
   const groupedSessions = useMemo(() => groupProjectAppSessions(sessions, projectApps.map((app) => app.appId)), [sessions, projectApps])
   const [deleting, setDeleting] = useState(false)
-  // The instructions for agents started here (#1161 item 2), opened from the project's menu
+  // The instructions for agents started here (#1161 item 2)
   const [instructing, setInstructing] = useState(false)
-  // Fold state (#205) — held by the store: remembered per project and persists across restarts
+  // Fold state (#205), kept per project across restarts
   const savedFolded = useStore((s) => s.foldedProjects.includes(projectId))
-  // Until the saved folds are read the list is drawn open and then folds; that is not a fold the person made, so it does not slide
+  // Until the saved folds are read the list is drawn open; folding then is not the person's, so it does not slide
   const workspaceReady = useStore((s) => s.workspaceReady)
   const toggleFold = (id: string) => useStore.getState().toggleProjectFold(id)
-  /*
-   * Hover expansion (#1578): a transient state on top of the saved fold, never written to it. Resting the pointer 0.1 s on
-   * a folded project's name row (any part of it, #1605) shows its rows; leaving the whole block hides them again. A click on the project makes it
-   * stay, which is the saved fold taking over (`pin`).
-   */
+  // Hover expansion (#1578, HoverExpander); a click pins it, the saved fold taking over. It counts only while saved folded
   const [hoverOpen, setHoverOpen] = useState(false)
-  // hoverOpen only counts while the saved fold is closed: if something unfolded the project meanwhile, the saved fold rules
   const hoverActive = savedFolded && hoverOpen
   const folded = savedFolded && !hoverOpen
   const sectionRef = useRef<HTMLElement>(null)
@@ -79,7 +67,7 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
     if (!savedFolded) expander.reset()
   }, [expander, savedFolded])
   useEffect(() => () => expander.reset(), [expander])
-  /** A click on the project: a hover-expanded one stays (the saved fold opens), a click-folded one folds as the arrow does */
+  /** A hover-expanded project stays open; otherwise the fold toggles as the arrow does */
   const toggleFoldFromClick = () => {
     if (hoverActive) expander.reset()
     toggleFold(projectId)
@@ -90,17 +78,10 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
     expander.reset()
     toggleFold(projectId)
   }
-  /*
-   * On a linked machine that is away (#82): its rows stay, from what the hub last heard, dimmed so they read as not
-   * current. Nothing about them changes on its own until the machine is back.
-   */
+  // An away machine (#82): its rows, as the hub last heard them, stay dimmed
   const away = useStore((s) => isAway(s.projects[projectId], s.machines))
 
-  /*
-   * Hooks are called **before any early return**. If even one render happens without a project,
-   * the hook order shifts and React throws — the kind of crash that hits right when a project is
-   * being deleted.
-   */
+  // Before the early return: a render without a project (as it is deleted) would shift the hook order and throw
   const drop = useDropLine(PROJECT_MIME, (draggedId, before) => {
     const ids = Object.keys(useStore.getState().projects)
     void reorderProjects(moveTo(ids, draggedId, projectId, before))
@@ -110,19 +91,8 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
 
   return (
     /*
-      Which project is on screen, stated in two layers (user request, 2026-10-01): the whole group — its name row,
-      its sessions and its apps, between two of the dividers below — is tinted, and the one row that is open keeps
-      the row mark inside it. A row mark alone says "this row"; with several projects open in the list the eye then
-      has to walk up to find whose row it is, and a folded project has no row to mark at all.
-
-      The tint is the selected Grid and Assistant buttons' surface-hover, at the strength of a row's hover rather than
-      a button's fill: it covers a dozen rows, and at full strength the group would outshine the row that is open in
-      it. It stays well under that row's own mark (surface-hover/40 plus the ink-muted bar), which is what keeps the two layers
-      reading as "this project, and this row in it". It is drawn only for the focus lane (openProjectOf) — the grid
-      and the Assistant light their own buttons.
-
-      The divider is the section's own bottom border. A colour change adds no size, so selecting a project moves
-      nothing in the list.
+      The open project's whole group is tinted and its open row keeps its mark: a folded project has no row to mark. The
+      tint is a row hover's strength (/20), under the row's own mark (/40 and the bar). Focus lane only (openProjectOf).
     */
     <section
       className={`relative border-b border-line py-2.5 transition-colors ${open ? 'bg-surface-hover/20' : ''} ${away ? 'opacity-60' : ''} ${dropLine(drop.edge)}`}
@@ -161,21 +131,11 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
       {askingTrust && <TrustAsk project={project} />}
 
       {/*
-        Folding removes the session rows and the app rows together (#205). The trust question
-        (above) stays — it is not a row, it is a question waiting for an answer. Dialogs (below)
-        stay too: folding is a way of viewing, not closing whatever work was in progress.
-
-        **A session cannot be dropped onto a folded project.** A session only changes position
-        within its own project (onReorder only touches that project's own list), and the drop spot
-        is a session row — a folded project has no rows, so no line appears and dropping does
-        nothing. It also does not expand while being dragged over: the whole point of expanding it
-        to show it would be a spot that never accepts the drop anyway. If a session's own project
-        is folded, there is no row to drag from it in the first place.
+        A fold hides the session and app rows (#205); the trust question and dialogs stay. A folded project takes no
+        session drop and does not expand under a drag: a session only moves within its own project.
       */}
       {/*
-        The rows slide open and closed (#1605) and stay until the exit ends, so a fold does not blink. A row that arrives in
-        an open project does not slide: the fold is already open, and only a fold moves. An open project with no session and
-        no app draws nothing below its line: no empty gap under the header (the gap is the rows' own padding).
+        The rows slide (#1605); with no rows, no gap under the header
       */}
       <Fold open={!folded} instant={!workspaceReady} className={sessions.length > 0 || projectApps.length > 0 ? 'pt-1.5' : undefined} testId={`project-rows-${project.name}`}>
         <ProjectSessionList

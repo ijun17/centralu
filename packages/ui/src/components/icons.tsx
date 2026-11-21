@@ -2,14 +2,8 @@ import type { ReactNode } from 'react'
 import type { MarkKind } from '../store/transcript.js'
 
 /**
- * Icons.
- *
- * No emoji. Emoji (1) look different across OSes and fonts, so density cannot be controlled, and
- * (2) are mostly full of hue, breaking this app's rule of "color only in the body of a diff"
- * immediately. An SVG where we control the stroke weight and color has neither problem.
- *
- * `currentColor` is used, so the color is decided by the parent's text-* class — hover and
- * disabled states follow automatically.
+ * Icons: SVG in `currentColor`, no emoji (docs/design-system.md §5); emoji differ per OS and carry hue, which this app
+ * keeps for the body of a diff. The parent's text-* class decides the colour, so hover and disabled follow.
  */
 export function PlusIcon({ size = 14 }: { size?: number }) {
   return (
@@ -72,9 +66,9 @@ export function StopIcon({ size = 10 }: { size?: number }) {
 }
 
 /**
- * A ring: how a run ended (the saved commands list). Solid once it ended well or was stopped, dashed when it failed:
- * the background work list's grammar (a hollow ring once done, a dashed ring when it failed). Drawn, not a bordered
- * span, so it reads as a mark and not as a capsule. The dash divides the circumference evenly, so no seam shows.
+ * A ring: how a run ended (the saved commands list), solid when it ended well or was stopped, dashed when it failed, as
+ * in the background work list. Drawn, not a bordered span, so it is not read as a capsule. The dash divides the
+ * circumference evenly, so no seam shows.
  */
 export function RingIcon({ dashed = false, size = 8 }: { dashed?: boolean; size?: number }) {
   return (
@@ -157,11 +151,8 @@ export function DotsIcon({ size = 14 }: { size?: number }) {
 }
 
 /**
- * The crown — the marker for an Assistant's role, directing other sessions.
- *
- * It speaks a role, not a state, so it does not compete for the same spot with the border that
- * spins while responding. If the sidebar and the session header used different drawings, the
- * same role would end up with two faces, so this one icon is shared between them.
+ * The crown: an Assistant's role, shared by the sidebar and the session header so a role has one face. A role, not a
+ * state, so it does not compete with the border that spins while responding.
  */
 export function CrownIcon({ size = 13 }: { size?: number }) {
   return (
@@ -176,11 +167,7 @@ export function CrownIcon({ size = 13 }: { size?: number }) {
   )
 }
 
-/**
- * The app — one window, one control surface (M4 B-2). An app's row stands alongside session rows
- * in the sidebar, so it has to be told apart from a session's tool-letter chip by shape (the
- * palette's rule: kind by shape, urgency by brightness).
- */
+/** The app (M4 B-2): its row stands among session rows, so it differs from a tool-letter chip by shape */
 export function AppIcon({ size = 13 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
@@ -191,7 +178,7 @@ export function AppIcon({ size = 13 }: { size?: number }) {
   )
 }
 
-/** An app window with a plus in place of its content: make a new app (the sidebar's Projects row, owner 2026-10-21) */
+/** An app window with a plus in place of its content: make a new app (the sidebar's Projects row) */
 export function AppPlusIcon({ size = 13 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
@@ -202,7 +189,7 @@ export function AppPlusIcon({ size = 13 }: { size?: number }) {
   )
 }
 
-/** A folder with a plus: add a folder as a project (the sidebar's Projects row, owner 2026-10-21) */
+/** A folder with a plus: add a folder as a project (the sidebar's Projects row) */
 export function FolderPlusIcon({ size = 13 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
@@ -245,16 +232,8 @@ export function CloseIcon({ size = 13 }: { size?: number }) {
 }
 
 /**
- * The expand/collapse indicator — an arrow with no tail (a chevron).
- *
- * Collapsed points right, expanded points down. The same glyph is rotated: drawing the two
- * directions separately leaves subtle differences in weight or size, producing a jump when
- * opening and closing, and rotation cannot do that. The rotation itself also says "this just
- * opened".
- *
- * Not a filled triangle (▸▾): a triangle is drawn by the font, so we cannot control its size or
- * alignment, and its weight is heavier than text, so it catches the eye before the name does in a
- * list.
+ * The expand/collapse chevron (docs/design-system.md §5): right when closed, rotated down when open. One glyph rotated,
+ * since two drawings differ subtly in weight and jump on toggle.
  */
 export function ChevronIcon({ open, size = 12 }: { open: boolean; size?: number }) {
   return (
@@ -314,14 +293,7 @@ export function SendIcon({ size = 15 }: { size?: number }) {
   )
 }
 
-/**
- * Rename — a pencil.
- *
- * Text ('Rename') is not used here because this spot (the right end of a session row) is a
- * narrow space standing next to the delete button, and adding text would truncate the name on
- * every row. A pencil is nearly a universal symbol for "edit", so switching to an icon does not
- * weaken the meaning.
- */
+/** Rename: a pencil. Beside delete at a session row's right end, a word would truncate every row's name */
 export function PencilIcon({ size = 13 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>
@@ -337,18 +309,9 @@ export function PencilIcon({ size = 13 }: { size?: number }) {
 }
 
 /**
- * Run — a filled play triangle.
- *
- * Filled, where the chevron next door deliberately is not. The chevron's note is about *font*
- * triangles, whose weight and alignment belong to whichever font drew them. Drawn here, the
- * solid mark is the right one — "run" is a button you press, and an outline reads as a shape
- * being described rather than pressed.
- *
- * It is the ink, not the canvas, that determines perceived size. The restart icon beside it
- * draws an 11-diameter circle at 14px; a triangle of 7 x 9.2 in the 16-unit canvas at 13px
- * looks half as wide on the same row. So the triangle fills 8.8 x 10.8 and is drawn at 15px.
- * The corners are rounded: every other icon in this file uses `strokeLinecap="round"`, and a
- * single knife-sharp triangle looks like it belongs to a different set.
+ * Run: a filled, drawn triangle (the chevron's rule is about font triangles); an outline reads as described, not
+ * pressed. Ink, not canvas, sets perceived size: beside the restart icon's 11-unit circle at 14px, a 7 x 9.2 triangle
+ * at 13px looked half as wide, so it fills 8.8 x 10.8 at 15px. Rounded corners, as every other icon's round caps.
  */
 export function PlayIcon({ size = 15 }: { size?: number }) {
   return (
@@ -361,13 +324,7 @@ export function PlayIcon({ size = 15 }: { size?: number }) {
   )
 }
 
-/**
- * Restart — an arrow drawing a circle.
- *
- * Turning the word "Restart" into an icon would weaken the meaning, so a nearly universal symbol
- * is used instead. The arrowhead is what makes it read as "circling back around" rather than
- * "reverting".
- */
+/** Restart: an arrow circling; the arrowhead makes it read as "around again", not "revert" */
 export function RestartIcon({ size = 14 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>
@@ -388,14 +345,7 @@ export function RestartIcon({ size = 14 }: { size?: number }) {
   )
 }
 
-/**
- * A branching trunk — the worktree manager (#76).
- *
- * A branch drawn with three dots and lines is nearly a universal symbol, so even as a button
- * never seen in this app before, it reads immediately as "something git". There is no risk of
- * confusion with the crown (assistant) either: one speaks a role, the other a branching, so
- * what the shapes say is entirely different.
- */
+/** A branching trunk: the worktree manager (#76), read at once as "something git" */
 export function BranchIcon({ size = 13 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>
@@ -403,7 +353,7 @@ export function BranchIcon({ size = 13 }: { size?: number }) {
       <circle cx="4.5" cy="12.5" r="1.6" stroke="currentColor" strokeWidth="1.4" />
       <circle cx="11.5" cy="3.5" r="1.6" stroke="currentColor" strokeWidth="1.4" />
       <path d="M4.5 5.1v5.8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      {/* A branch splitting off from the trunk comes back down again — branching and merging in one stroke */}
+      {/* Branching and merging in one stroke */}
       <path
         d="M11.5 5.1v1.4a2.4 2.4 0 01-2.4 2.4H6.9"
         stroke="currentColor"
@@ -414,10 +364,7 @@ export function BranchIcon({ size = 13 }: { size?: number }) {
   )
 }
 
-/**
- * Uncommitted changes — a page with a plus over a minus, the diff's two signs (owner, 2026-10-18: the sidebar's bare
- * count reads as "what is this number"). The page says files, the signs say changed.
- */
+/** Uncommitted changes: a page with the diff's plus over minus, so the sidebar's count does not read as a bare number */
 export function ChangesIcon({ size = 12 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>
@@ -512,10 +459,8 @@ export function ArchiveIcon({ size = 14 }: { size?: number }) {
 }
 
 /**
- * The size of an icon set in a line of text (#2332): Pretendard's cap height, 0.73em, so the icon follows the text's size. Drawn
- * to fill its box and sitting on the baseline (an inline SVG's bottom edge, which a flex row aligned on baselines also takes),
- * its top meets the capitals' and it reads as part of the line. Centring a box in the line instead put it 1–2px low, under
- * the text's centre, since the face's line box is not symmetric about its capitals
+ * An icon in a line of text is the text's cap height on its baseline (docs/design-system.md §5, #2332): Pretendard's
+ * 0.73em, filling its box; the inline SVG's bottom edge is the baseline a flex row aligns on.
  */
 const CAP_BOX = 'inline-block size-[0.73em] shrink-0 align-baseline'
 
@@ -528,10 +473,7 @@ function CapIcon({ children }: { children: ReactNode }) {
   )
 }
 
-/**
- * "From", after the source line over a relayed message ("Manager", "Board app", #1948): down, then right into the message
- * below. Drawn, not the font's ⤷, which sits above the text (#2332)
- */
+/** "From", after a relayed message's source line (#1948): down, then right. Drawn: the font's ⤷ sits high (#2332) */
 const FROM_ARROW = 'M1.75.75v4a2.25 2.25 0 0 0 2.25 2.25h5M6.75 4.75 9 7 6.75 9.25'
 
 export function FromArrowIcon() {
@@ -543,9 +485,8 @@ export function FromArrowIcon() {
 }
 
 /**
- * A line between messages, by its kind (#2338): a compaction (two rules pressed together), where this session came from (the
- * "from" arrow), a fresh conversation (a turn back to the start), a notice (a warning triangle), a failure (a stop). Drawn on
- * the 10-unit grid of `CapIcon` and set like the mail line's `MailIcon size={12}` beside it: 12px, the glyph about 9px
+ * A line between messages, by its kind (#2338): a compaction, a handoff, a fresh conversation, a notice, a failure. On
+ * `CapIcon`'s 10-unit grid, set like the mail line's `MailIcon size={12}`: 12px, the glyph about 9px.
  */
 const MARK_PATH: Record<MarkKind, string> = {
   compaction: 'M1 1.5h8M1 8.5h8M5 2.75v2.5M3.5 4 5 5.25 6.5 4',
@@ -563,10 +504,7 @@ export function MarkIcon({ kind }: { kind: MarkKind }) {
   )
 }
 
-/**
- * A plan step's state (#58): done, the one in progress, still to come. Told apart by shape, not hue. The text's cap height,
- * on its baseline (`CAP_BOX`): the font glyphs (✓ ▸ ○) are each a different, smaller size (#2332)
- */
+/** A plan step's state (#58), by shape, not hue, at the text's cap height (`CAP_BOX`; docs/design-system.md §5) */
 export function PlanStepIcon({ status }: { status: 'pending' | 'inProgress' | 'completed' }) {
   return (
     <CapIcon>

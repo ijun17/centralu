@@ -2,28 +2,16 @@ import { useNavShortcut, useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
 
 /**
- * FR-17 shortcut table — has to be viewable and checkable. It is in the command palette, not Settings (owner,
- * 2026-10-20): it is something looked up in passing, and the palette is where a key is wanted.
- *
- * A combination is written **by meaning**: `'mod'` and `'alt'` get named by this machine's own
- * keyboard (`⌘`/`Ctrl`, `⌥`/`Alt`), and the remaining pieces are the key's own name as is
- * (issue #32).
- *
- * The table shows **this machine's own keyboard**, right now. There is no other answer — the keys
- * written here are pressed on this machine, and listing both sets would only cost time finding the
- * one that actually applies.
+ * FR-17's shortcut table, in the palette (looked up in passing, where a key is wanted), not Settings. Written by
+ * meaning (issue #32): `'mod'` and `'alt'` are named by this machine's keyboard only, the one the keys are pressed on.
  */
 const SHORTCUTS: [string[], string][] = [
   [['mod', 'I'], 'Waiting'],
-  // `⇧` is printed on those keyboards too, so there is no word to translate it into. Attaching
-  // it to the following key reads better than `Ctrl+⇧+A`
+  // `⇧` is printed on PC keyboards too, so it stays a symbol, joined to its key: better than `Ctrl+⇧+A`
   [['mod', '⇧A'], 'Jump to next waiting'],
   [['mod', 'K'], 'Command palette'],
   [['mod', '1~9'], 'Jump to project'],
-  /*
-   * The digits name tab *identities*, not positions (EvidencePanel's handler) — after a
-   * drag-reorder this list stays true, which is the whole reason identity was chosen.
-   */
+  // The digits name tabs, not positions (EvidencePanel's handler), so this stays true after a drag-reorder
   [['mod', '⇧1~4'], 'Panel tab (changes · history · files · terminal)'],
   [['y / n / a'], 'Approve · deny · always allow'],
   [['alt', 'a'], 'Always allow (project scope)'],

@@ -3,9 +3,9 @@ import { useStore } from '../../store/store.js'
 import { SettingToggle } from './SettingToggle.jsx'
 
 /**
- * "Continue after a usage limit resets" and "Continue when the network is back" (#1415, #2238; on by default, owner 2026-10-26). Rows of
- * the Background card (Settings.tsx): they answer the same question as the rows beside them, what happens to my agents when I am not
- * there. Each computer's host continues its own sessions by its own switches
+ * "Continue after a usage limit resets" and "Continue when the network is back" (#1415, #2238; on by default): rows of
+ * the Background card (Settings.tsx), on what happens to my agents while I am away. Each computer's host continues its
+ * own sessions by its own switches.
  */
 export function AutoContinueSection() {
   // Each switch by itself: a selector that builds an object would read as a change on every store update

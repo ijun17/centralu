@@ -8,14 +8,9 @@ const Rule = () => <span className="h-px flex-1 bg-line" />
 const WIDE = 'max-w-[34rem]'
 
 /**
- * A line of the conversation that is not a message (a compaction, a notice, a delivery of mail): a capsule between two rules,
- * its icon and its words (owner, 2026-11-17, #2332 option C, #2338 option 1). Quiet like a divider: a `line` edge, `ink-faint`
- * words, no fill. A failure is a dashed box instead, in the brighter `ink-muted`: the dash is the shape a failure has
- * everywhere (§1), and a box tells it from the capsules around it.
- *
- * With `folded`, what it explains opens under it: the capsule is then a button with the chevron, and the explanation comes and
- * goes as a `Fold`. `open` is how it starts, and `onOpen` is told each time it opens (a line that reads what it shows when first
- * opened, the mail line). `after` stands beside the capsule (a button the line offers).
+ * A line of the conversation that is not a message: a capsule between two rules, or a dashed box for a failure
+ * (docs/design-system.md §7). With `folded`, the capsule is a button that opens it as a `Fold`; `open` is how it
+ * starts, `onOpen` hears each opening (the mail line reads what it shows then), `after` stands beside the capsule.
  */
 export function MarkLine({
   icon,

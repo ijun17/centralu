@@ -1,22 +1,11 @@
 import { useRef, type KeyboardEvent, type ReactNode } from 'react'
 
 /**
- * Pick one of several, shown all at once: the tool a session starts with, the theme mode, the line height.
- *
- * One component, so every screen's toggle is the same to a screen reader and under the pointer (copies drift: a radio
- * group on one screen, `aria-pressed` or nothing on another, a hover that brightens the border here and the fill
- * there):
- *
- * - a `radiogroup` of `radio`s, named by `label`;
- * - the keyboard of a radio group (WAI-ARIA): Tab enters on the picked option and leaves the group, the arrows move
- *   to the next or previous option and pick it, Home and End to the first and last. A disabled option is skipped.
- *
- * An option can be `disabled` (it cannot be picked: the tool is busy switching) or `dim` (it can be picked, and the
- * screen explains below why it will not work yet: a tool that needs a login). `title` is the option's tooltip.
- *
- * `size="md"` is a dialog's (the size of its buttons), `sm` a form's inside a settings card.
- * `layout="column"` stacks the options at full width, for options that carry a second line (a machine's choices).
- * `optionClassName` is for an option's inside layout (a row of label and detail, `leading-none`), never its colours.
+ * Pick one of several, shown at once (docs/design-system.md §11): a `radiogroup` named by `label`, with a radio
+ * group's keyboard (WAI-ARIA): Tab enters on the picked option and leaves, the arrows move and pick, Home and End go to
+ * the ends, a disabled option is skipped. `dim` can still be picked; the screen says below why it will not work yet
+ * (a tool that needs a login). `layout="column"` is for options with a second line. `optionClassName` is an option's
+ * inside layout, never its colours.
  */
 export type SegmentedOption<T extends string> = {
   value: T
@@ -29,10 +18,7 @@ export type SegmentedOption<T extends string> = {
 
 const SIZE = { sm: 'px-2 py-0.5 text-xs', md: 'px-2.5 py-1 text-sm' } as const
 
-/**
- * Where an arrow key lands, from `from`: the next option that is not disabled in that direction, wrapping around
- * the ends as a radio group does. `null` for a key that does not move, or when nothing else can be picked.
- */
+/** Where an arrow key lands from `from`: the next enabled option, wrapping; null when nothing moves */
 export function segmentedTarget(disabled: readonly boolean[], from: number, key: string): number | null {
   const n = disabled.length
   const step = key === 'ArrowRight' || key === 'ArrowDown' ? 1 : key === 'ArrowLeft' || key === 'ArrowUp' ? -1 : 0
@@ -68,14 +54,12 @@ export function Segmented<T extends string>({
   optionClassName = '',
   testId,
 }: {
-  /** The group's name, as a screen reader announces it */
   label: string
   value: T | null | undefined
   options: readonly SegmentedOption<T>[]
   onChange: (value: T) => void
   size?: 'sm' | 'md'
   layout?: 'row' | 'column'
-  /** The group's placement and gap */
   className?: string
   optionClassName?: string
   testId?: string

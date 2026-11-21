@@ -2,42 +2,22 @@ import { createListeners } from '@cc/common'
 import { useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 
-/**
- * A transparent cover over each app view laid over a panel, for as long as anything is dragged (#296).
- *
- * In WebKit a drag goes into a frame whatever the frame's pointer-events say: measured in Playwright's WebKit, a row or
- * a panel dragged over an app's view goes quiet on the page the moment it crosses the frame's edge, and its drop never
- * arrives. Hiding every view for the length of any drag empties the screen — views nowhere near the hand included.
- * The cover answers it instead: it is an element of this page lying above the frame, so
- * `dragenter`, `dragover` and `drop` land on the page, and the view stays where it was, showing what it showed.
- *
- * The view is not inside its panel (slots.ts: an iframe that moves loses its document), so a cover inside the view
- * would send the drag to the view's parents, not the panel's. The panel draws the cover itself (AppPanel) through a
- * portal into the view: in the page it lies over the frame, and in React's tree it is the panel's child, so the
- * panel's own drag handlers hear the drag exactly as they hear it over its header.
- *
- * Any drag: one of the screen's panels, a sidebar row, selected text, a file from the OS — the frame swallows them all
- * the same way. The cover goes on a drag's `dragend` or `drop`, and when the drag leaves the window.
- */
+// A cover over each slotted app view while anything is dragged, an OS file too (#296; measured in Playwright's WebKit;
+// docs/apps/views.md "Pinned, in the main area"). Hiding every view instead empties the screen. The panel portals it
+// into the view (AppPanel), as the view is not inside the panel (slots.ts), so the panel's own handlers hear the drag.
 
 /**
- * How long after a `dragleave` with nothing entered the drag counts as gone from the window. Inside the window the
- * next element's `dragenter` comes before the old one's `dragleave` and its `dragover` right after, so a drag still
- * over the page cancels this well within it; an engine that leaves `relatedTarget` empty on every `dragleave` (WebKit
- * has) only starts and cancels it at each edge.
+ * How long after a `dragleave` with nothing entered the drag counts as gone from the window. Inside it, the next
+ * `dragenter` precedes the old `dragleave` and a `dragover` follows, so a drag over the page cancels this in time;
+ * WebKit has left `relatedTarget` empty on every `dragleave`, which only starts and cancels it at each edge.
  */
 export const LEAVE_GRACE_MS = 150
 
 /**
- * Follows drags in `win` and reports whether one is in progress. Returns the function that stops.
- *
- * Capture on the window, so a handler below that stops propagation (every panel's `dragover` does) cannot hide the
- * drag from it. Ending is put off a task: a `drop` is heard here before its target, and removing the cover under it
- * then would take the fiber React looks the target up by, and with it the panel's handler.
- *
- * Also ended by a real mouse move with no button held. No mouse events reach the page during a drag, so one arriving
- * means the drag is over, however its end was missed — a cover left behind would take the frames' clicks. A move
- * with no distance is not counted: an engine sends those by itself when the page changes under a still pointer.
+ * Reports whether a drag is in progress in `win`; returns the stop function. Captured on the window, as every panel's
+ * `dragover` stops propagation. Ending waits a task: a `drop` is heard here before its target, and removing the cover
+ * then would take the fiber React finds the panel's handler by. A real mouse move with no button also ends it (no mouse
+ * events reach a page mid-drag), so a missed end leaves no cover taking clicks; a zero-distance move is engine noise.
  */
 export function watchDrags(win: EventTarget, set: (dragging: boolean) => void): () => void {
   let leaving: ReturnType<typeof setTimeout> | undefined
@@ -75,9 +55,8 @@ export function watchDrags(win: EventTarget, set: (dragging: boolean) => void): 
     ['dragleave', leave],
     ['mousemove', move],
   ]
-  // An options object, not `true`: Node 22's EventTarget does not remove a listener added with a
-  // bare `true` when it is removed with `true` (the test environment's, not WebKit's), measured
-  // on 2026-10-04 with v22.23.3 against v26.9.0. The object form is removed in both.
+  // An options object, not `true`: Node 22's EventTarget (the tests', not WebKit's) does not remove a listener added
+  // with a bare `true` (measured with v22.23.3 against v26.9.0); the object form is removed in both
   const capture = { capture: true } as const
   for (const [type, fn] of listeners) win.addEventListener(type, fn, capture)
   return () => {
@@ -110,10 +89,8 @@ function useAnyDrag(): boolean {
   return useSyncExternalStore(subscribeDrag, draggingNow, draggingNow)
 }
 
-/*
- * Where a view takes its cover: an element of its own inside the view (PinnedApps), so the portal never adds children
- * to an element React already fills. Keyed like slots.ts, by the view's key.
- */
+// Where a view takes its cover: its own element in the view (PinnedApps), so the portal never adds children to an
+// element React fills. Keyed by the view's key, as in slots.ts.
 const hosts = new Map<string, HTMLElement>()
 const hostListeners = createListeners((e) => console.error('A shield-host listener threw', e))
 const hostsChanged = () => hostListeners.emit()

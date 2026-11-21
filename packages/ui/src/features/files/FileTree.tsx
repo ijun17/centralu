@@ -16,28 +16,9 @@ import { hasDragFiles, hasDragPath, readDragPath, setDragPath } from './dragPath
 import { TabActions } from '../evidence/tabActions.jsx'
 
 /**
- * The file tree (FR-5, C-2).
- * A lazy load — only a directory that has actually been opened is read. The first render has to
- * stay light even in a repository with 10k+ files.
- *
- * **Ignored files are shown by default** (issue #17). A hidden row does not look filtered —
- * it looks like the file is not there. That is the wrong first impression for a tree whose job is "show me this
- * repo", and the file you came for is often exactly the untracked one.
- *
- * The toggle stays, because of what `.gitignore` covers: not a curiosity or two but
- * `node_modules`, `dist`, `.next` — thousands of rows that sort in among `src`. Anyone
- * drowning in those turns it off once and it stays off: the switch lives on the store, not in
- * component state, so leaving for the Git tab or collapsing the panel does not put it back,
- * and it comes back with the rest of the panel's layout. Whether it is
- * on is a way of looking, so unlike expanded folders (#16, which belong to a project) it is
- * one setting for the whole app.
- *
- * **The tree changes files, not only shows them** (#18, #19). Four operations and no
- * more: reveal, drag one in, drag one around, move one to the trash. Create, rename,
- * copy/paste, multi-select and filtering are deliberately absent — this app is a place to
- * watch an agent work, not an editor, and each of those brings a mode or a dialog with it.
- * Operations apply to ignored files like any other: they are ordinary files (#17), and the
- * untracked one is often exactly the one you came to move.
+ * The file tree (FR-5), read lazily per opened folder. Ignored files show by default (#17): a hidden row looks absent and
+ * the untracked file is often the one sought; the toggle is one app-wide store setting. Four operations only (#18, #19):
+ * reveal, drag in, drag around, trash. No create, rename, copy or multi-select: this app watches an agent, it is no editor.
  */
 export function FileTree({ projectId }: { projectId: string }) {
   const showIgnored = useStore((s) => s.showIgnored)
@@ -45,15 +26,8 @@ export function FileTree({ projectId }: { projectId: string }) {
   const [version, setVersion] = useState<Record<string, number>>({})
   const [menu, setMenu] = useState<MenuState | null>(null)
 
-  /*
-   * The side that made a change signals that it should be re-read.
-   *
-   * Right after we make a change ourselves, there is no reason to wait for the watcher (#34) — the
-   * moment already knows what changed, so **only the changed directory's** stamp is bumped
-   * immediately. Re-reading the whole tree would be the shorter code, but in a repository with
-   * twenty folders expanded, one move would turn into twenty list requests — exactly what this
-   * file's header comment's lazy principle exists to prevent.
-   */
+  // Our own change bumps only the changed directory's stamp, without waiting for the watcher (#34); re-reading the whole
+  // tree would cost one request per open folder.
   const refresh = useCallback((...dirs: string[]) => {
     setVersion((v) => {
       const next = { ...v }
@@ -62,31 +36,18 @@ export function FileTree({ projectId }: { projectId: string }) {
     })
   }, [])
 
-  /*
-   * **A change made outside** is reported too (#34).
-   *
-   * The watched set is exactly the expanded directories — not the whole repository. A folder the
-   * lazy tree has not read is not on screen, so there is no reason to watch it either, and that
-   * keeps it from ever hitting Linux's inotify limit (one watch per directory). The root ('') is
-   * always visible, so it is always included.
-   *
-   * This uses the same stamp table as `refresh` above (right after we make a change ourselves) —
-   * whether the source of "it changed" is us, Finder, or an agent, the screen's job is the same:
-   * "re-read that one directory."
-   */
+  // Outside changes (#34) bump the same stamps. Only the root and open folders are watched (FR-5), which also keeps clear
+  // of Linux's inotify limit (one watch per directory).
   const platform = usePlatform()
   const expanded = useStore((s) => s.expandedDirs[projectId])
-  /*
-   * Watches live in the host's memory, kept under the window's connection (#842 item 6), so they are sent again on
-   * every reconnect and every resync: a new connection starts with none, and a host the window reconnects to after a
-   * crash restart or a build switch holds none at all (#972 item 3). On a resync what is open is re-read too, since
-   * whatever changed while no host was watching was never reported.
-   */
+  // Watches live in the host's memory under the window's connection (#842 item 6), so they are resent on every reconnect
+  // and resync: a restarted or switched host holds none (#972 item 3). A resync also re-reads open folders, since changes
+  // made while nothing watched were never reported.
   const connected = useStore((s) => s.connection === 'connected')
   const hostResyncs = useStore((s) => s.hostResyncs)
   useEffect(() => {
     if (!connected) return
-    // A failed watch registration must not break the tree — watching is a side glance, not the main job. It is said (#841)
+    // A failed watch must not break the tree; it is reported (#841)
     void useStore.getState().watchProjectDirs(projectId, ['', ...(expanded ?? [])])
   }, [projectId, expanded, connected, hostResyncs])
   const resyncsSeen = useRef(hostResyncs)
@@ -96,9 +57,7 @@ export function FileTree({ projectId }: { projectId: string }) {
     refresh('', ...(useStore.getState().expandedDirs[projectId] ?? []))
   }, [hostResyncs, projectId, refresh])
   useEffect(() => {
-    // The watch is only torn down when leaving the project. Tearing it down and re-setting it
-    // every time the expanded set changes would miss whatever changed in between — the effect
-    // above only swaps out the watched set.
+    // Torn down only when leaving the project: re-setting it on each expand would miss changes in between
     return () => {
       void platform.fs.watch(projectId, []).catch(() => {})
     }
@@ -111,21 +70,11 @@ export function FileTree({ projectId }: { projectId: string }) {
     [platform, projectId, refresh],
   )
 
-  /*
-   * There is **only one** folder currently being targeted.
-   *
-   * With a state in each row, an inner folder that intercepts the drop (the closest one wins)
-   * leaves the outer folder no way to know the cursor has left it, and both stay lit. Two lit spots means the screen gives two answers to "where will it go" — a fact that has
-   * only one answer needs to be tracked as only one piece of state.
-   */
+  // One targeted folder for the whole tree: with per-row state, an inner folder taking the drop leaves the outer one lit
   const [hover, setHover] = useState<string | null>(null)
   const ops = useFileOps(projectId, refresh)
-  /*
-   * The row menu's two verbs act on this computer's files through the desktop shell (reveal in the file manager, move
-   * to the OS trash), so a project on a linked machine never gets them (#82): its paths are the other machine's. What
-   * it gets instead is VS Code over Remote-SSH, the one editor that can open that machine's path from here; with no
-   * way to reach it (a WSL machine), there is no menu at all.
-   */
+  // Reveal and trash act on this computer's files, so a linked machine's project (#82) gets VS Code over Remote-SSH
+  // instead, and no menu when VS Code cannot reach it (a WSL machine).
   const remote = useProjectMachine(projectId) !== null
   const remoteIde = useRemoteIde(projectId)
   const openMenu = useCallback(
@@ -143,12 +92,10 @@ export function FileTree({ projectId }: { projectId: string }) {
     <TreeCtx.Provider value={ctx}>
       <section className="flex min-h-0 flex-1 flex-col" data-testid="file-tree">
         {/*
-          Controls live at the right end of the tab strip (user request, 2026-09-07) — drawing yet
-          another header bar here would have effectively written "Project files" a second time
-          directly under the 'Files' tab.
+          In the tab strip: a header bar here would repeat the Files tab.
         */}
         <TabActions>
-          {/* 'Ignored' alone read as a state, not an action — it is the showing that is optional */}
+          {/* 'Ignored' alone read as a state; it is the showing that is optional */}
           <label
             className="flex shrink-0 items-center gap-1.5 text-xs text-ink-faint"
             title="Show what .gitignore hides — node_modules, build output, local files"
@@ -170,13 +117,7 @@ export function FileTree({ projectId }: { projectId: string }) {
   )
 }
 
-/**
- * Where the list lives, and also **the project root's drop target**.
- *
- * The empty space below the last row stands for the root. Without it, there would be no way to pull
- * something inside a folder back out — the root is the one directory with no row of its own, so
- * there is nowhere else to target it.
- */
+/** Also the root's drop target: the root has no row, so the space below the last row stands for it */
 function TreeRoot({ projectId, showIgnored }: { projectId: string; showIgnored: boolean }) {
   const drop = useDropTarget('')
   return (
@@ -195,14 +136,14 @@ type MenuState = { target: MenuTarget; x: number; y: number }
 
 type TreeContext = {
   projectId: string
-  /** A stamp bumped for each directory that needs re-reading — stands in for a watcher */
+  /** Bumped per directory to re-read */
   version: Record<string, number>
   ops: FileOps
   openMenu: (target: MenuTarget, x: number, y: number) => void
-  /** The folder currently targeted (`''` is the root). Only one spot on screen is ever lit at a time */
+  /** The targeted folder (`''` is the root) */
   hover: string | null
   setHover: (dir: string | null) => void
-  /** For a project on a linked machine VS Code can reach (#82): the row menu's one verb. Null for this computer's */
+  /** A linked machine's project VS Code can reach (#82); null for this computer's */
   remoteIde: RemoteIde | null
 }
 
@@ -215,14 +156,8 @@ function useTree(): TreeContext {
 }
 
 /**
- * The four things the tree does to files (#18, #19).
- *
- * **Success is quiet, failure is loud.** The result of a move is already visible as the row itself
- * moving, so adding a toast would be noise, but a failure moves nothing, so without a word it becomes
- * a 'silent no-op' — exactly what this project forbids. Only the trash also announces success: a row
- * disappearing only says "it was deleted" as far as that goes, and the promise that **it can be
- * brought back** (which is the whole point of #18's decision) only comes across by stating where it
- * went.
+ * Success is quiet, since the rows move; a failure is always said. Trash also says where the file went, since that it can
+ * be put back is the point of #18.
  */
 function useFileOps(projectId: string, refresh: (...dirs: string[]) => void) {
   const platform = usePlatform()
@@ -251,7 +186,7 @@ function useFileOps(projectId: string, refresh: (...dirs: string[]) => void) {
       move: async (from: string, toDir: string) => {
         try {
           const res = await platform.fs.move(projectId, from, toDir)
-          // moved:false means it was dropped back where it already was — a missed drop, not a failure, so nothing is said
+          // moved:false: dropped where it was, a miss rather than a failure
           if (res.moved) refresh(wireParent(from), toDir)
         } catch (e) {
           setToast(errorMessage(e))
@@ -274,14 +209,7 @@ function useFileOps(projectId: string, refresh: (...dirs: string[]) => void) {
 
 type FileOps = ReturnType<typeof useFileOps>
 
-/**
- * Turns one file into base64.
- *
- * A dataURL has the shape `data:<mime>;base64,<body>`, so stripping the prefix leaves it directly
- * usable, and the browser does the conversion. Handling the bytes directly makes string
- * concatenation freeze the screen for tens of seconds on a large file, which a person reads as
- * "the file will not attach".
- */
+/** Through a data URL, so the browser converts: building the string from bytes froze the screen for tens of seconds on a large file */
 function readBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -292,16 +220,8 @@ function readBase64(file: File): Promise<string> {
 }
 
 /**
- * A drop target for something — either a single folder row, or the whole tree (= the project root).
- *
- * **Where it is dropped decides what happens.** Dragging the same file row, dropping it on the
- * composer puts the path into the sentence (the pre-existing behavior, `dragPath.ts`), while
- * dropping it here moves the file. The two never get mixed up because the composer knows nothing
- * about this spot and this spot knows nothing about the composer.
- *
- * What arrived is told apart **by what it carries**: our own MIME type means a move within the tree,
- * an OS file means something dragged in from outside. If it is neither, `preventDefault` is not
- * called — which lets the browser tell the person "this cannot be dropped here" through the cursor.
+ * A folder row, or the whole tree for the root. Our path moves, an OS file is imported; anything else is not
+ * `preventDefault`ed, so the cursor says it cannot drop here.
  */
 function useDropTarget(dir: string) {
   const { ops, hover, setHover } = useTree()
@@ -313,16 +233,14 @@ function useDropTarget(dir: string) {
       onDragOver: (e: ReactDragEvent<HTMLElement>) => {
         if (!accepts(e.dataTransfer)) return
         e.preventDefault()
-        // Once an inner folder is targeted, the outer folder and root are not — the closest spot wins
+        // The closest folder wins
         e.stopPropagation()
-        // Something dragged from within the tree is a move, while a file from outside is a copy
-        // coming in. Without the cursor stating this, there would be no way to know what will
-        // happen before letting go.
+        // The cursor says move or copy before the hand lets go
         e.dataTransfer.dropEffect = hasDragPath(e.dataTransfer) ? 'move' : 'copy'
         setHover(dir)
       },
       onDragLeave: (e: ReactDragEvent<HTMLElement>) => {
-        // A leave event also fires when entering a child, so only an actual exit outward is honored
+        // Leave also fires on entering a child
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHover(null)
       },
       onDrop: (e: ReactDragEvent<HTMLElement>) => {
@@ -356,20 +274,8 @@ function Dir({
   const open = defaultOpen
   const stamp = version[path] ?? 0
 
-  /*
-   * `entries` is not a guard against re-reading: such a guard also blocks a read **when the input
-   * changes.** Picking a session in a different project changes projectId, and the file tree would
-   * keep showing the old project.
-   *
-   * Without the guard reads still do not repeat — this effect only runs when open,
-   * projectId or path **actually change.** The condition "do not re-read" is expressed through
-   * dependencies, not simulated with state. `stamp` is included for the same reason: the fact that
-   * the list needs re-reading after a file is moved or deleted is also expressed through a
-   * dependency, not simulated with state.
-   *
-   * The project can change again while a response is still in flight, so a late response is
-   * discarded.
-   */
+  // No "already read" guard on `entries`: it would also block the read for a new project. The deps (`stamp` included)
+  // decide when to read, and useLoad drops a late answer.
   const read = useLoad(() => (open ? platform.fs.listDir(projectId, path) : null), [open, platform, projectId, path], [stamp])
   const entries: FsEntry[] | undefined = read.data
 
@@ -403,16 +309,8 @@ function Dir({
 }
 
 /**
- * Whether a folder is open is **the project's** fact, not this row's (issue #16).
- *
- * As `useState` here it would die with the component: moving between two sessions of the
- * same repo would collapse the whole tree and you dig down the same path again. Drafts live
- * on the session for the same reason; this one lives on the *project*, because an expanded folder is a fact about the code rather than about a conversation.
- * Two sessions on one repo want the same tree open; two projects almost never do.
- *
- * The whole `<li>` takes the drop, not just the row: everything inside a folder renders
- * inside its `<li>`, so letting go over a file two levels down lands in the folder that
- * file is in — which is where someone aiming at it expects it to land.
+ * Open folders live on the project (#16): a fact about the code, shared by its sessions and kept across them. The whole
+ * `<li>` takes the drop, so letting go over a nested file lands in its folder.
  */
 function DirRow({
   entry,
@@ -443,11 +341,11 @@ function DirRow({
           openMenu({ path: entry.path, name: entry.name, isDir: true }, e.clientX, e.clientY)
         }}
         data-testid={`dir-${entry.path}`}
-        /* A folder is also moved as a whole — a tree where only files can be moved only works halfway */
+        /* A folder moves as a whole too */
         draggable
         onDragStart={(e) => setDragPath(e.dataTransfer, entry.path)}
       >
-        {/* Same width as a file's extension column — so folder names and file names line up */}
+        {/* The icon column's width, so folder and file names line up */}
         <span className="flex w-7 shrink-0 justify-center text-ink-faint">
           <ChevronIcon open={open} />
         </span>
@@ -480,9 +378,7 @@ function FileRow({ entry, depth }: { entry: FsEntry; depth: number }) {
           openMenu({ path: entry.path, name: entry.name, isDir: false }, e.clientX, e.clientY)
         }}
         data-testid={`file-${entry.path}`}
-        /* The shortest path to putting a file into the conversation — no need to memorize and type
-           the path. The same drag becomes a 'move' when dropped on a folder (the drop target
-           decides which) */
+        /* Into the conversation as a path, or onto a folder as a move: the drop target decides */
         draggable
         onDragStart={(e) => setDragPath(e.dataTransfer, entry.path)}
       >
@@ -503,36 +399,18 @@ function FileRow({ entry, depth }: { entry: FsEntry; depth: number }) {
 }
 
 /**
- * The right-click menu (#18, #19).
- *
- * **The reason delete is here** is the reason this menu exists at all. Putting a delete button on
- * the row means a hand aiming to open something could land on delete instead, and opening and
- * deleting have very different costs to undo. A right click is an entirely different action from a
- * left click, so it cannot be pressed by mistake, and right-click on a tree row has no other use to
- * take over from.
- *
- * There is no confirmation dialog — that is #18's decision. The trash can be undone **even after**
- * pressing it, while a dialog can only be undone before pressing it. A dialog that asks ends up
- * being clicked through reflexively anyway, so an undoable delete is always the better choice.
+ * Delete lives on right click (#18, #19), where no hand aiming to open lands. No confirmation (#18): the trash undoes
+ * after the press, and a dialog gets clicked through.
  */
 function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
   const { ops, remoteIde } = useTree()
   const fileManager = usePlatform().capabilities.fileManagerName
   const rootRef = useRef<HTMLDivElement>(null)
 
-  /*
-   * Closes on an outside click, on Escape, and when the window loses focus (useDismiss, shared with the other popovers).
-   * **It has to exclude itself** — mousedown fires before click, so closing it even for a click
-   * inside would make the menu disappear the instant an item is pressed, and the click would land
-   * on nothing.
-   */
+  // Excludes itself: mousedown precedes click, so an item press would close the menu first
   useDismiss({ onClose: close, refs: [rootRef] })
-  /*
-   * Placed after converting to layout pixels (#183), at the click: the coordinates in `state` are screen pixels already
-   * multiplied by zoom (--text-zoom), but the left/top set here are lengths inside the zoomed root (anchored.ts). The
-   * menu is measured, so near the right or bottom edge of the window it comes up and to the left of the pointer, whatever
-   * its size.
-   */
+  // `state` is in zoomed screen pixels, left/top in layout pixels (#183, anchored.ts). Measured, so near the right or
+  // bottom edge it opens up and left of the pointer.
   const place = useAnchoredPlacement({ x: state.x, y: state.y }, rootRef, true)
   const shell = {
     ref: rootRef,
@@ -549,10 +427,7 @@ function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
   }
 
   const { target } = state
-  /*
-   * A project on a linked machine (#82): neither this computer's file manager nor its trash holds that machine's file,
-   * so the menu has the one verb that reaches it. A folder opens as a VS Code folder, a file as a file.
-   */
+  // A linked machine's file (#82): a folder opens as a VS Code folder, a file as a file
   if (remoteIde) {
     return (
       <div {...shell}>
@@ -588,9 +463,7 @@ function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
         Reveal in {fileManager}
       </button>
       {/*
-        Delete is set apart below a divider. With the two items touching, it would be easy to
-        confuse the top one for the bottom one — pressing the top one by mistake just opens a
-        window, while pressing the bottom one makes the file disappear.
+        Delete sits below a divider: a slip on Reveal opens a window, a slip on delete removes the file.
       */}
       <div className="my-1 border-t border-line" />
       <button
@@ -611,16 +484,8 @@ function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
 }
 
 /**
- * The file-kind mark — vscode-icons (MIT).
- *
- * A familiar picture lets the kind register before the name is even read. This app started out by
- * stripping out all color, so bringing color in at all is itself a decision — but a file's kind is a
- * **classification, not a state**, so it does not overlap with the brightness system ("the
- * brightest thing = something waiting for me"). The icons are small and low-saturation, so they do
- * not pull the eye away from skimming the list either.
- *
- * An extension missing from the table falls back to the default file icon — even if the list falls
- * behind, there is never a blank.
+ * In colour: a file's kind is a classification, not a state, so it stays out of the brightness order (brightest = waiting
+ * for you); small, low-saturation icons do not pull the eye from the list.
  */
 function FileKind({ name }: { name: string }) {
   return (
@@ -638,11 +503,8 @@ function FileKind({ name }: { name: string }) {
 }
 
 /**
- * The derived calculation is memoized in the hook (a selector that builds a new array causes an
- * infinite re-render).
- * Only sessions belonging to this tree's project are collected (#185) — paths are relative to the
- * project, so a path with the same name touched by a session in a different project must not get
- * marked.
+ * Memoized here: a selector building a new set would re-render forever. Only this project's sessions (#185), since paths
+ * are project-relative.
  */
 function useTouched(projectId: string): Set<string> {
   const sessions = useStore((s) => s.sessions)

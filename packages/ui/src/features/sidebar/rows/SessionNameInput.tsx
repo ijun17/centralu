@@ -3,16 +3,8 @@ import { isPlainEnter, isPlainEscape } from '../../../app/keys.js'
 import { ROW_PAD } from '../layout.js'
 
 /**
- * Edits a session name in place (issue #5).
- *
- * **No modal is shown.** A name only gets its meaning by being chosen among the other names — if
- * a dialog covers the screen, the person ends up naming it without being able to see what it might
- * be confused with. Auto-generated names truncate the first prompt, so several rows in a row can
- * all read `This session is being continued…`, and the other rows have to stay visible while one
- * is being edited.
- *
- * An empty name is **treated as a cancel.** If a slip of deleting the text and clicking away
- * produced a nameless row, that row could no longer point at anything in the list.
+ * Edits a session name in place (#5), not in a modal: a name is chosen among the other rows, which must stay visible.
+ * An empty name cancels, so a slip cannot leave a nameless row.
  */
 export function SessionNameInput({
   id,
@@ -24,11 +16,7 @@ export function SessionNameInput({
   onDone: (name: string) => void
 }) {
   const [text, setText] = useState(initial)
-  /*
-   * Confirming with Enter makes the input disappear, and disappearing also fires one more blur
-   * event. Without a guard, the same name gets sent twice — one succeeds and one fails, and an
-   * error toast pops up for no apparent reason.
-   */
+  // Enter removes the input, which fires one more blur: without a guard the name is sent twice and the second fails
   const done = useRef(false)
   const selected = useRef(false)
   const finish = (name: string) => {
@@ -44,9 +32,8 @@ export function SessionNameInput({
       value={text}
       onChange={(e) => setText(e.target.value)}
       /*
-        An auto-generated name is usually replaced wholesale, so the whole text is selected (press → once to append
-        instead). Only on the first focus: the focus the window gives back after ⌘Tab would select the half-typed name
-        again, and the next key would replace it.
+        Select all on the first focus only: a generated name is usually replaced, but the focus given back after ⌘Tab
+        would select a half-typed name for the next key to replace.
       */
       onFocus={(e) => {
         if (selected.current) return
@@ -61,10 +48,8 @@ export function SessionNameInput({
         else if (isPlainEscape(e.nativeEvent)) finish(initial)
       }}
       /*
-        Clicking elsewhere to leave still keeps the edited value — there is no separate confirm button. Not when the window
-        itself lost focus (⌘Tab to look something up, #842 item 14): the field blurs then too, and saving would keep a
-        half-typed name. The edit stays open until the window is back: the browser usually gives the field focus back with it, and
-        if it does not, the name is saved then, so the edit is never left open with nothing to end it.
+        Blur saves. Not when the window lost focus (⌘Tab, #842 item 14): the edit stays open until the window is back, and
+        is saved then if the browser does not give the field focus back.
       */
       onBlur={(e) => {
         if (typeof document !== 'undefined' && !document.hasFocus()) {

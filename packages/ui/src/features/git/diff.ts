@@ -1,11 +1,5 @@
-/**
- * Where a diff's text is split up exactly the way the screen draws it.
- *
- * Pulled out of the component for one reason — **"the line currently on screen" is a
- * computation, and a computation has to be measurable.** A diff's row number is not a file's
- * line number. Only after reading `@@ -a,b +c,d @@` and, below it, counting only the lines that
- * actually survive in the new file does "here, in the IDE" come out.
- */
+// A diff's text split the way the screen draws it, apart from the component so "the line on screen" is testable: a
+// diff's row is a file's line only after `@@ -a,b +c,d @@` and the lines surviving in the new file below it are counted.
 
 export type DiffRowKind = 'file' | 'add' | 'del' | 'hunk' | 'ctx'
 export type DiffRow = { readonly kind: DiffRowKind; readonly marker: string; readonly body: string }
@@ -20,6 +14,10 @@ export type DiffPlace = {
   readonly line?: number
 }
 
+/**
+ * A line split as drawn: the marker in its own span, `body` the rest, so the copy can rejoin them. A blanket
+ * `replace(/^[+-]/, '')` would cut a dash from every `--- a/foo`, which is a context line here.
+ */
 export function toDiffRow(line: string): DiffRow {
   const kind: DiffRowKind = line.startsWith('diff --git ')
     ? 'file'
@@ -67,11 +65,8 @@ function onNewSide(row: DiffRow): boolean {
 }
 
 /**
- * Which file, and which line of it, row `index` corresponds to.
- *
- * Scans backward exactly once: the first hunk header it meets is the base for the line number,
- * and the `diff --git` that comes further back is the file. While passing through, it counts
- * **only the lines that survive in the new file**.
+ * Which file, and which line of it, row `index` is. One backward scan: the first hunk header met is the line's base,
+ * the `diff --git` further back the file, and only lines surviving in the new file are counted on the way.
  */
 export function diffPlaceAt(rows: readonly DiffRow[], index: number): DiffPlace {
   if (rows.length === 0) return { file: null, label: null }

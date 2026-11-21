@@ -4,20 +4,14 @@ import { isCovered, type CoveringLayers } from '../../store/layers.js'
 export type InboxKeyAction = 'down' | 'up' | 'open' | 'done' | 'allow' | 'deny' | 'choose' | 'close'
 
 /**
- * What a key does in the open waiting list (a pure function: tests attach here). The list listens on the window, so
- * this is the whole rule for when a key is the list's, the same guards the approval card's keys have
- * (`approvalKeyAction`, #683):
- *
- * - **Not while something covers the list.** ⌘K over the open list puts the palette's field on top; a list that still
- *   heard the window's keys would allow the command under the cursor on typing `yarn` (reproduced), and Enter or Esc
- *   meant for the palette would open or close the list.
- * - **Not while a field has the keyboard**, nor on a key an input method is composing with (a Korean ㅛ is a `y`).
- * - **y and n**, which answer an approval, take no modifier at all and no held key: a repeat would answer the row that
- *   slides under the cursor next.
- * - **1 to 6** press the choice of that number on the card under the cursor (#2229), which offers up to six; no modifier and no repeat, as y and n.
- * - **Enter on a focused button or link is that control's** (#842 item 2), as on the quit dialog (`confirmKeyAction`):
- *   a list that opened the row under its cursor instead would, by its preventDefault, keep Done, Continue, Allow and
- *   Deny from pressing at all.
+ * What a key does in the open waiting list, which listens on the window: the whole rule, with the approval card's
+ * guards (`approvalKeyAction`, #683).
+ * - Not while something covers the list: under the palette, typing `yarn` allowed the cursor's command (reproduced).
+ * - Not while a field has the keyboard, nor on a key an input method composes with (a Korean ㅛ is a `y`).
+ * - y and n take no modifier and no repeat: a held key would answer the row sliding under the cursor next.
+ * - 1 to 6 press that choice on the cursor's card (#2229, up to six), with no modifier and no repeat.
+ * - Enter on a focused button or link is that control's (#842 item 2, as `confirmKeyAction`): taking it would keep
+ *   Done, Continue, Allow and Deny from pressing at all.
  */
 export function inboxKeyAction(
   e: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'> &

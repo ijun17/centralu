@@ -1,14 +1,9 @@
 import type { ITheme } from '@xterm/xterm'
 
 /**
- * The terminal's colours, font and text size, read from the theme's CSS variables when an xterm is created
- * (#312). xterm paints with its own theme object rather than CSS, so this is the one place the
- * three xterms (the shell, a command's log in the terminal panel, the run dialog's log) learn the
- * theme. Each variable is spelled out in full: Tailwind only emits a theme variable it can find
- * written somewhere, and a name built from parts would not be found.
- *
- * A variable that is missing (a test page without the stylesheet) is left out, so xterm falls
- * back to its own default for that colour instead of painting an empty string.
+ * The terminal's colours, read from the theme's CSS variables when an xterm is created (#312): xterm paints with its own
+ * theme object, not CSS. Each name is spelled out in full: Tailwind only emits a theme variable it finds written
+ * somewhere. A missing variable (a test page without the stylesheet) is left out, so xterm uses its own default.
  */
 const VARS = {
   foreground: '--color-term-fg',
@@ -31,11 +26,7 @@ const VARS = {
   brightWhite: '--color-term-bright-white',
 } as const satisfies Partial<Record<keyof ITheme, string>>
 
-/**
- * `shell` is a live terminal on the side surface with a visible cursor. `log` is a read-only
- * command log on a raised surface; it takes no input, so its cursor is painted the background
- * colour and disappears.
- */
+/** `log` is a read-only log on a raised surface; it takes no input, so its cursor is the background colour */
 export function terminalStyle(el: Element, kind: 'shell' | 'log'): { theme: ITheme; fontFamily?: string; fontSize?: number } {
   const style = getComputedStyle(el)
   const read = (name: string): string | undefined => style.getPropertyValue(name).trim() || undefined
@@ -50,8 +41,7 @@ export function terminalStyle(el: Element, kind: 'shell' | 'log'): { theme: IThe
   if (cursor) theme.cursor = cursor
   // The code font (Settings → Appearance, #312 step 5): the terminal is text a machine wrote
   const fontFamily = read('--font-mono')
-  // xterm takes a number of pixels; the token is written in px (`11px`). What a machine wrote
-  // is the xs step everywhere else too (paths, the code viewer).
+  // xterm takes pixels; the token is written in px (`11px`), the xs step of all machine text
   const fontSize = Number.parseFloat(read('--text-xs') ?? '')
   return {
     theme,
@@ -61,11 +51,8 @@ export function terminalStyle(el: Element, kind: 'shell' | 'log'): { theme: IThe
 }
 
 /**
- * Keeps an open terminal in step with the theme and the code font. xterm only reads them when
- * told, so a terminal opened before a switch would keep the old colours or font until it was
- * closed; applyTheme and applyTypography announce every change with `cc-themechange`, and this
- * re-reads the variables then. A new font changes the cell size, so `refit` is called after it
- * to give the shell its new columns and rows.
+ * Keeps an open terminal in step with the theme and the code font: xterm reads them only when told, so this re-reads
+ * the variables on `cc-themechange` (applyTheme, applyTypography). A new font changes the cell size, so `refit` follows.
  * @returns stops following
  */
 export function followTheme(
@@ -83,12 +70,9 @@ export function followTheme(
     }
   }
   /*
-   * A code font that was still loading when the terminal opened (#731: the app waits for the bundled fonts before it
-   * draws, so this is a font picked later, or one that took longer than that wait). xterm measures its cell once, with
-   * whatever font is there, so when a face of the terminal's family finishes loading the cell is measured again: xterm
-   * measures only when the family changes, so it is set away and back. Only for a face of the terminal's own family,
-   * and once per face: measuring makes the engine resolve fonts, and in WebKit that can end in another `loadingdone`,
-   * which must not start the cycle again.
+   * A code font still loading when the terminal opened (picked later, or slower than the app's wait for bundled fonts,
+   * #731): xterm measures its cell once, and again only when the family changes, so it is set away and back when a face
+   * of its family loads. Once per face: in WebKit the measuring can fire another `loadingdone`.
    */
   const fonts = typeof document === 'undefined' ? undefined : document.fonts
   const measured = new Set<FontFace>()

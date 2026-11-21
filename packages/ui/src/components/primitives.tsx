@@ -5,12 +5,7 @@ import { useCapability } from '../app/PlatformProvider.jsx'
 import { formatDuration } from '../app/format.js'
 import { useAnchoredPlacement } from './anchored.js'
 
-/**
- * The state indicator (FR-12).
- * With no color, urgency is spoken by brightness and kind by shape.
- * Only waiting-for-approval is pure white, everything else is dim — the brightest thing on
- * screen is exactly what is waiting for me.
- */
+/** The state indicator (FR-12): urgency by brightness, kind by shape, no colour; the brightest is what waits on me */
 const SIGNAL: Record<SessionState, { glyph: string; tone: string; label: string }> = {
   waiting_approval: { glyph: '●', tone: 'signal', label: 'Awaiting approval' },
   error: { glyph: '✕', tone: 'text-ink-signal', label: 'Error' },
@@ -20,13 +15,10 @@ const SIGNAL: Record<SessionState, { glyph: string; tone: string; label: string 
   idle: { glyph: '·', tone: 'text-ink-faint', label: 'Idle' },
 }
 
-/** The state's spoken name. The same wording must be used wherever a dot is not drawn (e.g. a tool marker) */
+/** The state's name, the same wording wherever no dot is drawn (a tool marker) */
 export const stateLabel = (state: SessionState): string => SIGNAL[state].label
 
-/**
- * Why the last turn did not finish (#698), in the words the inbox, the sidebar's tooltip and the conversation share.
- * `reconnecting` is the one that has not stopped: the session still works, and the tool is still trying.
- */
+/** Why the last turn did not finish (#698), one wording; `reconnecting` has not stopped: the tool is still trying */
 export function interruptionLabel(i: Interruption): string {
   switch (i.reason) {
     case 'network':
@@ -48,16 +40,13 @@ export function interruptionLabel(i: Interruption): string {
 export const canContinue = (i: Interruption | null | undefined): i is Interruption => !!i && i.reason !== 'reconnecting'
 
 /**
- * Whether Centralu continues the stop by itself (#1415): the one test of a wait, for the header, the line above the composer and the inbox.
- * A limit wait always has its time (the reset said, or 30 minutes after the stop); one without is no wait anything shows
+ * Whether Centralu continues the stop by itself (#1415), the one test for the header, the composer's line and the
+ * inbox. A limit wait always has its time (the reset, or 30 minutes after the stop); one without shows no wait.
  */
 export const waitStands = (i: Interruption | null | undefined): i is Interruption =>
   !!i?.autoContinue && (i.reason === 'network' || (i.reason === 'limit' && i.autoContinue.at !== undefined))
 
-/**
- * The wait of a stop Centralu continues by itself (#1415), as the host said it (`Interruption.autoContinue`): what stopped it and
- * when it goes on. Null when nothing continues it by itself. One wording for the header and the inbox row
- */
+/** The wait of a stop Centralu continues by itself (#1415), from `Interruption.autoContinue`; null when none */
 export function autoContinueLabel(i: Interruption, clock: (d: Date) => string): string | null {
   const at = i.autoContinue?.at
   if (!waitStands(i)) return null
@@ -80,12 +69,8 @@ export function StateDot({ state }: { state: SessionState }) {
 }
 
 /**
- * The signature element — the identity of a keyboard-first tool.
- *
- * `mod` and `alt` take a meaning, not a glyph (issue #32). The key that is `⌘` on this Mac is
- * `Ctrl` on another keyboard, and the handler accepts both. A symbol written at the call site,
- * as in `<Kbd>⌘</Kbd>`, tells the person to press a key their keyboard does not have, so the
- * keyboard's name is taken in from this one place only.
+ * A key cap. `mod` and `alt` take a meaning, not a glyph (#32): `⌘` here is `Ctrl` on another keyboard, so a symbol
+ * written at the call site would name a key the person may not have.
  */
 export function Kbd({
   children,
@@ -110,27 +95,14 @@ export function Kbd({
 
 export const formatWaiting = (ms: number): string => formatDuration(ms, { coarse: true })
 
-/**
- * The longer the wait, the brighter the text.
- * Speaks the premise that a person's attention is the most expensive resource, using brightness
- * alone rather than adding a new shape.
- */
+/** The longer the wait, the brighter the text: attention spent by brightness alone, no new shape */
 export function waitingTone(ms: number): string {
   if (ms > 10 * 60_000) return 'text-ink-signal'
   if (ms > 3 * 60_000) return 'text-ink'
   return 'text-ink-faint'
 }
 
-/**
- * The tooltip.
- *
- * The browser's native title takes 1-2 seconds to appear and its look cannot be matched to the
- * app. For information like the sidebar — normally taking up no space, but expected to answer
- * immediately when asked — that delay is effectively no information at all.
- *
- * It appears on focus as well as on hover — someone navigating by keyboard alone needs the same
- * information.
- */
+/** The tooltip, on hover and on focus: the native title takes 1-2 seconds and cannot match the app */
 export function Tooltip({
   children,
   content,
@@ -142,11 +114,11 @@ export function Tooltip({
   children: ReactNode
   content: ReactNode
   testId?: string
-  /** Layout of the anchor wrapper, which is the flex item when the tooltip stands in a row. */
+  /** The anchor wrapper's layout: it is the flex item in a row */
   className?: string
-  /** An element near the bottom of the screen floats the tooltip upward — floating it downward would push it off the window */
+  /** `top` for an element near the bottom of the window */
   placement?: 'bottom' | 'top'
-  /** An element at the right edge aligns the tooltip to the right — left alignment would push the tooltip off the window */
+  /** `right` for an element at the window's right edge */
   align?: 'left' | 'right'
 }) {
   const [open, setOpen] = useState(false)
@@ -155,20 +127,14 @@ export function Tooltip({
   /** Pressed since the pointer came in: the tip stays away until it leaves */
   const pressed = useRef(false)
   /*
-   * fixed, not absolute: an absolute inside the trigger is clipped by an overflow somewhere
-   * among its ancestors (the usage donut's by the modal's scroll box, a sidebar button's by
-   * its overflow-y-auto). Floating it relative to the viewport leaves no box to be clipped by. Placed by the same rule as every popover (anchored.ts): `placement` is the side tried first and it
-   * flips when the window has no room there — a default direction, not a guarantee.
+   * Fixed, as every popover (anchored.ts): an absolute tip is clipped by an ancestor's overflow (the usage donut's by
+   * the modal's scroll box). `placement` is the side tried first; it flips when the window has no room there.
    */
   const pos = useAnchoredPlacement(anchorRef, tipRef, open, {
     align,
     side: placement === 'top' ? 'above' : 'below',
   })
-  /*
-   * Only scrolling an ancestor can move the anchor and make the measured position stale.
-   * Conversation auto-follow also emits scroll events during an answer; closing on those
-   * unrelated events dismissed every tooltip even while its anchor stayed still (#611).
-   */
+  // Only an ancestor's scroll moves the anchor: the conversation's auto-follow scrolls too, and closed every tip (#611)
   useEffect(() => {
     if (!open) return
     const close = (event: Event) => {
@@ -195,9 +161,8 @@ export function Tooltip({
         setOpen(false)
       }}
       /*
-       * A press puts the tip away until the pointer leaves (owner, 2026-10-18): a button that opens a list would leave
-       * its tip standing over the list it opened. The focus the press gives the button does not bring it back; keyboard focus
-       * still does.
+       * A press puts the tip away until the pointer leaves, or it stands over the list the button opened. The focus a
+       * press gives does not bring it back; keyboard focus does.
        */
       onMouseDownCapture={() => {
         pressed.current = true
@@ -210,10 +175,8 @@ export function Tooltip({
     >
       {children}
       {/*
-        Drawn into the body, not inside the anchor (owner, 2026-10-20): a tooltip inside it inherits whatever its row
-        wears, so an away machine's dimmed project (opacity 60%) would show its tooltip see-through. Opacity on an
-        ancestor cannot be undone by a child; outside it, the tip is always whole. Fixed positioning already ignores
-        the anchor's box.
+        In the body, not the anchor: opacity on an ancestor (an away machine's dimmed project) cannot be undone by a
+        child, so the tip would be see-through.
       */}
       {open &&
         createPortal(

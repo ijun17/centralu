@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { diffFileLabel, diffPlaceAt, renderableDiffRows, toDiffRow } from './diff.js'
 
-/**
- * A diff's row number is not a file's line number. What these tests guard is exactly that
- * conversion — where "Open in IDE" takes the person has to match where they are currently
- * looking (#122).
- */
+// A diff's row number is not a file's line number: "Open in IDE" must land where the person is looking (#122)
 
 const DIFF = [
   'diff --git a/src/one.ts b/src/one.ts', // 0

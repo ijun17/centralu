@@ -17,14 +17,9 @@ type SubTab = 'changes' | 'history' | 'branches'
 const DIFF_TRUNCATED_MESSAGE = '…diff is too large; showing part of it. Open in your IDE to see the rest.'
 
 /**
- * Git panel (FR-4, B-2 through B-6).
- * Builds the basis for an approval decision inside the app itself — so nobody has to leave for
- * the IDE just to see this.
- *
- * Nothing named `initial*` here is read only once at mount: the change list on the right
- * stays visible while this is open (#15), so clicks keep arriving at a panel that is
- * already mounted, and a value read once is a value ignored from then on. `pick`
- * says which click these fields belong to, so each one lands.
+ * Git panel (FR-4, B-2 through B-6): the basis for an approval decision, without leaving for the IDE. No `initial*`
+ * is read only at mount: the change list stays visible while this is open (#15), so clicks keep arriving; `pick` says
+ * which click the fields belong to.
  */
 export function GitPanel({
   projectId,
@@ -42,11 +37,8 @@ export function GitPanel({
   pick: number
 }) {
   /*
-   * There is no tab strip (user request, 2026-09-07). The Changes, History and Branches entry
-   * points already all live in the evidence sidebar on the right (visible even during an
-   * overlay, via #15) — having them here too would give the same three doors two copies each.
-   * This screen shows **only whichever one was clicked into** — which screen it is derives from
-   * the click (initialSub), not from state.
+   * No tab strip: Changes, History and Branches are in the evidence sidebar, visible over this (#15), and two copies of
+   * each door would confuse. The screen is the one clicked into (initialSub), not state.
    */
   const sub: SubTab = initialSub ?? 'changes'
 
@@ -62,13 +54,8 @@ export function GitPanel({
 }
 
 /**
- * B-2 change diff — **the list, staging and commit belong to the sidebar on the right**.
- *
- * No file list here: the sidebar's Changes already holds the same list and it stays visible
- * even during an overlay (#15) — two copies of the same list leave it unclear which one to
- * click (user's observation). This screen draws the one thing that needs room, the
- * diff, and nothing else. Whether a file is staged is still needed without the list, so it is
- * looked up by finding that file in status.
+ * B-2 change diff, only the diff: the list, staging and commit are the sidebar's Changes, visible over this (#15), and
+ * two copies of a list leave unclear which to click. Whether a file is staged is looked up in status.
  */
 function Changes({
   projectId,
@@ -89,10 +76,8 @@ function Changes({
   const remoteIde = useRemoteIde(projectId)
   const [selected, setSelected] = useState<GitFileStatus | null>(null)
   /*
-   * This diff is **the basis for an approval decision** — clicking through files in quick succession must not let a slow
-   * response arrive late and draw **a different file's diff** under the name of the file currently on screen. `useLoad`
-   * lets only the newest read write to the screen, clears the old file's diff at once, and says when a read failed
-   * instead of drawing an empty diff (the commit screen below asks the same way).
+   * An approval rests on this diff: a slow answer must not draw another file's diff under this name. `useLoad` lets only
+   * the newest read draw, clears the old diff at once, and says when a read failed rather than draw it empty.
    */
   const diff = useLoad(
     () => (selected ? platform.git.diff(projectId, selected.path, selected.staged) : null),
@@ -110,10 +95,8 @@ function Changes({
       .then((files) => {
         if (!alive) return
         /*
-         * Picking by path alone is not safe (#160). A partially staged file (MM) shows up in
-         * both Staged and Changed, and the host returns the staged one first — clicking it
-         * under Changed still opened the staged diff under the same file name. This matches
-         * both the path and which list it was clicked from together.
+         * By path and list together (#160): a partly staged file (MM) is in both Staged and Changed, and the host
+         * returns the staged one first, so a click under Changed would open the staged diff.
          */
         const hit = files.find(
           (f) => f.path === initialPath && (initialStaged === undefined || f.staged === initialStaged),
@@ -134,11 +117,7 @@ function Changes({
         data={diff.data ?? null}
         failure={diff.error === null ? undefined : { what: 'the diff', error: diff.error, onRetry: () => void diff.reload() }}
         emptyHint="Pick a file from the Changes list on the right"
-        /*
-         * The working-tree diff is a single file — which file it is comes from the file that
-         * was clicked into, not from a `diff --git` inside the diff itself. That is why only
-         * `line` is used and `file` is not.
-         */
+        // A working-tree diff is the one file clicked into, so only `line` is used, not the diff's `file`
         onOpenInIde={
           remote
             ? remoteIde
@@ -165,20 +144,10 @@ function Changes({
 }
 
 /**
- * The diff view.
- *
- * This is the one place chromatic color is used (an exception to m2-plan decision 1 — see
- * --color-diff-add/del in styles/index.css). Green for additions, red for deletions. `+`/`-` plus
- * brightness would still distinguish them in grayscale, but an approval decision is made by
- * scanning, and forcing it to be read line by line would break that flow. The symbols stay
- * anyway — for someone who cannot see color, leaving only the color behind would erase the
- * information.
- *
- * Copying needs the viewer's handler (issue #36), for the opposite reason to the viewer's.
- * The rows are virtualized for large diffs, so the clipboard must be rebuilt from the full
- * backing data instead of the mounted DOM. Markers are also drawn in their own `select-none`
- * span, and the screen's − is a typographic minus that no patch tool accepts. The payload is
- * therefore rebuilt from the data, marker included, so copied diffs stay complete and valid.
+ * The diff view, the one place with chromatic colour (an exception to m2-plan decision 1, `--color-diff-add/del`): an
+ * approval is made by scanning, which grayscale would slow to reading. The `+`/`-` stay for those who cannot see colour.
+ * Copying is rebuilt from the data (issue #36, useVirtualCopy): the rows are virtualized, and the screen's − is a
+ * typographic minus no patch tool accepts.
  */
 function DiffView({
   path,
@@ -196,8 +165,8 @@ function DiffView({
   /** When opened with nothing selected — the list lives in the sidebar, so this has to point there */
   emptyHint?: string
   /**
-   * Where the top of the screen currently points — which file, and which line of it, to open. Absent for a project on
-   * a linked machine (#82) VS Code's Remote-SSH cannot reach: an IDE on this computer cannot open that machine's file
+   * Opens the file and line at the top of the screen. Absent for a linked machine (#82) VS Code's Remote-SSH cannot
+   * reach: an IDE on this computer cannot open that machine's file
    */
   onOpenInIde?: (target: { file: string | null; line?: number }) => Promise<void>
   onOpenViewer?: () => void
@@ -210,13 +179,9 @@ function DiffView({
   const rowsRef = useRef<HTMLDivElement>(null)
   const copyLines = useMemo(() => rows.map((r) => ({ text: r.body, prefix: r.marker })), [rows])
   /*
-   * Copy and ⌘A over rows that are not all mounted: the code viewer's rule (useVirtualCopy), including the focus the
-   * panel takes once per path so ⌘A has somewhere to land (#118).
-   *
-   * The fact that the diff was truncated is stated by the on-screen notice (`diff-truncation`) — **it is not put into the
-   * clipboard.** The viewer (CodeViewer) does put it there: a file's body is read by a person, and one extra line does
-   * not get in the way of that. A diff is read by `git apply`. Handing that parser a sentence written for a person breaks
-   * it on the spot — worse than a partial patch is a broken one (#122).
+   * Copy and ⌘A over rows not all mounted: the code viewer's rule (useVirtualCopy, #118). Unlike the viewer's, the
+   * truncation notice stays off the clipboard: a diff is read by `git apply`, and a broken patch is worse than a partial
+   * one (#122).
    */
   const copyProps = useVirtualCopy({
     scrollRef,
@@ -234,12 +199,7 @@ function DiffView({
     overscan: 24,
   })
   const virtualRows = virtualizer.getVirtualItems()
-  /*
-   * One thing — the row currently at the top of view — decides two things: the file name shown
-   * in the band, and where "Open in IDE" takes the person. The same computation is not done
-   * twice — doing it twice would let the file the band names and the file the IDE opens drift
-   * apart, which is exactly the kind of lie this panel exists to remove.
-   */
+  // The top row decides both the band's file name and where "Open in IDE" goes, once, so the two never drift apart
   const place: DiffPlace = diffPlaceAt(rows, virtualizer.range?.startIndex ?? virtualRows[0]?.index ?? 0)
 
   if (!path) {
@@ -256,13 +216,6 @@ function DiffView({
     return <div className="flex flex-1 items-center justify-center text-sm text-ink-faint">Binary file</div>
   }
 
-  /**
-   * Each line split the way it is drawn: the marker moves into its own span, `body` is what
-   * is left. Splitting it once here is what lets the copy handler below put the line back
-   * together — and it stops `--- a/foo` from losing a dash, which a blanket
-   * `replace(/^[+-]/, '')` would do to every file header, since the classifier calls those
-   * context lines.
-   */
   const truncated = Boolean(data?.truncated)
 
   return (
@@ -293,17 +246,9 @@ function DiffView({
         </span>
       </header>
       {/*
-       * `tabIndex={0}` is correct here — the viewer (CodeViewer) is 0 for the same reason
-       * (#139). This panel **scrolls both horizontally and vertically**. At -1, someone not
-       * using a mouse has no way in, and would never see the far right end of a wrapped-tight
-       * line. It is instead named as a region so Tab does not land on an unnamed `<div>`. There
-       * is also a reason to keep the name as just `Diff`: the file name is already stated by
-       * the header right above, and stating it again here would read the same name twice (the
-       * same problem as the band below).
-       *
-       * The line height stays written out (1.5 of 11px, the ~17px rows the virtual list
-       * estimates) instead of using `leading-code`: a theme changing the code line height must
-       * not move the rows away from their estimate.
+       * `tabIndex={0}` region, as the viewer's (#139): it scrolls both ways, and at -1 a keyboard could not get in. Named
+       * just `Diff`: the header states the file. The line height is written out (1.5 of 11px, estimateSize's ~17px), not
+       * `leading-code`, so a theme cannot move the rows from their estimate.
        */}
       <div
         ref={scrollRef}
@@ -316,15 +261,8 @@ function DiffView({
       >
         {place.label && (
           /*
-           * Without `left-0`, this only sticks vertically: scrolling 1,500px to the right
-           * would carry the band along by -1,500px too (#122) — the moment
-           * someone scrolls right to see the end of a long line, the very band that was
-           * telling them which file disappears. Sticky has to be set on both axes.
-           *
-           * `aria-hidden`: this is a device to follow the `diff --git` row in the list
-           * **visually**. On screen it sits overlapping that row and reads as one thing, but
-           * without hiding it, a screen reader would read the same file name twice. The real
-           * content is that row in the list.
+           * Sticky on both axes (`left-0`): otherwise scrolling right carries the band away (#122). `aria-hidden`: it
+           * repeats the `diff --git` row visually, which a screen reader would otherwise read twice.
            */
           <div
             className="sticky left-0 top-0 z-20 border-b border-line bg-surface-raised px-3 py-1"
@@ -340,12 +278,9 @@ function DiffView({
             const { kind, body } = rows[v.index]!
             const i = v.index
             /*
-             * A file-boundary band (user's choice, 2026-09-07 — a commit diff is several files
-             * as one block of text, and without it there is no way to see where the next file starts).
-             * In a virtualized scroll, the actual sticky display is handled by
-             * `diff-current-file-band` above; this row shows the raw `diff --git` position
-             * itself. data-line stays as is, so copying still produces the raw text (display ≠
-             * copy, #36).
+             * A file-boundary band: a commit diff is several files in one text. The sticky name is the
+             * `diff-current-file-band` above; this row marks the `diff --git` line itself and keeps data-line, so a copy
+             * gets the raw text (display ≠ copy, #36).
              */
             if (kind === 'file') {
               const label = diffFileLabel(body)
@@ -374,12 +309,8 @@ function DiffView({
                 data-diff={kind}
                 data-line={i}
                 /*
-                 * With `w-full`, a row's width is **the visible width**, so scrolling right
-                 * leaves the green or red background behind on the left and the right half goes
-                 * colorless — color is exactly the device that lets an approval decision be
-                 * scanned, and it is missing on precisely the long lines. `w-max` widens it to
-                 * fit the content, and `min-w-full` still paints a short line all the way to
-                 * the edge.
+                 * `w-max`: a `w-full` row is the visible width, so a long line's right half would lose its colour when
+                 * scrolled to. `min-w-full` still paints a short line to the edge.
                  */
                 className={`absolute left-0 top-0 w-max min-w-full ${
                   kind === 'add'
@@ -395,9 +326,8 @@ function DiffView({
                 <span className="inline-block w-4 select-none text-center opacity-70">
                   {kind === 'add' ? '+' : kind === 'del' ? '−' : ''}
                 </span>
-                {/* Indentation is information in a diff — the default `white-space: normal` drew a 9-space
-                    indent and an 8-space indent in the same spot (#122). The viewer (CodeViewer) uses
-                    whitespace-pre for the same reason. */}
+                {/* Indentation is information: under `white-space: normal` a 9-space and an 8-space indent
+                    draw the same (#122). The viewer is whitespace-pre too. */}
                 <span data-code className="whitespace-pre">
                   {body}
                 </span>
@@ -415,11 +345,7 @@ function DiffView({
   )
 }
 
-/**
- * B-3 commit detail — **the list belongs to the sidebar's History**. Clicking a commit in the sidebar opens its diff here, laid out full width.
- * Picking the next commit happens in the sidebar too — two copies of the same list would be
- * confusing (the same judgment as with Changes).
- */
+/** B-3 commit detail: a commit picked in the sidebar's History opens its diff here, full width; the list stays there */
 function History({
   projectId,
   initialSha,
@@ -434,9 +360,8 @@ function History({
   const remote = useProjectMachine(projectId) !== null
   const remoteIde = useRemoteIde(projectId)
   /*
-   * The newest click wins, as on the Changes screen: clicking commit A and then B must not let A's slower answer draw
-   * A's diff while B is picked, and a commit that fails must not leave the one before it on screen behind a toast.
-   * Each click is a new request (`pick`), so clicking the same commit again reads it again.
+   * The newest click wins, as on Changes: A's slower answer must not draw while B is picked, and a failed commit must not
+   * leave the one before on screen. Each click is a new request (`pick`), so the same commit clicked again is read again.
    */
   const request = useMemo(() => ({ sha: initialSha, pick }), [initialSha, pick])
   const detail = useLoad(
@@ -452,14 +377,8 @@ function History({
         failure={detail.error === null ? undefined : { what: 'the commit', error: detail.error, onRetry: () => void detail.reload() }}
         emptyHint="Pick a commit from the History list on the right"
         /*
-         * The button on the commit screen opens a file, never an empty `async () => {}` — a dead
-         * button is worse than no button at all (#122).
-         *
-         * A commit diff spans several files, so "which file" has to be told by the diff itself:
-         * it is whichever file the band is pointing at. What gets opened is **that file in the
-         * working tree** — an IDE cannot open a specific sha's blob. The line number is also
-         * based on the commit's new side, so it can drift if there have been edits since, but
-         * it lands closer than dropping the person on line 1.
+         * Opens a real file, never a dead `async () => {}` (#122): the band's file, in the working tree, as an IDE cannot
+         * open a sha's blob. The line is the commit's new side; it can drift after edits, but lands nearer than line 1.
          */
         onOpenInIde={
           remote

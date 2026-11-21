@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { SessionState } from '@cc/protocol'
 import { foldSummary, groupAttention, HoverExpander, HOVER_EXPAND_MS } from './fold.js'
 
-// Unread by default: an idle (`waiting_input`) session is not counted either way (owner, 2026-10-20)
+// Unread by default: an idle (`waiting_input`) session is not counted either way
 const of = (...states: SessionState[]) => states.map((state) => ({ state, pendingQuestions: [], lastSeq: 2, lastReadSeq: 1 }))
 
 describe('foldSummary (#205)', () => {
@@ -43,7 +43,7 @@ describe('foldSummary (#205)', () => {
     expect(foldSummary([{ state: 'error', ...asking }])).toEqual([{ state: 'error', count: 1 }])
   })
 
-  // #2146 (owner decision 2026-11-10): a turn that ended while its own background work runs is not shown or counted as running
+  // #2146: a turn that ended while its own background work runs is not shown or counted as running
   it('counts a session whose turn ended while its own background work runs in its own chip, not as working', () => {
     const run = (kind: 'agent' | 'shell', over = {}) => ({ id: `${kind}-${Math.random()}`, kind, description: kind, status: 'running' as const, ...over })
     const at = (state: SessionState, backgroundTasks: ReturnType<typeof run>[], over = {}) => ({ state, pendingQuestions: [], lastSeq: 2, lastReadSeq: 2, backgroundTasks, ...over })
@@ -110,7 +110,7 @@ describe('HoverExpander (#1578)', () => {
     h.enterRow(true)
     expect(timers).toHaveLength(1)
     expect(timers[0]?.ms).toBe(HOVER_EXPAND_MS)
-    // The rest the owner chose (2026-10-26, #1605); a change of it is a decision, not a refactor
+    // The owner's value (#1605): changing it is a decision, not a refactor
     expect(HOVER_EXPAND_MS).toBe(100)
     expect(changes).toEqual([])
     fire()

@@ -35,7 +35,7 @@ describe('a command log view joining the stored log and live output', () => {
   })
 })
 
-// #1143 U18: the exit line is not drawn by the live event past the hold, and again after the replay
+// #1143 U18: the exit line is drawn once, after the replay, not also by the live event past the hold
 describe('the exit line of a command log', () => {
   it('is drawn once, after the stored log, when the run ended before the log answered', () => {
     const { written, log } = view()

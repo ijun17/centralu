@@ -25,11 +25,8 @@ import { Kbd } from '../../components/primitives.jsx'
 import { WaitCard, WaitFooter } from './WaitCard.jsx'
 
 /**
- * Approval card (FR-3). Keyboard first — y/n/a, ⌥a scopes it to the project. With the keyboard in this session's
- * composer, where y/n/a are letters of the message, mod+⇧Y / mod+⇧D / mod+⇧L answer it instead, and the card shows those.
- * A GUI slower than the mouse is worse than a terminal.
- * Color is used only on the left rail: tinting the whole card would make the command itself
- * unreadable.
+ * Approval card (FR-3; look: docs/design-system.md §8). Keyboard first: y/n/a, ⌥a for the project; from this session's
+ * composer, where those are letters, the `APPROVAL_COMBOS`, which the card then shows.
  */
 export function ApprovalCard({
   sessionId,
@@ -41,13 +38,12 @@ export function ApprovalCard({
   detail: ApprovalDetail
 }) {
   const respond = useStore((s) => s.respondApproval)
-  // The buttons cannot be clicked while a response is in flight — a second response would record an executed command as denied (#158)
+  // Disabled while an answer is in flight: a second one would record an executed command as denied (#158)
   const busy = useStore((s) => !!s.approvalsInFlight[inFlightKey(sessionId, requestId)])
   const sc = useShortcut()
   const inComposer = useComposerFocused(sessionId)
-  // An update card (#581), an agent's apply card (#665) or the Assistant's handoff card (#694): its "always" is for this session only, never the project
+  // An update (#581), apply (#665) or handoff (#694) card: "always" is this session's only, never the project's
   const updateCard = sessionOnlyAlways(detail)
-  // An edit whose file is unknown has nothing to remember (#428): no button, and `a` does nothing
   const canAlways = offersAlways(detail)
   const keys: AnswerKeys = inComposer
     ? {
@@ -62,18 +58,15 @@ export function ApprovalCard({
       const st = useStore.getState()
       const action = approvalKeyAction(e, {
         typing: isTextEntry(e.target),
-        // Ignored if the card is behind another screen or **is not the card of the focused session** —
-        // when several cards are up in the grid, a single y must not approve all of them
+        // Only the focused session's uncovered card: one y must not approve every card in the grid
         covered: approvalCardCovered(st, sessionId),
         inComposer: composerOf(e.target) === sessionId,
       })
       if (!action) return
-      // A capability question (M4 D-4) has no "always allow" — the answer gets remembered either way. `a` does nothing on this card
-      // Nor does a new project (#515), or an existing folder added as one (#1220): it is one folder, once — there is
-      // nothing to always allow
+      // `a` does nothing on a capability question (remembered either way) or a new or added project (one folder, #515, #1220)
       if ((detail.kind === 'capability' || detail.kind === 'project_create' || detail.kind === 'project_add') && action.decision === 'always')
         return
-      // Nor does an edit whose file is unknown (#428): there is no path to remember
+      // Nor where `offersAlways` says no (#428)
       if (!canAlways && action.decision === 'always') return
       // Nor does a project of another machine (#700): the consent is for this call, nothing is remembered for it
       if (detail.kind === 'project_access' && detail.to.machine && action.decision === 'always') return
@@ -81,13 +74,13 @@ export function ApprovalCard({
       if (detail.kind === 'project_access' && detail.from.machine && action.decision === 'always') return
       // Nor an agent started on another machine (#1038), for the same reason
       if (detail.kind === 'agent_start' && detail.machine && action.decision === 'always') return
-      // A cross-project consent's "always" is for the pair (#371) — there is no session or project scope to pick
+      // A cross-project "always" is for the pair (#371): no scope to pick
       if (detail.kind === 'project_access') {
         void respond(sessionId, requestId, action.decision)
         e.preventDefault()
         return
       }
-      // An update or handoff grant is deliberately per-session only; it must not become an app-wide setting.
+      // An update or handoff grant stays per-session, never an app-wide setting
       if (sessionOnlyAlways(detail)) {
         void respond(sessionId, requestId, action.decision)
         e.preventDefault()
@@ -223,13 +216,8 @@ export function ApprovalCard({
 }
 
 /**
- * An app's capability-question card (M4 D-4) — the same shape as the approval card (left rail,
- * header, y/n buttons). ApprovalCard puts this up inside a session; CapabilityAsk puts it up in
- * an app's pinned view. The same question has to wear the same face wherever it stands, for it
- * to read to a person as the same thing.
- *
- * There is no "always allow": both allow and deny are remembered from a single answer. The card
- * states where to reverse it (Permissions in the settings panel).
+ * An app's capability question, the same card in a session (ApprovalCard) and a pinned view (CapabilityAsk). No "always":
+ * either answer is remembered, and the card says where to change it.
  */
 export function PermissionCard({
   appName,
@@ -266,10 +254,8 @@ export function PermissionCard({
 }
 
 /**
- * One project reaching another (#371) — the first time a session of one project asks another project to do
- * something (ask_project) or to lend its apps. Three answers, unlike an app's capability question: once is this
- * call only, always is remembered for the pair (and listed in Settings, where it is revoked), deny is not
- * remembered. The task itself is shown whole below the question, since that is what the person is agreeing to.
+ * A project's first ask_project or app loan to another (#371). Once is this call, always is the pair's (revoked in
+ * Settings), deny is not remembered. The task stands whole, since that is what is agreed to.
  */
 function ProjectAccessCard({
   detail,
@@ -350,10 +336,8 @@ function ProjectAccessCard({
 }
 
 /**
- * A session asks to start another agent in its project (#561, start_agent). Four answers, the approval card's own
- * keys: once (y), always for this session (a), always for the whole project (⌥a, or ⌥ with a click; stored and
- * revoked in Settings), deny (n). The new session's permissions are said on the card, since that is the line the
- * person is agreeing to: the caller's own preset, never more.
+ * start_agent (#561): once (y), always for this session (a) or the project (⌥a, ⌥-click; revoked in Settings), deny (n).
+ * The card states the child's permissions, the caller's own preset and never more, since that is what is agreed to.
  */
 function AgentStartCard({
   detail,
@@ -372,7 +356,7 @@ function AgentStartCard({
   showProjectKey: boolean
   onAnswer: (decision: 'allow' | 'deny' | 'always', scope?: 'session' | 'project') => void
 }) {
-  // The Assistant's child (#853) works in no project: there is no project to always allow it for
+  // The Assistant's child (#853) has no project to always allow it for
   const inProject = detail.project.id !== ''
   // A child on a linked machine (#1038) is allowed once: nothing is remembered for another machine's project
   const remote = !!detail.machine
@@ -438,10 +422,7 @@ function AgentStartCard({
   )
 }
 
-/**
- * The Assistant asks to make a new project (#515, create_project). The full path stands on the card, since where
- * the folder goes is the whole of what is agreed to; nothing exists until Create. No "always": it is one folder.
- */
+/** create_project (#515): the full path is what is agreed to, and nothing exists until Create. No "always": one folder */
 function ProjectCreateCard({
   detail,
   busy,
@@ -515,11 +496,7 @@ function ProjectCreateCard({
   )
 }
 
-/**
- * The Assistant's add_project card (#1220): a folder that already exists becomes a project. What the folder's own
- * machine found there is what is agreed to: the machine, the full path, that it is a folder, and whether it is a git
- * repository and where its origin points. No "always": it is one folder, once.
- */
+/** add_project (#1220): what the folder's own machine found there is what is agreed to. No "always": one folder, once */
 function ProjectAddCard({
   detail,
   busy,
@@ -613,13 +590,10 @@ function ActionKey({
 }
 
 /**
- * Whether the card offers "always allow". Not for a file edit whose path is unknown (#428): the rule would be
- * "(no path)", which the host never matches, so it would be saved, listed and announced while doing nothing. Not for
- * a command with no key either (#838): an empty one, one the card flags (outside the sandbox, the network, input to a
- * running terminal) since a rule of its text would also let the plain command through, and one ending in `*`, which
- * an older host reads as a prefix. Nor for a card this window could not read (#844): "always" would remember a
- * question the person never saw in full. Nor for the Assistant's change to a linked machine (#1219): each one is
- * asked on its own, and the host remembers nothing for it. Nor for the Assistant's change to its settings or the session archive (#1219). Nor for a call of an app's tool (#2231): each is asked on its own.
+ * No "always" for: an edit with no path (#428: "(no path)" never matches, so it would do nothing); a command with no key
+ * (#838: empty, flagged by the card, whose text would also pass the plain command, or ending in `*`, a prefix to an older
+ * host); a card this window could not read (#844); the Assistant's change to a linked machine, its settings or the
+ * archive (#1219); an app tool call (#2231). The last two are asked each time.
  */
 export function offersAlways(detail: ApprovalDetail): boolean {
   if (isUnknownCard(detail) || isMachineChange(detail) || isAssistantChange(detail) || isAppCall(detail)) return false
@@ -629,13 +603,8 @@ export function offersAlways(detail: ApprovalDetail): boolean {
 export type ApprovalKeyAction = { decision: 'allow' | 'deny' | 'always'; scope?: 'session' | 'project' }
 
 /**
- * Whether this card should accept a key press right now (a pure function — tests attach here).
- *
- * Besides being covered by a modal or overlay, **a card belonging to a session that is not
- * focused** must not accept one either: in the grid, each pane's card attaches its own window
- * listener, so with two or more approvals up at once, a single y **approved all of them at
- * once** — the single most dangerous button to have mis-fire in this app. Keyboard approval
- * always goes to exactly one thing: "the session currently focused."
+ * Covered, or of an unfocused session: each grid pane's card listens on the window, so one y would approve every card
+ * up at once. Keyboard approval goes to the focused session only.
  */
 export function approvalCardCovered(
   st: CoveringLayers & { focusedSessionId: string | null },
@@ -658,24 +627,16 @@ export function keyScope(
 }
 
 /**
- * How far "always" on a start_agent card reaches. The project when the person asked for it (⌥a, or ⌥ and a click) and the
- * child has one; the Assistant's child works in no project (#853), so there is none to remember it for and it stays
- * this session's. The button and the key both ask here, so neither sends `project` for the Assistant's card and the
- * toast never says sessions in a project may start agents when the host remembers it for this session only.
+ * The project when asked (⌥a, ⌥-click) and the child has one; the Assistant's child has none (#853), so this session.
+ * Button and key both ask here, so the toast never promises a project-wide grant the host kept for the session only.
  */
 export function agentStartScope(detail: { project: { id: string } }, wantsProject: boolean): 'session' | 'project' {
   return wantsProject && detail.project.id !== '' ? 'project' : 'session'
 }
 
 /**
- * The complete rule for **when** the global y/n/a keys turn into an approval (a pure function —
- * tests attach here).
- *
- * A ⌘, ⌃ or ⇧ combination is a different shortcut: ⌘A (select all) and ⌘⇧A (next waiting, which
- * this app advertises in the top bar) must not flow through and trigger "always allow" —
- * approval is the single most dangerous button to have mis-fire in this app. Only ⌥ is let
- * through (⌥a is the established convention for project scope). Neither typing into a text field
- * nor a card hidden behind a modal or overlay is accepted.
+ * When y/n/a answer. ⌘, ⌃ or ⇧ make another shortcut (⌘A, ⌘⇧A next waiting) that must not trigger "always"; only ⌥
+ * passes (⌥a, project scope). Nothing while typing in a field or behind a modal or overlay.
  */
 export function approvalKeyAction(
   e: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'> &
@@ -687,10 +648,7 @@ export function approvalKeyAction(
     inComposer?: boolean
   },
 ): ApprovalKeyAction | null {
-  /*
-   * A key held down and repeating is not an approval (#158). Holding y down would approve the
-   * next card too, the moment it appears after the first response, before anyone has read it.
-   */
+  // A repeating key is not an approval (#158): held, it would approve the next card before anyone read it
   if (e.repeat || ctx.covered) return null
   // A key an input method is using belongs to the composition, whatever modifiers it carries (app/keys.ts)
   if (composingKey({ key: e.key, isComposing: !!e.isComposing, keyCode: e.keyCode ?? 0 })) return null
@@ -698,7 +656,7 @@ export function approvalKeyAction(
   if (combo) return ctx.inComposer || !ctx.typing ? combo : null
   if (e.metaKey || e.ctrlKey || e.shiftKey) return null
   if (ctx.typing) return null
-  // A letter is read by **meaning**, not by keycap — with ⌥ held, or on a Korean keyboard layout, `key` is a different character (app/keys.ts)
+  // By meaning, not keycap: ⌥ or a Korean layout changes `key` (app/keys.ts)
   const k = letterOf(e)
   if (k === 'y') return { decision: 'allow' }
   if (k === 'n') return { decision: 'deny' }
@@ -717,18 +675,9 @@ export const APPROVAL_COMBOS = {
 } as const
 
 /**
- * mod+⇧Y allow, mod+⇧D deny, mod+⇧L always allow (session scope), with exactly those modifiers. Chosen against what a
- * key already does in the composer or the window (2026-10-12):
- *
- *  - mod+Enter is the composer's send key when "send with ⌘Enter" is on (composerKeys.ts), and mod+Backspace deletes a
- *    word (Windows, Linux) or back to the line's start (macOS): both are what a person typing means by them.
- *  - Bare mod+letters are taken or edit text: ⌘A/C/V/X/Z, Ctrl+Y redo, ⌘N/⌘W/⌘M/⌘H/⌘Q (window and app keys),
- *    mod+K/I/B and mod+1-9 here. mod+⇧A is "next waiting" (a global shortcut on the desktop), mod+⇧Z redo,
- *    mod+⇧N/⇧F are new session and search (#529), mod+⇧I/J/C/R are WebView2's developer tools and hard reload.
- *  - No Alt: Ctrl+Alt is AltGr on many Windows layouts, where it types letters (Polish AltGr+N is ń).
- *
- * Y mirrors the bare y; D is Deny; L is the "always" one, kept off the keys a hand reaches for by habit. "Always" here
- * is session scope: project scope stays on ⌥a and ⌥-click, outside the composer.
+ * Exactly these modifiers, chosen to take no key that means something already (docs/product-spec.md "FR-3"). Also taken:
+ * bare mod+letters (⌘N/W/M/H/Q, mod+K/I/B, mod+1-9), mod+⇧N/⇧F (#529), WebView2's mod+⇧I/J/C/R (devtools, hard reload).
+ * L, for "always", is off the keys a hand reaches for by habit; project scope stays on ⌥a and ⌥-click.
  */
 function approvalComboOf(
   e: Pick<KeyboardEvent, 'key' | 'code' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>,
@@ -741,7 +690,7 @@ function approvalComboOf(
   return null
 }
 
-/** Is the keyboard in this session's composer right now — the card then shows its combos instead of y/n/a */
+/** The session whose composer holds the keyboard, if any */
 export function composerOf(target: EventTarget | null): string | null {
   const el = target as HTMLElement | null
   return el?.dataset?.composerSession ?? null
@@ -753,10 +702,8 @@ function useComposerFocused(sessionId: string): boolean {
     () => composerOf(typeof document === 'undefined' ? null : document.activeElement) === sessionId,
   )
   useEffect(() => {
-    /*
-     * Read after the event, not in it: focus moved by a component's layout effect fires focusin inside React's commit,
-     * where a state update is a flushSync from a lifecycle (React warns). By the microtask, activeElement is settled too.
-     */
+    // In a microtask: focusin from a layout effect fires inside React's commit, where a state update warns (flushSync
+    // from a lifecycle); activeElement is settled by then too.
     let live = true
     const update = () =>
       queueMicrotask(() => {
@@ -780,9 +727,8 @@ export type AnswerKeys = { allow: string; deny: string; always: string }
 const BARE_KEYS: AnswerKeys = { allow: 'y', deny: 'n', always: 'a' }
 
 /**
- * The card's text, which a list row's tooltip shows too (#543). What the request says beyond its command or path
- * (`approvalNotes`: network access, input to a running terminal, outside the sandbox, the reason, a delete or a move)
- * stands under it, so nothing the agent asked for is only in the row's head (#683 review).
+ * Also a list row's tooltip (#543). `approvalNotes` stand under the command or path, so nothing the agent asked for is
+ * only in the row's head (#683).
  */
 export function detailText(d: ApprovalDetail): string {
   const notes = approvalNotes(d)

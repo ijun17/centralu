@@ -1,15 +1,5 @@
-/**
- * Extension → vscode-icons icon.
- *
- * The icons are taken from vscode-icons (MIT) — a familiar picture lets the kind register before the
- * name is even read. Not all roughly 1,200 of them are included. There is no reason to spend that
- * much app size, and **anything missing from this table falls back to the default file icon, so a
- * gap never shows up as a blank.** That is what makes it safe to leave this table as is — even if
- * the list falls behind, the screen still looks fine.
- *
- * The name is checked as a whole first: things like `Dockerfile` and `.gitignore` are identified by
- * their name itself, not by an extension.
- */
+// Extension to vscode-icons (MIT) icon, so the kind registers before the name is read. A subset: anything missing falls
+// back to the default file icon, never a blank, so the table may lag safely. Whole names (`Dockerfile`) are checked first.
 import defaultFile from '../../assets/file-icons/default_file.svg'
 import ts from '../../assets/file-icons/file_type_typescript.svg'
 import tsx from '../../assets/file-icons/file_type_reactts.svg'
@@ -51,7 +41,7 @@ import wasm from '../../assets/file-icons/file_type_wasm.svg'
 
 export const DEFAULT_FILE_ICON = defaultFile
 
-/** Things identified by name itself — not caught by an extension */
+/** Known by the whole name, not an extension */
 const BY_NAME: Record<string, string> = {
   dockerfile: docker,
   '.dockerignore': docker,
@@ -84,7 +74,6 @@ const BY_EXT: Record<string, string> = {
   wasm,
 }
 
-/** Decides an icon from a single file name. Falls back to the default file icon when unknown — never blank */
 export function iconForFile(name: string): string {
   const lower = name.toLowerCase()
   const byName = BY_NAME[lower]

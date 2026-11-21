@@ -18,10 +18,7 @@ import { AddProjectMachines } from './menus/AddProjectMachines.jsx'
 
 /** The observation lane — high density, using as little space as possible (docs/architecture.md design principle 1) */
 export function Sidebar() {
-  /*
-   * One list whatever machine a project is on (#734), in the hub's order, which the person sets by dragging across
-   * machines; a linked machine's project carries its machine's badge instead of standing under a machine header.
-   */
+  // One list across machines (#734), in the hub's order; a linked machine's project carries its machine's badge
   const projectIds = useStore((s) => Object.keys(s.projects).join(','))
   const ids = projectIds ? projectIds.split(',') : []
   // Whether the host's first lists have arrived since this window opened; a later reconnect keeps what is shown
@@ -35,8 +32,7 @@ export function Sidebar() {
   const listRef = useRef<HTMLDivElement>(null)
   const width = useStore((s) => s.sidebarWidth)
   const setSidebarWidth = useStore((s) => s.setSidebarWidth)
-  // The minimum width is fixed in real pixels — the limit on how narrow the list can get stays the
-  // same even when text is zoomed in
+  // The minimum width is in real pixels, whatever the text zoom
   const zoom = useTextZoom()
   const platform = usePlatform()
   const addProject = useStore((s) => s.addProject)
@@ -56,12 +52,7 @@ export function Sidebar() {
   }
 
   return (
-    /*
-      **Only the project list scrolls** (#988). With the whole sidebar as the scroller, the resize handle, an
-      absolutely placed child of it, would scroll up with the rows: past the first screen there would be no edge left to
-      drag. So the aside never scrolls; the top doors and the bottom area stand still, and the handle is the scroller's
-      sibling, spanning the aside's full height, so a scroll never moves it and the list's scrollbar never covers it.
-    */
+    // Only the project list scrolls (#988): the resize handle, an absolute child, would scroll away with the rows
     <aside
       className="relative flex h-full shrink flex-col overflow-hidden border-r border-line bg-surface-side"
       style={{ width, minWidth: SIDEBAR_MIN / zoom, ...SIDEBAR_VARS }}
@@ -76,7 +67,7 @@ export function Sidebar() {
         testId="sidebar-resize"
       />
       <div className="shrink-0">
-        {/* The first row (owner, 2026-11-05; SearchField): the palette hangs from wherever this field is measured to be */}
+        {/* The palette hangs from wherever this field is measured to be (SearchField) */}
         <div className="px-2 pt-2">
           <SearchField />
         </div>
@@ -84,25 +75,19 @@ export function Sidebar() {
         <GridButton />
       </div>
       {/*
-        The list keeps room for about two rows however short the window (#988 follow-up): otherwise, in a 150px window the
-        fixed top and bottom leave it none, and a project's row cannot be reached at all. The bottom area gives way first.
+        The list keeps room for about two rows however short the window (#988); the bottom area gives way first
       */}
       {/*
-        The two ways a project comes to be stand over the list as icons (owner, 2026-10-19), beside its name, instead
-        of a row of framed buttons under it: an existing folder, or a new app. No "New folder as a project"
-        (owner, 2026-10-21): a new folder is made in the file manager or by an agent, then added.
-        The list starts where its own controls are, and the bottom keeps only the
-        user-folder apps still listed. The row stands still; only the list under it scrolls. A wider gap above it sets it
-        off from the doors, and a divider under it, the same hairline as between projects, sets it over the list (owner,
-        2026-10-19).
+        The ways a project comes to be, as icons over the list: an existing folder or a new app. No "New folder as a
+        project": the file manager or an agent makes the folder, then it is added.
       */}
       <div className="mt-4 flex shrink-0 items-center gap-0.5 border-b border-line pb-1.5 pl-4 pr-2" data-testid="sidebar-projects-head">
         <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink-faint">Projects</span>
         <span ref={addAnchor} className="flex">
           <IconButton
             /*
-             * **There should be exactly one way to pick a folder in this app**: this button is the picker itself. Once a machine is linked it first asks where (#734): this computer, the
-             * picker, or a linked machine, whose folder is typed (the picker cannot see that machine's disk).
+             * The app's one folder picker. With a machine linked it first asks where (#734); a linked machine's folder is
+             * typed, as the picker cannot see its disk.
              */
             label="Add a folder as a project"
             onClick={() => {
@@ -123,16 +108,13 @@ export function Sidebar() {
         </IconButton>
       </div>
       {/*
-        The list scrolls with its bar drawn over it, as the conversation does (OverlayScrollbar, `cc-scroll-overlay`;
-        owner, 2026-11-05): a native bar takes a column of its own, so every row would move left by its width the moment
-        the list grows past the window and back when it shrinks. The thumb stands 4px in from the edge, clear of the resize
-        handle (ResizeHandle, w-1) that spans the same edge.
+        The bar is drawn over the list (OverlayScrollbar): a native one would shift every row as the list outgrows the
+        window. The thumb stands 4px in, clear of the resize handle (w-1) on the same edge.
       */}
       <div className="relative flex min-h-[4.5rem] flex-1 flex-col">
         <div ref={listRef} className="cc-scroll-overlay min-h-0 flex-1 overflow-y-auto" data-testid="sidebar-projects">
           {/*
-            Until the host's first lists arrive the list is not known to be empty (owner, 2026-10-18: "No projects yet"
-            would flash on a slow start). The shape of two projects stands there instead, and the real list fades in.
+            Until the first lists arrive the list is not known to be empty, so a skeleton, not "No projects yet"
           */}
           {ids.length === 0 && !listed ? (
             <SidebarSkeleton />
@@ -156,10 +138,7 @@ export function Sidebar() {
         </div>
       </div>
       {/*
-        The bottom area stands still under the list (#988). Capped, so a long leftover list cannot push the list off the
-        screen: past the cap it scrolls on its own, and in a window too short for both it shrinks before the list does.
-        It holds only the user-folder apps still listed (#1141; none on this computer once its host has moved them into
-        projects), and nothing when there are none.
+        The user-folder apps still listed (#1141), capped so they cannot push the list off screen
       */}
       <div
         className="max-h-[45%] min-h-0 shrink overflow-y-auto border-t border-line empty:hidden"

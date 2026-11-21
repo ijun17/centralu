@@ -1,27 +1,13 @@
 import { useEffect, useState, type RefObject } from 'react'
 
 /**
- * The room panels are laid out in, in **real pixels** — what the grid and the project screen (#203)
- * count their columns in (core's `columnsFor`). A panel's minimum width is fixed in real pixels, like
- * the sidebar's and the evidence panel's: the text zoom (App.tsx, on the root) is there to enlarge the
- * letters, not to narrow the panel. A resize observer's box is in zoomed CSS pixels, so it is multiplied
- * by the zoom it was laid out under (otherwise a grid of one row at zoom level 3 becomes two rows at level
- * 4 in the same real room).
- *
- * The zoom is the one the measured layout had, read beside the box, and the product is kept — not the
- * box kept and multiplied by the store's zoom at render. The store's zoom changes the moment the scale is
- * set, and the view renders with it before App applies it and the observer reports the new box. The two
- * together are a width no zoom ever laid out. Measured at 1280×720, going from 1 to 1.25: the project
- * screen's room is 684 real pixels, then 535, one column for two panels either way, and 684 × 1.25 = 855
- * stood them side by side in between; the grid's is 1024, then 960, two columns for three panels, and
- * 1024 × 1.25 = 1280 stood them in three. An app's view laid over its panel (pinned-app/slots.ts) went
- * there and back, and the project screen's e2e test, measuring the panel in that frame, failed 3 of 30
- * runs in WebKit on a loaded machine. Kept as a product, the old real size holds until the observer
- * reports the new one. It always does: the window's CSS height is divided by the zoom, so the box always
- * changes with it.
- *
- * Kept as two numbers rather than one object, so an observer firing with an unchanged dimension does not
- * re-render every panel.
+ * The room panels are laid out in, in real pixels (core's `columnsFor`, grid and project screen #203): the text zoom
+ * enlarges letters, not narrows panels, so the observer's zoomed box is multiplied by the zoom it was laid out under.
+ * That zoom is read beside the box, not taken from the store: the store's zoom changes before App applies it and the
+ * observer reports, and the mix is a width no zoom laid out (measured at 1280×720, zoom 1 to 1.25: the grid briefly
+ * stood three panels in a row, an app view over its panel moved there and back, and the project screen's e2e failed 3
+ * of 30 runs in WebKit). The box always changes with the zoom (the window's CSS height is divided by it), so the old
+ * size holds until the observer reports. Two numbers, not one object: an unchanged side re-renders nothing.
  */
 export function useRealSize(ref: RefObject<HTMLElement | null>): { width: number; height: number } {
   const [width, setWidth] = useState(1200)

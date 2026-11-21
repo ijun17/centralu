@@ -7,13 +7,9 @@ import { Button } from '../../components/Button.jsx'
 import { TextField } from '../../components/TextField.jsx'
 
 /**
- * Adds a folder on a linked machine as a project (#82). The folder picker is this computer's, and cannot see another
- * machine's disk, so the path is typed, in that machine's own terms (`/home/me/app`, `C:\Users\me\app`, or a path
- * inside the WSL distro). The machine's host checks it exists and answers with the project, named as the hub names it.
- *
- * It only adds a folder that is there (owner, 2026-10-21): no "Create a new folder" tab, as the sidebar has no
- * "New folder as a project", so a project comes to be in two ways everywhere, an existing folder or a new app. Drawn as
- * the other dialogs are (header, body, footer; `TextField`, `Button`), docs/design-system.md §11.
+ * Adds an existing folder on a linked machine as a project (#82). The picker cannot see that machine's disk, so the path
+ * is typed in its terms (`/home/me/app`, `C:\Users\me\app`, a WSL path); its host checks it. No "Create a new folder":
+ * everywhere a project is an existing folder or a new app.
  */
 export function AddRemoteProjectDialog({ machine, onClose }: { machine: string; onClose: () => void }) {
   const name = useMachineName(machine)

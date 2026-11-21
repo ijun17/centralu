@@ -6,15 +6,9 @@ import { useFocusReturn } from './focusReturn.js'
 import { useDialogFocus } from './dialogFocus.js'
 
 /**
- * Raises the store's `openLayers` while a single screen-covering layer is floating (#158).
- *
- * Whether a dialog is open is usually local state on the component that raised it, so a global
- * shortcut (y/n/a on an approval card) had no way to know one was floating. `Modal` counts itself,
- * so a new dialog is covered automatically with no extra work. A layer that does not use `Modal`
- * (the run-command window) calls this hook directly.
- *
- * It also gives focus back to what held it when the layer opened, once the layer is gone (#115,
- * focusReturn.ts) — otherwise closing a dialog leaves the keyboard typing into nothing.
+ * Counts a screen-covering layer in the store's `openLayers` (#158), so global keys (y/n/a on an approval card) know a
+ * dialog floats; a layer that is not a `Modal` (the run-command window) calls this directly. Also gives focus back
+ * once the layer is gone (#115, focusReturn.ts).
  */
 export function useOpenLayer(): void {
   useFocusReturn(true)
@@ -25,16 +19,8 @@ export function useOpenLayer(): void {
 }
 
 /**
- * The modal's shell.
- *
- * This must be rendered through a portal. `absolute inset-0` positions itself relative to the
- * nearest positioned ancestor, and where the component using the modal happens to sit is none of
- * the modal's business: the sidebar is `relative` for its resize handle, so a modal opened inside
- * it would be trapped within the sidebar's width. Covering the whole window regardless of an
- * ancestor's circumstances requires attaching to body.
- *
- * Closing on Esc and on an outside click is also handled once, here — if every caller reimplements
- * it, some modals end up with Esc working and others without.
+ * The modal's shell, in a portal to body: `absolute inset-0` would sit in the nearest positioned ancestor (the sidebar
+ * is `relative` for its resize handle). Esc and the outside click are handled here once, so every modal has both.
  */
 export function Modal({
   onClose,
@@ -45,13 +31,12 @@ export function Modal({
   onClose: () => void
   children: ReactNode
   testId?: string
-  /** Whether to anchor it to the top or center it. A list-shaped modal is easier to use anchored at the top */
+  /** `top` suits a list-shaped modal */
   align?: 'center' | 'top'
 }) {
   useOpenLayer()
   // Escape only: the scrim below takes the outside press, and a modal stays up when the window loses focus
   useDismiss({ onClose, closeOverWindow: false })
-  // A dialog to the keyboard and to a screen reader: focus starts inside and Tab stays there (#842 item 7)
   const panelRef = useRef<HTMLDivElement>(null)
   const dialog = useDialogFocus(panelRef)
 

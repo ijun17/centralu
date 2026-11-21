@@ -14,7 +14,7 @@ describe('inboxStateLabel (docs/ux-writing.md 1.12)', () => {
   it('keeps the other states’ words', () => {
     expect(row({ state: 'waiting_approval' })).toBe('Needs approval')
     expect(row({ state: 'error' })).toBe('Error')
-    // Said as the state's dot says it (owner, 2026-10-26): the same word as `idle`
+    // Said as the state's dot says it: the same word as `idle`
     expect(row({ state: 'waiting_input' })).toBe('Idle')
     expect(row({ state: 'waiting_input' })).toBe(stateLabel('waiting_input'))
   })

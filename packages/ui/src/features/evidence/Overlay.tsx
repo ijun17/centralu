@@ -12,52 +12,24 @@ const CodeViewer = lazyComponent(() => import('../viewer/CodeViewer.jsx').then((
 const GitPanel = lazyComponent(() => import('../git/GitPanel.jsx').then((m) => m.GitPanel))
 
 /**
- * The wide surface — it covers the conversation, and nothing else.
- *
- * Why not inside the right-hand panel: what the viewer is really for here is checking a
- * diff an agent just wrote, and a diff is unreadable at 340px.
- *
- * Why it does not cover that panel as well: the sentence above does not mean "so take the
- * panel's width too". The overlay competes with the
- * *conversation* for room, not with the panel. Covering the panel takes away the file tree
- * and the change list — the thing you use to open the next file — so the shape of the work
- * becomes: click a file, watch the tree disappear, press escape, click the next one. Giving
- * up ~340px of diff to stop that is cheap, because the diff is unified: the loss is line
- * width, not a whole column (issue #15). It applies to both kinds, and the `git` kind is
- * the worse of the two to cover, since the list it was opened from is the list you are
- * working down.
- *
- * Why it covers the conversation rather than replacing it: reading code is deep but
- * **short**. Draw the cover back and the conversation is exactly as you left it, scroll
- * position included — the most expensive resource in this app is a person's attention, and
- * making them find their place again on the way back spends it.
- *
- * `inset-0` does not decide **what** gets covered; the parent does. So which lane this
- * component is mounted inside *is* the answer to that question — see Body in App.tsx.
+ * The wide surface over the conversation (docs/architecture.md "The viewer is a wide overlay"). It leaves the evidence lane
+ * visible: that list opens the next file, and a unified diff loses only line width (#15). The lane it is mounted in (Body in
+ * App.tsx) decides what `inset-0` covers.
  */
 export function Overlay() {
   const overlay = useStore((s) => s.overlay)
   // Esc gives the keyboard back to where it was, the composer included (#115)
   useFocusReturn(overlay !== null)
   const close = useStore((s) => s.closeOverlay)
-  // If whatever opened it stated a project, that is the answer — the grid's cross-panel link (#182)
+  // A project stated by the opener wins (the grid's cross-panel link, #182)
   const projectId = useStore((s) =>
     s.overlay?.kind === 'viewer' && s.viewerProjectId ? s.viewerProjectId : evidenceProjectOf(s),
   )
   // The session a file link named, whose folder (its worktree) the file is read from (#1209); only with its project
   const sessionId = useStore((s) => (s.overlay?.kind === 'viewer' && s.viewerProjectId ? s.viewerSessionId : null))
 
-  /*
-   * Dismissed with Esc. It has to dismiss even when pressed inside an input field — the person must
-   * not get trapped behind the cover.
-   *
-   * **But only when this layer is on top and the key actually came from this layer** (#181).
-   * Intercepting it in the window's capture phase means it arrives before every other element, so
-   * without that check Esc meant for the terminal (vim, less) in the evidence panel visible right
-   * next to it never reaches the terminal, and the overlay closes instead. It would also take Esc
-   * meant for a settings dialog or a modal open above it, closing the hidden overlay underneath and
-   * leaving the settings dialog needing a second press to close.
-   */
+  // Esc in the capture phase, so it closes even from an input; `overlayTakesEscape` keeps it from a layer above and from
+  // the terminal beside it (vim, less) (#181).
   useEffect(() => {
     if (!overlay) return
     const onKey = (e: KeyboardEvent) => {
@@ -75,7 +47,7 @@ export function Overlay() {
 
   return (
     <div className="absolute inset-0 z-20 flex flex-col bg-surface-floor" data-testid="overlay">
-      {/* The panel's header height (h-10), so the two header lines meet in one line across the window (owner, 2026-10-18) */}
+      {/* The panel's header height, so the two header lines meet across the window */}
       <header className="flex h-10 shrink-0 items-center gap-2 border-b border-line-chrome bg-surface-side px-3">
         <span className="text-sm text-ink-muted">{overlay.kind === 'git' ? 'Git' : 'Files'}</span>
         <Button
@@ -104,12 +76,7 @@ export function Overlay() {
   )
 }
 
-/**
- * Does the overlay claim this Esc (#181)? If another layer (a modal, a command window, settings,
- * the palette, the inbox, usage) is open above it, the key belongs to that layer, and a key coming
- * from the evidence panel next to the overlay belongs to that panel instead (Esc inside the
- * terminal).
- */
+/** Not when a layer above is open (modal, palette, settings…), nor for a key from the evidence panel beside it (#181) */
 export function overlayTakesEscape(st: CoveringLayers, target: EventTarget | null): boolean {
   if (isCovered(st, 'overlay')) return false
   const el = target as Element | null

@@ -2,10 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { UpdateStatus } from '@cc/protocol'
 import { agentApplyVerdict, applyOffer, applyWords, installedUpdate, autoApplyDecision, updateStateText, type AutoApplyInput } from './apply-update.js'
 
-/**
- * Applying an installed update (#352): what the update line offers, and when the automatic mode
- * relaunches by itself.
- */
+/** Applying an installed update (#352): what the update line offers, and when the automatic mode relaunches */
 const installed: UpdateStatus = {
   current: '0.1.0-beta.10',
   latest: '0.1.0-beta.11',

@@ -8,11 +8,9 @@ import { Button } from '../../components/Button.jsx'
 import { SettingsEmpty } from './SettingsLayout.jsx'
 
 /**
- * A list of answers the person gave once and can take back (#850 item 12): the always-allow rules and the projects
- * allowed to reach other projects, under Settings → Permissions.
- *
- * One component for both lists, so both handle a refusal: a refused take-back says why and the row stays; one
- * taken back leaves at once and the list is read again, which then decides what is shown. A row's button takes no second press while its take-back runs.
+ * Answers given once that can be taken back (#850 item 12), in Settings → Permissions: always-allow rules and project
+ * consents. A refused take-back says why and the row stays; a taken-back row leaves at once and the list is re-read,
+ * which then decides. A row's button takes no second press while its take-back runs.
  */
 export function GrantList<T>({
   load,
@@ -37,10 +35,8 @@ export function GrantList<T>({
 }) {
   /** Taken back here and not yet gone from a re-read list: hidden at once instead of after the read */
   const [gone, setGone] = useState<string[]>([])
-  /*
-   * A list read anew is the host's word: what it holds is shown, even under a key taken back earlier (a consent revoked
-   * and granted again while Settings stays open, #850 review).
-   */
+  // A list read anew is the host's word, shown even under a key taken back earlier (revoked and granted again while
+  // Settings stays open, #850 review)
   useEffect(() => setGone([]), [load.data])
   const [running, setRunning] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)

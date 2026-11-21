@@ -4,11 +4,8 @@ import { useAnchoredPlacement } from '../../../components/anchored.js'
 import { useDismiss } from '../../../components/useDismiss.js'
 import { SIDEBAR_VARS } from '../layout.js'
 
-/**
- * The shared shell for sidebar row menus — placement (zoom compensation, flipping, edge handling)
- * and the closing rules live here, once for the project and the session menus: two copies of this
- * calculation end up with only one of them fixed.
- */
+// The one shell for sidebar row menus: placement and closing rules, written once.
+
 /** The button that opened a row menu, from the box that holds it: what the keyboard returns to */
 export function menuTrigger(anchorEl: HTMLElement | null): HTMLElement | null {
   return anchorEl?.querySelector('button') ?? anchorEl
@@ -31,42 +28,18 @@ export function RowMenu({
   const ref = useRef<HTMLDivElement>(null)
 
   /*
-   * **Appears right below the button that opened it.**
-   *
-   * Not `absolute` inside the row: the row has no positioned ancestor of its own, so such a
-   * coordinate resolves against the sidebar as a whole, and whichever project is pressed, the menu
-   * lands at one fixed spot near the top right of the sidebar. A menu has to sit
-   * **next to whatever called it** for it to read as a menu about that thing.
-   *
-   * Why `fixed`: the sidebar has `overflow-y-auto`, so placing it in normal flow would clip the
-   * menu for projects lower in the list. Positioning it relative to the viewport leaves no box to
-   * clip against.
-   *
-   * If there is no room below, it flips upward. That means the height has to be **measured first**,
-   * and the height is only known once it is rendered — so it is measured and placed with
-   * useLayoutEffect (which runs before paint), and any frame where the position is not yet decided
-   * never reaches the screen (hidden via visibility).
+   * Fixed, under its button: `absolute` resolves against the whole sidebar, and the sidebar's overflow would clip it.
+   * It flips up when there is no room; hidden until measured.
    */
   const place = useAnchoredPlacement(anchorEl, ref, true, { align: 'right' })
   /*
-   * Closes when the person clicks outside it, presses Escape (focus goes back to the button that opened it), or leaves
-   * the window. If another project is pressed while
-   * a menu is open, it can look as if two menus are open at once, but in fact each one holds its own state, so neither
-   * closes the other.
-   */
-  // The anchor is the box that holds the button (it places the menu); the button is what takes the keyboard back
-  /*
-   * The trigger is inside `refs`: its click toggles the menu (`setMenuOpen(v => !v)`), so pressing it must not also count as
-   * a press outside, or the menu closes on mousedown and the click opens it again.
+   * The anchor box places the menu; its button takes the keyboard back. The trigger is in `refs`: its click toggles the
+   * menu, so a press on it must not count as outside, or the menu closes on mousedown and the click reopens it.
    */
   const trigger = menuTrigger(anchorEl)
   useDismiss({ onClose, refs: [ref, { current: anchorEl }], returnFocusTo: trigger })
 
-  /*
-   * **Tab goes from the button into the menu, and Shift+Tab comes back** (#1531 review). Drawn into the body, the
-   * menu is the last thing in the page, so Tab from the button would go on to the next control of the sidebar with the
-   * menu left open, out of the keyboard's reach. The order the document does not give is given here.
-   */
+  // Tab from the button goes into the menu, Shift+Tab back (#1531 review): portaled, the menu is last in the document
   const firstItem = (): HTMLElement | null => ref.current?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)') ?? null
   useEffect(() => {
     if (!trigger) return
@@ -87,11 +60,8 @@ export function RowMenu({
   }
 
   /*
-   * **Drawn into the body, not inside the row that opened it** (#1531). `position: fixed` frees a box from clipping, not
-   * from its ancestors' paint: an `opacity` on any ancestor applies to every descendant, fixed ones included, so the
-   * menu of a project on a machine that is away (its block is `opacity-60`) would come up half transparent, the rows under it
-   * showing through. Opacity on an ancestor cannot be undone by a child; outside it the menu is whole — the same reason
-   * the tooltip is portaled. It also covers any other menu inside a faded or transformed ancestor.
+   * Drawn into the body (#1531): an ancestor's opacity (an away machine's block, `opacity-60`) applies to fixed
+   * descendants too and no child can undo it, the reason the tooltip is portaled.
    */
   return createPortal(
     <div

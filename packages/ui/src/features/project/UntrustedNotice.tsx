@@ -21,14 +21,9 @@ function putAwayNow(id: string): void {
 }
 
 /**
- * What is off in a project the person has not trusted, said where they work in it (#1512). Nothing else says that
- * its `CLAUDE.md` and `AGENTS.md` are ignored: the card says what trusting turns on, the project row says only that
- * its apps do not run, and an agent's refusal ("the person can trust it from the project menu") reaches the person as
- * a line of the agent's answer.
- *
- * One line, whatever the panel's width (a narrow grid panel has no room for three); the rest of what is off stands in the
- * hover text. The button opens the same card as every other "Trust this project…", with the project's apps in view:
- * trusting runs the repository's code, so the decision stays the person's, one press away from where they met the limit.
+ * What is off in an untrusted project, said where the person works in it (#1512); nothing else says `CLAUDE.md` and
+ * `AGENTS.md` are ignored. One line at any panel width, the rest in the hover text. The button opens the same card as
+ * every "Trust this project…": trusting runs the repository's code, so the person decides, one press from the limit.
  */
 export function UntrustedNotice({ projectId, className = '' }: { projectId: string | null; className?: string }) {
   const project = useStore((s) => (projectId ? s.projects[projectId] : undefined))

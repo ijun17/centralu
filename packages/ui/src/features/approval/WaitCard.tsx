@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { Pill } from '../../components/Pill.jsx'
 
-/** The shell of every card that waits on the person (owner, 2026-10-18): white border, kind capsule, answers on a footer */
+/** The shell of every card that waits on the person (docs/design-system.md §8) */
 export function WaitCard({
   pill = 'Awaiting approval',
   subtitle,

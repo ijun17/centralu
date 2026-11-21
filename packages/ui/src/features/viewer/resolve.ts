@@ -1,25 +1,5 @@
-/**
- * Matching a path an agent wrote to a real file inside the project (#39).
- *
- * A link always opens **relative to the project root**. But the path an agent writes is often
- * relative to wherever it happened to be looking — especially true in a monorepo or a solution.
- * An actual case (user's observation, 2026-09-07):
- *
- *     What the agent wrote: `Media/ImageSearch.cs`
- *     Where it really is:   `Widgets.Cli/Media/ImageSearch.cs`
- *
- * That file does not exist at the root, so opening at the root alone can only say "could not open
- * it." To a person's eye, a perfectly fine-looking path looks like a dead link.
- *
- * So it does **suffix matching**: it looks through the project's file list for a path that ends
- * with `…/<the written path>`. Only matched at segment boundaries — `Media/ImageSearch.cs`
- * matches `X/Media/ImageSearch.cs` but not `X/OldMedia/ImageSearch.cs`. This uses the property
- * that a truncated-at-the-front path still has its tail intact, and this is a confirmation, not
- * a guess — the candidates are files that actually exist.
- *
- * If there is one, it opens. If there are several, **the person is asked to pick** — picking one
- * for them would be a guess dressed up as a fact.
- */
+// An agent's path is often relative to where it was looking (`Media/X.cs` for `Widgets.Cli/Media/X.cs`), so a link is
+// matched by suffix, at segment boundaries, against files that exist (#39). Several matches: the person picks.
 
 import { wireSegments } from '@cc/protocol/client'
 
@@ -29,10 +9,8 @@ function depth(path: string): number {
 }
 
 /**
- * Whichever of `paths` end with `ref`. An exact match always comes first.
- *
- * Nothing is matched if `ref` is empty or starts with `/` — an absolute path should already have
- * been resolved relative to the root (parseFileRef), and an empty value would match every path.
+ * Whichever of `paths` end with `ref`, an exact match first. An empty `ref` would match every path; one starting with
+ * `/` was already resolved against the root (parseFileRef).
  */
 export function suffixMatches(paths: readonly string[], ref: string): string[] {
   if (!ref || ref.startsWith('/')) return []

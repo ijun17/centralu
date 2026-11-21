@@ -1,18 +1,10 @@
 import type { HTMLAttributes, ReactNode } from 'react'
 
 /**
- * The small uppercase label: a section's name inside a card or a list (MODELS, RUNS, PREVIOUS), or a kind written
- * beside a row. 10px capitals in the faint ink, so it orders what is below it without competing with it.
- *
- * Twenty places wrote `text-2xs uppercase text-ink-faint` by hand. Two kinds are in use and both stay:
- *
- * - `readout` (most of them): the figures' font (`.readout`, the code font with even digits), for a label that sits
- *   among values, versions and counts.
- * - without it: the body font, for a label that heads prose or a list of names.
- *
- * `tone="ink"` lifts it to the plain ink when what it names needs the eye (an app review's alert). `as` keeps the
- * element the label is in its document: a heading where it heads a section, a `p` or a `span` elsewhere. `className`
- * is placement only, as with Button.
+ * The small uppercase label: a section's name in a card or a list (MODELS, RUNS), or a kind beside a row; faint, so it
+ * orders what is below without competing. `readout` for a label among values and counts (the figures' font), without
+ * it for one that heads prose or names. `tone="ink"` when what it names needs the eye (an app review's alert). `as`
+ * keeps the document's element (a heading where it heads a section). `className` is placement only, as with Button.
  */
 export function Badge({
   as: Tag = 'span',

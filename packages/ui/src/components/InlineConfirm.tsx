@@ -1,17 +1,10 @@
 import { Button } from './Button.jsx'
 
 /**
- * An action that asks first, in the place where it was pressed (#428): a sentence, then Cancel and the action.
- *
- * Used by the session archive's "Delete for good", an app's "Remove", a machine's "Remove?" and the stop confirmation
- * before an update. One component, so the order and the lock are the same everywhere: Cancel first, then the action,
- * which is disabled while `busy` (a second press would start the same change twice).
- *
- * - `tone="danger"`: for what cannot be taken back; the box and the action wear the danger colour.
- * - `inline`: no box, the question and its two buttons run on in a row (a machine's line in Settings → Machines),
- *   where `text` is a word or two ("Remove?").
- *
- * `testId` names the box (the question, when inline); the buttons are `${testId}-yes` and `${testId}-no` unless named.
+ * An action that asks first, where it was pressed (#428; docs/design-system.md §11): a sentence, Cancel, then the
+ * action, disabled while `busy`. `tone="danger"` for what cannot be taken back. `inline`: no box, the question and
+ * buttons run on in a row, `text` a word or two ("Remove?"). `testId` names the box (the question, when inline); the
+ * buttons are `${testId}-yes` and `${testId}-no` unless named.
  */
 export function InlineConfirm({
   text,
@@ -31,7 +24,7 @@ export function InlineConfirm({
   yesLabel: string
   noLabel?: string
   tone?: 'neutral' | 'danger'
-  /** The action is running: it cannot be pressed again */
+  /** The action is running: a second press would start the same change twice */
   busy?: boolean
   inline?: boolean
   onYes: () => void

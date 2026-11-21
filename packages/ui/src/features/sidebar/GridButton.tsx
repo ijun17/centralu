@@ -4,20 +4,9 @@ import { catalogByKey } from '../../store/app-catalog.js'
 import { droppedGridList, droppedGridPanel, gridTakes } from '../grid/drop.js'
 
 /**
- * The door to the grid.
- *
- * **It has to look different from a project.** If it had the same shape as the other rows in the
- * list, it would read as "one more project," but this is not a project, it is **a way of
- * watching**. Wrapping it in a rounded box sets it apart from the list — the shape says it is a
- * different kind of thing before the text does.
- *
- * Dropping a session or an app (#288) here switches into the grid and adds it there. If the person had to
- * open the screen first and then drag it in separately, that would be doing the work twice, so
- * dropping it here handles both steps at once.
- *
- * **No Experimental badge** (owner, 2026-08-27): the grid is how sessions get watched side by
- * side, and a warning that warns nobody is clutter on the one lane that is always on screen.
- * The Assistant's badge stays — that surface still is what its mark says it is.
+ * The door to the grid, in a rounded box: a way of watching, not one more project. Dropping a session or an app (#288)
+ * on it opens the grid with it added. No Experimental badge: on this always-visible lane a warning that warns nobody is
+ * clutter.
  */
 export function GridButton() {
   const view = useStore((s) => s.view)
@@ -35,17 +24,13 @@ export function GridButton() {
             ? 'border-line-strong bg-surface-hover text-ink'
             : 'border-line bg-surface-raised text-ink-muted hover:border-line-strong hover:text-ink'
         } ${over ? 'shadow-[inset_0_0_0_2px_var(--color-focus)]' : ''}`}
-        /*
-          A **selection**, not a toggle.
-          Making it an on/off switch reads as "a layer briefly covering the previous screen". It follows the same rule as the other rows in the
-          sidebar: pressing it shows this, and leaving it means choosing something else.
-        */
+        // A selection like the other rows, not a toggle: a toggle reads as a layer over the previous screen
         onClick={() => setView('grid')}
         aria-pressed={active}
         data-testid="grid-button"
         title="See sessions and apps side by side."
         onDragOver={(e) => {
-          // A session or an app (#288), from the sidebar or from a panel — the grid's own rule (grid/drop.ts)
+          // The grid's own rule (grid/drop.ts)
           if (!gridTakes(e.dataTransfer.types)) return
           e.preventDefault()
           setOver(true)
@@ -68,13 +53,12 @@ export function GridButton() {
       >
         <GridIcon />
         <span className="truncate font-medium tracking-tight">Grid</span>
-        {/* No panel count (owner, 2026-10-20): faint, and not something the person reads the grid button for */}
+        {/* No panel count: not what the button is read for */}
       </button>
     </div>
   )
 }
 
-/** A split screen — a symbol drawn to depict exactly what the grid does */
 function GridIcon({ size = 13 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">

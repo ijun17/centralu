@@ -8,30 +8,14 @@ import { useLiveTools, useReloadOnReconnect } from '../tools/useToolSetup.js'
 import { ASSISTANT_DEMANDS, useRefusals } from '../project/useToolChoice.js'
 
 /**
- * The intro screen (#63) — exactly once, on the very first run: "meet your assistant."
- *
- * Replaces FirstRun (folder first). The reason is not efficiency but **habit**: someone who
- * never goes through the experience of asking the Assistant something on the first run does
- * not click it later either — a person only uses what they have already tried. This app's
- * question-answering channel is the Assistant, not the people who built it.
- *
- * **The card doubles as the detection display.** There is no separate tool-detection screen — a
- * ready tool gets a live card, and a tool that is not ready gets a dim card with "Not connected"
- * and the prescription (an install or login command) standing right there together. A tool Centralu
- * installs itself shows its setup line instead, without the "Not connected" line, and is dimmed only before install; one the Assistant
- * cannot take (Antigravity, until it takes role text) is a plain refused card, reason and all, with no action. Where the
- * state is shown and where the action happens are the same spot.
- *
- * **Clicking a card only records the choice; no process starts** (lazy start). The Assistant
- * is not actually born until the first question is asked on the next screen.
+ * The intro (#63), once on the first run: meet the Assistant, as a person only uses what they have tried. Each card is
+ * also the tool's detection: live when ready, else dim with its fix on the spot. A click only records the choice; the
+ * Assistant starts with the first question on the next screen.
  */
 export function Intro() {
   const platform = usePlatform()
   const completeIntro = useStore((s) => s.completeIntro)
-  /*
-   * A detection that fails is not "no tool is ready" (#850 item 8): read as an empty list, it would draw no card and tell
-   * the person to run a command "above" that is not there. It says what failed, with the same way to ask again.
-   */
+  // A failed detection is not "no tool is ready" (#850 item 8): an empty list would point at a command "above" that is not there
   const detected = useLoad<ToolStatus[]>(() => platform.agents.detect(), [platform])
   const tools = useLiveTools(detected.data ?? null)
   useReloadOnReconnect(detected.reload)
@@ -48,11 +32,7 @@ export function Intro() {
     <div className="flex flex-1 items-center justify-center px-8" data-testid="intro">
       <div className="w-full max-w-xl">
         {/*
-          **One line is all there is.** Nobody reads a three-paragraph explanation before
-          starting — the longer it is, the less it gets read, and unread, this screen teaches
-          nothing and just collects a click. The one sentence worth
-          keeping is the single reason this screen exists: **there is someone to talk to.**
-          Everything else is left to the suggested-question cards on the next screen.
+          One line, as a longer intro goes unread; the next screen's suggested questions do the rest
         */}
         <h1 className="text-display font-medium tracking-tight text-ink" data-testid="intro-role">
           Meet your <span className="text-ink">Assistant</span>.
@@ -66,7 +46,7 @@ export function Intro() {
           {cards.map((t) => {
             const ok = ready(t)
             // A tool Centralu installs or signs in itself holds its action in the card; the others show the command to run.
-            // One the Assistant cannot take has no action to offer here (the sign-in lives in the new-session dialog): it is drawn as any refused card
+            // One the Assistant cannot take is a plain refused card (its sign-in is in the new-session dialog)
             const managed = (t.setup?.install === 'centralu' || t.setup?.signIn === 'centralu') && refusal(t.name) === null
             // A card whose line holds buttons of its own (Install, Sign in) is not a <button>, which may not hold one: it acts as one once it can be picked
             const Card = managed ? 'div' : 'button'
@@ -86,9 +66,8 @@ export function Intro() {
                     : {}
                   : { disabled: !ok, onClick: pick })}
                 /*
-                 * Disabled is **dim** (user requirement) — gray text is the convention for
-                 * "not available right now," and here that convention happens to be exactly
-                 * true. A card with an action in it dims its words, not the action: a dimmed Install reads as disabled.
+                 * Not ready is dim, the convention for "not available now". A card with an action dims its words, not the
+                 * action: a dimmed Install reads as disabled.
                  */
                 className={`rounded-lg border px-4 py-4 text-left transition-colors ${
                   ok
@@ -120,7 +99,7 @@ export function Intro() {
                   <span className="readout mt-1 block text-xs text-ink-faint">{t.detail}</span>
                 ) : (
                   <>
-                    {/* The diagnosis at a glance, the prescription right below it — an eye that does not know a terminal comes first */}
+                    {/* The diagnosis first, for an eye that does not know a terminal; the command below it */}
                     <span className="mt-1 block text-sm text-ink-muted" data-testid={`intro-card-${t.name}-status`}>
                       {refusal(t.name) ?? 'Not connected'}
                     </span>
@@ -151,7 +130,7 @@ export function Intro() {
                 No tool is ready yet — run a command above in your terminal, then check again.
               </p>
             )}
-            {/* Always present — a way for someone who just installed it in the terminal and came back to re-run detection */}
+            {/* Always there, for someone back from installing in a terminal */}
             <button
               className="mt-1.5 text-xs text-ink-faint underline-offset-2 hover:text-ink hover:underline"
               onClick={() => void detect()}

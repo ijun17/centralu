@@ -1,11 +1,8 @@
 import { APP_VERSION, isNewerVersion, type UpdateStatus } from '@cc/protocol/client'
 import type { RelaunchCheck, RelaunchPort } from '@cc/platform/ports'
 
-/**
- * What "Apply now" (#352) offers, as pure rules: the update line's button and an agent's request (#665) both read
- * these, so an agent can only ask for what the person could click. Kept apart from the hooks in apply-update.ts so
- * the store can use them without importing the hooks that import it.
- */
+// What "Apply now" (#352) offers, as pure rules read by the update line's button and an agent's request (#665), so an
+// agent asks only for what the person could click. Apart from apply-update.ts's hooks, which import the store.
 
 /** What the update line says once the host reports `restart_required` */
 export type ApplyOffer =
@@ -14,9 +11,8 @@ export type ApplyOffer =
   /** "Restart": this platform cannot relaunch into it, and `reason` says why when known */
   | { kind: 'restart'; reason?: string }
   /**
-   * This window already runs the installed version: the relaunch happened, and what is left is
-   * the keeper and host switch, which the desktop build bar shows. Saying "restart" here would ask
-   * for a relaunch that changes nothing.
+   * This window already runs the installed version; the keeper and host switch left is the desktop build bar's, and
+   * "restart" would ask for a relaunch that changes nothing.
    */
   | { kind: 'current' }
 
@@ -29,12 +25,8 @@ export type ApplyOffer =
 export function applyOffer(update: UpdateStatus, windowVersion: string, relaunch: RelaunchCheck | null | undefined): ApplyOffer {
   if (update.latest && !isNewerVersion(update.latest, windowVersion)) return { kind: 'current' }
   if (!relaunch?.ready) return { kind: 'restart', ...(relaunch?.reason ? { reason: relaunch.reason } : {}) }
-  /*
-   * The shell's `ready` says only that the bundle on disk is another build than this window (#665 review): it may be
-   * an older one (a backed-up app restored over the installed one). A relaunch is offered only into the version the
-   * update line names, read from the bundle itself, and only forward. A local build (`<base>.local.N`) orders by the
-   * same rule, as a prerelease identifier.
-   */
+  // The shell's `ready` says only that the bundle on disk differs (#665 review); it may be older (a restored backup).
+  // So only forward, into the version the line names, read from the bundle; `<base>.local.N` orders as a prerelease.
   const disk = relaunch.version
   if (!disk) return { kind: 'restart', reason: 'The app on disk does not say which version it is, so relaunching could start any build.' }
   if (!isNewerVersion(disk, windowVersion)) {
@@ -63,9 +55,8 @@ export function installedUpdate(update: UpdateStatus | null, windowVersion: stri
 }
 
 /**
- * The build on disk newer than this window, as "restart to finish" it, or null when there is none. A failed install of
- * a later release keeps its error there (#2130 review): npm may have it and the copy not, and the error says how to
- * finish it.
+ * The build on disk newer than this window, as "restart to finish", or null. A later release's failed install keeps
+ * its error here (#2130 review): npm may have it and the copy not, and the error says how to finish.
  */
 function waitingOnDisk(update: UpdateStatus | null, windowVersion: string, relaunch: RelaunchCheck | null | undefined): UpdateStatus | null {
   if (!relaunch?.ready || !relaunch.version || !isNewerVersion(relaunch.version, windowVersion)) return null

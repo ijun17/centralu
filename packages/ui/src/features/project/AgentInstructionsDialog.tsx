@@ -6,12 +6,9 @@ import { Button } from '../../components/Button.jsx'
 import { textInputClass } from '../../components/TextField.jsx'
 
 /**
- * The project's instructions for the agents started in it (#1161 item 2), opened from the project's menu.
- *
- * Every start_agent task given in this project carries them after the task, so the rules a parent repeated in each brief
- * (make your own worktree, stack the pull requests, never use git stash) are written once. They are this machine's copy
- * of the project's: a project on a linked machine keeps its own (its paths, its shell), and that machine's are the ones
- * a child started there reads. The dialog says both, since nothing else on screen shows where the text goes.
+ * The project's instructions for agents started in it (#1161 item 2): appended to every start_agent task, so rules a
+ * parent repeated per brief are written once. This machine's copy; a linked machine's project keeps its own (its paths,
+ * its shell), which children there read. The dialog says both, as nothing else shows where the text goes.
  */
 export function AgentInstructionsDialog({ project, onClose }: { project: ProjectInfo; onClose: () => void }) {
   const save = useStore((s) => s.saveAgentInstructions)

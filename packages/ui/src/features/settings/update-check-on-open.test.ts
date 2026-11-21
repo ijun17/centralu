@@ -6,11 +6,8 @@ import { useStore } from '../../store/store.js'
 import { useUpdateCheckWhileOpen } from './apply-update.js'
 
 /**
- * The check Updates asks for as Settings opens (#2155). Settings reopened during its closing fade is still mounted, so
- * the check has to follow Settings opening, not the view mounting.
- *
- * The hook runs in real React; the node test run has no DOM, so the container is just enough for React DOM to mount a
- * component that renders nothing (as in useChatScroll.test.ts).
+ * The check Updates asks for as Settings opens (#2155), not as the view mounts: reopened during its closing fade, it is
+ * still mounted. Real React without a DOM: the container is just enough to mount an empty component (useChatScroll.test.ts).
  */
 
 const status: UpdateStatus = {

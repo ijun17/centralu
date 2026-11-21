@@ -61,11 +61,8 @@ type Rule = {
 }
 
 /**
- * The name of a rule's owner (#183). With only a matcher, scope and date, clicking "always
- * allow" on the same command in two different projects would make two identical-looking rows
- * with no way to tell which belongs to which project. A session-scoped
- * rule uses the session name. A rule whose project or session has already been deleted says so
- * — leaving it blank would make it indistinguishable again.
+ * The name of a rule's owner (#183): otherwise one command allowed in two projects makes two identical rows. A
+ * session-scoped rule uses the session's name; a deleted owner is said, as a blank would be ambiguous again.
  */
 function RuleOwner({ rule }: { rule: Rule }) {
   const name = useStore((s) =>
@@ -87,60 +84,27 @@ function RuleOwner({ rule }: { rule: Rule }) {
 }
 
 /**
- * The window's categories.
- *
- * Named after the errand someone arrives with, not after the module that implements the
- * setting: people come here to stop being pinged, to take back an always-allow they regret,
- * or to look up a key. Naming by module would put the next setting wherever its code lives,
- * which is the one thing the person looking for it cannot know.
- *
- * A category per setting reads worse than no categories at all, so a new one has to earn its
- * place by having somewhere to belong — quiet hours land in Notifications, a default preset
- * in Permissions.
- *
- * Updates (issue #43): people arrive asking "am I on the latest?", which is an errand, not a module. It shares a
- * category with Background (owner, 2026-10-20): both answer "what does Centralu do while I am not looking", and each
- * is a switch or two. The shortcut table is in the command palette (Keyboard shortcuts), not here: it is looked up in
- * passing, not set.
+ * The window's categories, named after the errand someone arrives with (stop being pinged, take back an always-allow),
+ * not the module behind it, which the person cannot know. A new category earns its place; a setting first looks for
+ * one it belongs in. Updates (#43) share Background: both answer "what does Centralu do while I am not looking". The
+ * shortcut table is in the command palette: it is looked up in passing, not set.
  */
 const CATEGORIES = [
-  /*
-   * The Assistant belongs here because it is **the one thing the installation has only one
-   * of**.
-   *
-   * Other sessions have no agent switch: the conversation does not carry over, so "switching"
-   * would mean the same thing as "starting a new conversation," which creating a new session
-   * does more honestly. The Assistant is the one exception, for a single reason: since the app
-   * has only one, "create a new one with a different tool" does not make sense.
-   *
-   * The intro screen points here too ("You can change this later in Settings").
-   */
+  // The installation has one Assistant, so its tool is switched here (AssistantSettings); the intro screen points here too
   { id: 'assistant', label: 'Assistant', Icon: CrownIcon },
-  /*
-   * How the agents any session starts behave: how many run per project, how deep they may start their own, which model
-   * each difficulty runs. Its own category (owner, 2026-10-20): these apply to every session, not to the Assistant,
-   * and folded under the Assistant they read as its settings.
-   */
+  // How the agents any session starts behave; apart from the Assistant, under which they would read as its settings
   { id: 'agents', label: 'Agents', Icon: BranchIcon },
-  // An experimental feature is an app (#81) — there has to be a place to turn it on and off for "unused, it disappears" to hold true
+  // An experimental feature is an app (#81): "unused, it disappears" needs a place to turn it off
   { id: 'apps', label: 'Apps', Icon: AppIcon },
   { id: 'notifications', label: 'Notifications', Icon: BellIcon },
-  /*
-   * Whether quitting leaves agents running (#280). Its own category because the question people
-   * arrive with is "what happens to my agents when I quit?", and the answer is one switch plus
-   * what it costs. That switch shows only where the platform can do it (the desktop app's keeper);
-   * the category shows everywhere (#568), for "what happens to my agents when I leave them
-   * idle", which every host answers.
-   */
+  // "What happens to my agents when I quit?" (#280): the switch only where a keeper can do it; the category everywhere
+  // (#568), for what happens to idle agents, which every host answers
   { id: 'background', label: 'Background & updates', Icon: BackgroundIcon },
-  /*
-   * Linked machines (#82). Its own category because the errand is its own: "link my server", "why is it away". It
-   * holds a list, a form and a prompt, which no other category could take without renaming itself.
-   */
+  // Linked machines (#82): an errand of its own ("link my server", "why is it away"), a list, a form and a prompt
   { id: 'machines', label: 'Machines', Icon: MonitorIcon },
   { id: 'appearance', label: 'Appearance', Icon: ContrastIcon },
   { id: 'permissions', label: 'Permissions', Icon: ShieldIcon },
-  // Deleted sessions (#204) — the only place a conversation is deleted for good, so it has a place of its own
+  // Deleted sessions (#204): the only place a conversation is deleted for good
   { id: 'archive', label: 'Archive', Icon: ArchiveIcon },
 ] as const
 
@@ -149,14 +113,8 @@ type Category = (typeof CATEGORIES)[number]['id']
 const categoryOf = (id: string | undefined): Category | null => CATEGORIES.find((c) => c.id === id)?.id ?? null
 
 /**
- * Settings (E-3, E-4, E-5).
- * Notification policy and approval rules are **only half done if they save but cannot be seen**
- * — they are viewed and deleted here.
- *
- * One category at a time, chosen from the rail on the left. Every section stacked into a
- * single scroll reads fine at three and stops reading the moment there are eight —
- * and settings only ever arrive. Choosing where a thing goes is a decision made once, here;
- * scrolling past everything else is a cost paid on every visit.
+ * Settings (E-3, E-4, E-5): saved policies and rules are seen and deleted here. One category at a time from the rail:
+ * one scroll reads at three sections and fails at eight, and settings only ever arrive.
  */
 export function Settings() {
   const open = useStore((s) => s.settingsOpen)
@@ -207,11 +165,8 @@ export function Settings() {
       <div
         ref={panelRef}
         {...dialog}
-        /*
-          One size for every category (owner, 2026-10-19): a window that takes the height of what it shows jumps as
-          the rail is walked, and Notifications shrinks to a short box. So the frame stays and the page scrolls inside
-          it.
-        */
+        /* One size for every category: a window sized to its page jumps as the rail is walked,
+           so the frame stays and the page scrolls inside it */
         className={`flex h-[min(680px,calc(82vh/var(--text-zoom)))] w-[800px] max-w-[calc(92vw/var(--text-zoom))] flex-col overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal) outline-none ${
           leaving ? 'cc-drop-out' : 'cc-drop'
         }`}
@@ -226,10 +181,8 @@ export function Settings() {
         </header>
 
         <div className="flex min-h-0 flex-1">
-          {/*
-            The rail is the index. It says what this window holds without opening anything,
-            which a scroll can only do by being short — and it will not stay short.
-          */}
+          {/* The rail is the index: it says what the window holds
+              without opening anything */}
           <nav
             className="w-[196px] shrink-0 space-y-px overflow-y-auto border-r border-line p-2"
             data-testid="settings-nav"
@@ -254,11 +207,8 @@ export function Settings() {
             ))}
           </nav>
 
-          {/*
-            Only the chosen category is built. Hiding the rest instead would keep the whole
-            window's worth of controls in the page — and a control that is present but unseen
-            is one a test can pass on and a screen reader can walk into.
-          */}
+          {/* Only the chosen category is built: a hidden control is one a test
+              can pass on and a screen reader can walk into */}
           <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-8 pt-6" data-testid="settings-pane">
             {category === 'assistant' && <AssistantSettings />}
             {category === 'agents' && <AgentLimits />}
@@ -266,11 +216,8 @@ export function Settings() {
             {/* E-5 notification policy */}
             {category === 'notifications' && (
               <SettingsPage title="Notifications" lead="Notifications are the only way to force attention, so use them sparingly.">
-                {/*
-                  No "Error", "Once when every session finishes" or "Reset to defaults" (owner, 2026-10-20): the
-                  window raises neither notice (store/events/notices.ts), and a few switches need no reset. Their
-                  saved values stay in the snapshot, unread.
-                */}
+                {/* No "Error", "Once when every session finishes" or "Reset to defaults": the window raises neither
+                    notice (store/events/notices.ts), and a few switches need no reset. Their saved values stay, unread */}
                 <SettingsGroup title="Notify me">
                   {(
                     [
@@ -293,7 +240,7 @@ export function Settings() {
               </SettingsPage>
             )}
 
-            {/* Background and Updates (issue #43), one page (owner, 2026-10-20) */}
+            {/* Background and Updates (#43), one page */}
             {category === 'background' && (
               <SettingsPage
                 title="Background & updates"
@@ -362,9 +309,8 @@ export function Settings() {
 }
 
 /**
- * The app list (M4 A-8) — one row per external app, with a status and a reason per scope
- * (project or user folder). An app from an untrusted project, and a broken app, are not hidden
- * either. Hiding one would leave no way to ask why it is not showing up.
+ * The app list (M4 A-8): a row per external app with its status and reason, per scope. Untrusted and broken apps are
+ * listed too, or nothing would say why they do not show up.
  */
 function AppsSettings() {
   const catalog = useAppCatalog()
@@ -384,7 +330,7 @@ function AppsSettings() {
       {catalog.external.length > 0 && (
         <div className="space-y-6" data-testid="settings-external-apps">
           {projectIds.map((pid) => (
-            // The host removes a deleted project's apps from the list. The moment its name cannot be found is only the one tick before the list catches up
+            // A deleted project's apps leave with the host's next list; a missing name lasts only that one tick
             <SettingsGroup key={pid} title={projectLabelOf(projects, pid)}>
               <ul className="divide-y divide-line">
                 {catalog.byProject[pid]!.map((a) => (
@@ -427,15 +373,9 @@ function MachineAppsGroup({ machine, apps }: { machine: string; apps: ExternalCa
 }
 
 /**
- * A single row for an external app — what it is, its current state, and why. An app from an
- * untrusted project gets a trust button right there. If only the reason is shown and the person
- * has to go all the way to the project menu to find something to do about it, showing the
- * reason is only half the point.
- *
- * An app in the user folder is removed right here (M4 A-7). An approved MCP server is a
- * viewless app, so "revoking" it is this one row too. Since it is hard to undo, it asks once. What stays and what disappears is said in the
- * same place. A project app has no such button — it is a file in the repository, so the place
- * to remove it is git, and the host refuses to do it too.
+ * One external app's row: what it is, its state and why, with a trust button where the reason is untrust. A user-folder
+ * app (an approved MCP server too, a viewless app) is removed here (M4 A-7), asking once and saying what stays. A
+ * project app is a repository file: git removes it, and the host refuses.
  */
 function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
   const { status } = app
@@ -552,10 +492,8 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
 }
 
 /**
- * Secrets within an app's row (M4 E) — appears only for an app that declares secrets. Even
- * collapsed, it states how many are unset: someone in Settings looking for why an app is not
- * coming up because of a missing key needs to see what is missing before expanding the row. The
- * slot is the same panel as the pinned view (`AppSecrets`).
+ * Secrets in an app's row (M4 E), for an app that declares any; collapsed, it counts the unset ones, the likely reason
+ * the app is not coming up. The same panel as the pinned view's (`AppSecrets`).
  */
 /**
  * The app's panel size on the grid, in cells (#306) — the person's default for every placement of this app that has
@@ -610,10 +548,8 @@ function SecretsLine({ app }: { app: ExternalCatalogApp }) {
 }
 
 /**
- * Approved assistant skills (#71). Why this exists here: "a skill that can only be added,
- * with no way to view or delete it, is worse than not having it at all" — approval happens in
- * the card next to the conversation, management happens in Settings. Deleting one restarts the
- * assistant through the host, so it drops out of the prompt immediately too.
+ * Approved assistant skills (#71): approved in the conversation's card, seen and deleted here, as a skill that can
+ * only be added is worse than none. Deleting restarts the Assistant through the host, so it leaves the prompt at once.
  */
 export function AssistantSkills() {
   const platform = usePlatform()
@@ -661,19 +597,10 @@ export function AssistantSkills() {
 }
 
 /**
- * Which tool the Assistant runs on.
- *
- * **This is the only place in the app where an agent can be switched.** Other sessions have no
- * such control: because the conversation does not carry over, "switching" would mean the same
- * thing as "starting a new conversation," which creating a new session does more honestly. The
- * Assistant is the exception because the app has only one, so "create a new one with a
- * different tool" does not make sense.
- *
- * This handles both cases in one place: if it has not been born yet, only the choice is
- * recorded (the next first question is born with that tool), and if it is already alive, it is
- * swapped out on the spot. There is one reason a confirmation is asked for — once the process
- * changes, that tool's context is gone. (The transcript stays, and the new process is handed a
- * summary of the past conversation.)
+ * Which tool the Assistant runs on, the only agent switch in the app: elsewhere the conversation does not carry over,
+ * so a new session is the honest way, but there is only one Assistant. Not started yet, the choice is recorded; alive,
+ * it is swapped at once, after a confirmation, as the tool's context goes (the transcript stays, the new process gets
+ * a summary).
  */
 function AssistantSettings() {
   const platform = usePlatform()
@@ -741,13 +668,8 @@ function AssistantSettings() {
             <h2 className="text-md font-medium text-ink">
               Run the Assistant on {asking.label}?
             </h2>
-            {/*
-              **States plainly that a summary is a loss.**
-              Stopping at "it is handed a summary" reads as if nothing is lost — in reality only
-              the trunk of the recent turns goes across and the detail falls away. What the
-              person needs to know before clicking confirm is not what stays, but **what can
-              disappear**.
-            */}
+            {/* Says plainly that a summary loses detail: only the trunk of
+                recent turns goes across, and that is what the person needs before confirming */}
             <p className="mt-2 text-sm leading-body text-ink-muted">
               The current agent process ends and a new one starts.{' '}
               <b className="text-ink">Details it remembers may be lost</b> — each tool keeps its
@@ -1042,17 +964,8 @@ function AppearanceSection() {
       <TypographySection />
 
       <SettingsGroup title="Message box">
-        {/*
-          A switch for someone writing multi-line prompts.
-
-          It sits here because it is about how the **message box** is used, and someone looking for
-          this arrives thinking of the composer. (There is no "Fold the message box" beside it: a
-          short grid or project panel folds it by itself, SessionPane's foldWhenShort.)
-
-          The reason the default is off is recorded in the protocol's type declaration: Enter as
-          send is the chat-box convention, and silently moving it out from under someone already
-          accustomed to it would be worse than never offering the option at all.
-        */}
+        {/* For multi-line prompts, under the message box, where someone looking for it thinks. No fold switch: short
+            panels fold it (foldWhenShort). Why it is off by default: the protocol's type declaration */}
         <SettingToggle
           checked={modEnter}
           onChange={(on) => setPrefs({ sendWithModifierEnter: on })}
@@ -1066,11 +979,8 @@ function AppearanceSection() {
 }
 
 /**
- * Background mode (#280, decision 1 — off by default).
- *
- * The description says the three things a person needs before turning it on: what keeps running,
- * how to stop it anyway, and when it stops by itself. A switch that keeps processes alive behind
- * no window must never be one whose consequences someone discovers later.
+ * Background mode (#280, decision 1: off by default). The text says what keeps running, how to stop it and when it
+ * stops by itself: processes kept alive behind no window must not surprise anyone later.
  */
 function BackgroundSection({ port }: { port: BackgroundPort }) {
   const read = useLoad(() => port.get(), [port])

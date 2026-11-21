@@ -2,9 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@cc/core'
 import { messageTargets, messageText } from './MessageAsk.jsx'
 
-/**
- * A pinned view's `ui/message` (M4 B-4) — what gets sent, and who is shown first.
- */
+/** A pinned view's `ui/message` (M4 B-4): what gets sent, and who is shown first */
 
 const s = (id: string, projectId: string | null, kind: SessionSummary['kind'] = 'worker') => ({ id, projectId, kind }) as SessionSummary
 

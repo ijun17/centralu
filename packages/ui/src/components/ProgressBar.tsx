@@ -1,8 +1,4 @@
-/**
- * A thin bar for work with a known end (an install's download). `value` is 0 to 1; null is a bar of unknown length, which
- * breathes (`.breathe`, the signal for work in progress) instead of filling. The fill moves as a transition of its width
- * (180ms, `.cc-progress`), so a reading is followed, not jumped to; with reduced motion it changes without travel.
- */
+/** A thin bar for work with a known end (docs/design-system.md §9); `value` 0 to 1, null breathes (unknown length) */
 export function ProgressBar({ value, label, testId, className = '' }: { value: number | null; label: string; testId?: string; className?: string }) {
   const pct = value === null ? 100 : Math.max(0, Math.min(1, value)) * 100
   return (

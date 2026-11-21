@@ -5,18 +5,10 @@ import { useStore } from '../../../store/store.js'
 import { formatChangedCount } from '../../../app/format.js'
 import { BranchIcon, ChangesIcon } from '../../../components/icons.jsx'
 
-/**
- * Tooltip content: claims no space by default, but answers everything when asked.
- *
- * The name line has no changes count (owner, 2026-10-20), so this is where the count lives, and it is drawn to be
- * read at a glance: the branch and the uncommitted files each on a row with their icon, the count in the body ink.
- */
+/** A project's tooltip, where its changes count lives (the name line has none): branch and changes, each with its icon */
 export function ProjectDetail({ project }: { project: ProjectInfo }) {
   const changed = project.git?.changedFiles ?? 0
-  /*
-   * A linked machine that is away: everything below is what the hub last heard (owner, 2026-10-20). Said first, and the
-   * state lines dimmed, so a branch or a count from before the link dropped does not read as the folder's state now.
-   */
+  // An away machine: what follows is what the hub last heard, so it is said first and the state lines are dimmed
   const away = useStore((s) => isAway(project, s.machines))
   const machineName = useMachineName(project.machine)
   return (
@@ -28,7 +20,7 @@ export function ProjectDetail({ project }: { project: ProjectInfo }) {
       )}
       <span className="readout block truncate text-ink-faint">{project.path}</span>
       {project.git?.denied ? (
-        // Showing this as "not a repo" would lead the person to the wrong conclusion: what is needed is granting permission
+        // Not "not a repo": what is needed is granting permission
         <span className="text-ink" data-testid="git-denied">
           Folder access permission required — System Settings → Privacy & Security → Files and Folders
         </span>

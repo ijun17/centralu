@@ -18,14 +18,8 @@ import { clearViewerJump, currentViewerJump, requestViewerJump, useViewerJump } 
 import { suffixMatches } from './resolve.js'
 
 /**
- * Code viewer (FR-6, C-3) — **read-only**. Editing belongs to the IDE (a non-goal).
- *
- * Not bringing in anything heavy is the design of this screen:
- *   - No CodeMirror or Shiki. An editor engine is overkill for a read-only display, and Shiki's
- *     default engine is WASM, which conflicts with Tauri's CSP (no `wasm-unsafe-eval`).
- *   - Virtual scrolling plus grayscale emphasis (only comments and strings set apart by
- *     brightness) reads well enough instead.
- *   - If precise highlighting is needed, "Open in IDE" is one click away.
+ * Code viewer (FR-6, C-3), read-only. No CodeMirror or Shiki: an editor engine is overkill here, and Shiki's default
+ * engine is WASM, against Tauri's CSP (no `wasm-unsafe-eval`). Grayscale emphasis instead; "Open in IDE" for the rest.
  */
 /** `sessionId`: the session whose folder the file is in (#1209), read from its worktree; null for the project's own */
 export function CodeViewer({ projectId, sessionId = null }: { projectId: string; sessionId?: string | null }) {
@@ -40,23 +34,11 @@ export function CodeViewer({ projectId, sessionId = null }: { projectId: string;
   const jump = useViewerJump()
   const [file, setFile] = useState<FsFile | null>(null)
   /**
-   * Why the failure gets a place on screen and not only a toast.
-   *
-   * A file can be opened by clicking a path an agent typed, and that path is a guess —
-   * nothing checked it against the disk before it became a link (see `parseFileRef`). So a
-   * file that is not there is an ordinary outcome here, not an exotic one. The toast alone
-   * cannot carry it: it is a 2.5s pill and this overlay covers the lane it appears in,
-   * so the one thing left on screen would be "Loading…", forever, about a file that will
-   * never load.
+   * Shown on screen, not only as a toast: an agent's path is unchecked (`parseFileRef`), so a missing file is ordinary,
+   * and this overlay covers the 2.5s toast's lane, which would leave "Loading…" forever.
    */
   const [error, setError] = useState<string | null>(null)
-  /**
-   * Candidates for when several files end with the same name (resolve.ts).
-   *
-   * If there is one, it opens there with no fuss. If there are several, the person is asked to
-   * pick — picking one of them for them would be a guess dressed up as a fact, and this screen
-   * does not make a guess look like a fact.
-   */
+  /** Several files end with the written path (resolve.ts): the person picks, as picking for them would be a guess */
   const [candidates, setCandidates] = useState<string[]>([])
   /** A place already opened once — so if even that file cannot be read, the same place is not reopened forever */
   const resolved = useRef(new Set<string>())
@@ -68,19 +50,10 @@ export function CodeViewer({ projectId, sessionId = null }: { projectId: string;
   const scrollRef = useRef<HTMLDivElement>(null)
   const rowsRef = useRef<HTMLDivElement>(null)
   /**
-   * The width of the widest row drawn so far in this file (#139).
-   *
-   * A row is absolutely positioned, so it cannot push its parent's width wider. That means a row
-   * with `w-full` only paints as wide as **the visible width**, so scrolling right drags the
-   * search or landed row's background back to the left, and the line number (`sticky left-0`)
-   * cannot follow past its own row either and disappears with it. GitPanel's `w-max min-w-full`
-   * only rescues the long lines — a short line is still just the visible width (found again:
-   * scroll 1,500px and a short line's right edge sits at -1,500). The container holding the rows
-   * has to be widened to the widest row for every row to paint all the way to the edge.
-   *
-   * Because this is a virtual list, only the rows that are drawn can be measured, and the value
-   * never shrinks: when a long line scrolls off screen, the horizontal scroll width stays put,
-   * so the spot being looked at does not jump to the left.
+   * The widest row drawn so far in this file (#139): an absolute row cannot widen its parent, so a `w-full` row paints
+   * only the visible width, and scrolling right loses a short row's background and sticky line number (GitPanel's
+   * `w-max min-w-full` covers only long lines). Only drawn rows can be measured; it never shrinks, so the view does not
+   * jump left when a long line scrolls away.
    */
   const [rowsWidth, setRowsWidth] = useState(0)
 
@@ -99,13 +72,7 @@ export function CodeViewer({ projectId, sessionId = null }: { projectId: string;
       .then((f) => alive && setFile(f))
       .catch((e: unknown) => {
         if (!alive) return
-        /*
-         * Not being at the root does not make it a dead link. An agent often writes a path
-         * relative to wherever it happened to be looking (`Media/ImageSearch.cs` ↔ the real one
-         * being `Widgets.Cli/Media/…`). This looks through the project's file list for one
-         * with that tail — only after the first attempt failed, and since the host holds the
-         * index, this one extra call is cheap.
-         */
+        // Not at the root is not a dead link (resolve.ts). Searched only after the read failed; the host holds the index
         void platform.fs
           .search(projectId, path, 20)
           .catch(() => [] as { path: string; name: string }[])
@@ -118,7 +85,7 @@ export function CodeViewer({ projectId, sessionId = null }: { projectId: string;
             if (found.length === 1) {
               const target = found[0]!
               resolved.current.add(target)
-              // The line number was requested under the old path, so it has to be requested again under the new one to survive
+              // The line was asked for under the old path; ask again under the new one
               const jumpNow = currentViewerJump()
               if (jumpNow?.path === path) requestViewerJump(target, jumpNow.line)
               useStore.getState().openFile(target, projectId, sessionId)
@@ -146,12 +113,7 @@ export function CodeViewer({ projectId, sessionId = null }: { projectId: string;
     lines.forEach((l, i) => l.toLowerCase().includes(q) && hit.add(i))
     return hit
   }, [lines, query])
-  /*
-   * Moves between search results (#183). The list is virtualized, so with only the highlighting
-   * and a count, a match off screen would have to be found by scrolling by hand. Enter goes
-   * to the next one, ⇧Enter to the previous — wrapping around at either end. Which match it is
-   * on resets to the start whenever the search term or the file changes.
-   */
+  // Enter and ⇧Enter step through matches, wrapping (#183): in a virtual list an off-screen match is not found by eye
   const matchLines = useMemo(() => [...matches], [matches])
   const [matchAt, setMatchAt] = useState(-1)
   useEffect(() => setMatchAt(-1), [matchLines])
@@ -163,16 +125,6 @@ export function CodeViewer({ projectId, sessionId = null }: { projectId: string;
     overscan: 30,
   })
 
-  /**
-   * Land on the line a `path:123` click named (#39).
-   *
-   * Cheap precisely because the list is virtual: the row is not on screen and does not
-   * have to be — `scrollToIndex` works off the row index, so a line 4000 files deep costs
-   * the same as line 4. It waits for `file` because until the text is split there are no
-   * rows to count, and it clamps because an agent's line number can outrun the file it
-   * names (stale reading, truncated file) and a jump past the end should land at the end
-   * rather than nowhere.
-   */
   const stepMatch = (dir: 1 | -1) => {
     const n = matchLines.length
     if (n === 0) return
@@ -181,6 +133,7 @@ export function CodeViewer({ projectId, sessionId = null }: { projectId: string;
     virtualizer.scrollToIndex(matchLines[next]!, { align: 'center' })
   }
 
+  // Lands on a `path:123` line (#39), once `file` has rows. Clamped: an agent's line can outrun a stale or truncated file
   useEffect(() => {
     if (!file || !jump || jump.path !== path) return
     clearViewerJump()
@@ -363,16 +316,9 @@ export function CodeViewer({ projectId, sessionId = null }: { projectId: string;
         </p>
       ) : (
         /*
-         * `tabIndex={0}` + region — the same judgment as GitPanel's diff panel (#139). This
-         * panel also **scrolls horizontally** (tested with a single 4,000-character line). It
-         * does take focus once when the file opens, but at -1, once that focus is lost there is
-         * no way back in by keyboard, and the far right end of a wrapped-tight line would never
-         * be seen. The name is left as just `Code` — the path is already stated by the header
-         * right above.
-         *
-         * The 18px line height is the row height the virtual list estimates (estimateSize
-         * above), so it stays a number here rather than a step on the line-height scale: a theme
-         * changing `--leading-code` must not desynchronise the rows from their estimate.
+         * `tabIndex={0}` region, as GitPanel's diff (#139): it scrolls sideways, and at -1 the keyboard could not come back
+         * once focus left. Named just `Code`: the header states the path. 18px is estimateSize's row height, a number, not
+         * a step of the line-height scale, so a theme's `--leading-code` cannot desynchronise the rows from it.
          */
         <div
           ref={scrollRef}

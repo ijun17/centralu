@@ -47,10 +47,9 @@ function anchorOf(within: HTMLElement | null): { left: number; bottom: number } 
 }
 
 /**
- * Command palette (E-2) — finds projects, sessions, apps, actions and **conversation content** from
- * one search box. Since "where did we talk about that" is the real question in this app, search
- * results are mixed into the same list. Opened by ⌘K / Ctrl+K, or by the search field at the top of the sidebar
- * (#529), which is how a person who was never told the key finds it.
+ * Command palette (E-2): projects, sessions, apps, actions and conversation content in one list, as "where did we talk
+ * about that" is the real question here. Opened by ⌘K / Ctrl+K or the sidebar's search field (#529, #727), which is how
+ * a person never told the key finds it.
  */
 export function CommandPalette() {
   const open = useStore((s) => s.paletteOpen)
@@ -81,16 +80,12 @@ export function CommandPalette() {
 
   const [query, setQuery] = useState('')
   const [cursor, setCursor] = useState(0)
-  /*
-   * The shortcut table, shown in place of the list (owner, 2026-10-20). Esc goes back to the
-   * list, as a second level of anything does; Esc there closes.
-   */
+  // The shortcut table, in place of the list. Esc goes back to the list, as from any second level; Esc there closes
   const [keys, setKeys] = useState(false)
-  // The hits with the query they answer: until the answer to the latest keystroke comes, the rows are an earlier query's
   const inputRef = useRef<HTMLInputElement>(null)
   const asked = query.trim()
   const searching = open && asked.length >= 2
-  // Searching conversation content asks the host (SQLite FTS). A new query reads over the rows of the last one; a failed search says so instead of showing no hits
+  // Conversation content is searched on the host (SQLite FTS). A new query reads over the last rows; a failure says so
   const search = useLoad<FoundHits<{ sessionId: string; seq: number; snippet: string }>>(
     () => (searching ? platform.search.messages(asked, 20).then((list) => ({ query: asked, list })) : null),
     [searching, asked, platform],
@@ -100,19 +95,13 @@ export function CommandPalette() {
   // Shortening the box clears the rows at once, not when the next read would have started; a failed search leaves none
   const found = searching && !search.error ? (search.data ?? NO_HITS) : NO_HITS
   const hits = found.list
+  // Until the answer to the latest keystroke comes, the rows are an earlier query's
   const hitsFresh = hitsAnswer(found, query)
 
-  /**
-   * Clearing happens **on close**, not on open.
-   *
-   * This effect runs **after** the render where `open` became true. But the input box is already
-   * on screen in that same render — anything typed in between gets wiped out by this effect.
-   * Someone who starts typing the instant they press ⌘K loses their first character, and this
-   * happens more often the slower the machine is (the wider that gap gets).
-   *
-   * Clearing on close means it is already empty the next time it opens, and the write that
-   * overwrites input after the render disappears entirely. What the person sees behaves
-   * identically.
+  /*
+   * Cleared on close, not on open: this effect runs after the render that shows the field, so clearing on open wipes
+   * what was typed in between, more often on a slower machine (in parallel e2e runs the palette stayed open with the
+   * filter cleared, all 5 items listed).
    */
   useEffect(() => {
     if (open) {
@@ -134,8 +123,7 @@ export function CommandPalette() {
       ...(newIn
         ? [{ kind: 'action' as const, id: 'new-session', label: 'New session', sub: `in ${newIn.name}`, run: () => openNewSession(newIn.id) }]
         : []),
-      { kind: 'action', id: 'settings', label: 'Open settings', // The window's own categories, in its own order — the palette should not describe a
-      // room by a floor plan it does not have (issue #7)
+      { kind: 'action', id: 'settings', label: 'Open settings', // The window's own categories, in its order: not a floor plan it lacks (issue #7)
       sub: 'Notifications · appearance · permissions', run: () => toggleSettings(true) },
       { kind: 'action', id: 'shortcuts', label: 'Keyboard shortcuts', sub: 'The keys on this keyboard', run: () => setKeys(true), keepOpen: true },
       { kind: 'action', id: 'open-git', label: 'Open Git', sub: 'Changes · history · branches', run: () => openGit() },
@@ -143,15 +131,10 @@ export function CommandPalette() {
       { kind: 'action', id: 'import-app', label: 'Import an app', sub: 'From a folder, a .zip or a link', run: () => useStore.getState().openImport() },
       { kind: 'action', id: 'toggle-panel', label: 'Evidence panel', sub: `${sc('mod', 'B')} · changes · files`, run: () => togglePanel() },
       /*
-        The two waiting-list shortcuts are here because they stopped being printed on the
-        top bar (issue #33). The bar advertised them next to the count, which is the one
-        moment the count itself is what you want to read — and a hint you have already
-        learned keeps charging you attention forever. Somewhere they can be found is still
-        owed, though, so they are said twice: named with their keys in the shortcut table
-        (Keyboard shortcuts, above, for looking up), and runnable from here (for doing without
-        knowing the key).
+        The waiting-list shortcuts are not printed beside the top bar's count (issue #33), where a learned hint costs
+        attention forever. They are named in the shortcut table and run from here.
       */
-      // Back and forward between screens (#374). The palette lays over the screen and is not one, so back goes to the screen before the one under it
+      // Back and forward (#374). The palette is not a screen, so back goes to the screen before the one under it
       { kind: 'action', id: 'nav-back', label: 'Go back', sub: `${nav(-1)} · the screen before`, run: () => useStore.getState().goBack() },
       { kind: 'action', id: 'nav-forward', label: 'Go forward', sub: `${nav(1)} · the screen after`, run: () => useStore.getState().goForward() },
       { kind: 'action', id: 'waiting', label: 'Waiting list', sub: `${sc('mod', 'I')} · everything waiting on you`, run: () => toggleInbox(true) },
@@ -179,8 +162,8 @@ export function CommandPalette() {
         .slice(0, 5)
         .map<Item>((p) => ({ kind: 'project', id: p.id, label: p.name, sub: p.path })),
       /*
-       * Apps (#529), by name — the same rows the sidebar lists, so an app scrolled out of sight or on a folded project
-       * is a few letters away. Only when asked for: with nothing typed, the list stays the sessions and projects it was.
+       * Apps by name (#529), the sidebar's rows, so one scrolled away or in a folded project is a few letters away. Only
+       * for a query: with nothing typed the list is sessions and projects.
        */
       ...(q
         ? catalog.external
@@ -226,9 +209,9 @@ export function CommandPalette() {
   const choose = useCallback(
     (item: Item) => {
       /*
-       * A session picked here is one the person is going to type to (#528): its composer takes the
-       * keyboard once the palette is gone. The palette's own field leaves with it and drops focus on
-       * the page, where no key reaches the composer (only a Tab does, in WebKit on macOS only).
+       * A session picked here is one the person will type to (#528): its composer takes the keyboard once the palette is
+       * gone. The palette's field leaves with it and drops focus on the page, where no key reaches the composer (a Tab
+       * does, but only in WebKit on macOS).
        */
       const go = (id: string) => {
         focusSession(id)
@@ -259,10 +242,8 @@ export function CommandPalette() {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
       /*
-       * While a word is being composed (Korean, Japanese, Chinese), these keys are the input
-       * method's: Enter finishes the syllable, the arrows walk its candidates, Esc cancels it
-       * (#181). Taking that Enter would run the highlighted command the moment the person
-       * finishes typing "설정", and close the palette under the input method.
+       * While a word is composed (Korean, Japanese, Chinese) these keys are the input method's (#181): taking its Enter
+       * would run the highlighted command as "설정" is finished, closing the palette under the input method.
        */
       if (composingKey(e)) return
       if (keys) {
@@ -318,12 +299,9 @@ export function CommandPalette() {
   if (!shown) return null
 
   /*
-   * A popover hanging from the sidebar's search field (#727), not a dialog in the middle of the
-   * window. The catcher covers the whole window, so a press anywhere but the panel closes it; only
-   * the dimming starts below the field's row, so the field the person pressed (and the top
-   * bar above it) stays in view over the panel that came from it. The panel's left edge is the
-   * field's and it opens 4px under it, from where the field is measured (anchorOf). The catcher
-   * sits outside the top bar's drag region in the tree, so a press on it never moves the window.
+   * A popover hanging from the sidebar's search field (#727), 4px under it at its left edge (anchorOf). The catcher
+   * covers the window, so a press anywhere but the panel closes it; the dimming starts below the field's row, so the
+   * field and the top bar stay in view. Outside the top bar's drag region, a press on it never moves the window.
    */
   return (
     <div

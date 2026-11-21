@@ -6,15 +6,11 @@ import { WaitCard, WaitFooter } from '../approval/WaitCard.jsx'
 export const HOST_REQUEST_ARM_MS = 500
 
 /**
- * A program's call waiting for the person (#1405). Something on this computer that is not this window (an agent's
- * script, a tool) holds only the limited credential, and asked for something that cannot be undone or that widens what
- * runs without asking. The host holds the call; this card is the only way it runs.
- *
- * It stands over the lanes rather than in their flow: it comes and goes on a program's schedule, and taking room would
- * move what the person is reading (the reason there is no global approval banner, product-spec.md). It has no keys, unlike
- * a session's card: a y meant for the composer must never delete something for good. One card at a time, oldest first,
- * with how many more wait. A card's buttons take a click only once it has stood `HOST_REQUEST_ARM_MS`, and one click:
- * the next card appears where this one was, and a program that hears the answer can ask again at once.
+ * A program's call waiting for the person (#1405): something on this computer other than this window, with only the
+ * limited credential, asked for what cannot be undone or widens what runs unasked; the host holds it, and this card is
+ * the only way it runs. Over the lanes, not in their flow: taking room would move what the person reads (product-spec.md,
+ * no global approval banner). No keys: a y meant for the composer must never delete something for good. One card at a
+ * time, oldest first, with how many more; one click, and only after `HOST_REQUEST_ARM_MS`, as the next takes its place.
  */
 export function HostRequestCards() {
   const requests = useStore((s) => s.hostRequests)

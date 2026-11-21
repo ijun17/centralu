@@ -14,41 +14,15 @@ import { HoverExpander } from './fold.js'
 import { Fold } from '../../components/Fold.jsx'
 
 /**
- * The door to the Assistant — **directing by talking**.
- *
- * Placed directly above the grid. The two are two ways of looking at the same thing, so they
- * should stand side by side:
- *   assistant  direct sessions by talking, in one window
- *   grid          watch several windows at a glance
- *
- * Not nested under a project. This session does not belong to any project — crossing multiple
- * projects is the whole reason it exists.
- *
- * **The button spells out that it is still experimental** (issue #1). It looks identical to the
- * grid button, and people pressed it without knowing the difference. Putting the label **inside**
- * the Assistant screen would be too late — the person has already pressed it by then, and the
- * harm being prevented is exactly "pressing it without knowing."
- *
- * Follows the palette rule (styles/index.css) as is: **urgency is brightness, kind is shape.**
- * The text is ink-faint (the color reserved for background information). Making it brighter would be
- * a lie that it is more urgent than the grid button — "experimental" is not urgent, it is
- * **something the person should press knowingly.**
- *
- * The border is solid. A dashed one would only help if a narrow sidebar clipped the text away and
- * left only the shape, and **measuring shows it does not.** The 'Experimental' badge is
- * `shrink-0`, so it stands at its full 63px even at the narrowest width (180px, with the button
- * at 163px) — what gets clipped instead is the name.
+ * The door to the Assistant, directing by talking: beside the grid, the other way of looking at the sessions, and under
+ * no project, as crossing projects is what it is for.
  */
 export function AssistantButton() {
   const view = useStore((s) => s.view)
   const open = useStore((s) => s.openAssistant)
   const id = useStore((s) => s.assistantId)
   const active = view === 'assistant'
-  /*
-   * The children fold under the button and open when the mouse rests on it (#1591), by the rule of a folded project's name
-   * (#1578): a transient state that nothing saves. Leaving the whole block, button and list, folds it again. A click on
-   * the button only opens the screen; it pins nothing.
-   */
+  // The children open while the mouse rests on the button (#1591), as a folded project's rows do (#1578); a click pins nothing
   const [hoverOpen, setHoverOpen] = useState(false)
   const blockRef = useRef<HTMLDivElement>(null)
   const expander = useMemo(
@@ -95,10 +69,8 @@ export function AssistantButton() {
           void open()
         }}
         /*
-          The Assistant is a session too. Before the first conversation, no session exists yet,
-          so it is not made draggable — that keeps the #63 rule that opening a screen alone never
-          creates a process. Once a conversation exists, it can be dragged into the grid like any
-          other session row.
+          Draggable once its session exists (opening a screen never creates a process, #63); the grid takes its id as
+          any session row's.
         */
         draggable={!!id}
         onPointerEnter={(e) => e.pointerType === 'mouse' && expander.enterRow(true)}
@@ -125,12 +97,8 @@ export function AssistantButton() {
 }
 
 /**
- * The sessions the Assistant started with start_agent (#853): no project and no app, asked by the Assistant, on
- * this machine. A child of a project session hangs under it in its project; these have no project to hang in, so they
- * hang here, where the person watches and steps into them like any session.
- *
- * `earlier`: ones whose assistant is gone (replaced on a tool switch, #994 review). Nothing else starts a session with
- * no project and no app, so a missing starter was an Assistant; without this group they would have no row at all.
+ * The sessions the Assistant started with start_agent (#853), on this machine, with no project to hang in. `earlier`:
+ * those whose assistant is gone (#994 review); nothing else starts a session with no project and no app.
  */
 export function assistantChildren(
   sessions: Record<string, SessionSummary>,
@@ -146,10 +114,7 @@ export function assistantChildren(
   }
 }
 
-/**
- * Whether the children's list is drawn (#1591): while the mouse rests on the button (`hoverOpen`), and always while one
- * of the children is the open session, so the open session's row does not vanish. Nothing else says it is folded: no count.
- */
+/** The children's list is drawn while hovered (#1591) or while one of them is the open session; no folded count */
 export function assistantListShown(hoverOpen: boolean, selectedId: string | null, children: { current: readonly { id: string }[]; earlier: readonly { id: string }[] }): boolean {
   return hoverOpen || (selectedId !== null && [...children.current, ...children.earlier].some((s) => s.id === selectedId))
 }
@@ -173,11 +138,7 @@ function AssistantChildren({
   useEffect(() => {
     if (!shown) onDragging(false)
   }, [shown, onDragging])
-  /*
-   * The archive dialog is kept here, not in a row: archiving closes the row's menu at once and the host's answer (it asks
-   * first when something would be lost, #1512) comes later, and a list opened by hover may have folded by then. A row
-   * that is gone still reaches `setConfirmingId`, and the dialog stands on its own.
-   */
+  // The archive dialog lives here, not in a row: the host's answer (#1512) can come after a hover-opened list folded
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
   const deleteSession = useStore((st) => st.deleteSession)
   useEffect(() => {
@@ -201,7 +162,7 @@ function AssistantChildren({
   const row = (s: SessionSummary) => <AssistantChildRow key={s.id} s={s} onHold={onHold} setConfirming={(on) => setConfirmingId(on ? s.id : null)} />
   return (
     <>
-      {/* Slides open and closed like a project's rows (#1605); the rows stay until the exit ends. A child that arrives while it is open does not slide */}
+      {/* Slides like a project's rows (#1605) */}
       <Fold open={shown} className={current.length > 0 || earlier.length > 0 ? 'pt-0.5' : undefined} testId="assistant-fold">
         <ul data-testid="assistant-children" onDragStart={() => onDragging(true)} onDragEnd={() => onDragging(false)}>
           {current.map(row)}
@@ -221,11 +182,9 @@ function AssistantChildren({
 }
 
 /**
- * One child's row: opens it, drags onto the grid, and carries a ⋯ menu to stop or delete it (#994 review): no project's
- * list holds a child of the Assistant, so without this menu it could not be removed from the screen.
+ * One child's row, with a ⋯ menu to stop or archive it (#994 review): no project list holds it. No fold gutter: it folds
+ * nothing, and an empty column would push its mark from the guide line.
  */
-// No fold gutter on these rows (owner, 2026-10-20): an Assistant's child folds nothing, so the chevron's empty
-// column would only push its mark away from the guide line
 function AssistantChildRow({ s, onHold, setConfirming }: { s: SessionSummary; onHold: (rowId: string, held: boolean) => void; setConfirming: (on: boolean) => void }) {
   const selected = useSelectedSessionId()
   const focusSession = useStore((st) => st.focusSession)

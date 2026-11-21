@@ -5,12 +5,9 @@ import { useMachineName } from '../../store/selectors.js'
 import { MachineMenu } from './MachineMenu.jsx'
 
 /**
- * Which machine a session runs on, where the sidebar's machine badge (MachineBadge, #734) is not in view: the inbox, a notice
- * card, the session header (which is also every grid panel's header and the place an approval or question is answered).
- * Nothing for this computer: a tag on every local row would be noise, and the person reads its absence as "here".
- *
- * Kind is shape, urgency is brightness (styles/index.css): a chip one step lighter than what it stands on (`surface-raised`, edged by `line`; owner, 2026-11-02),
- * in the faint ink, so it never competes with what is waiting.
+ * Which machine a session runs on where the sidebar's badge (MachineBadge, #734) is not in view: the inbox, a notice
+ * card, the session header (every grid panel's too). Nothing for this computer: its absence reads as "here". A chip one
+ * step lighter than its ground, in the faint ink, so it never competes with what is waiting.
  */
 const CHIP = 'shrink-0 truncate rounded-md border border-line bg-surface-raised px-1 text-2xs leading-body text-ink-faint'
 
@@ -30,21 +27,13 @@ export function MachineTag({ machine, testId, className = '' }: { machine: strin
 }
 
 /**
- * A linked machine's project or user-folder app in the sidebar's one list (#734), which has no machine header to say
- * which machine its rows are on. MachineTag's chip, so it reads as the same mark wherever a machine is named; the
- * border is the link: solid while connected, dashed while not (connecting, away, unreachable, …). Pressing it opens a
- * menu with the link's state, its last error and Connect (MachineMenu),
- * and its tooltip carries the last error too.
- *
- * Capped at 96px and cut with an ellipsis past it, so a long machine name cannot take the line from the project's own
- * name; the whole name is in Settings → Machines. `placeholder` is the same chip, invisible and inert, holding the
- * badge's place inside a row that is itself a button (an app row), where the badge stands over it as a button of its
- * own beside the row's.
+ * A linked machine's project or user-folder app in the sidebar's one list (#734), which has no machine header. The
+ * border is the link: solid while connected, dashed while not. Pressing opens MachineMenu; the tooltip has the last
+ * error. Capped at 96px so a long machine name cannot take the project's line. `placeholder` holds the badge's place,
+ * invisible and inert, inside a row that is itself a button (an app row), where the badge stands over it as its own.
  */
-// In the project name's own ink (owner, 2026-10-20): beside a project's changes badge, a faint chip reads as one more
-// count. Its look is the chip's, a fill one step above the sidebar and an edge one step above the fill (owner, 2026-11-02;
-// no white border). Written whole rather than layered on CHIP: two text or border colours on one element are settled by the order
-// of the generated CSS, not of the class attribute
+// In the project name's ink: beside a project's changes badge, a faint chip reads as one more count. Written whole, not
+// layered on CHIP: of two text or border colours on one element, the generated CSS's order wins, not the class order
 const BADGE = 'shrink-0 truncate rounded-md border border-line bg-surface-raised px-1 pb-0.5 pt-px text-2xs leading-none text-ink max-w-24'
 
 export function MachineBadge({

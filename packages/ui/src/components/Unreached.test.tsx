@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { Unreached } from './Unreached.jsx'
 
-// #841 item 4: a machine whose trash could not be read is not left out of the list without a word (#2268: Tasks says it the same way)
+// #841 item 4, #2268: a machine whose trash (or Tasks) could not be read is not left out without a word
 describe('the part of a merged list on a machine that was not reached', () => {
   it('is named under the list, in one look wherever it stands', () => {
     const html = renderToStaticMarkup(<Unreached what="the session archive" unreached={[{ name: 'Box' }, { name: 'Laptop' }]} testId="trash-unreached" />)

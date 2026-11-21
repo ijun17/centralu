@@ -5,17 +5,11 @@ import { appCanLines, useProjectApps, usesLines } from '../../store/app-catalog.
 import { useStore } from '../../store/store.js'
 
 /**
- * The question "Trust this project?", with what trusting covers (#1141).
- *
- * Trust follows the project, with no switch per app (owner, 2026-10-18): trusting it lets its apps run, lets them reach
- * the Assistant and the person's other projects where an app may (the project's own root app), and lets its settings
- * apply. So the card lists each of the project's apps, its root app and those in `.centralu/apps` alike: its name, its
- * whole description, and what its manifest declares, which it can then do without asking (#2237), in plain words
- * (`appCanLines`). A long list scrolls inside the card.
- *
- * One card for every place that asks: under the project's row (`TrustAsk`, after registration and from the project
- * menu) and wherever a "Trust this project…" button stands (an untrusted app's screen, its Settings row, the New app
- * dialog, `TrustProjectButton`).
+ * "Trust this project?" with what trusting covers (#1141). Trust follows the project, no switch per app: its apps run,
+ * reach the Assistant and other projects where an app may (its root app), and its settings apply. So the card lists
+ * every app (root and `.centralu/apps`): name, whole description and what its manifest declares, which it can then do
+ * without asking (#2237), in plain words (`appCanLines`); a long list scrolls. One card wherever it is asked: `TrustAsk`
+ * under the project row, and every "Trust this project…" button (`TrustProjectButton`).
  */
 /** The test ids of one card's parts: the sidebar's follow their own scheme (`trust-ask-yes-<name>`) */
 export type TrustCardIds = { card: string; yes: string; no: string; title: string; apps: string; app: (key: string) => string }
@@ -30,10 +24,9 @@ export const trustCardIds = (testId: string): TrustCardIds => ({
 })
 
 /**
- * What stays off in a project that is not trusted (#1512), said by the card, the project row and the notice in a session.
- * The repository's own instruction files are the part nothing said before: an untrusted project's `CLAUDE.md` and
- * `AGENTS.md`, hooks and commands are not read (the session reads only the person's own settings), and starting
- * agents and worktrees are refused there (a session under `auto` is let through the host's gates, so the text says so).
+ * What stays off in an untrusted project (#1512), said by the card, the project row and the session notice: its
+ * `CLAUDE.md`, `AGENTS.md`, hooks and commands are not read (only the person's own settings), and starting agents and
+ * worktrees is refused (a session under `auto` passes the host's gates, so the text says so).
  */
 export const UNTRUSTED_OFF =
   "its CLAUDE.md and AGENTS.md, hooks and commands are ignored, its apps don't run, and its sessions can't start agents or use worktrees unless they run under auto"

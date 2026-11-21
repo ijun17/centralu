@@ -6,14 +6,9 @@ import { menuTrigger } from './RowMenu.jsx'
 import { connectAction, isTrying } from '../../settings/MachinesSection.jsx'
 
 /**
- * Reconnect, first in the menu of a project whose machine is not connected (#1533). The person finds the project, not the
- * machine: its menu is where they look for a way to bring it back, and the badge's menu and Settings → Machines are two
- * clicks away. It is the same action as theirs (`reconnectMachine`, so `machines.reconnect`: one attempt now, skipping the
- * backoff), and the host joins a press and an agent's call at the same moment into one attempt.
- *
- * It says what it is doing: "Connecting…" while the attempt is under way, with the menu left open; connected, the menu
- * closes (the row is gone, there is nothing left to press); failed, the row is back with the reason in plain words under it
- * (the words Settings → Machines uses for the same state), ready to be pressed again. Hidden while the machine is connected.
+ * Reconnect in the menu of a project whose machine is not connected (#1533), where the person looks: the badge's and
+ * Settings' action (`machines.reconnect`, skipping the backoff; the host joins simultaneous calls into one attempt). Says
+ * "Connecting…", closes the menu once connected, and on failure gives the reason in Settings → Machines' words.
  */
 export function ReconnectRow({
   machine,
@@ -23,18 +18,15 @@ export function ReconnectRow({
 }: {
   machine: string
   projectName: string
-  /** The box that holds the button that opened the menu: where the keyboard goes back to when the row goes while it holds it */
+  /** The box holding the menu's button: where focus goes back when the row goes */
   anchorEl: HTMLElement | null
   onClose: () => void
 }) {
   const resultId = useId()
   const info = useStore((s) => s.machines[machine])
   /*
-   * What the row says about a press is what the attempt it started came to, never what the machine said before it: the
-   * state that was there (with its old error) must not read as this press's failure. So a result is told only after the
-   * press has been seen to start an attempt (`connecting`, `starting`): watched on the store itself, since a render can skip
-   * a state that came and went within one batch. A press that started none (the host refused it, a change under way there)
-   * has the toast, not a result.
+   * A result is told only once this press is seen to start an attempt, so the machine's old error never reads as its
+   * failure. Watched on the store: a render can skip a state that came and went in one batch. No attempt: the toast says it.
    */
   const [pressed, setPressed] = useState(false)
   const [began, setBegan] = useState(false)
@@ -45,12 +37,7 @@ export function ReconnectRow({
     if (pressed && status === 'connected') onClose()
   }, [pressed, status, onClose])
   const gone = !info || status === 'connected'
-  /*
-   * The row goes when the machine connects, by this press or by itself, and keyboard focus that was on it falls to the
-   * body with it. It goes back to the button that opened the menu (as Escape sends it there): the menu stays open when
-   * the machine came back by itself, and closes after a press with the focus where it started. Only where it fell to the
-   * body: focus on another row of the menu stays there.
-   */
+  // When the row goes (connected), focus that fell to the body returns to the menu's button, as Escape does
   const shown = useRef(false)
   useLayoutEffect(() => {
     if (!gone) {
@@ -88,8 +75,7 @@ export function ReconnectRow({
         testId={`reconnect-${projectName}`}
       />
       {/*
-        Always there once the row is, so a screen reader that watches it hears the result when it is put in. A plain element
-        with aria-live, not role="status": a menu holds menu items, and an unnamed status between them is not one
+        Always present, so a screen reader hears the result. aria-live, not role="status": a menu holds menu items
       */}
       <div
         id={resultId}

@@ -2,17 +2,8 @@ import type { ReactNode, Ref } from 'react'
 import { Tooltip } from './primitives.jsx'
 
 /**
- * A button with only an icon, no text.
- *
- * Leaving out text means there has to be a way to ask what the button is for. The browser's
- * native title takes 1-2 seconds to appear and its look does not match the app, and for something
- * like an icon button — normally taking up no space, but expected to answer immediately when
- * asked — that delay is effectively no information at all. So this uses our own tooltip (it
- * appears on focus as well as on hover — someone navigating by keyboard alone needs the same
- * information).
- *
- * Why icon buttons are gathered into one component: building them one at a time leaves some with
- * a tooltip and some without.
+ * A button with only an icon (docs/design-system.md §5): its label is our own tooltip, shown on hover and on focus,
+ * since the native title takes 1-2 seconds and does not match the app.
  */
 export function IconButton({
   label,
@@ -29,7 +20,7 @@ export function IconButton({
   ref,
   className = '',
 }: {
-  /** Both the tooltip text and the name a screen reader announces — kept as one */
+  /** The tooltip and the accessible name, one string */
   label: string
   onClick?: () => void
   children: ReactNode
@@ -39,17 +30,11 @@ export function IconButton({
   placement?: 'bottom' | 'top'
   align?: 'left' | 'right'
   /**
-   * On — the icon stands in white (gray otherwise).
-   *
-   * Why this is taken as a prop instead of overriding the color through className: in Tailwind,
-   * when `text-ink-faint` and `text-ink` are both attached, which one wins is decided by the order
-   * of the generated CSS, not the order of the class attribute — a visible state cannot be pinned
-   * to something that can shift between builds. Here, only one of the two is ever attached.
+   * The icon in `ink` rather than `ink-faint`. A prop, not a className: with both classes Tailwind picks by the order
+   * of the generated CSS, which can shift between builds; here only one is ever attached.
    */
   lit?: boolean
-  /** The button opens a menu or a list (announced to a screen reader) */
   haspopup?: 'menu' | 'dialog'
-  /** What it opened is open */
   expanded?: boolean
   /** For a list anchored under the button */
   ref?: Ref<HTMLButtonElement>

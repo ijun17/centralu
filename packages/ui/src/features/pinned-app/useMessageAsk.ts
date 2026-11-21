@@ -3,15 +3,10 @@ import type { AppFrameMessage } from '../app-frame/AppFrame.jsx'
 import { messageText, type MessageAskState } from './MessageAsk.jsx'
 
 /**
- * The question a view's `ui/message` raises — shared by the pinned view and the in-conversation
- * view, which differ only in how the person answers (which session, or "send / don't").
- *
- * `onMessage` is the handler for the frame: it holds the view's request until the person answers.
- * If an earlier question is still pending, that one is closed as declined (the same rule as link
- * confirmation, AppFrame). A message with not a single piece of text is declined without asking —
- * there is nothing to send. `take` removes the pending question and hands it to the caller, which
- * must resolve it; `settle` closes it as sent or declined. A question still pending when the owner
- * goes away is closed as declined.
+ * The question a view's `ui/message` raises, for the pinned and in-conversation views (answered by a session pick, or
+ * send / don't). `onMessage` holds the frame's request until answered; an earlier pending one is declined (as links
+ * are, AppFrame), one without text is declined unasked. `take` hands the pending one to the caller to resolve; `settle`
+ * closes it. Unmounting declines it.
  */
 export function useMessageAsk() {
   const [ask, setAsk] = useState<MessageAskState | null>(null)
