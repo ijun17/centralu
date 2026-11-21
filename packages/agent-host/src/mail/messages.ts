@@ -3,6 +3,7 @@ import { createListeners } from '@cc/common'
 import { errorMessage, oneLineText, type MailChoices } from '@cc/protocol'
 import { asObj } from '../json-value.js'
 import {
+  GIVEN_AGAIN,
   HIDDEN_HOLDS,
   MailTargetMissing,
   type HandOverScope,
@@ -1228,7 +1229,7 @@ export class MessageService {
       ...(m.facts.personNote === true ? { personNote: true } : {}),
       ...(this.forPerson(m) ? { forPerson: this.forPerson(m) } : {}),
       ...(lastError === 'maybe_repeated' ? { maybeRepeated: true } : {}),
-      ...(lastError === 'given_again' ? { givenAgain: true } : {}),
+      ...(lastError === GIVEN_AGAIN ? { givenAgain: true } : {}),
       ...(inline ? { inline: m.body } : {}),
     }
   }

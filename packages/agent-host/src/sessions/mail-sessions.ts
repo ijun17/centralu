@@ -80,8 +80,11 @@ export type MailHooks = {
   turnInputs?(sessionId: string, turn: TurnInputs): void
   /** The Assistant's turn ended as a turn does: each session whose request it carried is told what it gets back, and those requests are settled (S12, §7.6) */
   requestTurnEnded?(assistantId: string): void
-  /** A call returned the answer of work a session gave another, or read where it stands (§8.1): the reports waiting for the caller are settled */
-  answered?(callerId: string, childId: string, how?: AnswerGiven): void
+  /**
+   * A call returned the answer of work a session gave another, or read where it stands (§8.1): the reports waiting for the caller are settled.
+   * False when that answer does not answer the task (`answerRecorder`)
+   */
+  answered?(callerId: string, childId: string, how?: AnswerGiven): boolean
   /** A turn started that the mailbox did not start: whose it is and the thread it belongs to (§6) */
   turnStarted?(sessionId: string, turn: TurnStart): void
   /** The Assistant's role is a new session's (mailbox §7.7, D15): mail sent to the role and not settled goes to it, delivered afresh */
@@ -210,7 +213,7 @@ export class MailSessionsView {
     this.host.children.onPersonWork(hooks.personWork)
     this.host.children.onOpenTasks(hooks.openTasks ? (id, side) => hooks.openTasks?.(id, side) ?? [] : undefined)
     this.host.children.onFinishedWith(hooks.finishedWith ? (callerId, childId) => hooks.finishedWith?.(callerId, childId) : undefined)
-    this.host.children.onAnswered(hooks.answered ? (callerId, childId, how) => hooks.answered?.(callerId, childId, how) : undefined)
+    this.host.children.onAnswered(hooks.answered ? (callerId, childId, how) => hooks.answered?.(callerId, childId, how) ?? true : undefined)
     this.host.children.onTurnStarted(hooks.turnStarted ? (sessionId, turn) => hooks.turnStarted?.(sessionId, turn) : undefined)
   }
 

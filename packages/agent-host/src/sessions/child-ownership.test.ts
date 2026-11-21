@@ -152,7 +152,10 @@ describe('the mailbox hears of a turn that starts (docs/plans/mailbox.md §6)', 
 describe('the mailbox hears that a call returned an answer (docs/plans/mailbox.md §8.1)', () => {
   it('is told who read what, and never breaks the call when the mailbox fails', () => {
     const seen: unknown[] = []
-    own.onAnswered((callerId, childId, how) => void seen.push([callerId, childId, how]))
+    own.onAnswered((callerId, childId, how) => {
+      seen.push([callerId, childId, how])
+      return true
+    })
     own.answered('caller', 'child', { ok: true, text: 'done' })
     own.answered('caller', 'child')
     own.answered('same', 'same', { ok: true, text: 'itself' })

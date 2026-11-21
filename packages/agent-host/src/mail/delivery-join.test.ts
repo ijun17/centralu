@@ -3,6 +3,7 @@
  * included, with no wake and no turn of its own; the Assistant's requests wait for its turn's end; mail at rest still wakes once.
  */
 import { afterEach, describe, expect, it } from 'vitest'
+import { answerRecorder } from './delegation.js'
 import { deliveryWorld, settle } from './delivery.test-helpers.js'
 import { A, B, C, ORC } from './messages.test-helpers.js'
 import { turnsOf as turnRows } from '../dev-services/store/mailbox-turns.test-helpers.js'
@@ -186,24 +187,25 @@ describe('mail joins a running turn (§10.6.2)', () => {
     expect(w.rowOf(task.id, B).deliveredAt).toEqual(expect.any(Number))
   })
 
-  it('a task given again that a waiting call settles before it goes is not given again: the call returned its answer (#2369)', async () => {
+  it('a call that waited on a task the turn only joined does not answer it: no report, and the task goes again for a turn of its own (#2369)', async () => {
     const w = started()
     w.send(A, { to: [B], text: 'start on #12' })
     await w.advance(2_000)
     w.states.set('b', inTurn)
     const task = w.mail.task(A, B, { text: 'and review #13', origin: 'agent_session', delivered: false })
     await w.advance(5_000)
-    const sent = w.to('b').length
     w.delivery.turnInputs(B, { took: w.to('b').slice(1).map((d) => d.input.id!), finished: true })
     w.endTurn('b')
-    expect(w.rowOf(task.id, B)).toMatchObject({ deliveredAt: null, readAt: null })
-    // The call that waited on the task reads the turn's end as its answer, which reports the task (`answerRecorder`)
-    w.mail.report(task.id, { outcome: 'finished', body: '[Centralu] its turn ended' })
+    // The call that waited reads the turn's end; the mailbox says that answer is not the task's
+    expect(answerRecorder(w.mail, w.store.mailbox)('a', 'b', { ok: true, text: 'done with #12' })).toBe(false)
+    expect(w.rowOf(task.id, B)).toMatchObject({ deliveredAt: null, readAt: null, settled: null })
     w.states.set('b', { kind: 'ready', live: true, quiet: false })
     w.delivery.poke('b')
     await w.advance(31_000)
-    expect(w.to('b')).toHaveLength(sent)
-    expect(w.rowOf(task.id, B)).toMatchObject({ deliveredAt: expect.any(Number), readAt: expect.any(Number), settled: 'reported' })
+    expect(w.to('b').at(-1)!.input.text).toContain(`id="${task.id}"`)
+    // The turn the task started answers it, as any turn does
+    expect(answerRecorder(w.mail, w.store.mailbox)('a', 'b', { ok: true, text: 'reviewed #13' })).toBe(true)
+    expect(w.rowOf(task.id, B).settled).toBe('reported')
   })
 
   it("a turn the tool opens for a task a turn before did not take is that mail's: started by mail, the task its work and starter", async () => {

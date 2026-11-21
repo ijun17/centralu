@@ -1,4 +1,4 @@
-import type { MailRow, MailboxRecords } from '../dev-services/store/mailbox.js'
+import { GIVEN_AGAIN, type MailRow, type MailboxRecords } from '../dev-services/store/mailbox.js'
 import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
 import { PERSON, isPerson, parseAddress } from './address.js'
 import type { DelegationOrigin, MessageService } from './messages.js'
@@ -217,9 +217,10 @@ export type AnswerGiven = { ok: true; text: string } | { ok: false; error: strin
 /**
  * What the mailbox does when a call returns the answer of work a session gave another, or reads where it stands (§9.6): the reports on the caller's
  * tasks to the child are read. A call that returned how the turn ended is the report: it is written on the task as told (delivered and read), which
- * settles it, so nothing wakes the caller for news the call already gave
+ * settles it, so nothing wakes the caller for news the call already gave. Returns false when that turn does not answer the task: it joined the turn
+ * and is given again (`MailboxRecords.undeliver` with `again`, #2369), so only a turn it starts answers it, and the call reads as still working
  */
-export function answerRecorder(mail: MessageService, records: MailboxRecords): (callerId: string, childId: string, how?: AnswerGiven) => void {
+export function answerRecorder(mail: MessageService, records: MailboxRecords): (callerId: string, childId: string, how?: AnswerGiven) => boolean {
   return (callerId, childId, how) => {
     const owner = mail.sessionAddress(callerId)
     // A hub's session a machine asked (`LinkedTasks.keep`), by its address
@@ -230,7 +231,8 @@ export function answerRecorder(mail: MessageService, records: MailboxRecords): (
     records.markRead(owner, reports, now)
     const task = records.newestTask(owner, child)
     // Work the child handed on in it is still open (§9.4): the task stays open, and the turn that work's answer starts answers it (§10.6.3)
-    if (!how || !task || (how.ok && records.handedOn(task.id).length > 0)) return
+    if (!how || !task || (how.ok && records.handedOn(task.id).length > 0)) return true
+    if (records.recipient(task.id, child)?.lastError === GIVEN_AGAIN) return false
     const outcome = how.ok ? ('finished' as const) : ('failed' as const)
     const answer = how.ok ? clipped(how.text, ANSWER_KEPT_CHARS) : undefined
     const written = mail.report(task.id, {
@@ -242,6 +244,7 @@ export function answerRecorder(mail: MessageService, records: MailboxRecords): (
       records.markDelivered(owner, [written.message.id], now, null)
       records.markRead(owner, [written.message.id], now)
     }
+    return true
   }
 }
 

@@ -170,6 +170,9 @@ type RecipientSql = {
 /** A `LIKE … ESCAPE '\'` pattern for what starts with `prefix` */
 const likePrefix = (prefix: string) => `${prefix.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
 
+/** The `last_error` of a task a turn took in while it ran, given again at rest (`undeliver` with `again`, #2369) */
+export const GIVEN_AGAIN = 'given_again'
+
 /** A row watched for an answer: of a needsReply message or a task (§4). `m` is the message, `r` the row */
 const WATCHED = `(m.needs_reply = 1 OR m.kind = 'task')`
 /** A row that may be delivered: not read, not held (or let go by the person), and not withdrawn or gone (§8.2 step 1) */
@@ -590,7 +593,7 @@ export class MailboxRecords {
   undeliver(recipient: string, ids: readonly string[], deliveredAt: number, again?: { dueAt: number }): string[] {
     const where = `recipient = ? AND delivered_at = ? AND (held IS NULL OR held = 'released')${again ? ' AND settled IS NULL' : ''} AND message_id IN (SELECT value FROM json_each(?))`
     const args: [string, number, string] = [recipient, deliveredAt, idList(ids)]
-    const set = again ? `, attempt_at = NULL, last_error = 'given_again', due_at = ?` : ''
+    const set = again ? `, attempt_at = NULL, last_error = '${GIVEN_AGAIN}', due_at = ?` : ''
     return this.transaction(() => {
       const put = this.db.prepare<[string, number, string], { message_id: string }>(`SELECT message_id FROM mail_recipients WHERE ${where}`).all(...args).map((r) => r.message_id)
       this.db.prepare(`UPDATE mail_recipients SET delivered_at = NULL, read_at = NULL, turn_seq = NULL${set} WHERE ${where}`).run(...(again ? [again.dueAt, ...args] : args))
@@ -649,17 +652,12 @@ export class MailboxRecords {
 
   /**
    * Settles watched rows not settled yet: one recipient's, or every row of the message with `'all'` (no address). A row moved from an older build
-   * (`legacy`) is answered or marked done too: its recipient's act ends it as it would have there (§6.3). A task given again (`undeliver`'s
-   * `again`) that is settled before it went (a call waiting on it returned that turn's answer) does not go: it reads as delivered when settled.
-   * Returns how many
+   * (`legacy`) is answered or marked done too: its recipient's act ends it as it would have there (§6.3). Returns how many
    */
   settle(messageId: string, recipient: string, how: Settled, at: number, answerId?: string): number {
     return this.db
       .prepare(
-        `UPDATE mail_recipients SET settled = @how, settled_at = @at, answer_id = COALESCE(@answerId, answer_id),
-            delivered_at = CASE WHEN last_error = 'given_again' THEN COALESCE(delivered_at, @at) ELSE delivered_at END,
-            read_at = CASE WHEN last_error = 'given_again' THEN COALESCE(read_at, @at) ELSE read_at END,
-            last_error = CASE WHEN last_error = 'given_again' THEN NULL ELSE last_error END
+        `UPDATE mail_recipients SET settled = @how, settled_at = @at, answer_id = COALESCE(@answerId, answer_id)
           WHERE message_id = @messageId AND (@recipient = 'all' OR recipient = @recipient)
             AND (settled IS NULL OR (settled = 'legacy' AND @how IN ('answered', 'done')))
             AND EXISTS (SELECT 1 FROM mail m WHERE m.id = @messageId AND ${WATCHED})`,

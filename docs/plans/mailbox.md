@@ -1984,9 +1984,10 @@ releases it, and that turn is the mail's, as a wake's is (`MailTurns.openedFor`)
 A task a turn took in while it ran came after the work that turn was doing began, so that turn's end does not answer it (#2369): when the turn
 ends as a turn does (not stopped, and not cut to be continued), the task is undelivered and given again at rest (`MailboxRecords.undeliver`
 with `again`), its frame marked `givenAgain="1"` with a line saying that if the last turn already did it, the session says so in one line.
-A stopped turn keeps it, so its giver is told of the stop; a cut turn keeps it for the turn that continues. A call that waited on the task
-and returned the turn's answer settles it before it goes again, and a settled task is not given again. What went into a turn is known in
-memory only: after a host restart that turn's end answers or files it as its rows say.
+A stopped turn keeps it, so its giver is told of the stop; a cut turn keeps it for the turn that continues. One rule for every path: a task that
+joined a running turn is answered only by a turn it starts. A call that waited on it (start_agent, agent_session's send with a wait) reads the
+joined turn's end as still working (`answerRecorder` answers false, `DelegationWaits.awaitAgent`), and the turn the task starts answers it
+with its report. What went into a turn is known in memory only: after a host restart that turn's end answers or files it as its rows say.
 
 **At rest** is the one rule `agentLook` (protocol session-state.ts) calls `finished`: no turn, no card, none of its own background work
 (`workTasks`), and the turn did not stop short (an error, a limit, an interruption). Not the turn Centralu starts to compact a conversation:
