@@ -112,7 +112,7 @@ describe("a linked machine's mail news", () => {
     })
   })
 
-  // #2333 review: a session there opens its mail line's messages through the hub, which routes `mail.thread` by the chain's machine
+  // #2333: a session there opens its mail line's messages through the hub, which routes `mail.thread` by the chain's machine
   it("names the chains of a mail line in a session there as the machine's, live and stored alike; the message id is every host's", () => {
     const mail = [{ threadId: ROOT, messageId: `${OWN}.m_01JABCDEFGHJKMNPQRSTVWXY02` }]
     const line = { type: 'notice', sessionId: 'w1', level: 'info', from: 'Centralu', label: 'mail', text: '1 message from c1', mail }

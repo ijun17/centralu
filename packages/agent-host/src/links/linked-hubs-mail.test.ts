@@ -95,7 +95,7 @@ describe('a message to a parent on a hub, as the machine sends it (#2067 item 1)
     offer(hubs, { client: 7 })
     offer(hubs, { client: 8, ...LAPTOP })
     expect(await across(hubs, LAPTOP)('hello')).toEqual({ ok: true, messageId: 'msg-1', to: 'h1', address: '', computer: 'Laptop' })
-    // The id is this computer's: a second send of the same words after a lost answer goes under it (#2067 review)
+    // The id is this computer's: a second send of the same words after a lost answer goes under it (#2067)
     expect(calls).toEqual([{ client: 8, params: { sessionId: 'c1', name: 'child', text: 'hello', needsReply: false, id: 'hub-0000000f.m_01JX0000000000000000000000' } }])
     // Another hub being down does not stand in the way, nor is it named
     hubs.gone(7)

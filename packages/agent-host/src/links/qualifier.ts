@@ -4,20 +4,12 @@ import { isObj, type Obj } from '../json-value.js'
 import { PERSON, appAddress, inHubTerms, parseAddress } from '../mail/address.js'
 
 /**
- * Rewrites what one linked machine says into the hub's terms, and the hub's terms back into the
- * machine's (docs/plans/remote-hub.md §3.3).
- *
- * Outbound (`out`): every id the remote hands over gets the machine's prefix, so the UI holds ids
- * that can only mean that machine. Inbound (`strip`): an id the UI sends to the remote must carry
- * this machine's prefix, and loses it. An id of another machine (or of the hub) is refused rather
- * than passed on: a remote host has no use for a stranger's id, and a call that mixes two machines
- * (a consent from one machine's project to another's)
- * is something phase 1 does not do.
- *
- * Results are rewritten structurally, field by field, from the shapes in `@cc/protocol`. Anything
- * the rewrite does not name passes as it is: a newer remote's extra field reaches the UI, which
- * reads it tolerantly (#339). Values are read as `unknown` on purpose: the remote is another build,
- * and the UI parses the result again through the method's schema.
+ * Rewrites what one linked machine says into the hub's terms, and back (docs/plans/remote-hub.md §3.3). Outbound (`out`): every
+ * id the remote hands over gets the machine's prefix, so the UI holds ids that can only mean that machine. Inbound (`strip`): an id the UI sends must carry this machine's prefix
+ * and loses it; an id of another machine or of the hub is refused, as a remote host has no use for a stranger's id and a call
+ * that mixes two machines is not supported. Results are rewritten structurally from the shapes in `@cc/protocol`; what the
+ * rewrite does not name passes as it is, so a newer remote's extra field reaches the UI, which reads it tolerantly (#339).
+ * Values are `unknown` on purpose: the remote is another build, and the UI parses the result again through the method's schema.
  */
 
 /** A session of a linked machine as the hub's mail and Inbox name it (docs/plans/linked-mail.md §7a) */

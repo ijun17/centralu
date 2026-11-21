@@ -2,17 +2,12 @@ import { randomBytes } from 'node:crypto'
 import { MACHINE_ID_RE } from '@cc/protocol'
 
 /**
- * Machine-qualified ids (remote mode as linked hosts, docs/plans/remote-hub.md §3.3).
- *
- * A hub shows a linked machine's ids to its UI as `<machine>.<id>`. The protocol's id pattern
- * (`SESSION_ID_RE`) already allows `.` after the first character, every id this host generates is
- * a UUID or a counter without a dot, and every parser in the UI splits on `/` or `:`, so a
- * qualified id passes through the UI unchanged. A machine id never contains a dot, so the first
- * dot always ends it.
- *
- * Numbers cannot carry a prefix. The ones the UI hands back to the hub (approval rule ids) are
- * folded into negative numbers instead: no local row id is ever negative, so a UI that does not know
- * about machines can never delete a local rule by sending a remote one's number (`encodeNumber`).
+ * Machine-qualified ids (remote mode as linked hosts, docs/plans/remote-hub.md §3.3). A hub shows a linked machine's ids to its
+ * UI as `<machine>.<id>`: the protocol's id pattern (`SESSION_ID_RE`) allows `.` after the first character, every id this host
+ * generates is a UUID or a counter without a dot, and the UI's parsers split on `/` or `:`, so a qualified id passes through
+ * unchanged. A machine id never contains a dot, so the first dot always ends it. Numbers cannot carry a prefix: the ones the UI
+ * hands back (approval rule ids) are folded into negative numbers, and no local row id is ever negative, so a UI that does not
+ * know about machines can never delete a local rule by sending a remote one's number (`encodeNumber`).
  */
 
 export function isMachineId(value: string): boolean {

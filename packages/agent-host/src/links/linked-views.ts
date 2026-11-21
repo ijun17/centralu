@@ -4,12 +4,10 @@ import { MachineUnreachableError, type RpcHandler } from './router.js'
 import { rpcError } from '../rpc-error.js'
 
 /**
- * The views of linked machines, as the hub's ViewHost reads them (docs/plans/remote-hub.md §11).
- *
- * `call` is the router: `apps.viewDocument` with a qualified instance id goes to the machine the id names, stripped,
- * and comes back with the app's project qualified (`routes.ts`). An id whose prefix names no linked machine reaches the
- * hub's own handler, where it is never open, so a machine removed since the window got the id is "not open" rather
- * than another machine's view.
+ * The views of linked machines, as the hub's ViewHost reads them (docs/plans/remote-hub.md §11). `call` is the router:
+ * `apps.viewDocument` with a qualified instance id goes to the machine the id names, stripped, and comes back with the app's
+ * project qualified (`routes.ts`). An id whose prefix names no linked machine reaches the hub's own handler, where it is never
+ * open, so a machine removed since the window got the id is "not open" rather than another machine's view.
  */
 export function linkedViews(call: RpcHandler): RemoteViews {
   return {

@@ -94,12 +94,12 @@ export class LinkedMachine extends LinkedMachineConnection {
    * once too (owner, 2026-10-26, #1618: a machine always busy never updated), and stops no host it cannot ask what runs
    */
   update(opts: { when?: 'idle' | 'now'; unasked?: boolean } = {}): Promise<MachineInstallResult> {
-    // Every update nobody approved counts against the hub's version (#1508 review): the hub's own and an agent's card-less one alike
+    // Every update nobody approved counts against the hub's version (#1508): the hub's own and an agent's card-less one alike
     return opts.unasked === true ? this.unaskedRun(() => this.updateNow(opts)) : this.updateNow(opts)
   }
 
   private async updateNow(opts: { when?: 'idle' | 'now'; unasked?: boolean }): Promise<MachineInstallResult> {
-    // An update nobody approved stops no host it cannot ask what runs: found out before anything is installed (#1508 review)
+    // An update nobody approved stops no host it cannot ask what runs: found out before anything is installed (#1508)
     if (opts.unasked === true) await this.probeActivity()
     const pick = await this.versionToInstall()
     // Never down: a local build whose base is unpublished may be handed an older release than the remote runs. A dev
@@ -213,14 +213,13 @@ export class LinkedMachine extends LinkedMachineConnection {
   }
 
   /**
-   * An update that does not wait (#1618): the person's `when: 'now'`, and every update nobody approved (owner, 2026-10-26: the
-   * hub's own catch-up used to wait for the turns there, and for its terminals and project commands, and a machine always busy
-   * never updated). It reads what runs there once, for the answer's sentence, and the host is stopped: the turns running end,
-   * and terminals and project commands close. Which turns that stop ends the stopping host lists itself, as it stops
-   * (`host.stop { forUpdate }`, update.ts `stopRemoteHost`), and the host the update starts continues each of them once.
-   *
-   * An update nobody approved stops no host it cannot ask what runs (#1508): a reading that fails is tried again as
-   * `probeActivity` does, then the update fails before the hold, nothing switched. The person's `now` goes on unread
+   * An update that does not wait (#1618): the person's `when: 'now'`, and every update nobody approved (owner, 2026-10-26:
+   * waiting for the turns there, and for its terminals and project commands, would never update a machine that is always busy).
+   * It reads what runs there once, for the answer's sentence, and the host is stopped: the turns running end, and terminals and
+   * project commands close. Which turns that stop ends the stopping host lists itself, as it stops (`host.stop { forUpdate }`,
+   * update.ts `stopRemoteHost`), and the host the update starts continues each of them once. An update nobody approved stops no
+   * host it cannot ask what runs (#1508): a reading that fails is tried again as `probeActivity` does, then the update fails
+   * before the hold, nothing switched. The person's `now` goes on unread
    */
   private async stopAtOnce(unasked: boolean): Promise<string | null> {
     const a = unasked ? await this.probeActivity() : await this.activity()
@@ -238,7 +237,7 @@ export class LinkedMachine extends LinkedMachineConnection {
   }
 
   /**
-   * Before an update nobody approved installs anything (#1508 review), and again right before it stops the host (#1618): what
+   * Before an update nobody approved installs anything (#1508), and again right before it stops the host (#1618): what
    * runs there must be readable. A failed reading is tried again twice, a poll apart, as the wait does
    * (`ACTIVITY_UNREAD_RETRIES`); a host that cannot be asked at all is not
    */
@@ -278,7 +277,7 @@ export class LinkedMachine extends LinkedMachineConnection {
     const v = this.versions
     const hub = this.deps.hub.version
     if (!v || v.hub.version !== hub || isLocalBuildVersion(hub) || isLocalBuildVersion(v.remote.version)) return false
-    // Spent for this version: both tries failed. Nobody restarts it without a card (#1508 review)
+    // Spent for this version: both tries failed. Nobody restarts it without a card (#1508)
     const f = this.follow
     if (f?.version === hub && f.tries >= FOLLOW_TRIES) return false
     return v.older === 'remote'
@@ -318,7 +317,7 @@ export class LinkedMachine extends LinkedMachineConnection {
   }
 
   /**
-   * Runs an update nobody approved as one try for this hub's version (#1508 review): the hub's own catch-up and an agent's
+   * Runs an update nobody approved as one try for this hub's version (#1508): the hub's own catch-up and an agent's
    * card-less `machines.update` or `install_machine` alike, so two failures spend the version for both
    * (`followsHub`). A failure shows on the row and, with a try left, is tried once more `FOLLOW_RETRY_MS` later. A call refused
    * because something else runs there spends nothing
@@ -465,11 +464,10 @@ export class LinkedMachine extends LinkedMachineConnection {
   }
 
   /**
-   * The machine's own "Allow auto from a linked computer" (#1273 review): read (`host.hubAuto` there), or set when
+   * The machine's own "Allow auto from a linked computer" (#1273): read (`host.hubAuto` there), or set when
    * `allowed` is given (`host.setHubAuto`), as that machine answers it. Only over the link while it is up: nothing is
    * started or connected for it. `older`: that machine's Centralu predates the switch; `unreachable`: the link is not up,
-   * or went down during the call. Any other failure (a timeout, a refusal there) is thrown in its own words (#1273
-   * review), never passed off as the link being down
+   * or went down during the call. Any other failure (a timeout, a refusal there) is thrown in its own words (#1273), never passed off as the link being down
    */
   async hubAuto(allowed?: boolean): Promise<HubAuto | 'unreachable'> {
     const client = this.client

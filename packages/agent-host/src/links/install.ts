@@ -8,22 +8,15 @@ import { floorOf } from './node-floor.js'
 import { lastLine, remoteScript, type RemoteCommand, type RemoteRun, type RemoteSpec } from './tunnel.js'
 
 /**
- * The hub's installer for a linked machine (docs/plans/remote-hub.md §10.2, phase 3 step 3): over the
- * same ssh as the link, and with nothing on the remote but a shell, `tar` and a way to download.
- *
- *   0. preflight   a script per shell reports what the machine is (`preflightCommand`); the hub
- *                  decides here whether it can install there (`preflight`), in one sentence if not
- *   1. Node        a script per shell downloads the pinned Node for that platform from nodejs.org,
- *                  checks it against the SHA-256 this release pinned (`remote-runtime.json`), unpacks
- *                  it with the system's tar and prunes it to the binary and its licence
- *   2. Centralu    `remote-install.mjs`, sent from here and run on that Node: both npm tarballs (the
- *                  shim, and the host-only package or, for older versions, the platform package),
- *                  each checked against the integrity the hub read from signed registry metadata
- *                  (registry.ts), unpacked beside what is there, the managed launcher written once,
- *                  `current` and `previous` switched by rename, older versions removed
- *
- * The remote never trusts a value that travelled with the file it checks (plan §10.3). Every script
- * and value crosses the shells as base64 or as plain words, as tunnel.ts sends commands.
+ * The hub's installer for a linked machine (docs/plans/remote-hub.md §10.2): over the link's ssh, with nothing on the remote
+ * but a shell, `tar` and a way to download.
+ *   0. preflight   a script per shell reports what the machine is; the hub decides whether it can install there
+ *   1. Node        the pinned Node from nodejs.org, checked against the SHA-256 this release pinned (`remote-runtime.json`),
+ *                  unpacked with the system's tar and pruned to the binary and its licence
+ *   2. Centralu    `remote-install.mjs`, sent from here and run on that Node: both npm tarballs, each checked against the
+ *                  integrity the hub read from signed registry metadata (registry.ts), unpacked beside what is there
+ * The remote never trusts a value that travelled with the file it checks (plan §10.3). Scripts and values cross the shells as
+ * base64 or plain words, as in tunnel.ts.
  */
 
 /** `packaging/remote-runtime.json`, which the release copies beside the host's `main.mjs` */

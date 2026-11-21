@@ -306,7 +306,7 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     await expect(tunnel({ FAKE_SSH_UNREACHABLE: '1' }).open()).rejects.toThrow(/ssh could not reach box: .*timed out/)
   })
 
-  // #1405 review: the row said the Centralu there "may predate centralu serve", then the launcher's permission advice
+  // #1405: the row must not say the Centralu there "may predate centralu serve" beside the launcher's permission advice
   it("says the machine's serve.json cannot be read there as that alone, not as a Centralu too old to print the line", async () => {
     const said = await tunnel({ FAKE_SSH_DENIED: '1' }).open().then(() => '', (e: unknown) => (e instanceof Error ? e.message : ''))
     expect(said).toMatch(/serve\.json cannot be read by this user \(EACCES\)\. Give this user read and write access/)

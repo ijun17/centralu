@@ -8,21 +8,16 @@ import { qualify, splitQualified } from './machine-ids.js'
 import { RUN_STATUS_TOOL, TOOL_LIST_WAIT_MS } from '../sessions/app-call-bounds.js'
 
 /**
- * The calling session's side of a project's app on another machine (#1938, docs/plans/remote-hub.md §13.3): what the
- * app's host last listed for a session here, and the one call across the link. The session's apps, its approval and its
- * card stay in `Attachment` (session-apps.ts), which calls here only in place of the local runtime, so a local and a
- * remote call are one path.
- *
- *   - **Names.** An app there is known here by its project qualified with that host's id (`<host>.<project>`, as the hub
- *     names a machine's projects and a machine a hub's, links/machine-ids.ts), so a ref says by itself where it runs. A
- *     local project id never holds a dot.
- *   - **The last list only names.** It is kept per linked host and session, fetched again when the session lists or finds
- *     apps; an entry grants nothing, as the app's host decides again at every call (`LinkedAppCalls`).
- *   - **A call outlives the link's wait.** It is asked in waits of its own (`CHUNK_MS`), the same call id each time, so
- *     the link's timeout never cuts a long call, asking again within it is never a second run, and the run id is known
- *     early. A link lost during a call ends it as maybe done; it is never sent again by itself.
- *   - **Never a local copy.** A host that cannot be reached answers that it cannot, naming it, and nothing ran. For a
- *     session a hub started here, `givingHub` is the one rule for the copy its checkout carries (§13.5).
+ * The calling session's side of a project's app on another machine (#1938, docs/plans/remote-hub.md §13.3): what the app's host
+ * last listed for a session here, and the one call across the link. It is called from `Attachment` (session-apps.ts) in place
+ * of the local runtime, so a local and a remote call are one path.
+ *   - **Names.** An app there is known by its project qualified with that host's id (`<host>.<project>`, links/machine-ids.ts);
+ *     a local project id never holds a dot.
+ *   - **The last list only names.** An entry grants nothing: the app's host decides again at every call (`LinkedAppCalls`).
+ *   - **A call outlives the link's wait.** It is asked in waits of its own (`CHUNK_MS`) under the same call id, so the link's
+ *     timeout never cuts a long call and asking again is never a second run. A link lost during a call ends it as maybe done;
+ *     it is never sent again by itself.
+ *   - **Never a local copy.** An unreachable host answers that it cannot, naming it, and nothing ran. For a session a hub started here, `givingHub` (§13.5) is the one rule for the copy its checkout carries.
  */
 
 /** A linked host whose apps a session here may use */

@@ -6,21 +6,15 @@ import { raceTimeout } from '../timing.js'
 import { qualify } from './machine-ids.js'
 
 /**
- * The app's host answering a session of a linked host (#1938, docs/plans/remote-hub.md §13.3, §13.4): `host.apps` /
- * `host.appCall` / `host.appCancel` on a machine, from its hub, and `hub.apps` / `hub.appCall` / `hub.appCancel` on a hub,
- * from a machine. One answerer for both directions; what differs is who may reach what (`reach`), which each side decides.
- *
- *   - **The other side is the link's.** `from` is the host at the other end of the connection the call came on, never
- *     a field of the call, and the session is qualified by it (`<from>.<session>`), so a host names only its own sessions.
- *   - **Every call goes through `ExternalApps.call`**, as a call of a session here does: visibility, the run id, the run row
- *     (`callerKind: 'session'` with the qualified id), cancellation and the app's own gates happen once, there. The
- *     calling session's approval was its own host's (§13.4): this side decides only whether that session may reach this
- *     app, read again at every list and every call.
- *   - **A call outlives its wait.** The caller says how long it waits (`waitMs`); past it the answer is `running` with the
- *     run id, and the run carries on. The same call id asked again waits on the same run, so a resend after a dropped link
- *     never runs it twice. `run_status` is answered from the outcomes kept here, then from the app's run rows.
- *   - A call from elsewhere has no preset here, so the app's own agent and capability questions treat it as `safe` (the
- *     default of `appAgentPreset`), and a question the app raises stands on the app's row (`askCapability`).
+ * The app's host answering a session of a linked host (#1938, docs/plans/remote-hub.md §13.3, §13.4): `host.apps` / `host.appCall` /
+ * `host.appCancel` on a machine and `hub.*` on a hub. What differs per direction is who may reach what (`reach`), which each side decides.
+ *   - **The other side is the link's.** `from` is the host at the other end of the connection the call came on, never a field of
+ *     the call; the session is qualified by it (`<from>.<session>`), so a host names only its own sessions.
+ *   - **Every call goes through `ExternalApps.call`**: visibility, run id, run row, cancellation and the app's gates happen once,
+ *     there. The calling session's approval was its own host's (§13.4); this side decides only whether it may reach this app, read again at every list and call.
+ *   - **A call outlives its wait** (`waitMs`): past it the answer is `running` with the run id. The same call id asked again waits
+ *     on the same run, so a resend after a dropped link never runs it twice.
+ *   - A call from elsewhere has no preset here, so it counts as `safe` (`appAgentPreset`'s default).
  */
 
 /** The host at the other end of the link a call came on */
@@ -36,7 +30,7 @@ export type LinkedAppCallsDeps = {
 }
 
 const RUN_STATUSES = ['ok', 'error', 'cancelled', 'rejected', 'running'] as const
-/** The calls kept after they ended, per link, for `run_status` and a resend */
+/** The calls kept after they ended, per link, for `run_status` (answered from these outcomes, then from the app's run rows) and a resend */
 const KEPT_PER_LINK = 200
 
 type Open = { from: string; session: string; runId: string; started: number; outcome: Promise<AppCallOutcome>; done: AppCallOutcome | null; abort: AbortController }
