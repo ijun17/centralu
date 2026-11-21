@@ -359,6 +359,8 @@ describe('the merge queue resolves a conflict with main itself, or hands it to t
     })
     await until((x) => stateOf(x) === 'merged', 'the pushed head to land')
     expect(notices().filter((e) => e.kind === 'attention')).toEqual([])
+    // Accepted as its own push onto the author's checked head, not as a head with a status of its own
+    expect(queueOnDisk().items[0].prePrHead).toBe(tip)
   })
 
   it('hands a conflict in code to the author session, once, with the exact instruction, and pushes nothing', async () => {

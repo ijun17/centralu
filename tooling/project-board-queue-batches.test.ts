@@ -1536,6 +1536,7 @@ describe('the merge queue does by itself what it told a session to do by hand (#
       })
       await until((x) => stateOf(x) === 'merged', 'the restacked head to land')
       expect(events().filter((e) => e.kind === 'attention')).toEqual([])
+      expect(itemsOnDisk()[0].prePrHead).toBe(pushed)
     })
 
     it('hands it to its author as before when the pull request under it has not merged', async () => {
