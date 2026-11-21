@@ -621,7 +621,7 @@ export class MailAcross extends AcrossReceipts {
         return { ok: true, messageId: m?.id ?? 'notice', to: this.d.reach.labelOf(to), address: to }
       }
       if (p.notice && !this.d.records.sentToward(to, sideOf(from))) {
-        return { ok: false, why: 'not_allowed', text: `${oneLineText(this.nameOf(from), 200)} may send a notice only to a session that mailed it, and ${this.label(to, from)} did not, so nothing was written.` }
+        return { ok: false, why: 'not_allowed', text: `${oneLineText(this.nameOf(from, from), 200)} may send a notice only to a session that mailed it, and ${this.label(to, from)} did not, so nothing was written.` }
       }
       const sent = this.d.service.send(from, { to: [to], text: p.text, needsReply: p.notice ? false : (p.needsReply ?? true), ...(p.urgent && !p.notice ? { urgent: true } : {}), ...(p.replyTo && !p.notice ? { replyTo: p.replyTo } : {}), ...(p.id ? { id: p.id } : {}), ...(p.subject ? { subject: p.subject } : {}), ...(p.choices ? { choices: p.choices } : {}) })
       return { ok: true, messageId: sent.message.id, to: this.label(to, from), address: to }
@@ -643,11 +643,11 @@ export class MailAcross extends AcrossReceipts {
     }
   }
 
-  /** A session by its name, here or on the other side, as a refusal names it; an address that is no session, quoted */
-  private nameOf(address: string): string {
+  /** A session by its name, here or on the other side, as a refusal to `reader` names it; an address that is no session, quoted */
+  private nameOf(address: string, reader?: string): string {
     const r = this.route(address)
     if (!r) return JSON.stringify(oneLineText(address, 200))
-    return r.kind === 'here' ? this.label(address) : (this.foreignName(address)?.name ?? this.d.reach.shownId(address))
+    return r.kind === 'here' ? this.label(address, reader) : (this.foreignName(address)?.name ?? this.d.reach.shownId(address, reader))
   }
 
   // ── Finding ──

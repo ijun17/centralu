@@ -70,9 +70,10 @@ export function askFrame(callerProject: string, task: string, asker?: { name: st
 
 /**
  * A project ask_project may name: one of this computer's (`machine` null) or one on a linked machine (#700), whose `id`
- * is machine-qualified (`<machine id>.<project id>`) as everywhere the hub names a remote id.
+ * is machine-qualified (`<machine id>.<project id>`) as everywhere the hub names a remote id. A hub's goes by its label
+ * (`label`), which two hubs may share: `machineId` is the hub's id, which tells them apart
  */
-export type AskableProject = { id: string; name: string; machine: string | null; machineId: string | null }
+export type AskableProject = { id: string; name: string; machine: string | null; machineId: string | null; label?: string }
 
 /** How a project is told apart from one of the same name, in a refusal: `cc [m1.p-1] on Remote box` */
 export function projectChoice(p: AskableProject): string {
@@ -106,7 +107,7 @@ export function matchProjects(asked: string, projects: readonly AskableProject[]
       if (slash <= 0) return []
       const machine = wanted.slice(0, slash).trim().toLowerCase()
       const name = wanted.slice(slash + 1).trim()
-      const there = projects.filter((p) => p.machineId !== null && (p.machineId === machine || p.machine?.toLowerCase() === machine))
+      const there = projects.filter((p) => p.machineId !== null && (p.machineId === machine || p.label === machine || p.machine?.toLowerCase() === machine))
       return there.some((p) => p.name === name) ? there.filter((p) => p.name === name) : there.filter((p) => p.name.toLowerCase() === name.toLowerCase())
     },
     () => projects.filter((p) => p.name.toLowerCase() === wanted.toLowerCase()),

@@ -175,6 +175,18 @@ describe("a machine session's ask_project of a hub's project (#1948 step 6)", { 
     expect(hub.store.mailbox.recipient(report!.id, at.hub('m1.w1'))?.deliveredAt).not.toBeNull()
   })
 
+  it('refuses a project two hubs that share a label both have, naming both, and names a hub that is away by its id as older builds printed it', async () => {
+    const machine = await machineHost({ mail: 'delivered' })
+    const web = (hubId: string, hub: string) => ({ id: `studio.p-${hubId}`, projectId: `p-${hubId}`, name: 'web', hub, hubId, label: 'studio' })
+    const ask = vi.fn(async (): Promise<HubAskResult> => ({ ok: false, error: 'asked' }))
+    machine.mgr.useLinkedHubs({ projects: async () => ({ projects: [web('hub-0000000b', 'Studio'), web('hub-0000000c', 'Studio 2')], away: [{ hubId: 'hub-0000000d', hub: 'Desk', label: 'desk', why: 'not reachable right now' }] }), ask })
+    for (const project of ['web', 'studio/web']) {
+      expect(await machine.ask({ project, task: 'review it' }), project).toMatchObject({ ok: false, error: expect.stringMatching(/^More than one project is called "(studio\/)?web": web \[studio\.p-hub-0000000b\] on Studio; web \[studio\.p-hub-0000000c\] on Studio 2\./) })
+    }
+    expect(await machine.ask({ project: 'hub-0000000d/web', task: 'review it' })).toMatchObject({ ok: false, error: expect.stringContaining('Desk is not reachable right now') })
+    expect(ask).not.toHaveBeenCalled()
+  })
+
   it('of a hub that says no task id (an older build), keeps nothing, and asks that hub again for the answer', async () => {
     const machine = await machineHost({ mail: 'delivered' })
     const answers: HubAskResult[] = [

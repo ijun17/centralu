@@ -17,8 +17,8 @@ export type RefComputers = {
   machine(id: string): boolean
   /** The prefix this hub's own sessions go under on its machines; null on a host that is no hub */
   label(): string | null
-  /** `you`: this machine's id there, under which that hub names this machine's sessions */
-  hubs(): readonly { id: string; label: string; name: string; you: string | null }[]
+  /** `you`: this machine's id there, under which that hub names this machine's sessions; `offered`: the label it offered, which its other machines know it by */
+  hubs(): readonly { id: string; label: string; name: string; you: string | null; offered?: string | null }[]
   /** The sessions of this hub's machines named `name` exactly, from its mirror: no computer is asked */
   mirrored(name: string): FoundEntry[]
 }
@@ -141,7 +141,8 @@ export class SessionRefs {
   /**
    * How the host `reader` is on names sessions. A machine this hub links knows this hub by the label it offers, and its other machines under
    * that label, which reads back there whether one hub links it or several; a hub that links this machine names its own sessions and its
-   * machines' by its ids, this host's as its machine. Any other reader, or none, reads as this host does
+   * machines' by its ids, this host's as its machine, and another of its machines does as this one does, by the label offered. Any other
+   * reader, or none, reads as this host does
    */
   private viewOf(reader: string | undefined): View {
     const c = this.d.computers()
@@ -153,7 +154,9 @@ export class SessionRefs {
       const label = c.label()
       if (r.host === this.d.hostId && dot > 0 && label && c.machine(machine)) return { here: null, hubs: [{ id: r.host, label, you: machine }], bare: () => false, of: (a) => a }
       const hub = hubs.find((h) => h.id === r.host)
-      if (hub) return { here: hub.id, hubs: [], bare: () => false, of: (a) => inHubTerms(a, hub.id, hub.you ? { host: this.d.hostId, id: hub.you } : undefined) }
+      const of = (a: string) => (hub ? inHubTerms(a, hub.id, hub.you ? { host: this.d.hostId, id: hub.you } : undefined) : a)
+      if (hub && dot > 0 && machine !== hub.you && hub.offered) return { here: null, hubs: [{ id: hub.id, label: hub.offered, you: machine }], bare: () => false, of }
+      if (hub) return { here: hub.id, hubs: [], bare: () => false, of }
     }
     return { here: this.d.hostId, hubs, bare: (m) => hubs.length === 1 && !c.machine(m), of: (a) => a }
   }

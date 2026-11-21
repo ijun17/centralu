@@ -9,7 +9,7 @@ import { frameField, liveBackgroundTasks } from '@cc/protocol'
 import type { DelegationFlow, DelegationHost } from './delegation-flow.js'
 import { agentDepthRefusal, depthOf } from './agent-depth.js'
 import { isOrdinary } from './tool-profiles.js'
-import { sessionAddress } from '../mail/address.js'
+import { parseAddress, sessionAddress } from '../mail/address.js'
 import { heldLine } from '../mail/across-core.js'
 import { linkedWords } from './remote-agents.js'
 import { unfinished } from '../mail/delegation.js'
@@ -135,10 +135,10 @@ export class AskProjectFlow {
     const askableOf = (): AskableProject[] => [
       ...projects.map((p) => ({ id: p.id, name: p.name, machine: null, machineId: null })),
       ...there.projects.map((p) => ({ id: p.id, name: p.name, machine: p.machine, machineId: p.machineId })),
-      ...fromHubs.projects.map((p) => ({ id: p.id, name: p.name, machine: p.hub, machineId: p.label })),
+      ...fromHubs.projects.map((p) => ({ id: p.id, name: p.name, machine: p.hub, machineId: p.hubId, label: p.label })),
     ]
     // An older build printed a hub's projects under the hub's id (`<hub id>.<id>`, `<hub id>/<name>`): read under its label
-    const older = fromHubs.projects.find((p) => wanted.startsWith(`${p.hubId}.`) || wanted.startsWith(`${p.hubId}/`))
+    const older = [...fromHubs.projects, ...fromHubs.away].find((p) => wanted.startsWith(`${p.hubId}.`) || wanted.startsWith(`${p.hubId}/`))
     const sought = older ? `${older.label}${wanted.slice(older.hubId.length)}` : wanted
     let found = matchProjects(sought, askableOf())
     // Nowhere (#1547): the mirror of a machine that is down may lack a project made since, so those are tried now, once, bounded
@@ -372,10 +372,11 @@ export class AskProjectFlow {
     // Its session by its id there, or as this host prints it (an older build printed the hub's id in front)
     const given = opts.session?.trim()
     const session = [prefix, `${target.hubId}.`].reduce((id, p) => (id?.startsWith(p) ? id.slice(p.length) : id), given)
-    const kept = opts.task ? [] : (this.host.linkedTasks?.asks(callerId) ?? []).filter((a) => a.sessionId.startsWith(prefix) && (!session || a.sessionId === `${prefix}${session}`))
+    const onHub = (a: { to: string }) => { const p = parseAddress(a.to); return p?.kind === 'session' && p.host === target.hubId }
+    const kept = opts.task ? [] : (this.host.linkedTasks?.asks(callerId) ?? []).filter((a) => onHub(a) && (!session || a.to === sessionAddress(target.hubId, session)))
     const [k] = kept
     if (k && kept.length === 1) {
-      return this.awaitAsk(callerId, { taskId: k.taskId, sessionId: k.sessionId, child: sessionAddress(target.hubId, k.sessionId.slice(prefix.length)), sessionName: k.name, project }, null, signal)
+      return this.awaitAsk(callerId, { taskId: k.taskId, sessionId: k.sessionId, child: k.to, sessionName: k.name, project }, null, signal)
     }
     const r = await hubs.ask(
       target.hubId,

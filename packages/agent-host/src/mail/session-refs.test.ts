@@ -8,7 +8,7 @@ const HOST = 'hub-0000000a'
 const here = (id: string, name: string): HereSession => ({ id, name, project: null, state: 'idle' })
 const entry = (address: string, name: string): FoundEntry => ({ address, name, project: null, machine: 'Remote box', role: 'session', state: 'idle', busy: false, at: 1 })
 
-function refs(o: { hostId?: string; sessions?: HereSession[]; machines?: string[]; label?: string; hubs?: { id: string; label: string; name: string; you?: string }[]; mirror?: FoundEntry[]; assistant?: string | null } = {}) {
+function refs(o: { hostId?: string; sessions?: HereSession[]; machines?: string[]; label?: string; hubs?: { id: string; label: string; name: string; you?: string; offered?: string }[]; mirror?: FoundEntry[]; assistant?: string | null } = {}) {
   const computers: RefComputers = {
     machine: (id) => (o.machines ?? []).includes(id),
     label: () => o.label ?? null,
@@ -169,6 +169,15 @@ describe('every id printed reads back as the session it names (`shown`, then `re
     }
     // And the forms older builds printed, under the hub's id
     expect([`${HOST}.h1`, `${HOST}.m2.x`].map((t) => machine.ref('a', t))).toEqual([{ address: `session:${HOST}/h1` }, { address: `session:${HOST}/m2.x` }])
+  })
+
+  it("written on a machine for a session on another machine of its hub: in that machine's terms, under the label the hub offered", () => {
+    const local = refs({ hostId: M, hubs: [{ ...studio, label: 'studio-2', offered: 'studio' }] })
+    const reader = `session:${HOST}/m2.c1`
+    const printed = [`session:${M}/w1`, `session:${HOST}/m2.b`, `session:${HOST}/h1`].map((a) => local.shown(a, reader))
+    expect(printed).toEqual(['studio.m1.w1', 'b', 'studio.h1'])
+    const sibling = refs({ hostId: 'hub-0000000e', hubs: [{ ...studio, you: 'm2' }, { id: 'hub-0000000c', label: 'desk', name: 'Desk', you: 'm2' }] })
+    expect(printed.map((p) => sibling.ref('a', p))).toEqual([{ address: `session:${HOST}/m1.w1` }, { word: 'b', here: [here('b', 'beta')] }, { address: `session:${HOST}/h1` }])
   })
 
   it('on a host that is a machine of one hub and a hub of its own machines: no id names the other side of either', () => {
