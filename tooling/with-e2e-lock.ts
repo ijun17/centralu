@@ -22,7 +22,7 @@
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { relative, resolve } from 'node:path'
-import { AFFECTED, affectedEngines, changedFiles, configOf, configReached, engineOutput, listedSpecs, mergeBase, reachesScreen, runAffected, specFilter, specsReaching } from './e2e-affected.js'
+import { AFFECTED, changedFiles, configOf, configReached, engineOutput, mergeBase, reachesScreen, readListing, runAffected, specFilter, specsReaching, type Engine, type Listing } from './e2e-affected.js'
 import { acquireLock, passesSignalOn, runsInTurn, signalExit, withoutSeparator, type Held } from './e2e-lock.js'
 
 const [program, ...rest] = process.argv.slice(2)
@@ -97,17 +97,20 @@ function runOnce(more: string[] = [], env: Record<string, string> = {}): Promise
   })
 }
 
-/** The spec files Playwright lists in `engine` for the same arguments (JSON): it loads the config and the specs and starts nothing. */
-function listing(engine: string): Promise<{ specs: string[] } | { why: string }> {
+/**
+ * What Playwright lists for the same arguments (JSON) in `engine`, or as the command is run when null: it loads the config
+ * and the specs and starts nothing.
+ */
+function listing(engine: Engine | null): Promise<Listing | { why: string }> {
   return new Promise((resolve) => {
-    const list = spawn(process.execPath, [...argv, '--list', '--reporter=json'], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, E2E_BROWSER: engine } })
+    const list = spawn(process.execPath, [...argv, '--list', '--reporter=json'], { stdio: ['ignore', 'pipe', 'pipe'], env: engine ? { ...process.env, E2E_BROWSER: engine } : process.env })
     let out = ''
     let err = ''
     list.stdout.on('data', (d: Buffer) => (out += d.toString()))
     list.stderr.on('data', (d: Buffer) => (err += d.toString()))
     list.on('error', (e) => resolve({ why: e.message }))
     list.on('close', () => {
-      const listed = listedSpecs(out)
+      const listed = readListing(out)
       resolve('why' in listed && err.trim() ? { why: `${listed.why}
 ${err.trim()}` } : listed)
     })
@@ -121,7 +124,6 @@ const code = base
       const changedPaths = changed.map((f) => resolve(root, f))
       return runAffected({
         base,
-        engines: affectedEngines(),
         config: () => configReached(resolve(root, configOf(commandArgs)), changedPaths, root).map((f) => relative(root, f)),
         list: listing,
         pick: (specs) => specsReaching(specs, changedPaths, root),

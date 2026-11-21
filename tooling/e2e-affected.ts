@@ -1,6 +1,6 @@
 /**
- * `pnpm e2e --affected` (#2373): the UI scenarios a branch changed, in the engines `pnpm e2e` runs in (affectedEngines),
- * one after the other under one e2e lock (tooling/with-e2e-lock.ts). A spec is affected when it, or a file it imports
+ * `pnpm e2e --affected` (#2373): the UI scenarios a branch changed, in the engines the config runs in (its
+ * `metadata.e2eBrowser`, read from Playwright's listing: readListing), one after the other under one e2e lock (tooling/with-e2e-lock.ts). A spec is affected when it, or a file it imports
  * through the repository's own files at any depth, differs from where the branch left main, uncommitted and untracked
  * files included (specsReaching); every spec is when the change reaches the config or a file it names (configReached).
  * Not followed, as they name no file TypeScript resolves: a file read without an import (a JSON fixture read from disk),
@@ -17,22 +17,11 @@ import { readFileSync, statSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
-import { e2eEngine } from '../e2e/engine.js'
 
 /** The flag `pnpm e2e` takes for this; Playwright never sees it. */
 export const AFFECTED = '--affected'
 
 export type Engine = 'chromium' | 'webkit'
-
-/**
- * The engines the affected specs run in, one after the other: the one `pnpm e2e` runs in (e2e/engine.ts: the one
- * `E2E_BROWSER` names, else Chromium alone on Windows, where Playwright's WebKit cannot drag), or both where that is the
- * mixed run, since CI runs every spec in each (build.yml).
- */
-export function affectedEngines(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): Engine[] {
-  const one = e2eEngine(env, platform)
-  return one ? [one] : ['chromium', 'webkit']
-}
 
 /** Where the branch left main, or null when main is not in this checkout. */
 export function mergeBase(cwd = process.cwd(), main = 'origin/main'): string | null {
@@ -68,11 +57,16 @@ export function configOf(args: string[]): string {
   return config
 }
 
+/** What a listing says: its spec files, and the engines a run of the config is in. */
+export type Listing = { specs: string[]; engines: Engine[] }
+
 /**
- * The spec files (absolute) of Playwright's `--list --reporter=json`: each top-level suite is one file, named relative to
- * the config's `rootDir`. Answers why not when the listing is not that, or names errors (a spec that does not load).
+ * Playwright's `--list --reporter=json`. The specs (absolute): each top-level suite is one file, named relative to the
+ * config's `rootDir`. The engines: the config's own `metadata.e2eBrowser` (an engine, or `mixed`: Chromium with the twins
+ * in WebKit, which CI runs as every spec in each), since the listing's projects do not carry their browserName. Answers
+ * why not when the listing is not that, or names errors (a spec that does not load).
  */
-export function listedSpecs(json: string): { specs: string[] } | { why: string } {
+export function readListing(json: string): Listing | { why: string } {
   let listing: unknown
   try {
     listing = JSON.parse(json)
@@ -83,12 +77,17 @@ export function listedSpecs(json: string): { specs: string[] } | { why: string }
   const errors = 'errors' in listing && Array.isArray(listing.errors) ? listing.errors : []
   const messages = errors.map((e: unknown) => (typeof e === 'object' && e !== null && 'message' in e && typeof e.message === 'string' ? e.message.split('\n')[0] : 'an error'))
   if (messages.length) return { why: messages.join('; ') }
-  const rootDir = 'config' in listing && typeof listing.config === 'object' && listing.config !== null && 'rootDir' in listing.config ? listing.config.rootDir : null
+  const config = 'config' in listing && typeof listing.config === 'object' && listing.config !== null ? listing.config : {}
+  const rootDir = 'rootDir' in config ? config.rootDir : null
   const suites = 'suites' in listing ? listing.suites : null
   if (typeof rootDir !== 'string' || !Array.isArray(suites)) return { why: 'the listing names no rootDir or suites' }
   const files = suites.map((s: unknown) => (typeof s === 'object' && s !== null && 'file' in s && typeof s.file === 'string' ? s.file : null))
   if (files.includes(null)) return { why: 'a suite of the listing names no file' }
-  return { specs: [...new Set(files.filter((f) => f !== null).map((f) => resolve(rootDir, f)))] }
+  const metadata = 'metadata' in config && typeof config.metadata === 'object' && config.metadata !== null ? config.metadata : {}
+  const named = 'e2eBrowser' in metadata ? metadata.e2eBrowser : undefined
+  const engines: Engine[] | null = named === 'mixed' ? ['chromium', 'webkit'] : named === 'chromium' || named === 'webkit' ? [named] : null
+  if (!engines) return { why: 'the config names no engine (metadata.e2eBrowser: chromium, webkit or mixed)' }
+  return { specs: [...new Set(files.filter((f) => f !== null).map((f) => resolve(rootDir, f)))], engines }
 }
 
 /** The repository's compiler options (tsconfig.json at `root`), so an import resolves as tsc resolves it, `paths` included. */
@@ -153,7 +152,9 @@ function reaching(starts: string[], changed: string[], root: string, follow: (sp
 /**
  * The files of the Playwright config `config` (absolute) that a change in `changed` reaches (`root` the repository's): the
  * config and the files it imports, and each file it names by a relative path in a string (its setup and teardown, its
- * reporters, a web server's script in its command) with the files that one imports by a relative path. Every spec runs
+ * reporters, a web server's script in its command) with the files that one imports by a relative path. A word that does
+ * not start with `./` or `../` is not taken for a path: a path the config builds (`join(dirname(...), 'x.ts')`), or one
+ * quoted inside a command (`node '../x.mjs'`). Every spec runs
  * through them, so a change to one reaches every spec. Read from the config's own source, so a file it starts naming
  * counts at once. A named file's imports of workspace packages are not followed: a spec that uses that code imports it
  * itself (the reporter's error text helper would otherwise make every protocol change a run of every spec). A config that
@@ -216,38 +217,44 @@ export function reachesScreen(files: string[], cwd = process.cwd()): boolean {
 }
 
 /**
- * One `--affected` run under the lock. When the change reaches the config (`config`: the config's files it reaches, as shown),
- * every spec, in each engine in turn. Otherwise each engine's specs are listed first (which starts no browser and no
- * server) and the affected ones picked (`pick`); nothing more when no engine has one; then each engine with any, in turn,
- * given its specs (`run` given null: every spec). `stopCode` is the exit code a signal that reached the runner asks for,
- * or null: once there is one, nothing further starts. Answers the exit code: of several runs, the first failing one's; 1
- * when a listing fails.
+ * One `--affected` run under the lock. The command is listed first as it is run (`list` given null; a listing starts no
+ * browser and no server), which names the engines its config is in. When the change reaches the config (`config`: the
+ * config's files it reaches, as shown), every spec, in each engine in turn. Otherwise each engine's specs are the ones
+ * listed for it (the first listing's, when there is one engine) and the affected ones picked (`pick`); nothing more when
+ * no engine has one; then each engine with any, in turn, given its specs (`run` given null: every spec). `stopCode` is
+ * the exit code a signal that reached the runner asks for, or null: once there is one, nothing further starts. Answers the
+ * exit code: of several runs, the first failing one's; 1 when a listing fails.
  */
 export async function runAffected(o: {
   base: string
-  engines: Engine[]
   config: () => string[]
-  list: (engine: Engine) => Promise<{ specs: string[] } | { why: string }>
+  list: (engine: Engine | null) => Promise<Listing | { why: string }>
   pick: (specs: string[]) => string[]
   run: (engine: Engine, specs: string[] | null) => Promise<number>
   stopCode: () => number | null
   screen: () => boolean
   say: (line: string) => void
 }): Promise<number> {
-  const config = o.config()
-  if (config.length) {
-    o.say(`e2e: the change reaches ${config.join(', ')}: the config, or a file it imports or names (setup, teardown, a reporter, a web server), which every spec runs through.`)
-    return runEach(o.engines.map((engine) => [engine, null]), o)
-  }
-  const picked: [Engine, string[]][] = []
-  for (const engine of o.engines) {
+  /** The listing of `engine` (null: as the command is run), or the exit code that ends the run */
+  const list = async (engine: Engine | null): Promise<Listing | number> => {
     const listed = await o.list(engine)
     const stopped = o.stopCode()
     if (stopped !== null) return stopped
-    if ('why' in listed) {
-      o.say(`e2e: the specs in ${engine} could not be listed: ${listed.why}`)
-      return 1
-    }
+    if (!('why' in listed)) return listed
+    o.say(`e2e: the specs${engine ? ` in ${engine}` : ''} could not be listed: ${listed.why}`)
+    return 1
+  }
+  const first = await list(null)
+  if (typeof first === 'number') return first
+  const config = o.config()
+  if (config.length) {
+    o.say(`e2e: the change reaches ${config.join(', ')}: the config, or a file it imports or names (setup, teardown, a reporter, a web server), which every spec runs through.`)
+    return runEach(first.engines.map((engine) => [engine, null]), o)
+  }
+  const picked: [Engine, string[]][] = []
+  for (const engine of first.engines) {
+    const listed = first.engines.length === 1 ? first : await list(engine)
+    if (typeof listed === 'number') return listed
     picked.push([engine, o.pick(listed.specs)])
   }
   if (picked.every(([, specs]) => !specs.length)) {
