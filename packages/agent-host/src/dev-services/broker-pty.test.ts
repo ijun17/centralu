@@ -145,7 +145,7 @@ describe('a pty through the broker', () => {
 })
 
 /*
- * Review of #1685: what the host opens for the person (Antigravity's sign-in page) is started by the broker, outside the
+ * #1685: what the host opens for the person (Antigravity's sign-in page) is started by the broker, outside the
  * job, so the browser outlives a Stop and the host. Only an https address is sent; a broker that is gone opens it in the host
  */
 describe('an address opened for the person through the broker', () => {
