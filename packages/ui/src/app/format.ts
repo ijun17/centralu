@@ -28,7 +28,7 @@ export const formatBytes = (n: number): string => scaled(n, 1024, BYTE_UNITS)
 /** A count in a few characters, for tokens: 812, 1.5k, 12.4k, 540k, 1.9M */
 export const formatCount = (n: number): string => scaled(n, 1000, COUNT_UNITS)
 
-/** A count of changed files, "10k+" when the host stopped counting at its cap (`more`, #850 review) */
+/** A count of changed files, "10k+" when the host stopped counting at its cap (`more`, #850) */
 export const formatChangedCount = (n: number, more?: boolean): string =>
   more ? `${formatCount(n)}+` : String(n)
 

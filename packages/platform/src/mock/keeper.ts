@@ -34,7 +34,7 @@ export class KeeperMock {
   private busyWatchers = new Set<(busy: boolean | null) => void>()
 
   readonly relaunch: RelaunchPort = {
-    // The shell reads the version from the bundle on disk an install just replaced (#665 review)
+    // The shell reads the version from the bundle on disk an install just replaced (#665)
     check: async () => {
       const c = { ...this.relaunchCheck }
       const installed = this.updatesMock.updateStatus.phase === 'restart_required' ? this.updatesMock.updateStatus.latest : null

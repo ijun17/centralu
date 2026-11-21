@@ -1,6 +1,6 @@
 /**
- * One that throws goes to `onError` and the rest still get the value: nothing would hand it over again. `emit` walks a
- * snapshot, so adding or removing one mid-emit neither skips nor repeats another.
+ * Listeners of one value: one that throws goes to `onError` and the rest still get the value, as nothing would hand it
+ * over again. `emit` walks a snapshot, so adding or removing one mid-emit neither skips nor repeats another.
  */
 export type Listeners<T> = {
   add(listener: (value: T) => void): () => void

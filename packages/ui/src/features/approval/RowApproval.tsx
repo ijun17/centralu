@@ -234,7 +234,7 @@ export function rowView(d: ApprovalDetail, root: string | null, otherPending = 0
 }
 
 /**
- * A path as a row shows it (#683 review): the file's name first, then its folder relative to the session's folder.
+ * A path as a row shows it: the file's name first, then its folder relative to the session's folder.
  * Both are normalized first, segment by segment (`.`, `..`, repeated separators, either slash, a Windows drive), and
  * compared whole segments at a time: `/proj/src/../../../../etc/zshrc` is `/etc/zshrc`, outside `/proj`, and a
  * prefix of the text alone (`/proj-2` against `/proj`) is not inside. A path outside that folder, one that climbs out

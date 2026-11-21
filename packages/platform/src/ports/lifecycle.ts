@@ -34,7 +34,7 @@ export interface DiagnosticsPort {
 }
 
 /**
- * Leftover processes from the app's folders (the person's request, 2026-09-07). A dev server an agent started with bash
+ * Leftover processes from the app's folders. A dev server an agent started with bash
  * is tied to neither the app's process nor its process group, so shutdown cannot catch it (measured). It is shown, not
  * killed: the person may have started it by hand.
  */

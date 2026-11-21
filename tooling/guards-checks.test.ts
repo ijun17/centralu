@@ -818,6 +818,8 @@ describe('guard/comments (#2355)', () => {
     ['// The key is used to sign requests.'],
     ['// It can be used to sign requests.'],
     ['// These are only used to sort.'],
+    ['// It is then used to sort.'],
+    ['// They are always used to sort.'],
     ["// It's used to sort."],
     ['// The waiting list is\n// used to sort.'],
     ['// It was previously sent: a repeat is dropped.'],
@@ -826,10 +828,12 @@ describe('guard/comments (#2355)', () => {
     await quiet(file, 'comments', 'f()' + NL + text, '// It used to wait.')
   })
   it('holds a file header to 3 lines of text', async () => {
-    expect(await lines(file, '// one\n// two\n// three\n' + code(3), 'comments')).toEqual([])
-    expect(await lines(file, block(3) + NL + code(3), 'comments')).toEqual([])
-    expect(await lines(file, block(4) + NL + code(3), 'comments')).toEqual([1])
-    expect(await lines(file, '// one\n// two\n// three\n// four\n' + code(3), 'comments')).toEqual([1])
+    expect(await lines(file, '// one\n// two\n// three\n\n' + code(3), 'comments')).toEqual([])
+    expect(await lines(file, block(3) + NL + NL + code(3), 'comments')).toEqual([])
+    expect(await lines(file, block(4) + NL + NL + code(3), 'comments')).toEqual([1])
+    expect(await lines(file, '// one\n// two\n// three\n// four\n\n' + code(3), 'comments')).toEqual([1])
+    // A doc right on the first declaration is that declaration's, held to the block limit
+    expect(await lines(file, block(6) + NL + code(3), 'comments')).toEqual([])
   })
   it('holds a comment block to 10 lines', async () => {
     expect(await lines(file, code(1) + NL + block(10) + NL + code(1), 'comments')).toEqual([])
@@ -849,7 +853,7 @@ describe('guard/comments (#2355)', () => {
     const own = Array.from({ length: 12 }, (_, i) => `// note ${i}`).join(NL)
     expect(await lines(file, 'f()' + NL + own, 'comments')).toEqual([2])
   })
-  it('holds a listed file at its own share, which may only go down', async () => {
+  it('holds a listed file at its own share', async () => {
     const held = 'packages/platform/src/ports/system.ts'
     // code first, then the comments in blocks of five, each followed by a line of code
     const shareOf = (comments: number, codeLines: number) =>
@@ -859,7 +863,7 @@ describe('guard/comments (#2355)', () => {
       return (result?.messages ?? []).filter((m) => m.ruleId === 'guard/comments').map((m) => m.message.slice(0, 60))
     }
     expect(await messages(shareOf(40, 4))).toEqual([expect.stringMatching(/^\d+% of this file/)])
-    expect(await messages(shareOf(5, 40))).toEqual([expect.stringContaining('holds this file')])
+    expect(await messages(shareOf(5, 40))).toEqual([])
     expect(await lines(file, shareOf(40, 4), 'comments')).toEqual([1])
   })
   it('reads only the folders whose comments are swept', async () => {

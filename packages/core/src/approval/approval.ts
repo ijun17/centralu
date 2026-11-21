@@ -96,7 +96,7 @@ export function projectCreateQuestion(d: Extract<ApprovalDetail, { kind: 'projec
   return `Make the empty folder ${where} and add it as the project ${d.name}?`
 }
 
-/** Printed under the command and in a row's tooltip (#683 review) */
+/** Printed under the command and in a row's tooltip (#683) */
 export function approvalNotes(d: ApprovalDetail): string[] {
   if (d.kind === 'command') {
     return [

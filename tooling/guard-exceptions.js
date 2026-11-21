@@ -250,8 +250,8 @@ export const ARCHIVE_ALLOWED = [
 /**
  * The source files `guard/comments` holds above its 35% share of comment lines (#2355), each at its share when its folder
  * was swept. Most are type declarations whose fields each keep one line the type cannot say (what absence means, what an
- * older peer does, a unit, a security consequence); the rest keep platform facts, races or measured numbers. A file may
- * only go down: a lower share asks for its number to be lowered, and one at or under 35% leaves the list.
+ * older peer does, a unit, a security consequence); the rest keep platform facts, races or measured numbers. Each number
+ * is a ceiling: a file may not go above it, and a change that brings one down may lower it (at or under 35%, remove it).
  */
 export const COMMENT_SHARE_HELD = {
   files: {

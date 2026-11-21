@@ -298,7 +298,7 @@ function Body() {
 const EDGE_PADDING = 16
 
 /**
- * The dashboard: one count (user request, 2026-09-09; FR-12 asks for two), as each row of the list says its kind.
+ * The dashboard: one count (FR-12 asks for two; the person chose one), as each row of the list says its kind.
  * Brightness carries the urgency: ink-signal for an approval or an error, grey for waiting for input.
  */
 function TopBar() {

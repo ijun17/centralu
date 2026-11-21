@@ -1,7 +1,8 @@
 type Waiting<T> = { resolve: (v: T) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
 
 /**
- * A timer goes with its request however it settles, or it keeps a closure alive for the full bound. Timers are unref'd:
+ * Requests waiting for an answer, by id. A timer goes with its request however it settles, or it keeps a closure alive
+ * for the full bound. Timers are unref'd:
  * a wait never keeps the host running.
  */
 export class PendingRequests<T = unknown> {

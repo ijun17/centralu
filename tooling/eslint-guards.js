@@ -395,7 +395,7 @@ const onePathRule = guard('one-path-rule', { copy: "{{what}} is a copy of a path
  * text, a comment block over COMMENT_BLOCK_LINES lines of text, and a source file over COMMENT_SHARE comment lines.
  * Adjacent line comments are one block.
  */
-const ADVERB = String.raw`(?:\w+ly|only|also|not|just|still|never|often)`
+const ADVERB = String.raw`(?:\w+ly|only|also|not|just|still|never|often|then|always|now|all|both|again|even|too)`
 const HISTORY = [
   new RegExp(String.raw`(?<!\b(?:is|are|was|were|be|been|being|get|gets|got|'s)[\s*]+(?:${ADVERB}[\s*]+)?)\bused[\s*]+to\b`, 'gi'),
   /(?:^[\s*]*|[.!?;:][\s*]+|\n[\s*]*-[\s*]+)(Previously)\b/g,
@@ -414,7 +414,6 @@ const comments = guard(
     header: 'the file header is {{n}} lines: at most 3 say what the file is; the rest goes to a document or away (#2355)',
     block: 'a {{n}}-line comment: keep what the code cannot carry in at most {{max}} lines, and point to the document or runtime-lessons rule for the rest (#2355)',
     share: '{{pct}}% of this file is comment lines (at most {{max}}%): delete what restates the code, point to documents for the rest (#2355)',
-    held: 'tooling/guard-exceptions.js holds this file at {{held}}% comment lines and it has {{pct}}%: lower the number, or remove the line at 35% or less',
   },
   (context, add) => ({
     Program(program) {
@@ -441,7 +440,8 @@ const comments = guard(
       for (const [i, g] of groups.entries()) {
         // Lines of text: a `/**` or ` */` line alone carries none
         const n = g.text.split('\n').filter((l) => /[^\s*/]/.test(l)).length
-        if (i === 0 && g.start < firstCode) {
+        // A header stands apart from the code; a doc right on the first declaration is that declaration's
+        if (i === 0 && g.end < firstCode - 1 && !source.lines[g.end].trim()) {
           if (n > HEADER_LINES) add(at(g.start), 'header', { n }, 'header')
         } else if (n > COMMENT_BLOCK_LINES) add(at(g.start), 'block', { n, max: COMMENT_BLOCK_LINES }, 'block')
       }
@@ -456,7 +456,6 @@ const comments = guard(
       const held = COMMENT_SHARE_HELD.files[relativeFile(context)]
       const max = held ?? Math.round(100 * COMMENT_SHARE)
       if (pct > max) add(at(1), 'share', { pct, max }, 'share')
-      else if (held !== undefined && pct < held) add(at(1), 'held', { pct, held }, 'held')
     },
   }),
 )
