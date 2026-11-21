@@ -3,7 +3,7 @@
  * a test can hold (docs/state-management.md "The conversation's scroll position").
  */
 
-export const BOTTOM_SLACK = 80
+const BOTTOM_SLACK = 80
 
 /** Not zero: rounding jitters scrollTop by a pixel or two */
 export const MOVED_UP_SLACK = 4

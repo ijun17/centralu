@@ -55,7 +55,7 @@ function focusedSoFar(): Element[] {
 }
 
 /** Focuses the latest usable of `before` if focus fell to the page or is inside the closing `layer`; whether it did */
-export function returnFocus(before: readonly Element[], layer: Element | null = null): boolean {
+function returnFocus(before: readonly Element[], layer: Element | null = null): boolean {
   if (typeof document === 'undefined') return false
   const now = document.activeElement
   // Let go of the leaving layer first, so what asks for the keyboard next (a composer the palette opened, #528) gets it

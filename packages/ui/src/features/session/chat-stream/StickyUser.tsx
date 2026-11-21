@@ -11,7 +11,7 @@ import { FromArrowIcon } from '../../../components/icons.jsx'
  */
 
 /** design-system §9, the 150-200 ms layers */
-export const STICKY_FOLD_MS = 180
+const STICKY_FOLD_MS = 180
 
 export function useStickyUser({
   scrollRef,

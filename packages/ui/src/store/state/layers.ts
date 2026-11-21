@@ -17,7 +17,7 @@ export type Overlay =
   | null
 
 /** A button on a toast. `run` is called at most once: pressing it puts the toast away */
-export type ToastAction = { label: string; run: () => void }
+type ToastAction = { label: string; run: () => void }
 
 /** Layers over the screen: overlay, inbox, palette, usage, settings, the file viewer and the toast. */
 export type LayersSlice = {

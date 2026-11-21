@@ -73,7 +73,7 @@ export function detectTrigger(
  * 13). The host answers from an index in milliseconds; this only bounds a search that hangs, so the composer
  * can still send.
  */
-export const FILE_SEARCH_WAIT_MS = 1500
+const FILE_SEARCH_WAIT_MS = 1500
 
 /** Which search a file result answers: the project and the query */
 function searchKey(projectId: string, query: string): string {

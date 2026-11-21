@@ -10,9 +10,8 @@ export type ThemeBase = 'dark' | 'light'
 
 /** The protocol's list, so the host names the same presets (#1219); the first of each base is that side's default */
 export { THEME_PRESETS }
-export type { ThemePreset }
 
-export { THEME_TOKENS, pickableThemes }
+export { pickableThemes }
 
 /** By theme-file key; a value the browser rejects is never applied */
 export function isValidTokenValue(key: string, value: string): boolean {
@@ -202,7 +201,7 @@ function luminance([r, g, b]: Rgba): number {
 }
 
 /** A translucent colour as it lands on an opaque one */
-export function over(top: Rgba, bottom: Rgba): Rgba {
+function over(top: Rgba, bottom: Rgba): Rgba {
   const a = top[3]
   return [top[0] * a + bottom[0] * (1 - a), top[1] * a + bottom[1] * (1 - a), top[2] * a + bottom[2] * (1 - a), 1]
 }

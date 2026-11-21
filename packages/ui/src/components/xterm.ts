@@ -8,7 +8,7 @@ import { registerTerminalHttpLinks } from './terminalLinks.js'
 import { followTheme, terminalStyle } from './terminalTheme.js'
 
 /** What `attach` returns: how the owner hears the terminal's size and what it tears down */
-export type XtermAttachment = {
+type XtermAttachment = {
   /** Called only when the size changed, never for a degenerate size */
   onSize?: (cols: number, rows: number) => void
   /** Runs after the resize observer is stopped and before the terminal itself goes away */

@@ -146,7 +146,3 @@ function Command({ server, testId = 'review-command' }: { server: AppReview['ser
     </code>
   )
 }
-
-/** `uses` in plain words — kept with the app catalog, which the trust card and the inbox read too (#1141) */
-export { usesLines }
-

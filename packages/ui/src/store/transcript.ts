@@ -317,7 +317,7 @@ function handoffText(e: Extract<NormalizedEvent, { type: 'handoff' }>): string {
 }
 
 /** The model knows nothing above this line, the record does: why the line exists (#304) */
-export function resetText(e: Extract<NormalizedEvent, { type: 'conversation_reset' }>): string {
+function resetText(e: Extract<NormalizedEvent, { type: 'conversation_reset' }>): string {
   return e.trigger === 'clear'
     ? 'Conversation cleared — the agent remembers nothing above this line'
     : 'The agent started a new conversation here — it remembers nothing above this line'

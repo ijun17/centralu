@@ -31,7 +31,7 @@ export function foldKeys(item: Pick<ChatItem, 'seq' | 'storedSeq'>): string[] {
 }
 
 /** Whether the row folds into a run; `hasView` says whether a tool call opened an app view in the conversation */
-export function foldable(item: ChatItem, hasView: (callId: string) => boolean): boolean {
+function foldable(item: ChatItem, hasView: (callId: string) => boolean): boolean {
   if (item.kind === 'reasoning') return true
   if (item.kind !== 'tool') return false
   // A manager's worktree proposal waits on the person to take it (ChatRow `WorktreeProposalRow`)

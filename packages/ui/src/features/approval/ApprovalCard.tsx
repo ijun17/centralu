@@ -668,7 +668,7 @@ export function approvalKeyAction(
  * The combos that answer a card while the keyboard is in the composer, where bare y/n/a are letters of the message.
  * `mod` is ⌘ on a Mac and Ctrl elsewhere; written by meaning, named by the keyboard (`useShortcut`).
  */
-export const APPROVAL_COMBOS = {
+const APPROVAL_COMBOS = {
   allow: ['mod', '⇧Y'],
   deny: ['mod', '⇧D'],
   always: ['mod', '⇧L'],
@@ -691,7 +691,7 @@ function approvalComboOf(
 }
 
 /** The session whose composer holds the keyboard, if any */
-export function composerOf(target: EventTarget | null): string | null {
+function composerOf(target: EventTarget | null): string | null {
   const el = target as HTMLElement | null
   return el?.dataset?.composerSession ?? null
 }

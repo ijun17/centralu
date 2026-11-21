@@ -9,9 +9,9 @@ import type { HTMLAttributes, MouseEventHandler, ReactNode } from 'react'
  * that waits is the signal at full strength, the brightest line on screen exactly then. `tone` overrides each edge's
  * ink when the content should speak louder (`signal` keeps a waiting count's glow, `bright` is the same white without).
  */
-export type PillEdge = 'quiet' | 'live' | 'solid' | 'dashed'
-export type PillTone = 'signal' | 'bright' | 'ink' | 'muted' | 'faint'
-export type PillSize = 'bar' | 'label' | 'line'
+type PillEdge = 'quiet' | 'live' | 'solid' | 'dashed'
+type PillTone = 'signal' | 'bright' | 'ink' | 'muted' | 'faint'
+type PillSize = 'bar' | 'label' | 'line'
 
 const EDGE: Record<PillEdge, string> = {
   quiet: 'border-solid border-line',
@@ -38,7 +38,7 @@ const SIZE: Record<PillSize, string> = {
   line: 'gap-1.5 px-2.5 py-0.5 text-2xs',
 }
 
-export function pillClass({
+function pillClass({
   edge = 'quiet',
   size = 'bar',
   tone,

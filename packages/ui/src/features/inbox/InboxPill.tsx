@@ -98,7 +98,7 @@ function PeekLine({ text }: { text: string | null }) {
   )
 }
 
-export function peekText(n: Notice): string {
+function peekText(n: Notice): string {
   switch (n.kind) {
     case 'done':
       return `${n.name} finished`

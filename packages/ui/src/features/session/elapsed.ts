@@ -19,7 +19,7 @@ const STEPS: readonly { below: number; step: number }[] = [
   { below: Infinity, step: 3600 },
 ]
 
-export function elapsedStep(seconds: number): number {
+function elapsedStep(seconds: number): number {
   return STEPS.find((s) => seconds < s.below)!.step
 }
 

@@ -19,7 +19,7 @@ type Box = { left: number; top: number; width: number; height: number }
 type End = Extract<AppDragMessage, { phase: 'end' }>
 
 /** A drag is a hand held down, so minutes is generous; a later end belongs to no drag the person is making */
-export const DRAG_START_TTL_MS = 120_000
+const DRAG_START_TTL_MS = 120_000
 
 /** Border box less borders; the borders are in layout pixels, scaled by `rect.width / offsetWidth` so the root zoom does not move the box */
 function contentBox(frame: HTMLIFrameElement): Box {
