@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { virtualFileLinter } from './eslint-virtual.test-helpers.js'
 import { baseCommit, renamesSince } from './lint-allowlist.js'
-import { DURATIONS, balance, splitFilesAt, splitPieces, type SplitFiles, durationsFromReports, formatDurations, osSelector, parseDurations, refreshDurations, refreshDurationsFile, remoteNodeTests, repoFiles, tightened, vitestFiles } from './os-tests.js'
+import { DURATIONS, balance, droppedPieces, droppedPiecesSince, splitFilesAt, splitPieces, type SplitFiles, durationsFromReports, formatDurations, osSelector, parseDurations, refreshDurations, refreshDurationsFile, remoteNodeTests, repoFiles, tightened, vitestFiles } from './os-tests.js'
 import { SLOW } from './test-timing.js'
 import * as layer from './os-layer.js'
 
@@ -173,14 +173,8 @@ describe('the allowlist', () => {
   it(
     "lists nothing main's list does not: no new line but a file git sees renamed",
     () => {
-      const ref = process.env.CC_LINT_BASE ?? 'origin/main'
-      const base = baseCommit(ROOT, ref)
-      if (!base) {
-        // CI's verify job fetches main's history and sets CC_LINT_BASE: there, main's list has to be read
-        expect(process.env.CC_LINT_BASE, `no merge base with ${ref}`).toBeUndefined()
-        console.warn(`os-layer.test.ts: not compared with main's list (no merge base with ${ref})`)
-        return
-      }
+      const base = mainBase('the allowlist')
+      if (!base) return
       const main = mainList(base)
       if (main === null) {
         // Once main has the layer, its list must be readable: a list renamed or unreadable there would pass anything
@@ -358,6 +352,18 @@ function gitOk(args: string[]): boolean {
   }
 }
 
+/** main's merge base, or null (with a warning) where there is none to read */
+function mainBase(what: string): string | null {
+  const ref = process.env.CC_LINT_BASE ?? 'origin/main'
+  const base = baseCommit(ROOT, ref)
+  if (!base) {
+    // CI's verify job fetches main's history and sets CC_LINT_BASE: there, main has to be read
+    expect(process.env.CC_LINT_BASE, `no merge base with ${ref}`).toBeUndefined()
+    console.warn(`os-layer.test.ts: ${what} not compared with main (no merge base with ${ref})`)
+  }
+  return base
+}
+
 /** main's allowlist at `base`, or null when there is none to read */
 function mainList(base: string): string[] | null {
   try {
@@ -464,6 +470,37 @@ describe('the tests that run on every OS', () => {
     // Reading a file of the repository is not it
     expect(await select(code("import { readFileSync } from 'node:fs'", "readFileSync('x')")).selectMacTests([T])).toEqual([])
   })
+
+  it('names the tests cut from a picked one that are not picked themselves, and no other new test', () => {
+    const text = (n: number) => 'x\n'.repeat(n)
+    const whole = 'tooling/pre-pr.test.ts'
+    const [reports, prs] = ['tooling/pre-pr-reports.test.ts', 'tooling/pre-pr-open-prs.test.ts'] as [string, string]
+    const at = (base: Record<string, string>, now: Record<string, string>): SplitFiles => ({ base: (f) => base[f] ?? null, now: (f) => now[f] ?? null })
+    const split = at({ [whole]: text(1400) }, { [whole]: text(750), [reports]: text(160), [prs]: text(370) })
+    const dropped = (picked: string[], files = split, pickedAtBase = (t: string): boolean => t === whole) => droppedPieces([whole, reports, prs], new Set(picked), [whole], files, pickedAtBase)
+    expect(dropped([whole])).toEqual(new Map([[whole, [reports, prs]]]))
+    // A piece picked for its own text is not dropped; nor is anything cut from a test that ran on Linux only
+    expect(dropped([whole, reports])).toEqual(new Map([[whole, [prs]]]))
+    expect(dropped([], split, () => false)).toEqual(new Map())
+    // The whole removed: its pieces are named all the same
+    expect(dropped([], at({ [whole]: text(1400) }, { [reports]: text(160), [prs]: text(370) }))).toEqual(new Map([[whole, [reports, prs]]]))
+    // A new test beside a picked one that lost no lines, or more than it lost, or one that was there at the base, is no piece
+    expect(dropped([whole], at({ [whole]: text(1400) }, { [whole]: text(1400), [reports]: text(160), [prs]: text(370) }))).toEqual(new Map())
+    expect(dropped([whole], at({ [whole]: text(1400) }, { [whole]: text(1300), [reports]: text(160), [prs]: text(370) }))).toEqual(new Map())
+    expect(dropped([whole], at({ [whole]: text(1400), [prs]: text(370) }, { [whole]: text(1030), [reports]: text(160), [prs]: text(370) }))).toEqual(new Map([[whole, [reports]]]))
+  })
+
+  it(
+    'on the repository: a test cut from one picked at main is picked too',
+    async () => {
+      const base = mainBase('the pieces of picked tests')
+      if (!base) return
+      const { all, picked } = await pickedOnRepo()
+      const dropped = [...droppedPiecesSince(base, all, new Set(picked))].map(([whole, pieces]) => `${pieces.join(', ')} (from ${whole})`)
+      expect(dropped, `cut from a test that runs on every OS, these run on Linux only: name each in EVERY_OS_TESTS (tooling/os-layer.js) with its reason, or give it what picked the whole`).toEqual([])
+    },
+    120_000 * SLOW,
+  )
 
   it('refuses to guess past an import it cannot follow', () => {
     expect(() => pick({ 'packages/ui/src/x/a.test.ts': "import { b } from './gone.js'\nexport const a = b\n" }, 'packages/ui/src/x/a.test.ts')).toThrow(/names no file/)

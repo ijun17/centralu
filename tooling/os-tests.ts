@@ -135,11 +135,32 @@ const CONFIG: Linter.Config[] = [
 
 const CODE = /\.(ts|tsx|mts|cts|mjs|cjs|js|jsx)$/
 
-/** The questions the selection asks, over the repository with `virtual` files laid over it (for tests) */
-export function osSelector(virtual: ReadonlyMap<string, string> = new Map()) {
+/** The repository's files as a selection reads them: the working tree's, or a commit's (`treeAt`) */
+export type Tree = { read: (file: string) => string; isFile: (file: string) => boolean }
+
+const WORKING_TREE: Tree = {
+  read: (file) => readFileSync(`${ROOT}${file}`, 'utf8'),
+  isFile: (file) => existsSync(`${ROOT}${file}`) && statSync(`${ROOT}${file}`).isFile(),
+}
+
+/** The files of `commit` */
+export function treeAt(commit: string): Tree {
+  const files = new Set(execFileSync('git', ['ls-tree', '-r', '-z', '--name-only', commit], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split('\0'))
+  return {
+    read: (file) => {
+      const text = gitShow(commit, file)
+      if (text === null) throw new Error(`${file} is not a file of ${commit}`)
+      return text
+    },
+    isFile: (file) => files.has(file),
+  }
+}
+
+/** The questions the selection asks, over `tree` (the working tree by default) with `virtual` files laid over it (for tests) */
+export function osSelector(virtual: ReadonlyMap<string, string> = new Map(), tree: Tree = WORKING_TREE) {
   const scans = new Map<string, Scan>()
-  const read = (file: string) => virtual.get(file) ?? readFileSync(`${ROOT}${file}`, 'utf8')
-  const isFile = (file: string) => virtual.has(file) || (existsSync(`${ROOT}${file}`) && statSync(`${ROOT}${file}`).isFile())
+  const read = (file: string) => virtual.get(file) ?? tree.read(file)
+  const isFile = (file: string) => virtual.has(file) || tree.isFile(file)
 
   /** Scans a file (a repository path with `/`) once */
   function scanFile(file: string): Scan {
@@ -417,7 +438,7 @@ export function formatDurations(durations: Durations, source: string): string {
 /** What the split rule reads of a file: its text at main's merge base and in the working tree, null when it is not there */
 export type SplitFiles = { base: (file: string) => string | null; now: (file: string) => string | null }
 
-/** At most this many pieces take a removed file's line, and together they may hold this many lines more than it did, plus `SPLIT_LINES_PER_PIECE` for each */
+/** At most this many pieces are cut from a file, and together they may hold this many lines more than it lost, plus `SPLIT_LINES_PER_PIECE` for each */
 export const SPLIT_MAX_PIECES = 5
 export const SPLIT_LINES = 50
 export const SPLIT_LINES_PER_PIECE = 20
@@ -425,41 +446,66 @@ export const SPLIT_LINES_PER_PIECE = 20
 const isTestFile = (file: string) => /\.(test|test-helpers)\.(ts|tsx|mts|mjs)$/.test(file)
 
 /**
- * The files that may take the allowlist line of a file this change removed, because they are pieces of it
- * (`os-layer.test.ts` and `tightened` both ask): for each file of `main`'s list that is gone now, the `candidates` (files
- * the list would gain: the lines the list has that main's has not, or the offenders it lacks) that
- * - are in its folder and are named by its stem (the name up to the first dot) and then `-` or `.`
+ * May `piece` have been cut from `whole`:
+ * - it is in its folder and is named by its stem (the name up to the first dot) and then `-` or `.`
  *   (`install-windows.test.ts` to `install-windows-update.test.ts` and `install-windows.test-helpers.ts`);
- * - were not there at `base`: a file that existed already (`links/away.ts` beside a removed `links/away.test.ts`) is not a piece;
- * - are tests and test helpers when the removed file was one, and neither when it was not: a test lends nothing to shipped code;
- * - are at most `SPLIT_MAX_PIECES`, together no longer than the file was by `SPLIT_LINES` lines and `SPLIT_LINES_PER_PIECE`
- *   for each (the imports each repeats, the setup moved to a helper): the same code reaching the OS, cut in pieces, not more of it.
- * A file that fits none is a new offender, as before. A candidate goes to the first removed file that takes it.
+ * - it was not there at `base`: a file that existed already (`links/away.ts` beside a removed `links/away.test.ts`) is not a piece;
+ * - it is a test or test helper when `whole` was one, and neither when it was not: a test lends nothing to shipped code.
  */
-export function splitPieces(main: readonly string[], current: readonly string[], candidates: readonly string[], files: SplitFiles): Map<string, string[]> {
+function mayBePieceOf(whole: string, piece: string, files: SplitFiles): boolean {
+  const dir = whole.slice(0, whole.lastIndexOf('/') + 1)
+  const stem = whole.slice(dir.length).split('.')[0] ?? ''
+  const name = piece.slice(dir.length)
+  return piece.startsWith(dir) && !name.includes('/') && (name.startsWith(`${stem}-`) || name.startsWith(`${stem}.`)) && files.base(piece) === null && isTestFile(piece) === isTestFile(whole)
+}
+
+/**
+ * The files of `wholes` that this change removed or shortened, each with the `candidates` it was cut into: those that
+ * may be its pieces (`mayBePieceOf`), at most `SPLIT_MAX_PIECES`, together no longer than the lines it lost by `SPLIT_LINES`
+ * and `SPLIT_LINES_PER_PIECE` for each (the imports each repeats, the setup moved to a helper): the same code cut in
+ * pieces, not more of it. A candidate goes to the first file that takes it.
+ */
+export function piecesOf(wholes: readonly string[], candidates: readonly string[], files: SplitFiles): Map<string, string[]> {
   const lines = (text: string | null) => (text === null ? 0 : text.split('\n').length)
   const out = new Map<string, string[]>()
   const taken = new Set<string>()
-  for (const gone of main.filter((f) => !current.includes(f) && files.now(f) === null)) {
-    const dir = gone.slice(0, gone.lastIndexOf('/') + 1)
-    const stem = gone.slice(dir.length).split('.')[0] ?? ''
-    const pieces = candidates.filter((f) => {
-      const name = f.slice(dir.length)
-      return (
-        !taken.has(f) &&
-        f.startsWith(dir) &&
-        !name.includes('/') &&
-        (name.startsWith(`${stem}-`) || name.startsWith(`${stem}.`)) &&
-        files.base(f) === null &&
-        isTestFile(f) === isTestFile(gone)
-      )
-    })
+  for (const whole of wholes) {
+    const pieces = candidates.filter((f) => !taken.has(f) && mayBePieceOf(whole, f, files))
+    if (pieces.length === 0 || pieces.length > SPLIT_MAX_PIECES) continue
+    const lost = lines(files.base(whole)) - lines(files.now(whole))
     const size = pieces.reduce((sum, f) => sum + lines(files.now(f)), 0)
-    if (pieces.length === 0 || pieces.length > SPLIT_MAX_PIECES || size > lines(files.base(gone)) + SPLIT_LINES + SPLIT_LINES_PER_PIECE * pieces.length) continue
+    if (lost <= 0 || size > lost + SPLIT_LINES + SPLIT_LINES_PER_PIECE * pieces.length) continue
     for (const f of pieces) taken.add(f)
-    out.set(gone, pieces)
+    out.set(whole, pieces)
   }
   return out
+}
+
+/**
+ * The files that may take the allowlist line of a file this change removed (`os-layer.test.ts` and `tightened` both ask):
+ * the pieces (`piecesOf`) of each file of `main`'s list that is gone now, among the `candidates` (files the list would gain:
+ * the lines the list has that main's has not, or the offenders it lacks). A file that fits none is a new offender, as before.
+ */
+export const splitPieces = (main: readonly string[], current: readonly string[], candidates: readonly string[], files: SplitFiles): Map<string, string[]> =>
+  piecesOf(main.filter((f) => !current.includes(f) && files.now(f) === null), candidates, files)
+
+/**
+ * The tests of `tests` that this change cut (`piecesOf`) from a test the selection picked at main's merge base, and that it
+ * does not pick now (#2402), each under the test it was cut from. The selection is made file by file, so a piece whose own
+ * text earns it nothing (the OS question stayed in the other piece) would leave Windows without a word. `changed` are the
+ * tests changed or removed since the base, and `pickedAtBase` asks the selection there.
+ */
+export function droppedPieces(tests: readonly string[], picked: ReadonlySet<string>, changed: readonly string[], files: SplitFiles, pickedAtBase: (test: string) => boolean): Map<string, string[]> {
+  const unpicked = tests.filter((t) => !picked.has(t) && files.base(t) === null)
+  const wholes = changed.filter((w) => unpicked.some((t) => mayBePieceOf(w, t, files)) && pickedAtBase(w))
+  return piecesOf(wholes, unpicked, files)
+}
+
+/** `droppedPieces` of the repository since `base`, for the tests the selection picks now */
+export function droppedPiecesSince(base: string, tests: readonly string[], picked: ReadonlySet<string>): Map<string, string[]> {
+  const changed = execFileSync('git', ['diff', '--name-only', '-z', '--no-renames', '--diff-filter=DM', base, '--'], { cwd: ROOT, encoding: 'utf8' }).split('\0').filter(isTestFile)
+  const atBase = osSelector(new Map(), treeAt(base))
+  return droppedPieces(tests, picked, changed, splitFilesAt(base), (t) => atBase.whyEveryOs(t) !== null)
 }
 
 /** A file's text at `base`, or null when it was not there */

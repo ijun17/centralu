@@ -287,6 +287,11 @@ that imports the launcher or a host helper that starts processes runs everywhere
 Not seen: what §5 lists as not seen by the rule, and a process started by path (`EVERY_OS_TESTS` names those, `launcher-node-floor` today). Modules outside the list
 (`node:crypto`, `node:url` but its path conversions) do not count.
 
+The rule judges each file alone, so a test cut from a picked one can lose the selection: the OS question stays in one
+piece, and the others reach the OS through tooling and scripts, which do not count. `os-layer.test.ts` fails when a test
+new since main's merge base, cut from a test picked there (`piecesOf`, the allowlist's split rule), is not picked now
+(#2402); the piece is then named in `EVERY_OS_TESTS`, or given what picked the whole.
+
 ### 6.2 Where it applies
 
 `windows tests (vitest N/3)` (`N/2` until #2167) runs `tsx tooling/os-tests.ts --shard N/3 --out <list>` and then vitest with
