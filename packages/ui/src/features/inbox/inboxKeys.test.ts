@@ -9,7 +9,7 @@ const key = (
 
 const FREE = { typing: false, covered: false }
 
-describe('inboxKeyAction (#683: the list hears the window, so it keeps the approval card’s guards)', () => {
+describe('inboxKeyAction (#683 review: the list hears the window, so it keeps the approval card’s guards)', () => {
   it('maps the list keys', () => {
     expect(inboxKeyAction(key('j'), FREE)).toBe('down')
     expect(inboxKeyAction(key('ArrowUp'), FREE)).toBe('up')

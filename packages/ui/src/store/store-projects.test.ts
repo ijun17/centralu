@@ -350,7 +350,7 @@ describe('new projects', () => {
   })
 })
 
-describe('a project git count the host could not read (#850 item 10)', () => {
+describe('a project git count the host could not read (#850 review of item 10)', () => {
   it('keeps the last count instead of reading as no changes, and takes a known one again', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)

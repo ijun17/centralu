@@ -60,7 +60,7 @@ describe('the receiver for a quit request', () => {
   })
 })
 
-describe('quitting (#1009)', () => {
+describe('quitting (#1009 review)', () => {
   it('a quit the shell refuses is an Error carrying its reason', async () => {
     invoke.mockRejectedValue('quit refused')
     const err = await quitApp().catch((e: unknown) => e)

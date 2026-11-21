@@ -664,7 +664,7 @@ describe('linked machines (#82)', () => {
     expect(resume.mock.calls.map(([id]) => id)).toEqual(['box.mw-1'])
   })
 
-  it('a resync leaves a session the machine continues itself to it, and counts only what it wakes (#1618 D4)', async () => {
+  it('a resync leaves a session the machine continues itself to it, and counts only what it wakes (#1618 review D4)', async () => {
     const mock = new MockPlatform()
     mock.machinesList = [box()]
     const remote = await mock.projects.add('/srv/app', 'box')

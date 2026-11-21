@@ -1,7 +1,8 @@
 /**
- * Version comparison for the update check, a mirror of packaging/npm/centralu/bin/semver.mjs (pinned by
- * tooling/launcher-semver.test.ts). In protocol so the host and the mock platform answer alike; the host checks because
- * installed launchers keep their copy, which compared prereleases as NaN (#42, docs/runtime-lessons/quit-relaunch-update.md UP10).
+ * Version comparison for the update check, a copy of packaging/npm/centralu/bin/semver.mjs (a published package's plain
+ * .mjs, which the app bundle does not import) pinned by tooling/launcher-semver.test.ts. In protocol so the host and the
+ * mock platform answer alike; the host checks because installed launchers keep their copy, which compared prereleases
+ * as NaN (#42, docs/runtime-lessons/quit-relaunch-update.md UP10).
  */
 export function isNewerVersion(a: string, b: string): boolean {
   const [coreA, preA] = split(String(a))

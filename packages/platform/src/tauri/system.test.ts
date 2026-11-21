@@ -50,7 +50,7 @@ describe('TauriSystemPort', () => {
     stopNext()
   })
 
-  it('a link taken for a listener that left goes to a listener on another port that joined meanwhile (#1010)', async () => {
+  it('a link taken for a listener that left goes to a listener on another port that joined meanwhile (#1010 review)', async () => {
     let answer: (links: string[]) => void = () => {}
     invoke.mockImplementation((cmd: string) =>
       cmd === 'take_app_links' ? new Promise<string[]>((resolve) => (answer = resolve)) : Promise.resolve(null),
