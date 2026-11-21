@@ -479,13 +479,13 @@ export const WINDOWS_INLINE_MAX = 7_900
  * The framing of a script on a Windows remote's stdin (#1360): base64 of its UTF-8, then a line holding one dot (base64 has
  * none). The reader stops at that line and does not wait for the end of input. **Measured on a Windows 11 PC (OpenSSH 9.5,
  * Windows PowerShell 5.1, 2026-10-20), 17,000 characters of stdin:** `[Console]::In.ReadToEnd()` never returned in 2 to 9 of 30
- * runs one after another and 13 to 18 of 30 ten at a time; `ReadLine()` up to the dot line hung in 1 to 4 of 30 to 80 runs at
- * 100,000 characters; a `StreamReader` over `OpenStandardInput()` hung in 5 of 6. The stream read with `Read()` into a buffer
- * until the dot line did not hang in 200 of 200 runs at 17,000 and 100,000 characters (five at a time), and read to its end at
- * 17,000 too: the end of input did arrive, the text readers of `[Console]::In` stalled, and the script's size is not the cause
- * (70,000 passed, 17,000 hung). The reader prints `STDIN_READY` when it starts and `STDIN_ACK` once the script is read, before
- * it runs it: the hub waits for both (`exec`), so a remote that never saw its input fails in seconds, not after the step's 30
- * minutes, and a step is sent again only when PowerShell was up and the input did not arrive.
+ * runs one after another and 13 to 18 of 30 ten at a time; `ReadLine()` up to the dot line did not hang at 17,000 but hung in 1
+ * to 4 of 30 to 80 runs at 100,000 characters; a `StreamReader` over `OpenStandardInput()` hung in 5 of 6. The stream read with
+ * `Read()` into a buffer until the dot line did not hang in 200 of 200 runs at 17,000 and 100,000 characters (five at a time),
+ * and read to its end at 17,000 too: the end of input did arrive, the text readers of `[Console]::In` stalled, and the script's
+ * size is not the cause (70,000 passed, 17,000 hung). The reader prints `STDIN_READY` when it starts and `STDIN_ACK` once the
+ * script is read, before it runs it: the hub waits for both (`exec`), so a remote that never saw its input fails in seconds,
+ * not after the step's 30 minutes, and a step is sent again only when PowerShell was up and the input did not arrive.
  */
 export const STDIN_END = '.'
 /** What the reader prints when it starts (see `STDIN_END`) */
@@ -798,7 +798,7 @@ export type SshTunnelOptions = {
  * - The forward binds 127.0.0.1 on both ends, never 0.0.0.0 and never `GatewayPorts`, so nothing on the hub's network can use it.
  * - The same port number on both ends when free here (it reads the same in both logs), else another; nothing depends on it (plan §11).
  * - **Closing ends every ssh it started**, also in the middle of `open()` (a machine removed while it connects): `open()` then
- *   starts nothing more and fails. What ssh itself starts (a `ProxyCommand`, `ProxyJump`'s second ssh) ssh ends them on SIGTERM.
+ *   starts nothing more and fails. ssh ends what it starts itself (a `ProxyCommand`, `ProxyJump`'s second ssh) on SIGTERM.
  * - ssh stays in the host's process group (unlike an agent CLI, `adapters/local-process.ts`, #435): the supervisor ends the group
  *   (`host_proc.rs` `kill_group`); a forward, which reads no stdin, would otherwise outlive a host that died without `close()`.
  */

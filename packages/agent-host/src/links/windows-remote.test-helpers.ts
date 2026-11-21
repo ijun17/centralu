@@ -157,7 +157,8 @@ export function pwsh7ModulePath(dir: string): string {
 /**
  * Whether a command on the stand-in remote ended without a word: a non-zero exit, nothing on stdout, and on stderr only
  * PowerShell's progress records and the fake ssh's own mark (`FAKE_SSH_MARK`). Every script Centralu runs there says something
- * when it fails, so what is left is a process that was ended, crashed (Windows PowerShell with `-EncodedCommand` exits 1 when
+ * when it fails (a `CENTRALU-INSTALL fail` line, a JSON line with `ok:false`, `Centralu: no version is installed`, PowerShell's
+ * CLIXML errors), so what is left is a process that was ended, crashed (Windows PowerShell with `-EncodedCommand` exits 1 when
  * its last command failed, whatever that command's code) or never ran. Seen on GitHub's windows-2022 runners in
  * install-windows.test.ts (#1244): three times in one afternoon, exit 1 and no output after 3 to 8 s, from a different command
  * each time; never on a development machine (22 runs under load, 3,900 runs of the stop alone), so the cause is unknown (not a

@@ -39,7 +39,6 @@ export const settleForCall = async (m: Reachable): Promise<void> => {
     if (m.reachForCall) await m.reachForCall()
     else if (m.attemptUnderWay) await m.settled?.()
   }
-  // Up, and just connected: whether it takes tasks is its answer to this connection's offer, read once it came (#1948 step 6)
   if (m.reachable) await m.offerAnswered?.()
 }
 
