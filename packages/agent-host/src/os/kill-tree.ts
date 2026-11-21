@@ -160,13 +160,12 @@ export function hasProcessGroups(platform: NodeJS.Platform = process.platform): 
  * the table is read while the tree is whole, the process is ended alone, then what the table showed under it, parents first
  * (`endInOrder`, #2142), as `taskkill /T` ends a tree in no order and a git hook's `sleep` that died first made git go on and
  * commit. An unreadable table leaves `taskkill /T` on the root. It runs on its own, as the callers do not wait (the table takes
- * 0.4-0.75 s); `taskkill` is named by its full path (`leftoverOs`). `kill()` is called without a signal (it still closes a
- * pty's console and ends a ChildProcess): node-pty's Windows `kill()` throws "Signals not supported on windows." when given
- * one, which made Stop, restart and shutdown do nothing and, from a pty not yet ready, surfaced later as an uncaught exception
- * that shut the host down. And only when taskkill did not end the tree (#857): after it the shell is gone, and node-pty's
- * ConPTY `kill()` forks an agent that attaches to the shell's console and 5 s later `process.kill`s by pid, failing with
- * "AttachConsole failed" and killing a pid Windows may have handed to someone else (measured on Windows 11). Leaving it loses
- * nothing: the pty slot frees on the exit (`pty-slot.ts` `releaseEnded`)
+ * 0.4-0.75 s). `kill()` is called without a signal (it still closes a pty's console and ends a ChildProcess): node-pty's
+ * Windows `kill()` throws when given one, and from a pty not yet ready that surfaced later as an uncaught exception that shut
+ * the host down. And only when taskkill did not end the tree (#857): after it the shell is gone, and node-pty's ConPTY `kill()`
+ * forks an agent that 5 s later `process.kill`s by pid, failing with "AttachConsole failed" and killing a pid Windows may have
+ * handed to someone else (measured on Windows 11). Leaving it loses nothing: the pty slot frees on the exit (`pty-slot.ts`
+ * `releaseEnded`)
  */
 async function shootWindows(stops: readonly { handle: KillablePty; pid: number }[], os: KillOs): Promise<void> {
   const roots = stops.map(({ handle, pid }) => {

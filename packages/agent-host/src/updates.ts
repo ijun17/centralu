@@ -623,17 +623,12 @@ export class UpdateService {
       if (this.stopped) return
       packageInstalled = true
       /*
-       * Refreshes the copy that gets launched, only if one exists (on macOS `centralu install` creates `/Applications/…`, not for
-       * someone who never asked). Not over a maintainer's local build newer than the target (`keepsInstalledCopy`, #645: `pnpm
-       * local-update` waiting for "Apply now" outranks its release); every other copy is replaced, a higher released one too (npm is
-       * the source of truth), and an unreadable version as well (a corrupt plist must not block updates). A kept local build still
-       * gets the package updated, and the notice says what was kept. The launcher is the one npm just installed (`installCopy`), not
-       * `centralu` from PATH (a hub's shim, #1736). `npm` resolves through the login-shell PATH that `env-path.ts` adds at startup: a
-       * GUI app inherits none. This replaces the bundle we run out of (`swapInto` in `swap.mjs`: new to `<app>.new`, old renamed
-       * aside, new renamed in): macOS keeps the process alive but between the renames paths inside the bundle do not resolve (#2117),
-       * so the end is "restart". On Windows it renames the folder we run out of: NTFS allows it with the exe mapped while no process
-       * has its working directory inside (measured on Windows 11, 2026-10-08; the app leaves it at start, `leave_app_folder`), and a
-       * later install sweeps the old one
+       * Refreshes the copy that gets launched, only if one exists (on macOS `centralu install` creates `/Applications/…`, not
+       * for someone who never asked). Not over a maintainer's local build newer than the target (`keepsInstalledCopy`, #645:
+       * `pnpm local-update` waiting for "Apply now" outranks its release); every other copy is replaced, a higher released one
+       * too, and an unreadable version as well (a corrupt plist must not block updates). A kept local build still gets the
+       * package updated. The launcher is the one npm just installed (`installCopy`), not `centralu` from PATH (a hub's shim,
+       * #1736).
        */
       if (copy) {
         const copyVersion = this.deps.installedCopyVersion(copy)
@@ -641,6 +636,14 @@ export class UpdateService {
           const notice = `The local build ${copyVersion} at ${copy} is newer than ${version} and was kept.`
           this.status = { ...this.status, error: this.status.error ? `${this.status.error} ${notice}` : notice }
         } else {
+          /*
+           * `npm` resolves through the login-shell PATH that `env-path.ts` adds at startup: a GUI app inherits none. This
+           * replaces the bundle we run out of (`swapInto` in `swap.mjs`: new beside, old renamed aside, new renamed in): macOS
+           * keeps the process alive but between the renames paths inside the bundle do not resolve (#2117), so the end is
+           * "restart". On Windows it renames the folder we run out of: NTFS allows it with the exe mapped while no process has
+           * its working directory inside (measured on Windows 11; the app leaves it at start, `leave_app_folder`), and a later install sweeps
+           * the old one
+           */
           await this.installCopy()
         }
       }
