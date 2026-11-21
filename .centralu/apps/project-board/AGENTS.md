@@ -1190,6 +1190,8 @@ push run of CI is fully green, the full tier included (or `commit`).
   `forView` and `serially`, which every handler goes through).
 - `github.mjs` — every call to GitHub, through `gh`. `project.json` — which project, and the CI settings.
 - `ci.mjs` — the CI and merge decisions as pure functions (no gh, no IO).
+- `known-failures.mjs` — the known intermittent failures issue's one reader (`readKnownFailures`: read and matched), for
+  `ci_status` and for a local e2e run (`knownFailureQuotes`, which e2e/flaky-report.ts imports), so both set apart the same failures.
 - `queue.mjs`, `queue-driver.mjs`, `bin/merge-queue.mjs` — the merge queue's decisions (pure), its file,
   lease and polls, and the watch command. `batch.mjs`, `queue-batch.mjs` — its batches: the rules
   (pure) and their steps on GitHub. `queue-screen.mjs` — which tier a batch must run (#1538): it asks the default

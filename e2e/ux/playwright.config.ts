@@ -17,6 +17,8 @@ const engine = uxEngine()
 assertBrowserSandbox(engine)
 
 export default defineConfig({
+  // The engine a run is in, as playwright.config.ts names it: `pnpm ux --affected` reads it from Playwright's listing
+  metadata: { e2eBrowser: engine },
   testDir: '.',
   testMatch: /\.task\.ts$/,
   timeout: 30_000,
