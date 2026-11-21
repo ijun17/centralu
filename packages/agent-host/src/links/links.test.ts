@@ -3082,8 +3082,8 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     await remoteHost(remote.port, remoteStore, { mail: true })
     await eventually(() => status(hub) === 'connected' && hub.links.get('m1')?.takesTasks === true)
     /*
-     * Two writers, in no set order: the task released there on the deletion crosses back by the receipts and frees the place; the record goes once
-     * the link's resync has read the machine's sessions (`RemoteAgents.caughtUp`). A child at rest keeps its record and holds no place, so each is
+     * Two writers, in no set order: the task released there on the deletion crosses back by the receipts and frees the place; the record goes when
+     * the link's resync reads the machine's sessions and finds the child gone (`RemoteAgents.caughtUp`). A child at rest keeps its record and holds no place, so each is
      * waited for
      */
     await eventually(() => ceiling() === null)
