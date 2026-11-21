@@ -276,7 +276,7 @@ if (args[0] === 'api' && args[1] === '-H') {
   process.stdout.write(text)
   process.exit(0)
 }
-if (args[0] === 'api' && /\/commits\/\w+\/statuses\?/.test(args[1])) json((st.statuses ?? {})[args[1].split('/')[4]] ?? [])
+if (args[0] === 'api' && /\/commits\/\w+\/status\?/.test(args[1])) json({ statuses: (st.statuses ?? {})[args[1].split('/')[4]] ?? [] })
 if (args[0] === 'api' && /^repos\/[^/]+\/[^/]+$/.test(args[1])) json({ default_branch: 'main', permissions: { admin: true, maintain: true, push: true } })
 fail('fake gh: unexpected call ' + JSON.stringify(args) + '\n')
 `
@@ -753,7 +753,7 @@ describe('rebase_stack', { timeout: 60_000 * SLOW }, () => {
       "Moved #2's base from low to main.",
     ])
     expect(writes()).toEqual([
-      { args: ['api', '-X', 'POST', `repos/ijun17/centralu/statuses/${head}`, '--input', '-'], stdin: JSON.stringify({ state: 'success', context: 'pre-pr', description: `carried from ${s.u2.slice(0, 7)} by rebase_stack; tier:light; passed` }) },
+      { args: ['api', '-X', 'POST', `repos/ijun17/centralu/statuses/${head}`, '--input', '-'], stdin: JSON.stringify({ state: 'success', context: 'pre-pr', description: 'tier:light; passed' }) },
       { args: ['api', '-X', 'PATCH', 'repos/ijun17/centralu/pulls/2', '--input', '-'], stdin: '{"base":"main"}' },
     ])
     expect(checkout(s.work)).toEqual(before)
@@ -1253,6 +1253,12 @@ describe('pre_pr runs pnpm pre-pr on a pull request as it is now and posts the p
     runtime()
     const run = await call('pre_pr', { pr: 7 })
     expect(run.text).toBe("No pre-pr status: pnpm pre-pr cannot fetch a fork's branch (feat/tools) here. Run it in that checkout, and give skipPrePr with what it said.")
+    // The reason goes onto GitHub in the status, so it is held to the public text rules as the description is
+    await call('edit_private_words', { add: ['Moonbase'] })
+    const leak = await call('pre_pr', { pr: 7, skipPrePr: 'Run on the Moonbase build.' })
+    expect(leak.isError).toBe(true)
+    expect(leak.text).toMatch(/^No pre-pr status: skipPrePr .*Moonbase/)
+    expect(writes()).toEqual([])
     const r = await call('pre_pr', { pr: 7, skipPrePr: 'Run in the fork: passed at aaaaaaa.' })
     expect(r.text).toBe('pnpm pre-pr skipped for #7 at aaaaaaa; posted the pre-pr status (tier:deep; skipped: Run in the fork: passed at aaaaaaa.). Labelled tier:deep, above its tier:light.')
     expect(gh.state<State>().statuses).toEqual({ [head]: [{ state: 'success', context: 'pre-pr', description: 'tier:deep; skipped: Run in the fork: passed at aaaaaaa.' }] })

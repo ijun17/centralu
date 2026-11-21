@@ -653,8 +653,8 @@ async function pollItem(item, { now, ref, renew, save, landed = [], stillIntegra
   const at = new Date(now).toISOString()
   const { permissions, defaultBranch } = await permissionsOf(repo, now)
   const pr = await readPr(repo, item.pr, QUEUE_PR_FIELDS)
-  // The head pnpm pre-pr is known to have passed on (#1886): queue_merge's, or the queue's own push onto it. An item queued
-  // before the field existed starts from the head it had
+  // The head pnpm pre-pr is known to have passed on (#1886): queue_merge's, or the queue's own push onto it. An item without
+  // one (queued by a board that set none) is taken at the head it was polled at, for as long as a queue file holds such items
   const accepted = item.prePrHead !== undefined ? item.prePrHead : (item.head ?? pr.headRefOid)
   const base = { title: pr.title, prePrHead: accepted, ...resetFor(item, pr.headRefOid) }
   const view = { ...item, ...base }

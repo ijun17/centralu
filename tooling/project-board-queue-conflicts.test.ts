@@ -7,7 +7,7 @@ import { SLOW } from './test-timing.js'
 import { g, GIT_ENV, githubStandIn } from './git-fixture.test-helpers.js'
 // @ts-expect-error -- a plain .mjs module of the board app, without types
 import { pathMatches } from '../.centralu/apps/project-board/versions.mjs'
-import { SHA, SHA2, LISTS, MECHANICAL_FILES, ghCheck, green, ghRun, ghPr, ghState, root, fake, runtime, call, patchGh, writes, queueOnDisk, notices, until, stateOf, morePolls, appTmp } from './project-board-queue.test-helpers.js'
+import { SHA, SHA2, A, R, LISTS, MECHANICAL_FILES, ghCheck, green, ghRun, ghPr, ghState, root, fake, runtime, call, patchGh, writes, queueOnDisk, notices, until, stateOf, morePolls, appTmp, seedQueue } from './project-board-queue.test-helpers.js'
 
 // --- Conflicts (#1182): real git, a bare repository standing for GitHub's --------------------------
 
@@ -320,6 +320,27 @@ describe('the merge queue resolves a conflict with main itself, or hands it to t
     expect(steps[1].text).toContain('against main: docs/generated/schema.md +1 -1, pnpm-lock.yaml +1 -1.')
     expect(steps.find((e) => e.step === 'fixed')).toMatchObject({ by: 'queue' })
     expect(queueTmps()).toEqual([])
+  })
+
+  // #1886: the queue's push is exempt only onto a head pre-pr passed on; onto one pushed since, it is that head's change still
+  it('asks for the pre-pr status of the head it pushed onto a head that had none, and lands nothing meanwhile', async () => {
+    const repo = conflictRepo({ 77: ['pnpm-lock.yaml'] })
+    const at = new Date().toISOString()
+    // Queued at A; the author pushed the conflicting head since, with no pre-pr status
+    seedQueue([{ repo: R, pr: 77, lowers: [], owner: 'tester', author: 'writer', state: 'waiting', head: A, prePrHead: A, title: 'feat(apps): change 77', queuedAt: at, updatedAt: at, reruns: {} }])
+    conflictRuntime(repo, [77])
+    patchGh((s) => (s.noPrePr = '*'))
+    await until(() => conflictSteps().some((e) => e.step === 'push'), 'the merge to be pushed')
+    const tip = tipOf(repo, 77)
+    patchGh((s) => {
+      Object.assign(s.prs['77'], { headRefOid: tip, mergeStateStatus: 'CLEAN', mergeable: 'MERGEABLE' })
+      s.checks[tip] = green('2026-10-17T09:00:00Z')
+      s.runs[tip] = [ghRun('success', 1, tip)]
+    })
+    const q = await until((x) => stateOf(x) === 'attention', 'attention for the pushed head')
+    expect(q.queue[0].reason.kind).toBe('pre-pr')
+    expect(q.queue[0].reason.text).toContain(`since ${A.slice(0, 7)} to ${tip.slice(0, 7)}`)
+    expect(writes().filter((w) => w[0] === 'merge')).toEqual([])
   })
 
   it('hands a conflict in code to the author session, once, with the exact instruction, and pushes nothing', async () => {

@@ -1878,7 +1878,7 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     const r = await call('queue_merge', { pr: 77 })
     expect(r.isError).toBe(true)
     expect(r.text).toBe(
-      "Not queued: #77's head c0ffee0 has no pre-pr status: it was pushed after open_pr, or opened by a board that did not post one. Run pre_pr with pr #77: it runs pnpm pre-pr on c0ffee0 and posts the pre-pr status.",
+      "Not queued: #77's head c0ffee0 has no pre-pr status: pnpm pre-pr has not passed on it through open_pr or pre_pr. Run pre_pr with pr #77: it runs pnpm pre-pr on c0ffee0 and posts the pre-pr status.",
     )
     expect(itemsOnDisk()).toEqual([])
     expect(writes()).toEqual([])
@@ -1906,6 +1906,20 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     patchGh((s) => (s.writes = [...(s.writes ?? []), ['status', SHA2, 'success', 'pre-pr', 'tier:light; passed']]))
     await until((x) => stateOf(x) === 'merged', 'the head to land once it has the status')
     expect(writes().find((w) => w[0] === 'merge')![2]).toEqual(expect.arrayContaining(['--match-head-commit', SHA2]))
+  })
+
+  it('asks for the status of a head pushed between queue_merge and its first poll', async () => {
+    runtime(ghState({ noPrePr: [SHA2] }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    expect(itemsOnDisk()[0]).toMatchObject({ prePrHead: SHA })
+    patchGh((s) => {
+      s.prs['77'].headRefOid = SHA2
+      s.checks[SHA2] = green()
+      s.runs[SHA2] = [ghRun('success', 1, SHA2)]
+    })
+    const q = await until((x) => stateOf(x) === 'attention', 'attention for the head pushed before the first poll')
+    expect(q.queue[0].reason.kind).toBe('pre-pr')
+    expect(writes().filter((w) => w[0] === 'merge')).toEqual([])
   })
 
   // Mixed versions while the board is rolled out: an item an older board queued checked no status

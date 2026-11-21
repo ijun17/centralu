@@ -232,7 +232,7 @@ async function queueMerge({ pr, lowers = [], owner, author, deleteBranch = true 
   if (p.state !== 'OPEN') problems.push(`${top.ref} is ${String(p.state).toLowerCase()}, not open.`)
   if (p.isDraft) problems.push(`${top.ref} is a draft; mark it ready for review first.`)
   // open_pr posts it on the head pre-pr passed on; a head pushed since has none (#1886). A stack's top's run covered its lowers
-  if (p.state === 'OPEN' && !(await prePrPassed(top.repo, p.headRefOid))) problems.push(`${top.ref}'s head ${short(p.headRefOid)} has no pre-pr status: it was pushed after open_pr, or opened by a board that did not post one. ${prePrAsk(top.ref, p.headRefOid)}`)
+  if (p.state === 'OPEN' && !(await prePrPassed(top.repo, p.headRefOid))) problems.push(`${top.ref}'s head ${short(p.headRefOid)} has no pre-pr status: pnpm pre-pr has not passed on it through open_pr or pre_pr. ${prePrAsk(top.ref, p.headRefOid)}`)
   const lowerPrs = []
   for (const l of under) {
     const lp = await readPr(l.repo, l.number)
@@ -263,7 +263,7 @@ async function queueMerge({ pr, lowers = [], owner, author, deleteBranch = true 
  * `prePrHead`, the head queue_merge found the pre-pr status on (#1886).
  * Answers enqueue's `{ item, replaced }` with the event's `seq` and how many are active, or `{ error }`.
  */
-function enqueueFor({ repo, number, lowers = [], owner, author, deleteBranch = true, title, mark = null, prePrHead = null }) {
+function enqueueFor({ repo, number, lowers = [], owner, author, deleteBranch = true, title, mark = null, prePrHead }) {
   // No owner given: a new id, unless it is queued already (queued again, it stays the session's that
   // queued it first, whose watch command still listens for that owner)
   const given = owner?.trim() || null

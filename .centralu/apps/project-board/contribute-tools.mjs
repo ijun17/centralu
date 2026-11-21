@@ -4,12 +4,12 @@ import { commentIdOf } from './answers.mjs'
 import { checkoutDir, itemInput, itemOf, itemRef, pathInput, REF_HELP, refOf, repoInput, repoOf } from './board.mjs'
 import { config } from './config.mjs'
 import { GitError } from './git.mjs'
-import { addLabels, createIssue, createPr, editComment, FATAL, GitHubError, markDraft, openPrsOnBase, postComment, postStatus, prsWithHead, QUEUE_PR_FIELDS, readComment, readPr, readRepo, readRepoFile, readStatus, sameRepo, setPrBase, viewerLogin } from './github.mjs'
+import { addLabels, createIssue, createPr, editComment, FATAL, GitHubError, markDraft, openPrsOnBase, postComment, prsWithHead, QUEUE_PR_FIELDS, readComment, readPr, readRepo, readRepoFile, readStatus, sameRepo, setPrBase, viewerLogin } from './github.mjs'
 import { progress } from './ci-tools.mjs'
 import { answering, serially } from './handlers.mjs'
 import { renderMarkdown } from './markdown.mjs'
 import { noteOpened } from './opened.mjs'
-import { PRE_PR_STATUS, prePrDescription, runPrePr } from './pre-pr.mjs'
+import { postPrePr, PRE_PR_STATUS, prePrDescription, runPrePr } from './pre-pr.mjs'
 import { answer, asError, linesAnswer } from './reply.mjs'
 import { CLOSES_HEADING, commitProblems, DEFAULT_CONVENTIONS, fillTemplate, foreignBareIssueWarnings, parseConventions, publicTextProblems, subjectProblems } from './rules.mjs'
 import { rebaseStack, StackRefusal } from './stack.mjs'
@@ -182,7 +182,7 @@ export async function openPr({ title, head, base, draft, repo, sections, dryRun,
     const sha = status.sha ?? pr.head
     try {
       if (!sha) throw new GitHubError('github', 'GitHub gave no head commit for it.')
-      await postStatus(r, sha, { state: 'success', context: PRE_PR_STATUS, description: status.description })
+      await postPrePr(r, sha, status.description)
     } catch (e) {
       warnings.push(`The pre-pr status was not posted: ${e?.message ?? e} queue_merge asks for it; run pre_pr on ${refOf(r, pr.number)}, which posts it.`)
     }
@@ -238,6 +238,9 @@ async function checkHead({ repo, head, fork, base, path, skipPrePr, prePrExempt,
   if (skipPrePr !== undefined) {
     const why = String(skipPrePr).trim()
     if (!why) throw new GitHubError('input', 'skipPrePr needs the reason the checks are skipped; it goes into the description.')
+    // It goes onto GitHub in the pre-pr status too, which no description check reads
+    const problems = publicTextProblems(why, await privateWords(), 'skipPrePr')
+    if (problems.length) throw new GitHubError('input', problems.join(' '))
     // Not run, the paths were not judged: deep, so skipping pre-pr never lowers the review (#1259)
     return { note: `\`pnpm pre-pr\` was not run: ${why}\n${SKIPPED_TIER_LINE}`, tier: 'deep', warnings: [], sha: null, description: prePrDescription('deep', `skipped: ${why}`) }
   }
@@ -300,7 +303,7 @@ async function openPrChecked({ skipPrePr, prePrExempt, path, ...args }, ctx) {
   if (dry.isError) return dry
   const c = await checkHead({ repo: repoOf(args.repo), head: args.head, fork: String(args.head).includes(':'), base: args.base, path, skipPrePr, prePrExempt, refusal: 'Not opened:' }, ctx)
   if (c.refused) return c.refused
-  return serially(openPr)({ ...args, verifiedNote: c.note, labels: [`tier:${c.tier}`], status: c, alsoWarn: c.warnings, signal: ctx?.mcpReq?.signal }, ctx)
+  return serially(openPr)({ ...args, verifiedNote: c.note, labels: [`tier:${c.tier}`], status: { sha: c.sha, description: c.description }, alsoWarn: c.warnings, signal: ctx?.mcpReq?.signal }, ctx)
 }
 
 /**
@@ -313,13 +316,13 @@ async function prePrOn({ pr, path, skipPrePr, prePrExempt }, ctx) {
   if (p.state !== 'OPEN') throw new GitHubError('input', `${want.ref} is ${String(p.state).toLowerCase()}; pre_pr checks an open pull request.`)
   const c = await checkHead({ repo: want.repo, head: p.headRefName, fork: p.isCrossRepository, base: p.baseRefName, path, skipPrePr, prePrExempt, refusal: `No pre-pr status on ${want.ref}:` }, ctx)
   if (c.refused) return c.refused
-  return serially(postPrePr)({ want, p, c }, ctx)
+  return serially(postPrePrOn)({ want, p, c }, ctx)
 }
 
-async function postPrePr({ want, p, c }) {
+async function postPrePrOn({ want, p, c }) {
   const sha = c.sha ?? p.headRefOid
   const warnings = [...c.warnings]
-  await postStatus(want.repo, sha, { state: 'success', context: PRE_PR_STATUS, description: c.description })
+  await postPrePr(want.repo, sha, c.description)
   if (sha !== p.headRefOid) warnings.push(`${want.ref} was at ${short(p.headRefOid)} when read, and pre-pr ran on ${short(sha)}: the branch moved meanwhile. The status is on ${short(sha)}; run pre_pr again if that is not its head now.`)
   const had = labelTier(p.labels)
   const tier = labelTier([...(p.labels ?? []), `tier:${c.tier}`])
@@ -356,7 +359,7 @@ async function carryPrePr(repo, from, to) {
   try {
     const s = await readStatus(repo, from, PRE_PR_STATUS)
     if (s?.state !== 'success') return `${short(from)} had no pre-pr status to carry over to ${short(to)}: run pre_pr on it before queue_merge.`
-    await postStatus(repo, to, { state: 'success', context: PRE_PR_STATUS, description: `carried from ${short(from)} by rebase_stack; ${s.description}` })
+    await postPrePr(repo, to, s.description)
     return `Carried the pre-pr status of ${short(from)} over to ${short(to)}: the same change.`
   } catch (e) {
     return `The pre-pr status of ${short(from)} was not carried over to ${short(to)}: ${e?.message ?? e} Run pre_pr on it before queue_merge.`

@@ -696,11 +696,10 @@ export async function postStatus(repo, sha, { state, context, description, targe
   await restWrite('POST', `repos/${repo}/statuses/${sha}`, { state, context, description: String(description).slice(0, 140), ...(targetUrl ? { target_url: targetUrl } : {}) }, `the ${context} status`)
 }
 
-/** The newest commit status of `context` on `sha` (`{ state, description }`; GitHub lists them newest first), or null when there is none. */
+/** The newest commit status of `context` on `sha` (`{ state, description }`; the combined status keeps one per context), or null when there is none. */
 export async function readStatus(repo, sha, context) {
   checkRepo(repo)
-  const list = await restJson(`repos/${repo}/commits/${sha}/statuses?per_page=100`)
-  const s = (Array.isArray(list) ? list : []).find((x) => x?.context === context)
+  const s = (await restJson(`repos/${repo}/commits/${sha}/status?per_page=100`))?.statuses?.find((x) => x?.context === context)
   return s ? { state: s.state, description: s.description ?? '' } : null
 }
 

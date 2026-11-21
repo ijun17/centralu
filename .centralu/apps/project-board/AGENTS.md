@@ -307,13 +307,14 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
 
 ### pre-pr's status (#1886)
 
-`open_pr` runs `pnpm pre-pr` on the head it opens, but nothing asked for it again on a head pushed later: new commits, or the
-author's own rebase onto main, landed with only CI's word. So pre-pr's pass is written on the head it ran on, as a commit
-status, and the queue asks for it on the head it lands.
+`open_pr` runs `pnpm pre-pr` on the head it opens; a head pushed later (new commits, or the author's own rebase onto main)
+needs it again. pre-pr's pass is written on the head it ran on, as a commit status, and the queue asks for it on the head it
+lands.
 
 - **The status**: context `pre-pr` (`PRE_PR_STATUS`, pre-pr.mjs), state success, on the exact commit pre-pr ran on (its
   answer's `head`, not the branch as read before or after), description `tier:<name>; passed` (`passed without <checks>` with
-  exemptions); with `skipPrePr`, `tier:deep; skipped: <reason>` on the head the pull request opened at. `open_pr` posts it
+  exemptions); with `skipPrePr`, `tier:deep; skipped: <reason>` (the reason checked as public text, as the description is)
+  on the head the pull request opened at. `open_pr` posts it
   after the pull request opens (a status GitHub refuses is a warning: the pull request is open either way).
 - **`pre_pr`** (`pr`, `skipPrePr?`, `prePrExempt?`, `path?`): pre-pr on an open pull request's head as it is now, with the
   branches of the pull requests under it, exactly as `open_pr` runs it (`checkHead`, contribute-tools.mjs, the one procedure
@@ -329,15 +330,15 @@ status, and the queue asks for it on the head it lands.
   for it), and a head the queue pushed itself onto a head it had accepted (a merge of main or a restack, `conflict.sha`): the
   same change, merged mechanically or replayed with the same patch id, and CI runs on it before it lands. The queue never runs
   pre-pr itself.
-- **`rebase_stack`** (a session's restack) carries the status over to the head it pushes (`carry`, stack.mjs), described
-  `carried from <sha> by rebase_stack; …`: it pushes only a replay whose patch id is the tested change's, so what pre-pr said
+- **`rebase_stack`** (a session's restack) carries the status over to the head it pushes (`carry`, stack.mjs), its
+  description as it was: it pushes only a replay whose patch id is the tested change's, so what pre-pr said
   holds, and a stack's top restacked after its lower landed can be queued without running pre-pr again. A head that had no
   status carries none, and the answer says to run `pre_pr`. The queue's own restack of a top carries nothing: the exemption
   above covers it in the queue, and queued again after `unqueue` such a head needs `pre_pr`.
 - **Mixed versions while this rolls out**: an item queued before this (no `prePrHead`) is taken at the head it had, and only a
   head pushed after that is asked for the status. A pull request an older board opened has no status, and `queue_merge` says to
   run `pre_pr`. An older board's `queue_merge` queues without asking, and an older driver (a watch command started days ago)
-  polls without asking: it lands a moved head on CI alone, as before, until it is restarted on this code.
+  polls without asking: it lands a moved head on CI alone until it is restarted on this code.
 - **Attribution, not proof.** Anyone who can push to the repository can post a `pre-pr` status by hand, and pre-pr ran on
   the session's computer, on code it pushed. The status says which run of pre-pr vouched for a head, so the queue does not land a
   head nobody checked by mistake; it is a speed check, not a trust boundary. CI on the head, the batch's run and the review its
