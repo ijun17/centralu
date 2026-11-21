@@ -1,28 +1,7 @@
 /**
- * Version comparison for the in-app update check (issue #43).
- *
- * **This is a mirror, not a third implementation.** The launcher ships the same
- * comparison in `packaging/npm/centralu/bin/semver.mjs`, and the two are pinned to
- * each other by `tooling/launcher-semver.test.ts` — if one is edited without the
- * other, that test fails. Copying was the least bad option: the launcher's copy is
- * a plain `.mjs` inside a published npm package, and importing across that boundary
- * would drag the shim into the app bundle and past three build steps that have no
- * reason to know it exists.
- *
- * **Why it lives in `protocol`:** the host does the checking and the mock platform
- * has to answer the same way for the same inputs, and `protocol` is the only package
- * both are allowed to import (`eslint.config.js` boundaries). Putting it in the host
- * would have forced the mock to invent its own rule, which is precisely how the two
- * would drift — and drift here is invisible: every answer still looks plausible.
- *
- * Why not `.split('.').map(Number)`: that turns `0.1.0-beta.2` into [0, 1, NaN, 2],
- * and `NaN !== NaN` ends the comparison at the third slot with `NaN > NaN` = false —
- * so no beta ever saw the next beta. That is exactly how `centralu update` on
- * 0.1.0-beta.1 answered "already latest" while beta.2 sat on the registry (#42).
- *
- * That bug is also the reason this check exists in the *host* at all: the broken
- * compare shipped inside launchers that are now on people's machines, and no fix
- * can reach them retroactively. A check that runs here bypasses them entirely.
+ * Version comparison for the update check, a mirror of packaging/npm/centralu/bin/semver.mjs (pinned by
+ * tooling/launcher-semver.test.ts). In protocol so the host and the mock platform answer alike; the host checks because
+ * installed launchers keep their copy, which compared prereleases as NaN (#42, docs/runtime-lessons/quit-relaunch-update.md UP10).
  */
 export function isNewerVersion(a: string, b: string): boolean {
   const [coreA, preA] = split(String(a))

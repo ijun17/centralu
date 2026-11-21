@@ -41,7 +41,7 @@ export const mailParams = {
     ),
   /** "N sessions have mail from while Centralu was off": wake them, or leave them for their next turn */
   'mail.wake': z.object({ wake: z.boolean() }),
-  /** What a session's header badge lists (docs/plans/mailbox.md §18.8). An older host answers `unknown_method`: no badge */
+  /** What a session's header badge lists (docs/plans/mailbox.md §18.8). An older host answers "Unknown method": no badge */
   'watches.list': z.object({ sessionId: z.string() }),
   /** Its firing not given yet is taken back, and its session gets one quiet notice */
   'watches.cancel': z.object({ id: z.string() }),

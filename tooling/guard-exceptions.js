@@ -19,16 +19,6 @@
  * a file in the repository.
  */
 export const EXCEPTIONS = {
-  comments: {
-    'packages/protocol/src/semver.ts': {
-      counts: { block: 1 },
-      reason: { block: 'It names eslint.config.js, so scripts/tier.mjs reads it as a comment a tool reads and any edit is judged as code; it shrinks when the judge stops matching a bare mention of eslint (#2355)' },
-    },
-    'packages/ui/src/app/useLoad.ts': {
-      counts: { block: 1 },
-      reason: { block: 'It names eslint.config.js, so scripts/tier.mjs reads it as a comment a tool reads and any edit is judged as code; it shrinks when the judge stops matching a bare mention of eslint (#2355)' },
-    },
-  },
   'no-hand-split': {
     'packages/protocol/src/paths.ts': {
       reason: 'The one file allowed to write the separator down, because writing it down is its subject: every other file asks it (wireSegments, wireBaseName, wireJoin)',
@@ -248,10 +238,11 @@ export const ARCHIVE_ALLOWED = [
 ]
 
 /**
- * The source files `guard/comments` holds above its 35% share of comment lines (#2355), each at its share when its folder
- * was swept. Most are type declarations whose fields each keep one line the type cannot say (what absence means, what an
- * older peer does, a unit, a security consequence); the rest keep platform facts, races or measured numbers. Each number
- * is a ceiling: a file may not go above it, and a change that brings one down may lower it (at or under 35%, remove it).
+ * The source files `guard/comments` holds above its 35% share of comment lines (#2355), each at its share now. Most are
+ * type declarations whose fields each keep one line the type cannot say (what absence means, what an older peer does, a
+ * unit, a security consequence); the rest keep platform facts, races or measured numbers. The guard holds each number as a
+ * ceiling, and tooling/guards-checks.test.ts fails until a change that brings a file down lowers its line (at or under
+ * 35%, removes it).
  */
 export const COMMENT_SHARE_HELD = {
   files: {
@@ -274,7 +265,6 @@ export const COMMENT_SHARE_HELD = {
     'packages/protocol/src/entities/sessions.ts': 38,
     'packages/protocol/src/entities/tools.ts': 41,
     'packages/protocol/src/entities/usage.ts': 37,
-    'packages/protocol/src/semver.ts': 42,
     'packages/protocol/src/turn-who.ts': 48,
     'packages/ui/src/features/files/dragPath.ts': 42,
     'packages/ui/src/features/session/RunMenu.tsx': 43,

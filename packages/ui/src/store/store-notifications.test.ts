@@ -87,7 +87,7 @@ describe('update status (#43)', () => {
       install.spy.mockRestore()
     })
 
-    // #2155 review: a switch's answer seated with neither check would let a host connection gone since replace the
+    // #2155: a switch's answer seated with neither check would let a host connection gone since replace the
     // newer host's state
     it("drops a switch's answer that comes back after the host connection it was asked on is gone", async () => {
       const platform = new MockPlatform()
@@ -149,7 +149,7 @@ describe('update status (#43)', () => {
       const stop = windowOf(platform)
       const applyNow = vi.fn(useStore.getState().applyUpdateNow)
       useStore.setState({ applyUpdateNow: applyNow })
-      // What the host had heard when the shell was asked to relaunch: "started" comes first (#665 review)
+      // What the host had heard when the shell was asked to relaunch: "started" comes first (#665)
       const relaunch = platform.relaunch.relaunch
       let heardBefore: unknown[] = []
       platform.relaunch.relaunch = async () => {
@@ -550,7 +550,7 @@ describe('resets, notices and switches the tool made (#304)', () => {
     const items = messagesToChat([
       { sessionId: 'n-4', seq: 1, role: 'system', kind: 'marker', ts: 1, payload: { type: 'from_a_newer_host', text: 'x' } },
       { sessionId: 'n-4', seq: 2, role: 'system', kind: 'marker', ts: 2, payload: { type: 'compaction', failed: false } },
-      // A payload with no kind it could name has no line kind either (#2338 review)
+      // A payload with no kind it could name has no line kind either (#2338)
       { sessionId: 'n-4', seq: 3, role: 'system', kind: 'marker', ts: 3, payload: { type: 7, text: 'x' } },
     ])
     expect(items.map((i) => (i as { text: string }).text)).toEqual(['Earlier messages were compacted here'])

@@ -59,7 +59,7 @@ function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; project
   const [setupFor, setSetupFor] = useState<ToolName | null>(null)
   // A tool that cannot keep what this project asks (an untrusted project, `launchRefusal`) is left out like one not installed
   const trusted = useStore((s) => !!s.projects[projectId]?.trusted)
-  // Asked with the session's own preset and role (#1562 review): the switch keeps both, so a tool must keep them too
+  // Asked with the session's own preset and role (#1562): the switch keeps both, so a tool must keep them too
   const preset = useStore((s) => s.sessions[sessionId]?.permissionPreset ?? 'normal')
   // Role text by its kind; a builder's fixed role the window does not hold, and the host refuses that switch itself
   const roleText = useStore((s) => isAssistantOrCoordinator(s.sessions[sessionId]?.kind))

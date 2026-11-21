@@ -405,7 +405,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
   z.object({ ...appScoped, type: z.literal('tool_setup'), tool: ToolName, setup: ToolSetup }),
   // App-wide: the host checks on its own schedule, and a check hours into a running window has no RPC answer to ride
   z.object({ ...appScoped, type: z.literal('update_status'), status: UpdateStatus }),
-  // Names the thread and nothing of its content, which the screen asks for (`mail.thread`; docs/plans/mailbox.md §10.1)
+  // Names the thread and nothing of its content, which the screen asks for (`mail.thread`; docs/plans/mailbox.md §12.2)
   z.object({
     ...appScoped,
     type: z.literal('mail_changed'),

@@ -335,7 +335,7 @@ describe('sidebar folding (#205)', () => {
     expect([...(folds(mock) ?? [])].sort()).toEqual([a.id, c.id].sort())
   })
 
-  // The file tree's trash refuses the project folder (#838 review)
+  // The file tree's trash refuses the project folder (#838)
   it('deleting a project with its folder trashes the folder through its own door, then removes the project', async () => {
     const mock = new MockPlatform()
     const a = await mock.projects.add('/tmp/trash-whole')

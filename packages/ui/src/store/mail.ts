@@ -6,7 +6,7 @@ import type { AppState, StoreGet, StoreSet } from './state.js'
 import { alertPerson } from './events/notices.js'
 import { coalescedRead } from './single-flight.js'
 
-// The person's mailbox (#1347, docs/plans/mailbox.md §10.1): the host owns every fact, and nothing is drawn ahead of its answer.
+// The person's mailbox (#1347, docs/plans/mailbox.md §12): the host owns every fact, and nothing is drawn ahead of its answer.
 
 const NO_TASKS = { tasks: [], capped: null, unreached: [] }
 

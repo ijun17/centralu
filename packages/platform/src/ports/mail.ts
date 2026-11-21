@@ -1,6 +1,6 @@
 import type { MailHeldRow, MailTaskRow, MailThreadRow, MailThreadView, UnreachedMachine, WatchView } from '@cc/protocol/client'
 
-/** The person's side of the mailbox (#1347, docs/plans/mailbox.md §10.1, docs/protocol.md §3, §5) */
+/** The person's side of the mailbox (#1347, docs/plans/mailbox.md §12.2, docs/protocol.md §3, §5) */
 export interface MailPort {
   list(): Promise<{ threads: MailThreadRow[]; held: MailHeldRow[]; waiting: number }>
   tasks(): Promise<{ tasks: MailTaskRow[]; capped: number | null; unreached: UnreachedMachine[] }>

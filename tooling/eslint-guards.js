@@ -13,6 +13,8 @@
  * Known gaps, shared: a name rebound through a `let`, a function that is handed what the rule looks for, and a
  * spelling that needs types (a `Reflect` call, an alias of an imported function).
  */
+import { Linter } from 'eslint'
+import tseslint from 'typescript-eslint'
 import { guard, keyOf, nameOf, plain, relativeFile, stringNodes, unwrap } from './eslint-guard-kit.js'
 import { COMMENT_SHARE_HELD } from './guard-exceptions.js'
 import { variableOf } from './eslint-const-init.js'
@@ -391,20 +393,37 @@ const onePathRule = guard('one-path-rule', { copy: "{{what}} is a copy of a path
 /**
  * Comments say what the code cannot: a platform rule, a race, a measured number, why a check exists (#2355, the owner's
  * decision of 2026-11-21; CONTRIBUTING.md "What is expected of code"). In a folder whose comments are swept this reports
- * history ("used to", not the passive "is used to"; a sentence opening with "Previously"), a file header over 3 lines of
- * text, a comment block over COMMENT_BLOCK_LINES lines of text, and a source file over COMMENT_SHARE comment lines.
+ * history ("used to", not the passive "is used to"; a sentence opening with "Previously"; a "#N review" tag), a file header over 3
+ * lines of text, a comment block over COMMENT_BLOCK_LINES lines of text, and a source file over COMMENT_SHARE comment lines.
  * Adjacent line comments are one block.
  */
 const ADVERB = String.raw`(?:\w+ly|only|also|not|just|still|never|often|then|always|now|all|both|again|even|too)`
 const HISTORY = [
   new RegExp(String.raw`(?<!\b(?:is|are|was|were|be|been|being|get|gets|got|'s)[\s*]+(?:${ADVERB}[\s*]+)?)\bused[\s*]+to\b`, 'gi'),
   /(?:^[\s*]*|[.!?;:][\s*]+|\n[\s*]*-[\s*]+)(Previously)\b/g,
+  /#\d+[\s*]+review\b/gi,
 ]
 const HEADER_LINES = 3
 const COMMENT_BLOCK_LINES = 10
 const COMMENT_SHARE = 0.35
 /** Below this many lines a file's share says little: two comments in a six-line file are a third of it */
 const SHARE_FROM_LINES = 30
+/** A file's lines that hold only a comment, and its lines that hold code or a comment: the share `guard/comments` holds */
+export function commentShare(source) {
+  const code = new Set()
+  for (const t of source.ast.tokens) for (let l = t.loc.start.line; l <= t.loc.end.line; l++) code.add(l)
+  const comment = new Set()
+  for (const c of source.getAllComments()) for (let l = c.loc.start.line; l <= c.loc.end.line; l++) if (!code.has(l) && source.lines[l - 1].trim()) comment.add(l)
+  return { comment: comment.size, lines: code.size + comment.size }
+}
+
+/** `commentShare` of a TypeScript or JavaScript text, outside a lint run; `file` names its kind (`.tsx` parses JSX) */
+export function commentShareOf(text, file = 'x.ts') {
+  let share = { comment: 0, lines: 0 }
+  const rule = { create: (context) => ({ Program: () => void (share = commentShare(context.sourceCode)) }) }
+  new Linter().verify(text, [{ files: ['**/*.{ts,tsx,mts,cts,js,mjs,cjs}'], languageOptions: { parser: tseslint.parser }, plugins: { share: { rules: { of: rule } } }, rules: { 'share/of': 'error' } }], file)
+  return share
+}
 const isTestFile = (file) => /\.test\.|test-helpers\./.test(file)
 const at = (line) => ({ loc: { start: { line, column: 0 }, end: { line, column: 0 } } })
 const comments = guard(
@@ -446,13 +465,9 @@ const comments = guard(
         } else if (n > COMMENT_BLOCK_LINES) add(at(g.start), 'block', { n, max: COMMENT_BLOCK_LINES }, 'block')
       }
       if (isTestFile(context.filename)) return
-      const code = new Set()
-      for (const t of program.tokens) for (let l = t.loc.start.line; l <= t.loc.end.line; l++) code.add(l)
-      const commentLines = new Set()
-      for (const c of source.getAllComments()) for (let l = c.loc.start.line; l <= c.loc.end.line; l++) if (!code.has(l) && source.lines[l - 1].trim()) commentLines.add(l)
-      const lines = code.size + commentLines.size
+      const { comment, lines } = commentShare(source)
       if (lines < SHARE_FROM_LINES) return
-      const pct = Math.round((100 * commentLines.size) / lines)
+      const pct = Math.round((100 * comment) / lines)
       const held = COMMENT_SHARE_HELD.files[relativeFile(context)]
       const max = held ?? Math.round(100 * COMMENT_SHARE)
       if (pct > max) add(at(1), 'share', { pct, max }, 'share')

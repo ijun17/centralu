@@ -140,7 +140,7 @@ export function ConfirmDelete({
             {wt.dirty && (
               <p className="mt-1 text-xs text-ink" data-testid="worktree-dirty">
                 {wt.unknown
-                  ? // git did not answer: not known to be clean is not clean (#850 review)
+                  ? // git did not answer: not known to be clean is not clean (#850)
                     'Its changes could not be counted. Uncommitted work in it would be lost once it is deleted.'
                   : `${formatChangedCount(wt.changedFiles, wt.more)} uncommitted ${wt.changedFiles === 1 && !wt.more ? 'change' : 'changes'} would be lost once it is deleted.`}
               </p>

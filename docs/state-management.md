@@ -107,8 +107,9 @@ only update suggestions; they never restore the composer's text.
   render, so a pixel offset lands elsewhere once the rows above it are measured.
 - **Arriving is re-aimed every frame**, for up to 30 frames, because the target moves while rows measure: one
   `scrollTop = scrollHeight` came to rest 339px short on an 80-turn conversation. The view is hidden meanwhile
-  (`visibility: hidden`; `display: none` leaves nothing to measure) and shown once the aim holds and the rows above
-  it lie where they were measured. The person's wheel, key or pointer ends it at once.
+  (`visibility: hidden`; `display: none` leaves nothing to measure) and shown once the aim holds: at the bottom, as
+  soon as the view is there; at a row (a search hit, the row it was left on), once the rows above it lie where they
+  were measured. The person's wheel, key or pointer ends it at once.
 - **Where the person was is written on leaving, from values taken at their last scroll.** The focus view keeps the
   pane and swaps the session, and React runs the cleanup after rendering the next session, so the element then
   answers about the wrong conversation (a 3,959px jump in e2e). Nothing is written while still arriving: those

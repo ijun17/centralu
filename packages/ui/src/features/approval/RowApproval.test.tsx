@@ -80,7 +80,7 @@ describe('RowApproval', () => {
     expect(button(html, 'approve-allow')).not.toBeNull()
   })
 
-  // #683 review: requests that say nothing on their line, or carry a risk it does not show, open the session
+  // #683: requests that say nothing on their line, or carry a risk it does not show, open the session
   it('an empty, flagged, multi-line or outside-the-folder request shows Open', () => {
     const open = (d: ApprovalDetail) => {
       const { html, text } = render(waiting(d), { settled: true })

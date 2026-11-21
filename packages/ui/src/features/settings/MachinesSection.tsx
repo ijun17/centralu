@@ -478,14 +478,14 @@ export function hubAutoNote(name: string, state: 'on' | 'off' | 'older' | 'unrea
 }
 
 /**
- * The machine's own "Allow auto from a linked computer" (#1273 review), read and set over the link, so a machine with
+ * The machine's own "Allow auto from a linked computer" (#1273), read and set over the link, so a machine with
  * no window (`centralu serve`) can be set from here. Read at each start: off, a child this computer's `auto` session
  * starts there runs under normal, and this computer asks first. The switch shows the machine's answer; while the link
  * is down, or on an older machine without it, it says so instead.
  */
 function HubAutoSwitch({ m }: { m: MachineInfo }) {
   const platform = usePlatform()
-  // The machine's answer to the last change, kept only while the link is as it was then (#1273 review): a link that
+  // The machine's answer to the last change, kept only while the link is as it was then (#1273): a link that
   // goes or comes back reads the machine again, and that read is what shows
   const [set, setSet] = useState<{ state: 'on' | 'off' | 'older' | 'unreachable'; status: MachineInfo['status'] } | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
@@ -681,7 +681,7 @@ function VersionPrompt({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: 
 function OtherCredentials({ m }: { m: MachineInfo }) {
   const others = m.otherCredentials
   if (!others?.length && !m.ownCredentialGone && !m.credentialFileUnreadable) return null
-  // One that is gone no longer gives access: listed, since something used it, but not counted (#1405 review)
+  // One that is gone no longer gives access: listed, since something used it, but not counted (#1405)
   const count = (others ?? []).filter((c) => !c.gone).length + m.otherCredentialsMore
   return (
     <div className="mt-1 text-xs leading-body" data-testid={`machine-credentials-${m.id}`}>
@@ -705,7 +705,7 @@ function OtherCredentials({ m }: { m: MachineInfo }) {
               {c.created ? `, since ${new Date(c.created).toLocaleDateString()}` : ''}
               {/* A pairing under a label already there is a change, not a silent swap (#1405) */}
               {c.hubsName ? ', under this computer’s own name but not made by it' : c.replaced ? ', which replaced an earlier one of that name' : ''}
-              {/* Used there, then withdrawn before a read listed it (#1405 review): nothing left to revoke */}
+              {/* Used there, then withdrawn before a read listed it (#1405): nothing left to revoke */}
               {c.gone ? ', used, then withdrawn' : ''}
             </span>
             {!c.gone && (

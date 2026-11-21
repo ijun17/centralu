@@ -50,7 +50,7 @@ describe('what a session’s subagent steps take', () => {
     expect(text(html)).not.toContain('Move the subagent steps of')
   })
 
-  // #418 review: a machine not read left the list saying no session keeps any (#841's rule, ux-writing §1.5)
+  // #418: a machine not read left the list saying no session keeps any (#841's rule, ux-writing §1.5)
   it('names each machine it could not read, and never says no session keeps any while one was not read', () => {
     const unreached = [{ machineId: 'm1', name: 'Box' }]
     const none = renderToStaticMarkup(<SubagentStepsHeldList sessions={[]} unreached={unreached} error={null} onRetry={noop} row={idle} onMove={noop} />)

@@ -54,27 +54,14 @@ export function createLoader<T>(show: (update: (shown: Loaded<T>) => Loaded<T>) 
 }
 
 /**
- * Reads something when a screen shows it, and again when what it is about changes (#850 item 8).
- *
- * About thirty components wrote this by hand: a state, an effect, an `alive` flag against a late answer, and a
- * `.catch` that most often set an empty list. That last part is why a failed read looked like an empty one: the
- * evidence panel said "No changes" and "No commits yet", and settings said "No saved rules", when the host had not
- * answered at all. Here a failure is an `error`, never an empty `data`, and the screen says what failed
- * (`LoadFailed`). A refresh that fails keeps what was shown, with the error beside it: the list is still what it was
- * a moment ago, and the line says it may be out of date.
- *
- * - `read` asks the question; when it returns null there is nothing to ask (yet), and the load is idle. Written
- *   inline, so `exhaustive-deps` sees what it uses.
- * - `deps` are what the question is about (a project, a session): when one changes, what was shown goes and the new
- *   subject is read. `exhaustive-deps` checks them as it does an effect's (eslint.config.js).
- * - `refresh` are signals that the same subject changed (a file touched, a version bumped): it is read again while the
- *   last answer stays on screen, so a list does not blink on every refresh.
- *
- * - `keepLast` leaves the last answer on screen while `deps` change and the new one is read, as a refresh does: for a
- *   question that is typed or toggled (a search box, a grouping), not one about another subject.
- * - `delayMs` waits that long before each read starts and starts it only if nothing changed meanwhile (a search box asks
- *   when the typing pauses).
- *
+ * Reads something when a screen shows it, and again when what it is about changes (#850 item 8). A failure is an `error`,
+ * never an empty `data`, so a failed read does not pass for an empty list (`LoadFailed` says what failed); a refresh that
+ * fails keeps what was shown, with the error beside it.
+ * - `read` asks (null: nothing to ask yet, idle) about `deps`, the subject (a project, a session); `exhaustive-deps` checks
+ *   them as an effect's, so `read` is written inline. A change of `deps` drops what was shown and reads the new subject.
+ * - `refresh` signals that the same subject changed: it is read again with the last answer kept on screen.
+ * - `keepLast` keeps the last answer while `deps` change, for a typed or toggled question (a search box, a grouping).
+ * - `delayMs` waits before each read and starts it only if nothing changed meanwhile (a search box asks on a pause).
  * An answer to an older question (the subject changed, the screen went away, a newer read started) is dropped.
  */
 export function useLoad<T>(

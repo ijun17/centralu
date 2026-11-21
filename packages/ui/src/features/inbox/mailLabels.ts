@@ -3,7 +3,7 @@ import { plainLine } from '@cc/protocol/client'
 import type { MailHeldRow, MailMessage, MailParty, MailTaskRow, MailThreadRow, MailThreadView } from '@cc/protocol/client'
 
 /**
- * How the Inbox words the mailbox (#1347, docs/plans/mailbox.md §10.1). The host names the parties and states why mail is held;
+ * How the Inbox words the mailbox (#1347, docs/plans/mailbox.md §12.3). The host names the parties and states why mail is held;
  * these only turn those words into the screen's, so a word this build does not know is shown as the host wrote it.
  */
 

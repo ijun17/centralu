@@ -69,8 +69,8 @@ export function detectTrigger(
 }
 
 /**
- * How long Enter and Tab wait for the file search of the latest keystroke before the list gives up on it (#842 review
- * of item 13). The host answers from an index in milliseconds; this only bounds a search that hangs, so the composer
+ * How long Enter and Tab wait for the file search of the latest keystroke before the list gives up on it (#842 item
+ * 13). The host answers from an index in milliseconds; this only bounds a search that hangs, so the composer
  * can still send.
  */
 export const FILE_SEARCH_WAIT_MS = 1500
@@ -196,7 +196,7 @@ export function useAutocomplete({
   )
   useEffect(() => {
     if (fileKey === null) return
-    // A search that hangs must not hold the composer: past this the list stops waiting for it (#842 review of item 13)
+    // A search that hangs must not hold the composer: past this the list stops waiting for it (#842 item 13)
     const t = setTimeout(() => setGaveUp(fileKey), FILE_SEARCH_WAIT_MS)
     return () => clearTimeout(t)
   }, [fileKey])

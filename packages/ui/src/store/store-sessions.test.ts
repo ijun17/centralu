@@ -332,7 +332,7 @@ describe('a session deleted while awaited is never revived (#163)', () => {
     ])
   })
 
-  // #378 review: the host deletes an app's agent session once its run is over
+  // #378: the host deletes an app's agent session once its run is over
   it('a draft with words in it survives its session\'s deletion, to be copied', () => {
     const id = 'del-draft-378'
     useStore.setState({
@@ -364,7 +364,7 @@ describe('a session deleted while awaited is never revived (#163)', () => {
 })
 
 /*
- * An opened app-agent session stays the person's (#378 review). markRead sends nothing with nothing unread, and the
+ * An opened app-agent session stays the person's (#378). markRead sends nothing with nothing unread, and the
  * app's request is read as it arrives, so the host would not hear "opened" and a short run would delete it on screen.
  */
 describe('an app-agent session on screen', () => {

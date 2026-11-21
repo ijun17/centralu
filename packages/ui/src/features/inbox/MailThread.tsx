@@ -16,7 +16,7 @@ import { AnsweringPicker } from './AnsweringPicker.js'
 import { answerTo, answeringTarget, choicesLabel, closeStopsWork, replyKind, threadStateLabel } from './mailLabels.js'
 
 /**
- * One mailbox conversation in the inbox (#1347, docs/plans/mailbox.md §10.1): who is in it, what was said, the person's
+ * One mailbox conversation in the inbox (#1347, docs/plans/mailbox.md §12.3): who is in it, what was said, the person's
  * reply. Others' words go under their name through the session view's `Markdown` (#2228: no raw HTML, links as there);
  * the person's stay plain text. Centralu's lines (a state moved, a party joined) are small and plain.
  */

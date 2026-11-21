@@ -5,7 +5,7 @@ import { Button } from '../../components/Button.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { CloseIcon } from '../../components/icons.jsx'
 
-/** What the card says of a draft whose session is gone (#378 review) */
+/** What the card says of a draft whose session is gone (#378) */
 export function keptDraftLine(d: KeptDraft): string {
   return d.name ? `"${d.name}" was deleted. Your draft is kept here.` : 'A session was deleted. Your draft is kept here.'
 }

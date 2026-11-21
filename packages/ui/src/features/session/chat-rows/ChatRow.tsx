@@ -244,7 +244,7 @@ export function ToolCard({
   const read = useMemo(() => centraluCallOf(item) ?? unmarkedAskProject(item), [item])
   /*
    * A record with no mark (an older host's) is read by its Claude name; `app-<x>` there is an app's only for an app this
-   * window knows, since a repository's own server may carry that name (#730 review)
+   * window knows, since a repository's own server may carry that name (#730)
    */
   const knownApp = useStore(
     (s) => !read?.app || !!item.centralu || s.externalApps.some((a) => a.appId === read.app),

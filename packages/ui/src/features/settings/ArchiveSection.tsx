@@ -98,7 +98,7 @@ export function ArchiveSection() {
         (e: unknown) => errorMessage(e),
       ),
     )
-  /** One call per machine (#378 review): a linked machine's records are deleted there */
+  /** One call per machine (#378): a linked machine's records are deleted there */
   const purgeRunsOf = async (list: readonly TrashedRun[]) => {
     const byMachine = new Map<string | null, string[]>()
     for (const r of list) byMachine.set(r.machine ?? null, [...(byMachine.get(r.machine ?? null) ?? []), r.runId])

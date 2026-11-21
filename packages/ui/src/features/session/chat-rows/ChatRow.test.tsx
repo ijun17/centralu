@@ -333,7 +333,7 @@ describe('ChatRow: tool cards', () => {
     const some = row(tool({ tool: 'Agent', title: 'x', callId: 'c1' }))
     expect(some.text).toContain('Later 1 earlier step was archived. Settings → Archive restores it.')
 
-    // One step is "it", and a count goes through the shared formatter (#418 review)
+    // One step is "it", and a count goes through the shared formatter (#418)
     state = { subagentSteps: { s1: { c1: { open: true, more: false, loading: false, error: null, rows: [], trashed: 1 } } } }
     expect(row(tool({ tool: 'Agent', title: 'x', callId: 'c1' })).text).toContain('The step was archived. Settings → Archive restores it.')
     state = { subagentSteps: { s1: { c1: { open: true, more: false, loading: false, error: null, rows: [stored(1500, 'text', { text: 'Later' })], trashed: 1499 } } } }

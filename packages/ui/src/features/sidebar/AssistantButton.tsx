@@ -98,7 +98,7 @@ export function AssistantButton() {
 
 /**
  * The sessions the Assistant started with start_agent (#853), on this machine, with no project to hang in. `earlier`:
- * those whose assistant is gone (#994 review); nothing else starts a session with no project and no app.
+ * those whose assistant is gone (#994); nothing else starts a session with no project and no app.
  */
 export function assistantChildren(
   sessions: Record<string, SessionSummary>,
@@ -182,7 +182,7 @@ function AssistantChildren({
 }
 
 /**
- * One child's row, with a ⋯ menu to stop or archive it (#994 review): no project list holds it. No fold gutter: it folds
+ * One child's row, with a ⋯ menu to stop or archive it (#994): no project list holds it. No fold gutter: it folds
  * nothing, and an empty column would push its mark from the guide line.
  */
 function AssistantChildRow({ s, onHold, setConfirming }: { s: SessionSummary; onHold: (rowId: string, held: boolean) => void; setConfirming: (on: boolean) => void }) {

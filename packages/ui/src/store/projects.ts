@@ -246,7 +246,7 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
               const cur = s.projects[projectId]
               // The common answer is "the same": a fresh object every turn would re-render the whole sidebar
               if (!cur || sameGit(cur.git, git)) return {}
-              // git did not answer in time: the last count still stands rather than reading as none (#850 review)
+              // git did not answer in time: the last count still stands rather than reading as none (#850)
               if (git?.unknown && cur.git) return {}
               // Only `git`: the host fills the rest from defaults, which would undo a `setProjectCommands` in flight
               return { projects: { ...s.projects, [projectId]: { ...cur, git } } }

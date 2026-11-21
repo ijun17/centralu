@@ -25,7 +25,7 @@ export type ApplyOffer =
 export function applyOffer(update: UpdateStatus, windowVersion: string, relaunch: RelaunchCheck | null | undefined): ApplyOffer {
   if (update.latest && !isNewerVersion(update.latest, windowVersion)) return { kind: 'current' }
   if (!relaunch?.ready) return { kind: 'restart', ...(relaunch?.reason ? { reason: relaunch.reason } : {}) }
-  // The shell's `ready` says only that the bundle on disk differs (#665 review); it may be older (a restored backup).
+  // The shell's `ready` says only that the bundle on disk differs (#665); it may be older (a restored backup).
   // So only forward, into the version the line names, read from the bundle; `<base>.local.N` orders as a prerelease.
   const disk = relaunch.version
   if (!disk) return { kind: 'restart', reason: 'The app on disk does not say which version it is, so relaunching could start any build.' }
@@ -56,7 +56,7 @@ export function installedUpdate(update: UpdateStatus | null, windowVersion: stri
 
 /**
  * The build on disk newer than this window, as "restart to finish", or null. A later release's failed install keeps
- * its error here (#2130 review): npm may have it and the copy not, and the error says how to finish.
+ * its error here (#2130): npm may have it and the copy not, and the error says how to finish.
  */
 function waitingOnDisk(update: UpdateStatus | null, windowVersion: string, relaunch: RelaunchCheck | null | undefined): UpdateStatus | null {
   if (!relaunch?.ready || !relaunch.version || !isNewerVersion(relaunch.version, windowVersion)) return null
@@ -85,7 +85,7 @@ export async function agentApplyVerdict(
     return { ready: false, reason: 'A window that cannot relaunch itself answered (a browser window, or a desktop app whose agent host is not held by the background keeper).' }
   }
   const check = await relaunch.check().catch((e: unknown): RelaunchCheck => ({ ready: false, reason: String(e) }))
-  // A release past the build on disk is offered to install; the build on disk can still be applied (#2130 review)
+  // A release past the build on disk is offered to install; the build on disk can still be applied (#2130)
   const shown = installedUpdate(update, windowVersion, check)
   const u = shown?.phase === 'idle' ? (waitingOnDisk(update, windowVersion, check) ?? shown) : shown
   if (u?.phase === 'updating' || u?.phase === 'waiting_for_npm') {

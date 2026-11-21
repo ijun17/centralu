@@ -36,7 +36,7 @@ export function GrantList<T>({
   /** Taken back here and not yet gone from a re-read list: hidden at once instead of after the read */
   const [gone, setGone] = useState<string[]>([])
   // A list read anew is the host's word, shown even under a key taken back earlier (revoked and granted again while
-  // Settings stays open, #850 review)
+  // Settings stays open, #850)
   useEffect(() => setGone([]), [load.data])
   const [running, setRunning] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)

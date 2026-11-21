@@ -131,7 +131,7 @@ export interface AgentPort {
   /** One launch card's native subagent steps (#222), oldest first from `afterSeq`; never in `loadMessages` */
   loadSubagentMessages(sessionId: string, parentCallId: string, afterSeq?: number, limit?: number): Promise<StoredMessage[]>
   subagentTrashed(sessionId: string, parentCallId: string): Promise<{ steps: number }>
-  /** docs/security-boundaries/desktop.md "Images a reply names" */
+  /** A local image a reply names, read by the session's host (`messages.image`); limits: docs/security-boundaries/desktop.md "Images a reply names" */
   messageImage(sessionId: string, path: string): Promise<MessageImage>
   capabilities(tool: ToolName, machine?: MachineRef): Promise<AdapterCapabilities>
   /** `ready: false` means the tool is not ready yet, not that there are none */

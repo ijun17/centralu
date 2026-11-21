@@ -7,9 +7,10 @@ import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
+import { readFileSync } from 'node:fs'
 import { guardLinter, virtualFileLinter } from './eslint-virtual.test-helpers.js'
-import { ARCHIVE_ALLOWED, EXCEPTIONS } from './guard-exceptions.js'
-import { guardConfigs, guards } from './eslint-guards.js'
+import { ARCHIVE_ALLOWED, COMMENT_SHARE_HELD, EXCEPTIONS } from './guard-exceptions.js'
+import { commentShareOf, guardConfigs, guards } from './eslint-guards.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const eslint = guardLinter()
@@ -728,7 +729,7 @@ describe('the guard rules as a set', () => {
       }
     }
     // A ceiling: lowered when a line goes, never raised (#1606, #1607)
-    expect(count).toBeLessThanOrEqual(37)
+    expect(count).toBeLessThanOrEqual(35)
     expect(ARCHIVE_ALLOWED.length).toBeLessThanOrEqual(11)
     for (const a of ARCHIVE_ALLOWED) expect(a.why.length, a.text).toBeGreaterThan(10)
   })
@@ -811,6 +812,8 @@ describe('guard/comments (#2355)', () => {
     ['// Previously the host sent it twice.'],
     ['// The host sends it once. Previously it sent it twice.'],
     ['/**\n * - Previously: two sends\n */'],
+    ['// The pane keeps the claim (#842 review)'],
+    ['/** Asked once (#730\n * review item 2) */'],
   ])('reports history in %j', async (text) => {
     expect((await lines(file, 'f()' + NL + text, 'comments')).length).toBe(1)
   })
@@ -824,6 +827,8 @@ describe('guard/comments (#2355)', () => {
     ['// The waiting list is\n// used to sort.'],
     ['// It was previously sent: a repeat is dropped.'],
     ["const a = 'it used to wait'"],
+    ['// The pane keeps the claim (#842)'],
+    ['// A change the owner chose (#842 reviewer)'],
   ])('lets %j through', async (text) => {
     await quiet(file, 'comments', 'f()' + NL + text, '// It used to wait.')
   })
@@ -853,18 +858,28 @@ describe('guard/comments (#2355)', () => {
     const own = Array.from({ length: 12 }, (_, i) => `// note ${i}`).join(NL)
     expect(await lines(file, 'f()' + NL + own, 'comments')).toEqual([2])
   })
-  it('holds a listed file at its own share', async () => {
+  it('holds a listed file at its own share, not at 35%', async () => {
     const held = 'packages/platform/src/ports/system.ts'
-    // code first, then the comments in blocks of five, each followed by a line of code
+    expect(COMMENT_SHARE_HELD.files[held]).toBe(63)
+    // `codeLines` lines of code, then the comments in blocks of five, each block followed by a line of code
     const shareOf = (comments: number, codeLines: number) =>
       [code(codeLines), ...Array.from({ length: comments }, (_, i) => `// n${i}`).flatMap((c, i) => (i % 5 === 4 ? [c, 'f()'] : [c]))].join(NL)
-    const messages = async (text: string) => {
-      const [result] = await eslint.lintText(text, { filePath: join(ROOT, held), warnIgnored: false })
-      return (result?.messages ?? []).filter((m) => m.ruleId === 'guard/comments').map((m) => m.message.slice(0, 60))
-    }
-    expect(await messages(shareOf(40, 4))).toEqual([expect.stringMatching(/^\d+% of this file/)])
-    expect(await messages(shareOf(5, 40))).toEqual([])
-    expect(await lines(file, shareOf(40, 4), 'comments')).toEqual([1])
+    const half = shareOf(20, 16)
+    const seventy = shareOf(35, 8)
+    expect([half, seventy].map((t) => commentShareOf(t))).toEqual([{ comment: 20, lines: 40 }, { comment: 35, lines: 50 }])
+    expect(await lines(held, half, 'comments')).toEqual([])
+    expect(await lines(file, half, 'comments')).toEqual([1])
+    expect(await lines(held, seventy, 'comments')).toEqual([1])
+  })
+  it('lists each held file at its share now: a file brought down lowers its line, or leaves the list at 35% or under', () => {
+    const now = Object.fromEntries(
+      Object.keys(COMMENT_SHARE_HELD.files).map((f) => {
+        const { comment, lines } = commentShareOf(readFileSync(join(ROOT, f), 'utf8'), f)
+        return [f, Math.round((100 * comment) / lines)]
+      }),
+    )
+    expect(COMMENT_SHARE_HELD.files).toEqual(now)
+    expect(Object.values(now).filter((pct) => pct <= 35)).toEqual([])
   })
   it('reads only the folders whose comments are swept', async () => {
     expect(await lines('packages/core/src/x.ts', 'f()\n// It used to wait.', 'comments')).toEqual([2])

@@ -54,7 +54,7 @@ describe('the web system port', () => {
     return () => create({ token: 'test', WebSocketImpl: UnconnectedSocket as unknown as typeof WebSocket })
   }
 
-  it('asks once a page, only while undecided, and an undecided answer is not called blocked (#1010 review)', async () => {
+  it('asks once a page, only while undecided, and an undecided answer is not called blocked (#1010)', async () => {
     const { shown, FakeNotification } = fakeNotifications(null)
     const make = await freshPlatform()
     const p = make()

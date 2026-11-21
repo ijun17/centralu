@@ -39,7 +39,7 @@ export function RowMenu({
   const trigger = menuTrigger(anchorEl)
   useDismiss({ onClose, refs: [ref, { current: anchorEl }], returnFocusTo: trigger })
 
-  // Tab from the button goes into the menu, Shift+Tab back (#1531 review): portaled, the menu is last in the document
+  // Tab from the button goes into the menu, Shift+Tab back (#1531): portaled, the menu is last in the document
   const firstItem = (): HTMLElement | null => ref.current?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)') ?? null
   useEffect(() => {
     if (!trigger) return

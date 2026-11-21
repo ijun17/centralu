@@ -126,7 +126,7 @@ export function Inbox() {
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      // The list's keys only when nothing covers it and no field has the keyboard (#683 review, inboxKeys.ts)
+      // The list's keys only when nothing covers it and no field has the keyboard (#683, inboxKeys.ts)
       const action = inboxKeyAction(e, {
         typing: isTextEntry(e.target),
         covered: inboxCovered(useStore.getState()),
