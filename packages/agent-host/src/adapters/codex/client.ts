@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { z } from 'zod'
 import { codexLaunch } from './native.js'
 import { toolCommand } from '../../tool-launch.js'
+import { errnoCode } from '../../os/errors.js'
 import type { AgentProcess, ProcessSource } from '../contract.js'
 import { adoptToolProcess, logToolStderr, startToolProcess, stopToolProcess } from '../core/tool-process.js'
 import { PendingRequests } from '@cc/common'
@@ -112,7 +113,8 @@ export class CodexClient {
       if (this.finished) return
       this.finished = true
       this.closed = true
-      this.pending.rejectAll(new Error(`codex app-server failed to start: ${err.message}`))
+      // ENOENT: no codex where the lookup looked (`toolCommand` starts `notOnPath` then), whatever path it names
+      this.pending.rejectAll(new Error(`codex app-server failed to start: ${errnoCode(err) === 'ENOENT' ? 'codex CLI not found' : err.message}`))
       this.handlers.onExit(null, false)
     })
     // A stdin write after a failed spawn also throws a stream 'error' — swallowed here since it is already handled above

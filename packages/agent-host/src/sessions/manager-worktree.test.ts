@@ -579,7 +579,7 @@ describe('worktree sessions', () => {
     it("never takes a worktree a session not archived works in", async () => {
       const live = await start('pr/live')
 
-      await expect(start('pr/live')).rejects.toThrow(new RegExp(`the worktree of the session "${live.name}"`))
+      await expect(start('pr/live')).rejects.toThrow(new RegExp(`a folder named for the session "${live.name}", which is not archived`))
       expect(existsSync(join(live.worktree!.path, 'a.txt'))).toBe(true)
     })
   })
