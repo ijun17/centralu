@@ -214,7 +214,7 @@ export class DelegationWaits {
    */
   /**
    * `handedOverAnswer` for a wait a handoff ended: always an answer. The entry can be gone by the time the wait reads it
-   * (#740 review): an original removed while waiting has its moves recorded, its waits woken, and its entries dropped
+   * (#740): an original removed while waiting has its moves recorded, its waits woken, and its entries dropped
    * by the session archive before the woken calls run.
    */
   handedOverReply(callerId: string, id: string): { ok: false; error: string } {

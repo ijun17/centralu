@@ -76,7 +76,7 @@ export type MailInput = {
    * What the delivery carries that the receiver's conversation shows as a session's message (`SessionEvents.deliverMail`): a delegation tool's task
    * (mail to a child of the sender's, origin `agent_session`; `ask_project`, the Assistant's `send_to_session`, whose note too, #2258; docs/plans/mailbox.md §10.6.2), its sender and words, or the notice of a
    * card in a session it gave work (§10.6.4), from that session. `alone`: the delivery carries nothing else. `messageId`: the message it is, which the
-   * delivery's line then does not open to again (#2333 review). The agent reads the mail frame only
+   * delivery's line then does not open to again (#2333). The agent reads the mail frame only
    */
   shown?: { senderId: string; text: string; alone: boolean; messageId: string }
   /** The name the tool is given a joining input by (`SessionHandle.send`'s `id`), so the turn's end says whether that turn took it (`turnInputs`) */
@@ -379,7 +379,7 @@ export class MailDelivery {
     this.cutoff !== null && row.dueAt <= this.cutoff && !needsReceiver(message)
 
   /**
-   * `skipOld` for a session whose process runs: only what would start a turn of its own. Its quiet mail goes into the process as before
+   * `skipOld` for a session whose process runs: only what would start a turn of its own. Its quiet mail still goes into the process
    * (no turn), and a message that needs the receiver is never skipped. A resume is not a turn (#1951)
    */
   private readonly skipOldWake = (message: MailRow, row: RecipientRow): boolean => this.skipOld(message, row) && wakesMessage(message)
@@ -417,7 +417,7 @@ export class MailDelivery {
   }
 
   /**
-   * A note or task that could not be delivered tells its session sender, quietly (#2258 review): no report comes for a note, and none for a task until
+   * A note or task that could not be delivered tells its session sender, quietly (#2258): no report comes for a note, and none for a task until
    * the person sends it again, so this is how the sender learns of it and can tell the person at its next turn (a task given again until it is held,
    * #2385). The person's Inbox holds it. Best effort: the hold is committed already, and a notice that fails is logged, never the hold's failure
    */

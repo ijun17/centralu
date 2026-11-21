@@ -420,7 +420,7 @@ describe('a reader from before #1161, or one whose new calls fail', () => {
 })
 
 /*
- * What a start and a send on a linked machine rest on in the caller (#1038 review, #2159): the checks of a local start, read again after the card
+ * What a start and a send on a linked machine rest on in the caller (#1038, #2159): the checks of a local start, read again after the card
  * and before each send. An `auto` caller crossing out of an untrusted project is logged once, at the start, as a local start logs it
  */
 describe('what a start and a send on a linked machine rest on in the caller', () => {

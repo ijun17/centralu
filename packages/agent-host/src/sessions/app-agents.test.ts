@@ -142,8 +142,8 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
   })
 
   /*
-   * Deep review of #1993: the cap is every call open into the app now, not the run id the app cites, so the app's own code
-   * cannot reach `auto` through a screen's call while a session's call is open.
+   * The cap is every call open into the app, not the run id the app cites, so the app's own code cannot reach `auto`
+   * through a screen's call while a session's call is open (#1993).
    */
   describe('held to every call open into the app (owner decision 2026-11-05)', () => {
     const ref = () => ({ projectId, appId: 'notes' })
@@ -349,13 +349,13 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
   /*
    * The input recorded is all of the input the model read — including what it read from and
    * wrote to cache (TokenUsage's three fields do not overlap). An agent re-reads its context on
-   * every call: while the cache figures were excluded, a run that read 25k–80k was recorded as 1k.
+   * every call: without the cache figures, a run that read 25k–80k would be recorded as 1k.
    */
   /*
    * A progress line (M4 D) — when an agent an app has assigned is waiting on the person's
    * approval, the intermediary sends the app "waiting," and the app (the template's helper)
-   * bubbles it up on its own call. The host used to drop that line (`onprogress: () => {}`) — the
-   * calling session's card said only "running."
+   * bubbles it up on its own call. A host that drops that line (`onprogress: () => {}`) leaves
+   * the calling session's card saying only "running."
    */
   it('while the agent waits on the person\'s approval, what it is waiting on appears on the tool card of the session that called the app', async () => {
     plant('project', 'notes', { agent: true })
@@ -576,9 +576,9 @@ describe('run_agent — a finished session goes, its record stays in the session
   })
 
   /*
-   * #378 review: the person's part was heard only while the run's wait was tracked and once the desk's verdict came. Opened
-   * or written to while the process was closing (hundreds of ms to seconds with a real CLI), or written to between the
-   * check and the move to the session archive, the session was deleted anyway: the person's message was lost, or its wake cancelled
+   * The person's part counts in the gaps too, not only while the run's wait is tracked and once the desk's verdict comes (#378):
+   * a session opened or written to while the process is closing (hundreds of ms to seconds with a real CLI), or written to between
+   * the check and the move to the session archive, stays. Deleting it would lose the person's message, or cancel its wake
    * ("The session was deleted while waking"). The gaps are driven here by a close and a wake the test holds.
    */
   const held = () => {
@@ -659,8 +659,8 @@ describe('run_agent — a finished session goes, its record stays in the session
   })
 
   /*
-   * #378 review (LOW): a restart applied at the turn's end (a setting changed during the run) was not counted as in use.
-   * Deleted while it ran, the restart's late dispose found a session that was gone and said restart_failed for it.
+   * A restart applied at the turn's end (a setting changed during the run) counts as in use (#378): a session deleted while
+   * it runs would leave the restart's late dispose to find it gone and say restart_failed for it.
    */
   it('a session whose restart at the turn end is still under way stays', async () => {
     plant('project', 'notes', { agent: true })
@@ -686,8 +686,8 @@ describe('run_agent — a finished session goes, its record stays in the session
   })
 
   /*
-   * #378 review (LOW): the person's delete that joined the host's own delete under way ended as the host's purge, so a
-   * session the person archived was gone for good, its conversation file with it
+   * The person's delete that joins the host's own delete under way ends as the person's, not the host's purge (#378): a
+   * purge would take a session the person archived for good, its conversation file with it
    */
   it('a session the person deletes while the host is deleting it stays in the session archive, with its conversation file', async () => {
     plant('project', 'notes', { agent: true })

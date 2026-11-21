@@ -76,8 +76,8 @@ export class InterruptionWatch {
    * The turn went with its process (#698): a start found the session mid-turn with no process left (a full quit, a
    * reboot, a crash the keeper did not survive), or a kept process could not be re-attached. `shutdown`: the start found the
    * last host recorded the system ending (a shutdown, restart or sign-out, #1397), which is said so rather than as a quit. The session is reset to
-   * `idle`, which used to leave no mark at all: the conversation simply stopped. A line now says so, and the
-   * interruption puts the session in the inbox with a way to continue.
+   * `idle` with a line that says so, and the interruption puts the session in the inbox with a way to continue: without
+   * them the conversation would simply stop with no mark.
    */
   markTurnLost(m: SessionInfo, announce: boolean, reason: 'quit' | 'shutdown' = 'quit'): void {
     m.interruption = { reason, at: Date.now() }

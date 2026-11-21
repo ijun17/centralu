@@ -94,7 +94,7 @@ export class ChildReports {
   }
 
   /**
-   * `stoppedId`'s stop, told to a session whose seat cannot read mail as it was before #1948 step 3 (`StopNoticeOptions.relayToMailless`, mailbox.md §10.6.3): the
+   * `stoppedId`'s stop, told to a session whose seat cannot read mail (`StopNoticeOptions.relayToMailless`, mailbox.md §10.6.3): the
    * relayed report in the words for that ending (`deliverReport`): failed with the kind of its error, the usage limit, else how its interruption says it
    * stopped. `told` once it went in. Never throws
    */
@@ -216,8 +216,7 @@ export class ChildReports {
 
   /**
    * How a report names the session it is about, and its project: as read_session lists it (`labelOf`), so a resumed
-   * conversation is not named by its compaction summary's first line. The two report paths used to name it each, and
-   * a finished turn's report used the raw name.
+   * conversation is not named by its compaction summary's first line
    */
   reportedAs(m: SessionInfo): { name: string; project: string } {
     const project = m.projectId ? (this.host.projectRow(m.projectId)?.name ?? '(project no longer exists)') : '(none)'
@@ -293,8 +292,8 @@ export class ChildReports {
      * What the model reads (#1186): how the work ended, the session's id, the kind of its tool's error, how to go on, and the read that shows
      * its last response and that error. Nothing the reported session, its tool, its machine or a name could have written goes in (#120): not
      * its last response, its error's words, its name, its project's or its tasks' descriptions; read_session lists the names by id.
-     * It used to read only "intersession message available", so a failed run, a usage limit and the way to continue reached the store and the
-     * screen and never the model. The thread's report is these words too: the mailbox shows it under Centralu's name
+     * Without them a failed run, a usage limit and the way to continue would reach the store and the screen and never the model. The thread's
+     * report is these words too: the mailbox shows it under Centralu's name
      */
     const forModel =
       outcome +
@@ -353,22 +352,18 @@ export class ChildReports {
   }
 
   /**
-   * Tells a session something in its conversation (#428): a report, or Centralu's word on a request that did not go. Never while this host is leaving. Handing over, a report whose mark the store keeps is the
-   * next host's to give (#646); one held only in memory (a linked machine's, #723) and a notice like these are dropped
-   * in that window, as anything said then would be. Quitting, the next start tells what the quit cut (#698), where a
-   * word now would read "failed" and could wake a sleeping session on the way out. Never to a session that is gone, and it never throws: the session may be asleep
-   * or deleted, and a notice must not destabilize the host. The ways of telling each kept their own guard, and
-   * the report had none.
+   * Tells a session something in its conversation (#428): a report, or Centralu's word on a request that did not go. Never while this host is
+   * leaving. Handing over, a report whose mark the store keeps is the next host's to give (#646); one held only in memory (a linked machine's,
+   * #723) and a notice like these are dropped in that window, as anything said then would be. Quitting, the next start tells what the quit cut
+   * (#698), where a word now would read "failed" and could wake a sleeping session on the way out. Never to a session that is gone, and it never
+   * throws: the session may be asleep or deleted, and a notice must not destabilize the host.
    *
-   * `relayed`: the text is about another session (`from`), stored and shown as from it. What the model reads is
-   * `forModel`, the words Centralu wrote, with the source's id (#1186): every such text is Centralu's but a report's
-   * last response, which the report leaves out of `forModel` (#120). The model used to read only "intersession message
-   * available" for all of them, so a note that was not delivered, a card waiting on it or a link that dropped never
-   * reached it.
+   * `relayed`: the text is about another session (`from`), stored and shown as from it. The model reads `forModel`, the words Centralu wrote,
+   * with the source's id (#1186), so a note that was not delivered, a card waiting on it or a link that dropped reaches it: every such text is
+   * Centralu's but a report's last response, which the report leaves out of `forModel` (#120).
    *
-   * A notice that could not be delivered (a session that cannot be woken: its tool fails to start) is kept, said in the
-   * log, and delivered once the session takes a message again (`deliverHeld`, #1186); it used to be dropped without a
-   * word. Kept in memory only: a host swap in between loses it, as before. `onDelivered`: told when it went in, now or from the held notices
+   * A notice that could not be delivered (a session that cannot be woken: its tool fails to start) is kept, said in the log, and delivered once
+   * the session takes a message again (`deliverHeld`, #1186). Kept in memory only: a host swap in between loses it.
    */
   async tellSession(
     sessionId: string,
@@ -376,6 +371,7 @@ export class ChildReports {
     from: { sessionId: string; name: string },
     relayed: boolean,
     forModel: string = text,
+    /** Told when it went in, now or from the held notices */
     onDelivered?: () => void,
   ): Promise<boolean> {
     if (this.host.disposing || !this.host.meta.has(sessionId)) return false
@@ -399,7 +395,7 @@ export class ChildReports {
   /** Notices that could not be delivered, by the session they are for (`tellSession`) */
   private readonly held = new Map<string, { text: string; from: { sessionId: string; name: string }; relayed: boolean; forModel: string; onDelivered?: () => void }[]>()
 
-  /** The session was deleted: the notices kept for it go with it (#1186 review), and a cut its answer was to tell */
+  /** The session was deleted: the notices kept for it go with it (#1186), and a cut its answer was to tell */
   forgetHeld(sessionId: string): void {
     this.held.delete(sessionId)
     this.cutsUntold.delete(sessionId)
