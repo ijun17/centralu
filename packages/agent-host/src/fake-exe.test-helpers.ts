@@ -178,6 +178,27 @@ export function fakeExe(dir: string, name: string, source: string): string {
 }
 
 /**
+ * Puts the tool `name` into `dir` as `npm i -g` puts one on PATH, running `source` (CommonJS) under this Node from
+ * `<dir>/node_modules/<name>.cjs`. Both launchers are written on every OS, and each OS passes over the other's:
+ * `<name>.cmd`, the shim Windows finds by PATHEXT, and `<name>`, an `sh` script POSIX finds by the bare name.
+ * Returns `dir`, the folder to put on PATH.
+ *
+ * For code that finds a tool on PATH and may read its shim back for what it starts (`execTool`, `launchFor`,
+ * `resolveCommand`). A program started directly, by path or by a name `spawn` looks up without a shell (ssh, gh),
+ * where a `.cmd` cannot run, is `fakeExe`. A test of the logic alone, with no real process, adds the program to
+ * `memoryOs({ as }).programs` instead.
+ */
+export function fakeTool(dir: string, name: string, source: string): string {
+  const script = join(dir, 'node_modules', `${name}.cjs`)
+  mkdirSync(dirname(script), { recursive: true })
+  writeFileSync(script, source)
+  writeFileSync(join(dir, `${name}.cmd`), `@"${process.execPath}" "%~dp0\\node_modules\\${name}.cjs" %*\r\n`)
+  writeFileSync(join(dir, name), `#!/bin/sh\nexec "${process.execPath}" "${script}" "$@"\n`)
+  chmodSync(join(dir, name), 0o755)
+  return dir
+}
+
+/**
  * Whether `dir` is strictly inside `base`, both as their real paths: on GitHub's Windows runners the temporary folder
  * is named with its short name (`C:\Users\RUNNER~1\…`) while a test's folder is often its real path
  * (`realpathSync.native`, `C:\Users\runneradmin\…`), and comparing the two as written never matched. A path on

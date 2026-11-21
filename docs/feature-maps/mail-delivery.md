@@ -1,0 +1,16 @@
+# Mail delivery and reports
+
+Mail between sessions: sent with the `mail` tool, delivered into the recipient's turn (waking it when it sleeps), held
+as tasks when it asks for work, answered by the report a turn's end sends to each giver, watched (a session, a time, a
+pull request), carried across linked machines, and shown as the mail line in the transcript and the Inbox. Rules:
+[plans/mailbox.md](../plans/mailbox.md),
+[lifecycle/turn-endings-and-mail.md](../agent-host/lifecycle/turn-endings-and-mail.md).
+
+| Part | Where |
+|---|---|
+| Screen | `packages/ui/src/features/session/MailMark.tsx` (`MailMark`, `Delivered`); `packages/ui/src/store/transcript.ts` (`noticeLine`); `packages/ui/src/store/mail.ts` (`mailActions`, `mailAttention`); `packages/ui/src/store/state/mail.ts` (`MailSlice`); `packages/ui/src/features/inbox/TaskList.tsx`, `packages/ui/src/features/inbox/MailThread.tsx`, `packages/ui/src/features/inbox/mailLabels.ts`; `packages/ui/src/features/session/Watches.tsx` |
+| Host | `packages/agent-host/src/mail/host-mail.ts` (`hostMail`, the wiring); `packages/agent-host/src/mail/delivery.ts` (`MailDelivery`); `packages/agent-host/src/mail/messages.ts` (`MessageService`); `packages/agent-host/src/mail/tool.ts` (`MailTool`); `packages/agent-host/src/sessions/tool-definitions.ts` (`mail`); `packages/agent-host/src/mail/frame.ts` (`buildMessageFrame`); `packages/agent-host/src/mail/turns.ts` (`MailTurns`); `packages/agent-host/src/mail/delegation.ts`; `packages/agent-host/src/mail/last-response.ts`; `packages/agent-host/src/sessions/child-reports.ts` (`ChildReports`, `SessionLastResponse`); `packages/agent-host/src/sessions/mail-accept.ts`; `packages/agent-host/src/mail/watches.ts` (`Watches`); `packages/agent-host/src/mail/across.ts` (`MailAcross`), `packages/agent-host/src/sessions/linked-reports.ts` |
+| Protocol | `packages/protocol/src/commands/methods/mail.params.ts` (`mail.list`, `mail.tasks`, `mail.thread`, `mail.reply`, `watches.list`); `packages/protocol/src/entities/mail.ts` (`MailTaskRow`, `MailMessage`, `WatchView`); `packages/protocol/src/events.ts` (`MailDelivered`, `mail_changed`, `watches_changed`) |
+| Store | `packages/agent-host/src/dev-services/store/mailbox.ts` (`MailboxRecords`: `mail`, `mail_recipients`, `mail_turns`, `mail_watches`); `docs/generated/schema.md` |
+| Documents | `docs/plans/mailbox.md` §8, §9, §10; `docs/agent-host/lifecycle/turn-endings-and-mail.md` "The mailbox's delivery in the host"; `docs/plans/linked-mail.md`; `docs/security-boundaries/mailbox-and-requests.md`; `docs/domain-model.md` §2.5 |
+| Tests | `packages/agent-host/src/mail/delivery.test.ts`, `packages/agent-host/src/mail/messages.test.ts`, `packages/agent-host/src/mail/tool.test.ts`, `packages/agent-host/src/mail/watches.test.ts`, `packages/agent-host/src/sessions/last-response.test.ts`, `packages/agent-host/src/sessions/mail-turn-report.test.ts`, `packages/agent-host/src/dev-services/store-mailbox.test.ts`, `packages/agent-host/src/links/linked-mail-across.test.ts`, `packages/ui/src/store/store-mail.test.ts`, `packages/ui/src/features/session/Watches.test.tsx`, `packages/ui/src/features/inbox/MailThread.test.tsx`, `packages/ui/src/features/inbox/TaskList.test.tsx`; `e2e/inbox-mail.spec.ts`, `e2e/watches.spec.ts` |

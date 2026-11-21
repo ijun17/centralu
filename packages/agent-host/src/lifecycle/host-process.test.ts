@@ -20,6 +20,7 @@ import { LAUNCH_VARIABLES } from './launch-env.js'
 import { OWNER_MARK, ownerMarkFor } from '../dev-services/strays.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
+import { fakeTool } from '../fake-exe.test-helpers.js'
 import { alive, pidIn } from '../process.test-helpers.js'
 
 const ROOT = fileURLToPath(new URL('../../../../', import.meta.url))
@@ -107,20 +108,17 @@ function startHost(s: ReturnType<typeof setup>, args: string[], extra: Record<st
 const settle = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 /**
- * An agent CLI as `npm i -g` installs it on Windows, a `.cmd` shim beside its script, that writes
- * the arguments and environment it was given to `<out>/<name>-<pid>.json` and answers `--version`.
+ * An agent CLI on PATH (`fakeTool`) in `<dir>/bin` that writes the arguments and environment it was given to
+ * `<dir>/cli-runs/<name>-<pid>.json` and answers `--version`.
  */
 function fakeCliOnPath(dir: string, name: string): string {
-  const bin = join(dir, 'bin')
   const out = join(dir, 'cli-runs')
-  mkdirSync(join(bin, 'node_modules'), { recursive: true })
   mkdirSync(out, { recursive: true })
-  writeFileSync(
-    join(bin, 'node_modules', `${name}.js`),
+  return fakeTool(
+    join(dir, 'bin'),
+    name,
     `require('node:fs').writeFileSync(${JSON.stringify(join(out, name))} + '-' + process.pid + '.json', JSON.stringify({ argv: process.argv.slice(2), env: process.env }))\nconsole.log('1.0.0')\n`,
   )
-  writeFileSync(join(bin, `${name}.cmd`), `@ECHO off\r\nnode  "%~dp0\\node_modules\\${name}.js" %*\r\n`)
-  return bin
 }
 
 /** Asks a running host one RPC over its WebSocket, as a window does */
