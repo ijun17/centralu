@@ -48,8 +48,11 @@ export class TurnStartWait {
 
   /** A message of the CLI's: the receipt for an input written since the wait began ends it */
   saw(m: CliMessage): void {
-    // An init that says it sends none ends a wait the version at spawn began
-    if (m.type === 'system' && m.subtype === 'init' && !(this.receipts = receiptsInputs(m))) this.stop()
+    if (m.type === 'system' && m.subtype === 'init') {
+      this.receipts = receiptsInputs(m)
+      // A CLI that says it sends none is not waited for: any wait running ends
+      if (!this.receipts) this.stop()
+    }
     if (m.type === 'command_lifecycle' && typeof m.command_uuid === 'string' && this.written.has(m.command_uuid)) this.stop()
   }
 
