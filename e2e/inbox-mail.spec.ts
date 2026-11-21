@@ -957,14 +957,13 @@ test('A button inside a fold that is opening stays where it ends when focus brin
     const find = () => document.querySelector<HTMLElement>('[data-testid="mail-line-inbox"]')
     for (let i = 0; i < 10 && !find(); i++) await Promise.resolve()
     const button = find()
-    if (!button) return null
+    if (!button) throw new Error('Open in Inbox was not drawn')
     button.focus()
     button.scrollIntoView({ block: 'nearest' })
     const r = button.getBoundingClientRect()
     return { x: r.x + r.width / 2, y: r.y + r.height / 2, fold: document.querySelector('[data-testid="mark-folded"]')?.getAttribute('data-fold') }
   })
-  expect(during?.fold).toBe('opening')
-  if (!during) return
+  expect(during.fold).toBe('opening')
   await expect(page.getByTestId('mark-folded')).toHaveAttribute('data-fold', 'open')
   const after = await page.getByTestId('mail-line-inbox').evaluate((b) => b.getBoundingClientRect().y + b.getBoundingClientRect().height / 2)
   expect(Math.abs(after - during.y)).toBeLessThan(1)
