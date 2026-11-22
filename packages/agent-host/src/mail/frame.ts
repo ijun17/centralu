@@ -138,6 +138,8 @@ export type MessageFrameItem = {
   maybeRepeated?: boolean
   /** A task a turn of the receiver took in while it ran, given again at rest (`RecipientRow.givenAgainAt`, #2369) */
   givenAgain?: boolean
+  /** A task given into a running turn: `handled` lets that turn's report answer it (`MailDelivery.claim`, #2493) */
+  joined?: boolean
 }
 
 /** What another party's message is, said by the wake and by the tool's read alike */
@@ -219,6 +221,9 @@ function messageFoot(shown: readonly MessageFrameItem[], calls: MessageCalls): s
     ...shown
       .filter((i) => i.givenAgain)
       .map((i) => `${isMessageId(i.messageId) ? i.messageId : 'unknown'} came while your last turn ran, so it is given again (givenAgain="1"). If that turn already did it, say so in one line.`),
+    ...shown
+      .filter((i) => i.joined)
+      .map((i) => `${isMessageId(i.messageId) ? i.messageId : 'unknown'} joined your running turn: if this turn does it, ${calls.done(i.messageId)} lets this turn's report answer it.`),
     ...shown
       .filter((i) => i.clarifies !== undefined)
       .map((i) => `${isMessageId(i.messageId) ? i.messageId : 'unknown'} is about the work you gave: a reply to it is given as work again, and its turn is reported to you.`),

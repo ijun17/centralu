@@ -181,3 +181,8 @@ export async function crossWorld(): Promise<CrossWorld> {
 export function sendWork(mgr: SessionManager, ...a: Parameters<AgentSessionActions['sendWork']>): ReturnType<AgentSessionActions['sendWork']> {
   return (mgr as unknown as { delegationFlow: DelegationFlow }).delegationFlow.actions.sendWork(...a)
 }
+
+/** `AgentSessionActions.sendNote` of a manager: what a session's `mail` send with `kind: "note"` to `target` does (#2493) */
+export function sendNote(mgr: SessionManager, ...a: Parameters<AgentSessionActions['sendNote']>): ReturnType<AgentSessionActions['sendNote']> {
+  return (mgr as unknown as { delegationFlow: DelegationFlow }).delegationFlow.actions.sendNote(...a)
+}

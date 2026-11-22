@@ -193,13 +193,14 @@ describe('done', () => {
     expect(w.mail.done(A, note.id)).toEqual({ settled: 0, how: 'unwatched' })
   })
 
-  it('refuses a message that is not stored, and one the caller was not sent and did not send; a task’s receiver cannot close it', () => {
+  it('refuses a message that is not stored, and one the caller was not sent and did not send; a task’s receiver cannot close it, only claim it for its turn', () => {
     const w = world()
     const m = w.send(A, { to: [B], text: 'x' }).message
     expect(refusedFor(() => w.mail.done(B, `${HOST}.m_01J00000000000000000000000`))).toBe('unknown_message')
     expect(refusedFor(() => w.mail.done(C, m.id))).toBe('not_yours')
     const t = w.mail.task(A, B, { text: 'work', origin: 'start_agent', delivered: true })
-    expect(w.mail.done(B, t.id)).toEqual({ settled: 0, how: 'unwatched' })
+    // Its receiver's handled is for the turn it runs in to answer (MailDelivery.claim)
+    expect(w.mail.done(B, t.id)).toEqual({ settled: 0, how: 'task' })
     expect(w.rowOf(t.id, B).settled).toBeNull()
     expect(w.mail.done(A, t.id)).toEqual({ settled: 1, how: 'withdrawn' })
   })

@@ -269,7 +269,7 @@ describe('mail joins a running turn (§10.6.2)', () => {
     expect(w.rowOf(joined.id, B).settled).toBeNull()
   })
 
-  it('a task given again that joins another running turn before rest is given again after that turn too, and only its own turn answers it (#2369)', async () => {
+  it('a task given again does not join another running turn, which would give it again once more, and waits for a turn of its own (#2369, #2493)', async () => {
     const w = started()
     w.send(A, { to: [B], text: 'start on #12' })
     await w.advance(2_000)
@@ -278,18 +278,16 @@ describe('mail joins a running turn (§10.6.2)', () => {
     await w.advance(5_000)
     w.delivery.turnInputs(B, { took: w.to('b').slice(1).map((d) => d.input.id!), finished: true })
     w.endTurn('b')
-    // Before it is at rest, the person starts another turn, and the task goes into that one
+    // Before it is at rest, the person starts another turn: the task does not go into that one
     w.turns.beginOther('b', 'person', null)
     w.states.set('b', inTurn)
+    const before = w.to('b').length
     w.delivery.poke('b')
     await w.advance(5_000)
-    const into = w.to('b').at(-1)!.input
-    expect(into).toMatchObject({ joins: true })
-    expect(into.text).toContain('givenAgain="1"')
-    expect(w.rowOf(task.id, B).givenAgainAt).toBeNull()
-    w.delivery.turnInputs(B, { took: [into.id!], finished: true })
-    w.endTurn('b')
+    expect(w.to('b')).toHaveLength(before)
     expect(w.rowOf(task.id, B)).toMatchObject({ deliveredAt: null, givenAgainAt: expect.any(Number) })
+    w.delivery.turnInputs(B, { took: [], finished: true })
+    w.endTurn('b')
     const answered = answerRecorder(w.mail, w.store.mailbox)
     expect(answered('a', 'b', { ok: true, text: 'changelog done' }, task.id)).toBe(false)
     // At rest it wakes the session for a turn of its own, whose end answers it

@@ -61,6 +61,8 @@ export type HostMailSessions = {
   relayStop?(receiverId: string, stoppedId: string, why: StopWhy, told: () => void): void
   /** A send to a session the caller gives work, answered (`MailSessionsView.work`, #1948), or null for plain mail */
   work?: MailToolHost['work']
+  /** A note for a session the caller started (`MailToolHost.note`, #2493) */
+  note?: MailToolHost['note']
   /** A child this host started on a linked machine, with the name its mail shows (`MailSessionsView.onLinkedMachine`, #2067); none for any other id */
   onLinkedMachine?(id: string): { name: string } | undefined
   /** Whether the session's background work is known: false for an adopted process whose tool has not listed it yet (`RestartPolicy.backgroundKnown`); known when absent */
@@ -87,6 +89,7 @@ export function mailSessionsOf(
     turnInputs: (id) => mgr.mail.turnInputs(id),
     onLinkedMachine: (id) => mgr.mail.onLinkedMachine(id),
     work: (...a) => mgr.mail.work(...a),
+    note: (...a) => mgr.mail.note(...a),
     settleAtRest: (id) => mgr.mail.settleAtRest(id),
     questionSettled: (id) => mgr.mail.questionSettled(id),
     relayStop: (receiverId, stoppedId, why, told) => mgr.mail.relayStop(receiverId, stoppedId, why, told),
@@ -336,7 +339,9 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     },
     across,
     watches,
+    claim: (address, id) => delivery.claim(address, id),
     ...(sessions.work ? { work: sessions.work } : {}),
+    ...(sessions.note ? { note: sessions.note } : {}),
   })
   /** Whether the card a notice names stands in its session still: the session holds that question or approval (mailbox.md §10.6.4) */
   const cardStands = (session: string, requestId: string): boolean => {

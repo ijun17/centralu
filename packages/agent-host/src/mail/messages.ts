@@ -430,7 +430,7 @@ export class MessageService {
 
   /**
    * Work a delegation tool gave: a task from `sender` to `recipient`, whose turn Centralu reports (D2, D7). Written delivered when the old path delivered its words.
-   * A `note` is a message that needs no reply: no report and no last response answers it
+   * A `note` is a message that needs no reply: no report and no last response answers it; one from `agent_session` (a session's `mail` to one it started) is quiet
    */
   task(sender: string, recipient: string, input: TaskInput): MailRow {
     const from = parseAddress(sender)
@@ -443,7 +443,12 @@ export class MessageService {
       return this.put(
         {
           sender, kind: input.note ? 'message' : 'task', body: text, replyTo: input.replyTo ?? null, causeId: this.causeOf(sender), origin: input.origin,
-          facts: { ...(input.fromScript ? { fromScript: input.fromScript } : input.across?.forPerson ? { hubAssistant: true } : {}), ...(input.depth ? { agentDepth: input.depth } : {}) },
+          facts: {
+            ...(input.fromScript ? { fromScript: input.fromScript } : input.across?.forPerson ? { hubAssistant: true } : {}),
+            ...(input.depth ? { agentDepth: input.depth } : {}),
+            // A note a session gives one it started (`mail` kind "note", #2493) wakes nothing: it rides that session's next turn
+            ...(input.note && input.origin === 'agent_session' ? { quiet: true } : {}),
+          },
           ...(input.across ? { id: input.across.id } : {}),
         },
         [this.row(recipient, { dueAt: input.delivered ? now : dueAt(now, false, from.kind === 'person'), ...(input.delivered ? { deliveredAt: now, readAt: now } : {}) })],
@@ -556,7 +561,7 @@ export class MessageService {
   }
 
   /** `mail done` (D8): as a recipient, no answer is needed; as the sender, the message is withdrawn for every unsettled recipient */
-  done(by: string, id: string): { settled: number; how: 'done' | 'withdrawn' | 'none' | 'unwatched' } {
+  done(by: string, id: string): { settled: number; how: 'done' | 'withdrawn' | 'none' | 'unwatched' | 'task' } {
     return this.run(() => {
       const m = this.records.message(id)
       if (!m) throw refuse('unknown_message', REFUSAL_TEXT.unknown_message(id))
@@ -565,8 +570,10 @@ export class MessageService {
       if (!mine && !row) throw refuse('not_yours', REFUSAL_TEXT.not_yours(id))
       // A request is marked done in the turn it is in, where its words are shown (§7.6)
       if (!mine && this.isRequest(m, by) && !this.inOpenTurn(m, row, this.opts.turn?.(by) ?? null)) throw refuse('not_allowed', REFUSAL_TEXT.withheld(id))
-      // A task is settled by its report, not by its receiver saying it needs nothing: that would take the report from its owner
-      if (!m.needsReply && (m.kind !== 'task' || !mine)) return { settled: 0, how: 'unwatched' }
+      // A task is settled by its report, not by its receiver saying it needs nothing: that would take the report from its owner. Its receiver's
+      // `handled` says the turn it is in does it (`task`): that turn's report answers it (`MailDelivery.claim`, #2493)
+      if (!mine && m.kind === 'task') return { settled: 0, how: row?.settled === null ? 'task' : 'none' }
+      if (!m.needsReply && m.kind !== 'task') return { settled: 0, how: 'unwatched' }
       if (mine) {
         const n = this.records.settle(id, 'all', 'withdrawn', this.now())
         return { settled: n, how: n > 0 ? 'withdrawn' : 'none' }
@@ -694,6 +701,8 @@ export class MessageService {
       if (message.sender === recipient || this.reach.mayWrite(message.sender, recipient) !== null || opts.skip?.(message, row)) continue
       // A request to the Assistant never joins its running turn: one asker a turn (docs/plans/turn-owned-by-no-one.md §4.2)
       if (opts.joining && toAssistant && this.askerOf(message, recipient) !== undefined) continue
+      // A task given again waits for a turn of its own: joining another, it would be given again once more (#2493)
+      if (opts.joining && message.kind === 'task' && row.givenAgainAt !== null) continue
       if (this.reminderSettled(message, recipient)) {
         this.records.markRead(recipient, [message.id], now)
         continue
@@ -741,7 +750,8 @@ export class MessageService {
       if (message.kind === 'message' && message.needsReply) needsReply = true
       const relation = this.relation(recipient, message)
       given.push({ threadId: message.rootId, messageId: message.id, relation })
-      items.push(this.frameItem(recipient, message, relation, down && row.deliveredAt === null, row))
+      const item = this.frameItem(recipient, message, relation, down && row.deliveredAt === null, row)
+      items.push(opts.joining && message.kind === 'task' ? { ...item, joined: true } : item)
     }
     const frame = buildMessageFrame(items, this.opts.calls?.(recipient))
     // What this delivery gives: the messages the frame names (one folded over its budget waits for the next), which the line counts and opens to

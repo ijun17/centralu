@@ -666,6 +666,24 @@ export class MailDelivery {
     else this.queued.delete(recipient)
   }
 
+  /**
+   * The receiver says its running turn does task `id` (`mail handled`, #2493): that turn's end answers it with its report, and does not give it again.
+   * One given again and waiting is delivered into that turn. False when it cannot be: not an open task of the receiver's, held, queued in its tool
+   * for a turn after, or no turn of the receiver's is running
+   */
+  claim(recipient: string, id: string): boolean {
+    const party = parseAddress(recipient)
+    const turn = party?.kind === 'session' ? this.turns?.current(party.sessionId) : undefined
+    const row = this.records.recipient(id, recipient)
+    const open = this.records.message(id)?.kind === 'task' && row?.settled === null && (row.held === null || row.held === 'released')
+    if (!turn || !row || !open || this.queuedFor(recipient).has(id)) return false
+    if (row.deliveredAt === null) this.records.markDelivered(recipient, [id], this.now(), turn.turnSeq)
+    // No longer one of the turn's joined inputs: its end gives it no other way than the turn's own work, which the last response answers
+    const joined = this.joined.get(recipient)
+    if (joined) this.joined.set(recipient, joined.map((g) => ({ ...g, ids: g.ids.filter((m) => m !== id) })))
+    return true
+  }
+
   /** The messages given the recipient that its tool holds queued for a turn after (`turnInputs`): no turn's last response answers them yet */
   queuedFor(recipient: string): ReadonlySet<string> {
     return new Set((this.queued.get(recipient) ?? []).flatMap((q) => q.ids))

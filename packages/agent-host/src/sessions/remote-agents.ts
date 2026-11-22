@@ -427,6 +427,18 @@ export class RemoteAgents {
     return this.act(callerId, rec, { sessionId: rec.sessionId, action: 'send', text })
   }
 
+  /**
+   * A note for the child across the link (the caller's `mail` with `kind: "note"`, #2493): a message that needs no reply, written quiet there, with
+   * no task and no report. Refused as new work is: a child above its caller, or a caller the gate refuses
+   */
+  async note(callerId: string, rec: RemoteAgent, text: string): Promise<{ ok: true; messageId: string; name: string } | { ok: false; error: string }> {
+    const refused = aboveCallerError(rec.name, rec.preset ?? 'normal', this.callerPreset(callerId)) ?? this.gateError(callerId)
+    if (refused) return { ok: false, error: refused }
+    const tasks = this.host.linkedTasks
+    const sent = tasks ? await tasks.send(callerId, rec.sessionId, text, { origin: 'agent_session', note: true }) : { ok: false as const, text: NO_MAIL }
+    return sent.ok ? { ok: true, messageId: sent.messageId, name: `${rec.name} on ${rec.machine}` } : { ok: false, error: `Could not send to "${rec.name}" on ${rec.machine}: ${bare(sent.text)}.` }
+  }
+
   private async act(callerId: string, rec: RemoteAgent, opts: AgentSessionOpts | { sessionId: string; action: 'send'; text: string }, signal?: AbortSignal): Promise<ChildRunResult> {
     if (rec.callerId !== callerId) return { ok: false, error: `${rec.sessionId} is not a session this session started. agent_session works only on sessions start_agent started from here.` }
     const reader = this.host.linkedReader

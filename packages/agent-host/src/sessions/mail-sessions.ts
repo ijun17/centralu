@@ -6,7 +6,7 @@ import type { AnswerGiven, GivenTask, LinkedTasks } from '../mail/delegation.js'
 import type { CardHooks } from '../mail/card-notices.js'
 import type { HandedOverMessage } from '../mail/messages.js'
 import type { StopTold, StopWhy, WaitEnd } from '../mail/stop-notices.js'
-import type { MailToolArgs, MailToolResult } from '../mail/tool.js'
+import type { MailToolArgs, MailToolHost, MailToolResult } from '../mail/tool.js'
 import type { TurnStart } from '../mail/turns.js'
 import type { TurnInputs } from '../mail/delivery.js'
 import type { HandOverScope } from '../dev-services/store/mailbox.js'
@@ -301,6 +301,11 @@ export class MailSessionsView {
   async work(callerId: string, target: string, text: string, ifBusy: IfBusy | undefined, signal?: AbortSignal): Promise<MailToolResult | null> {
     const r = await this.host.delegationFlow.actions.sendWork(callerId, target, text, ifBusy, signal)
     return r && agentCallsFor(this.host.tools.toolProfileOf(callerId) ?? 'human', agentRunText(r))
+  }
+
+  /** `MailToolHost.note` (#2493): a note for a session the caller started, or null for plain mail */
+  note(callerId: string, target: string, text: string): ReturnType<MailToolHost['note'] & {}> {
+    return this.host.delegationFlow.actions.sendNote(callerId, target, text)
   }
 
   /**

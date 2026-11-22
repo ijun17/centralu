@@ -186,6 +186,31 @@ export class AgentSessionActions {
   }
 
   /**
+   * `mail` with `kind: "note"` to a session the caller started, here or on a linked machine (#2493): a message that needs no reply, given quietly at
+   * its next turn (`MessageService.task` with `note`), no task and no report. Null for any other target: the send is plain mail
+   */
+  async sendNote(callerId: string, target: string, text: string): Promise<{ ok: true; messageId: string; name: string } | { ok: false; error: string } | null> {
+    const remote = target.includes('.') ? this.flow.remote.of(target) : undefined
+    if (remote) {
+      if (remote.callerId !== callerId) return null
+      const machine = this.host.linkedReader?.machineOf(target)
+      const refused = this.host.refusesDelegation(callerId, { sessionId: target, linked: true }, { tool: 'mail', target: `a session on ${machine ?? 'a linked machine'}`, text })
+      return refused ? { ok: false, error: refused } : this.flow.remote.note(callerId, remote, text)
+    }
+    const request = this.host.children.agentStarts.get(target)
+    const ended = request?.req.callerId === callerId ? request.ended : undefined
+    if (ended && 'childId' in ended) target = ended.childId
+    const caller = this.host.meta.get(callerId)
+    const child = this.host.meta.get(target)
+    if (!caller || !child || !ownChild(caller, child)) return null
+    // Refused as new work is (§7.4, #1273): a note is words the child reads too
+    const refused = aboveCallerError(child.name, child.permissionPreset, caller.permissionPreset) ?? this.host.refusesDelegation(callerId, { sessionId: child.id, projectId: child.projectId }, { tool: 'mail', target: child.name || child.id, text })
+    if (refused) return { ok: false, error: refused }
+    const mailed = this.host.mailTask(callerId, child, 'agent_session', text, true)
+    return 'error' in mailed ? { ok: false, error: mailed.error } : { ok: true, messageId: mailed.messageId, name: child.name || child.id }
+  }
+
+  /**
    * `mail` to a session agent_session works on for the caller, its start request or its linked child: new work, answered at once, its end told
    * (docs/plans/mailbox.md §10.6.6). Null for any other target: the send is plain mail
    */
