@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { UsageHistoryReadings, UsageWindow } from '@cc/protocol'
-import { barWindow, usageTone, weeklySeries, weeklyWindow } from './weekly.js'
+import { barWindow, usageTone, barSeries, weeklyWindow } from './weekly.js'
 
 const w = (over: Partial<UsageWindow>): UsageWindow => ({
   id: 'x', label: 'x', percent: 0, resetsAt: null, scope: null, ...over,
@@ -51,29 +51,29 @@ describe('usageTone', () => {
   })
 })
 
-describe('weeklySeries', () => {
+describe('barSeries', () => {
   const series = (window: string, label: string, percent: number[], over: Partial<UsageHistoryReadings> = {}): UsageHistoryReadings => ({
     tool: 'claude', account: 'a', window, label, scope: null,
     points: percent.map((p, i) => ({ at: new Date(Date.UTC(2026, 9, 12, i)).toISOString(), percent: p, resetsAt: null })), ...over,
   })
 
   it('draws the weekly window, not the 5-hour one', () => {
-    expect(weeklySeries([series('session', '5 hours', [10, 90]), series('weekly_all', 'Weekly', [20, 30])])?.window).toBe('weekly_all')
+    expect(barSeries([series('session', '5 hours', [10, 90]), series('weekly_all', 'Weekly', [20, 30])])?.window).toBe('weekly_all')
   })
 
   it('takes the fullest weekly window, as the donut does', () => {
-    const picked = weeklySeries([series('weekly_all', 'Weekly', [74]), series('weekly_scoped', 'Weekly', [95], { scope: 'Opus' })])
+    const picked = barSeries([series('weekly_all', 'Weekly', [74]), series('weekly_scoped', 'Weekly', [95], { scope: 'Opus' })])
     expect(picked?.window).toBe('weekly_scoped')
   })
 
   it('follows the account read most recently, and is null without any reading', () => {
     const old = series('weekly_all', 'Weekly', [99], { account: 'old', points: [{ at: '2026-09-01T00:00:00.000Z', percent: 99, resetsAt: null }] })
-    expect(weeklySeries([old, series('weekly_all', 'Weekly', [5])])?.account).toBe('a')
-    expect(weeklySeries([])).toBeNull()
+    expect(barSeries([old, series('weekly_all', 'Weekly', [5])])?.account).toBe('a')
+    expect(barSeries([])).toBeNull()
   })
 
   it("draws the tool's one window when it has no weekly one, as the donut does (#2459)", () => {
-    expect(weeklySeries([series('included', 'Included', [5])])?.window).toBe('included')
+    expect(barSeries([series('included', 'Included', [5])])?.window).toBe('included')
   })
 })
 

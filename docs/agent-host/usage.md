@@ -28,8 +28,10 @@ happens with the token: [security-boundaries/credentials.md](../security-boundar
 - *Every failure is a reason.* Token not found or unreadable, expired (its JWT `exp`) or answered 401, another 4xx, a 5xx or
   timeout, an answer of another shape: each is one kind with one reason (`usage-failure.ts`) and one host.log line the first time
   in a process, with the status or exit code and never the token or the answer. A failed read keeps the last good answer when
-  there is one, else the plan `agent about` says (`localUsage`, below), so the plan stays on screen. The token read is bounded
-  at 3 s and each call at 5 s, under `usageFor`'s 15 s; the only cache is `usageFor`'s minute.
+  there is one, else the plan `agent about` says (`localUsage`, below), so the plan stays on screen; the reason shows under
+  kept numbers too, as they may no longer hold. The Keychain read is bounded at 3 s and each call at 5 s, under `usageFor`'s
+  15 s. `usageFor` keeps a read, good or failed, for a minute and shares one in flight, so a plan that always fails (Free) is
+  not asked on every poll.
 - *Drift.* `pnpm drift:cursor-usage` (the weekly drift run) goes red when the installed CLI's bundle no longer carries the
   token's naming and paths, the two methods, or the answers' descriptors (`usage-contract.ts`), searching every file of the
   version, since names move between chunks. A test holds the fields the parser reads to those descriptors.

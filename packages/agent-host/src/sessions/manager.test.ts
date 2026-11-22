@@ -719,6 +719,32 @@ describe('while-alive facts are carried in the list', () => {
     }
   })
 
+  it('reads the limits once for asks that come together, and not again for a minute after a failure (#2459)', async () => {
+    let now = 1_000_000
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+    try {
+      let reads = 0
+      let answer: (s: unknown) => void = () => {}
+      Object.assign(adapter, { listUsage: () => (reads++, new Promise((resolve) => (answer = resolve))) })
+      const asks = [rpc('agents.usage', { tool: 'claude' }), rpc('agents.usage', { tool: 'claude' })]
+      await vi.waitFor(() => expect(reads).toBe(1))
+      answer({ plan: 'Pro', windows: [], daily: [] })
+      for (const r of await Promise.all(asks)) expect(r).toMatchObject({ supported: true, usage: { plan: 'Pro' } })
+
+      now += 61_000
+      Object.assign(adapter, { listUsage: async () => (reads++, Promise.reject(new Error('Cursor did not share its usage'))) })
+      expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ supported: false, reason: 'Cursor did not share its usage' })
+      now += 59_000
+      expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ supported: false, reason: 'Cursor did not share its usage' })
+      expect(reads).toBe(2)
+      now += 2_000
+      await rpc('agents.usage', { tool: 'claude' })
+      expect(reads).toBe(3)
+    } finally {
+      clock.mockRestore()
+    }
+  })
+
   it('does not say a tool with no adapter reports no limits: nothing is known about it, so it is unknown (#1616)', async () => {
     const r = await rpc('agents.usage', { tool: 'cursor' })
     expect(r).toMatchObject({ supported: false, reason: 'cursor does not support usage queries', usage: null })

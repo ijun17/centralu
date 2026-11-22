@@ -39,7 +39,9 @@ export function planUsageSnapshot(period: unknown, plan: unknown): UsageSnapshot
   if (!usage || limit <= 0) throw new CursorUsageFailure('no-limit', usage ? 'planUsage.limit is 0' : 'no planUsage')
   const info = PLAN.safeParse(plan).data?.planInfo
   const end = p.data.billingCycleEnd || info?.billingCycleEnd || 0
-  const resetsAt = end > 0 ? new Date(end).toISOString() : null
+  // A date out of range loses the reset, not the percents
+  const at = new Date(end)
+  const resetsAt = end > 0 && Number.isFinite(at.getTime()) ? at.toISOString() : null
   const window = (id: string, label: string, percent: number | undefined): UsageWindow[] =>
     percent === undefined || !Number.isFinite(percent) ? [] : [{ id, label, percent: Math.max(0, Math.min(100, percent)), resetsAt, scope: null }]
   return {

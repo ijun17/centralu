@@ -26,6 +26,11 @@ function noLimitsReason(label: string): string {
   return `${label} does not report usage limits`
 }
 
+/** A read of a tool's limits stands for a minute, good or failed; a clock set back makes it stale */
+function withinAMinute(at: number): boolean {
+  return !isFromTheFuture(at, Date.now()) && Date.now() - at < 60_000
+}
+
 /**
  * What the tool queries reach of the session manager (#428), typed as the manager declares each member. The manager
  * builds it with getters for its fields, so each is read when used, never kept.
@@ -137,14 +142,10 @@ export class ToolQueries {
     if (opts.limits === false) return { supported: true, usage: null, cache }
 
     const hit = this.usageCache.get(tool)
-    if (hit && !isFromTheFuture(hit.at, Date.now()) && Date.now() - hit.at < 60_000) return { supported: true, usage: hit.snapshot, cache }
+    if (hit && withinAMinute(hit.at)) return { supported: true, usage: hit.snapshot, cache }
 
     try {
-      const snapshot = await withTimeout(adapter.listUsage(), 15_000)
-      this.usageCache.set(tool, { snapshot, at: Date.now() })
-      // A fresh reading is kept for the history (§6.2), whoever asked: the gauge, a turn end or the ten-minute sample
-      void this.host.usageRecorder.snapshot(tool, snapshot)
-      return { supported: true, usage: snapshot, cache }
+      return { supported: true, usage: await this.readLimits(tool, adapter.listUsage.bind(adapter)), cache }
     } catch (err) {
       const failed = { supported: false, reason: errorMessage(err), usage: hit?.snapshot ?? null, cache }
       if (hit) return failed
@@ -153,6 +154,37 @@ export class ToolQueries {
       if (local === 'logged-out') return notLoggedIn
       return local ? { ...failed, ...local } : failed
     }
+  }
+
+  /** The limits read in flight per tool, shared by whoever asks meanwhile */
+  private readonly limitReads = new Map<ToolName, Promise<UsageSnapshot>>()
+
+  /** The last failed read per tool: kept as long as a good one, so a read that keeps failing is not made on every ask */
+  private readonly limitFailures = new Map<ToolName, { error: Error; at: number }>()
+
+  private readLimits(tool: ToolName, listUsage: () => Promise<UsageSnapshot>): Promise<UsageSnapshot> {
+    const failed = this.limitFailures.get(tool)
+    if (failed && withinAMinute(failed.at)) return Promise.reject(failed.error)
+    const running = this.limitReads.get(tool)
+    if (running) return running
+    const read = withTimeout(listUsage(), 15_000)
+      .then(
+        (snapshot) => {
+          this.usageCache.set(tool, { snapshot, at: Date.now() })
+          this.limitFailures.delete(tool)
+          // A fresh reading is kept for the history (§6.2), whoever asked: the gauge, a turn end or the ten-minute sample
+          void this.host.usageRecorder.snapshot(tool, snapshot)
+          return snapshot
+        },
+        (err: unknown) => {
+          const error = err instanceof Error ? err : new Error(errorMessage(err))
+          this.limitFailures.set(tool, { error, at: Date.now() })
+          throw error
+        },
+      )
+      .finally(() => this.limitReads.delete(tool))
+    this.limitReads.set(tool, read)
+    return read
   }
 
   /**

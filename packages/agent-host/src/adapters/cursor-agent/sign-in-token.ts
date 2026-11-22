@@ -68,11 +68,18 @@ export function tokenExpiry(token: string): number | null {
 }
 
 function exitOf(e: unknown): string {
-  const code = typeof e === 'object' && e !== null && 'code' in e ? e.code : undefined
+  const ended = field(e, 'ended')
+  if (typeof ended === 'string') return `ended by its ${ended}`
+  const code = field(e, 'code')
   return typeof code === 'number' ? `exit ${code}` : 'did not run'
 }
 
 function codeOf(e: unknown): string {
-  const code = typeof e === 'object' && e !== null && 'code' in e ? e.code : undefined
+  const code = field(e, 'code')
   return typeof code === 'string' ? code : 'unreadable'
+}
+
+function field(e: unknown, name: 'code' | 'ended'): unknown {
+  const value: unknown = typeof e === 'object' && e !== null ? Object.getOwnPropertyDescriptor(e, name)?.value : undefined
+  return value
 }
