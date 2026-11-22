@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
 // eslint-disable-next-line no-restricted-imports -- the runtime ui knows only ports, but tests are contractually required to use MockPlatform instead of ad-hoc mocking (see the header of platform/src/mock/index.ts)
 import { MockPlatform } from '@cc/platform/mock'
-import { composerTarget, droppedQuestionsText, messagesToChat, useStore, type ChatItem } from './store.js'
+import { composerTarget, droppedQuestionsText, lastTurnRefusedModel, messagesToChat, useStore, type ChatItem } from './store.js'
 import { delta, line, resetStore, sessionInfo } from './store.test-helpers.js'
 
 beforeEach(resetStore)
@@ -416,20 +416,30 @@ describe('a model the provider refused (#1369)', () => {
       },
     }) as NormalizedEvent
 
-  it('stands as a line that offers another model, live', async () => {
+  it("stands as a line of the tool's words alone, live: the note offers another model (#2360)", async () => {
     const mock = new MockPlatform()
     mock.sessions.set('mr-1', sessionInfo('mr-1'))
     await useStore.getState().attach(mock)
 
     mock.emit(refused('mr-1'))
 
-    const last = (useStore.getState().chat['mr-1'] ?? []).at(-1) as { kind: string; text: string; pickModel?: true }
+    const chat = () => useStore.getState().chat['mr-1'] ?? []
+    const last = chat().at(-1) as { kind: string; text: string; pickModel?: true }
     expect(last.kind).toBe('mark')
-    // The tool's words and the way on, nothing of a turn: the note under the composer says it stopped (#2360)
-    expect(last.text).toBe(
-      "Codex refused the model gpt-5.5: The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account. Pick another model for this session to continue.",
-    )
+    expect(last.text).toBe("Codex refused the model gpt-5.5: The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.")
     expect(last.pickModel).toBe(true)
+    expect(lastTurnRefusedModel(chat())).toBe(true)
+    // The person's next message starts another turn, which the refusal is not part of
+    mock.emit({ type: 'user_message', sessionId: 'mr-1', seq: 9, text: 'go on' })
+    expect(lastTurnRefusedModel(chat())).toBe(false)
+  })
+
+  it('a message still being sent leaves the refusal the last turn’s; a failure after it decides', () => {
+    const [mark] = messagesToChat([{ sessionId: 'mr-4', seq: 4, role: 'system', kind: 'marker', ts: 1, payload: refused('mr-4') }])
+    const sending: ChatItem = { kind: 'user', seq: 5, text: 'go on', pending: true }
+    const other: ChatItem = { kind: 'mark', seq: 6, text: 'Compaction failed — timed out', mark: 'failed' }
+    expect(lastTurnRefusedModel([mark!, sending])).toBe(true)
+    expect(lastTurnRefusedModel([mark!, other])).toBe(false)
   })
 
   it('and the same line after reopening', () => {

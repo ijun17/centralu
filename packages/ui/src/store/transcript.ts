@@ -285,10 +285,6 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       // Only the model's context was folded; the mark shows where, so one can read back past it
       if (holds(items, e.seq)) return items
       return [...items, { kind: 'mark', seq: ++chatSeq, ...stored(e.seq), ...markerParts(e) }]
-    case 'handoff':
-      // The note's full text stays in the stored payload (#102)
-      if (holds(items, e.seq)) return items
-      return [...items, { kind: 'mark', seq: ++chatSeq, ...stored(e.seq), ...markerParts(e) }]
     // A fresh conversation inside the session and a tool's notice: one quiet line each (#304)
     case 'conversation_reset':
     case 'notice':
@@ -313,11 +309,6 @@ function compactionText(e: Extract<NormalizedEvent, { type: 'compaction' }>): st
   return 'Earlier messages were compacted here'
 }
 
-/** Never the note itself (#102): it can run to megabytes, and the successor's first message carries a preview */
-function handoffText(e: Extract<NormalizedEvent, { type: 'handoff' }>): string {
-  return `Handed off from "${e.from}" — the note is kept with this session`
-}
-
 /** The model knows nothing above this line, the record does: why the line exists (#304) */
 function resetText(e: Extract<NormalizedEvent, { type: 'conversation_reset' }>): string {
   return e.trigger === 'clear'
@@ -325,22 +316,22 @@ function resetText(e: Extract<NormalizedEvent, { type: 'conversation_reset' }>):
     : 'The agent started a new conversation here — it remembers nothing above this line'
 }
 
-/** The stored marker kinds this build can word (`markerText`) */
+/**
+ * The stored marker kinds this build draws a line for (`markerText`). A handoff has none: the successor's first message
+ * is its record (#2360).
+ */
 const KNOWN_MARKERS: ReadonlySet<string> = new Set([
   'compaction',
-  'handoff',
   'error',
   'conversation_reset',
   'notice',
 ])
 
+type Marker = Extract<NormalizedEvent, { type: 'compaction' | 'error' | 'conversation_reset' | 'notice' }>
+
 /** The live and restored paths must never word the same marker differently */
-function markerText(
-  e: Extract<NormalizedEvent, { type: 'compaction' | 'handoff' | 'error' | 'conversation_reset' | 'notice' }>,
-): string {
+function markerText(e: Marker): string {
   switch (e.type) {
-    case 'handoff':
-      return handoffText(e)
     case 'error':
       return errorText(e)
     case 'conversation_reset':
@@ -409,16 +400,14 @@ export function audienceShown(n: Pick<NoticeLine, 'audience' | 'from'>): 'you' |
 }
 
 /** For the icon (#2338): `failed` draws a dashed box, every other kind a capsule; the window adds `notice` lines too */
-export type MarkKind = 'compaction' | 'handoff' | 'reset' | 'notice' | 'failed'
+export type MarkKind = 'compaction' | 'reset' | 'notice' | 'failed'
 
-function markKind(e: Extract<NormalizedEvent, { type: 'compaction' | 'handoff' | 'error' | 'conversation_reset' | 'notice' }>): MarkKind {
+function markKind(e: Marker): MarkKind {
   if (e.type === 'error' || (e.type === 'compaction' && e.failed)) return 'failed'
   return e.type === 'conversation_reset' ? 'reset' : e.type
 }
 
-function markerParts(
-  e: Extract<NormalizedEvent, { type: 'compaction' | 'handoff' | 'error' | 'conversation_reset' | 'notice' }>,
-): {
+function markerParts(e: Marker): {
   text: string
   mark: MarkKind
   notice?: NoticeLine
@@ -428,6 +417,17 @@ function markerParts(
   const line = { text: markerText(e), mark: markKind(e) }
   if (e.type === 'error' && refusedModel(e)) return { ...line, pickModel: true }
   return notice ? { ...line, notice } : line
+}
+
+/**
+ * The provider refused the model of the last turn (#1369): its failure line, after the person's last message, says so.
+ * Trying again cannot help; picking another model can, and the stop note offers it (#2360). The newest failure line
+ * decides: a failure after the refusal is the one the note is about.
+ */
+export function lastTurnRefusedModel(items: readonly ChatItem[] | undefined): boolean {
+  // A message still being sent has not started a turn: the note stands until the session works
+  const it = items?.findLast((x) => (x.kind === 'user' && !x.pending) || (x.kind === 'mark' && x.mark === 'failed'))
+  return it?.kind === 'mark' && !!it.pickModel
 }
 
 /** The host marks a refused model in `error.data` (#1369) */
@@ -444,8 +444,6 @@ function refusedModel(e: Extract<NormalizedEvent, { type: 'error' }>): string | 
 function errorText(e: Extract<NormalizedEvent, { type: 'error' }>): string {
   // No turn was running: the conversation could not be opened at all (#168)
   if (e.error.code === 'conversation_locked') return `Could not open this conversation — ${e.error.message}`
-  // Trying again cannot help; picking another model can, and the row offers it (#1369)
-  if (refusedModel(e)) return `${e.error.message} Pick another model for this session to continue.`
   // A failure with no words of its own is still a line, not an empty box
   return e.error.message || 'The agent stopped and gave no reason'
 }
@@ -500,11 +498,8 @@ function pushStored(items: ChatItem[], m: StoredMessage): void {
       })
     } else if (m.kind === 'marker') {
       // The stored payload is the event itself
-      const e = m.payload as Extract<
-        NormalizedEvent,
-        { type: 'compaction' | 'handoff' | 'error' | 'conversation_reset' | 'notice' }
-      >
-      // A kind a newer host stored is left out: drawn as a known kind, it would be worded wrongly
+      const e = m.payload as Marker
+      // A kind with no line here (a handoff, a newer host's kind) is left out: drawn as a known kind, it would be worded wrongly
       if (typeof e.type !== 'string' || !KNOWN_MARKERS.has(e.type)) return
       items.push({ kind: 'mark', seq: m.seq, storedSeq: m.seq, ...markerParts(e) })
     } else if (m.kind === 'tool_call') {

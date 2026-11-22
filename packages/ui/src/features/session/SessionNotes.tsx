@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { CONTINUE_WORDS, type Interruption, type SessionState } from '@cc/protocol/client'
 import { turnStop, type TurnStop } from '@cc/core'
-import { useStore } from '../../store/store.js'
+import { lastTurnRefusedModel, useStore } from '../../store/store.js'
 import { useMachineName } from '../../store/selectors.js'
 import { turnStopLabel } from '../../components/primitives.jsx'
 import { useNowUntil } from '../../app/useLabelNow.js'
@@ -70,6 +70,10 @@ export function StopNote({ sessionId, stop: current }: { sessionId: string; stop
   // The plain line's stop, kept while it fades out under a wait that came
   const said = useHeld(stop?.kind === 'wait' ? null : stop)
   const now = useNowUntil(said?.kind === 'stopped' ? said.resetAt : undefined)
+  // Trying again cannot help a refused model; another model can (#1369). Held with the stop, so the note fades out whole
+  const pickModel = useHeld(
+    useStore((s) => (current ? (current.kind === 'error' || (current.kind === 'stopped' && current.error)) && lastTurnRefusedModel(s.chat[sessionId]) : null)),
+  )
   if (!note.shown || !stop) return null
   return (
     <div
@@ -85,6 +89,7 @@ export function StopNote({ sessionId, stop: current }: { sessionId: string; stop
         >
           <span className="min-w-0 flex-[1_1_auto] break-words text-ink" data-testid="stop-note-words">
             {turnStopLabel(said, now)}
+            {pickModel && ' · pick another model'}
           </span>
           <span className="flex min-w-0 flex-wrap items-center gap-2">
             {said.kind === 'stopped' && (
@@ -97,6 +102,17 @@ export function StopNote({ sessionId, stop: current }: { sessionId: string; stop
                 data-testid="stop-note-continue"
               >
                 Continue
+              </Button>
+            )}
+            {pickModel && (
+              <Button
+                variant="secondary"
+                size="sm"
+                className="shrink-0"
+                onClick={() => useStore.getState().requestSettingsMenu(sessionId)}
+                data-testid="stop-note-pick-model"
+              >
+                Pick another model
               </Button>
             )}
             {(said.kind === 'error' || said.error) && (

@@ -16,7 +16,6 @@ import { WorktreeProposalRow } from './delegation.jsx'
 import { CentraluCallHeader } from './CentraluCall.jsx'
 import { CentraluCallBody } from './CentraluCallBody.jsx'
 import { Badge } from '../../../components/Badge.jsx'
-import { Button } from '../../../components/Button.jsx'
 
 /*
  * One row of the conversation (#428). `ToolCard` and `SubagentSteps` stay in this file: a launch card
@@ -132,19 +131,6 @@ export const ChatRow = memo(function ChatRow({
         icon={<MarkIcon kind={item.mark} />}
         failed={item.mark === 'failed'}
         data-mark={item.mark}
-        after={
-          item.pickModel && (
-            // The provider refused the model (#1369)
-            <Button
-              size="xs"
-              className="shrink-0"
-              data-testid="msg-mark-pick-model"
-              onClick={() => useStore.getState().requestSettingsMenu(sessionId)}
-            >
-              Pick another model
-            </Button>
-          )
-        }
       >
         {item.text}
       </MarkLine>

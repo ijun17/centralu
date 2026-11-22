@@ -485,12 +485,11 @@ export function FromArrowIcon() {
 }
 
 /**
- * A line between messages, by its kind (#2338): a compaction, a handoff, a fresh conversation, a notice, a failure. On
+ * A line between messages, by its kind (#2338): a compaction, a fresh conversation, a notice, a failure. On
  * `CapIcon`'s 10-unit grid, set like the mail line's `MailIcon size={12}`: 12px, the glyph about 9px.
  */
 const MARK_PATH: Record<MarkKind, string> = {
   compaction: 'M1 1.5h8M1 8.5h8M5 2.75v2.5M3.5 4 5 5.25 6.5 4',
-  handoff: FROM_ARROW,
   reset: 'M8.75 5a3.75 3.75 0 1 1-1.1-2.65M5.6 2.35h2.05V.3',
   notice: 'M5 .75 9.5 9.25h-9zM5 3.75v2.5M5 7.6v.1',
   failed: 'M5 2.6v3M5 7.3v.1M9.4 5a4.4 4.4 0 1 1-8.8 0 4.4 4.4 0 0 1 8.8 0',

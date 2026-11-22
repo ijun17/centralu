@@ -451,11 +451,11 @@ describe('handing off and starting fresh', () => {
 
 /*
  * #172: creating a session, the host (and the mock) broadcasts `session_created`, `handoff` and `user_message`, in that
- * order, before the response. Overwriting the conversation with a pending opening prompt on the response would erase
- * the marker, and reading history would bring it back with the prompt twice.
+ * order, before the response. Adding a pending opening prompt on the response would show the prompt twice once
+ * history is read.
  */
 describe('the first screen of a session born from a handoff (#172)', () => {
-  it('exactly one marker and one opening prompt stand, and reading back through history leaves them as is', async () => {
+  it('one opening prompt and no handoff line stand, and reading back through history leaves them as is', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho172')
     await useStore.getState().attach(mock)
@@ -473,14 +473,15 @@ describe('the first screen of a session born from a handoff (#172)', () => {
       handoff: { from: 'Old', note: 'note', fromSessionId: 'old-172' },
     })
     const now = () => useStore.getState().chat[info.id] ?? []
-    expect(now().map(line)).toEqual([expect.stringContaining('Handed off from "Old"'), 'OPENING'])
+    // The opening prompt is the handoff's record: no line of its own says it again (#2360)
+    expect(now().map(line)).toEqual(['OPENING'])
     // The opening prompt is a confirmed row — leaving it pending would let it absorb a later message with the same text
     expect(now().find((i) => i.kind === 'user' && i.pending)).toBeUndefined()
 
     release()
-    expect(await readAll(info.id)).toEqual([expect.stringContaining('Handed off from "Old"'), 'OPENING', ...now().slice(2).map(line)])
+    expect(await readAll(info.id)).toEqual(['OPENING', ...now().slice(1).map(line)])
     expect(now().filter((i) => i.kind === 'user' && i.text === 'OPENING')).toHaveLength(1)
-    expect(now().filter((i) => i.kind === 'mark')).toHaveLength(1)
+    expect(now().filter((i) => i.kind === 'mark')).toHaveLength(0)
   })
 })
 

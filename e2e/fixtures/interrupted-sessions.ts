@@ -210,6 +210,33 @@ export function interruptedSessionTests() {
     await expect(note).toHaveCount(0)
   })
 
+  test('a refused model: the line keeps the tool’s words, the note offers another model before Done (#2360)', async ({ page }) => {
+    await setup(page, ['/tmp/alpha'])
+    const s = await newSession(page, 'alpha')
+    const note = page.getByTestId('stop-note')
+    const buttons = () => note.getByRole('button').allTextContents()
+    const words = "Codex refused the model gpt-5.5: The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account."
+    await emit(page, [
+      { type: 'state_change', sessionId: s, state: 'working' },
+      { type: 'error', sessionId: s, error: { code: 'internal', message: words, retryable: false, data: { reason: 'model_rejected', model: 'gpt-5.5' } } },
+    ])
+    await expect(page.locator('[data-testid="msg-mark"][data-mark="failed"]')).toHaveText(words)
+    await expect(note.getByTestId('stop-note-words')).toHaveText('Stopped: error · pick another model')
+    await expect.poll(buttons).toEqual(['Pick another model', 'Done'])
+    await page.getByTestId('stop-note-pick-model').click()
+    await expect(page.getByTestId('settings-menu')).toBeVisible()
+
+    // Another failure after the person's next message is not a refusal: the plain note
+    await page.keyboard.press('Escape')
+    await emit(page, [
+      { type: 'user_message', sessionId: s, seq: 50, text: 'try again' },
+      { type: 'state_change', sessionId: s, state: 'working' },
+      { type: 'error', sessionId: s, error: { code: 'internal', message: 'app-server exited (code 0)', retryable: true } },
+    ])
+    await expect(note.getByTestId('stop-note-words')).toHaveText('Stopped: error')
+    await expect.poll(buttons).toEqual(['Done'])
+  })
+
   test('the wait above the composer reads whole at a narrow window and a large text size, both buttons in full (#1415)', async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 720 })
     await setup(page, ['/tmp/alpha'])
@@ -298,5 +325,24 @@ export function limitBadgeTests() {
     await emit(page, [{ type: 'interruption', sessionId: s, interruption: { reason: 'limit', at: Date.now() } }])
     await expect(page.getByTestId('stop-note-words')).toHaveText('Stopped: usage limit')
     await expect(badge).toHaveText('Limit 100% · resets Jan 1, 2030, 01:20')
+  })
+
+  test('"Limit reached" with no percentage leaves the header while the note says the limit stop (#2360)', async ({ page }) => {
+    await setup(page, ['/tmp/alpha'])
+    const s = await newSession(page, 'alpha')
+    const at = new Date(2030, 0, 1, 1, 20)
+    await emit(page, [
+      { type: 'state_change', sessionId: s, state: 'working' },
+      { type: 'limit_reached', sessionId: s, resumeAt: at.toISOString() },
+    ])
+    const badge = page.getByTestId('limit-badge')
+    await expect(badge).toHaveText('Limit reached · resets Jan 1, 2030, 01:20')
+    await emit(page, [{ type: 'interruption', sessionId: s, interruption: { reason: 'limit', at: Date.now(), resetAt: at.getTime() } }])
+    await expect(page.getByTestId('stop-note-words')).toHaveText('Stopped: usage limit · resets at Jan 1, 2030, 01:20')
+    await expect(badge).toHaveCount(0)
+    // A note that says no time: the badge keeps the reset, so it is said somewhere
+    await emit(page, [{ type: 'interruption', sessionId: s, interruption: { reason: 'limit', at: Date.now() } }])
+    await expect(page.getByTestId('stop-note-words')).toHaveText('Stopped: usage limit')
+    await expect(badge).toHaveText('Limit reached · resets Jan 1, 2030, 01:20')
   })
 }

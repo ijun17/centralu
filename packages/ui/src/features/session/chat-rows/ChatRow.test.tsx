@@ -216,11 +216,10 @@ describe('ChatRow: approvals and marks', () => {
     expect(folds.html).toContain('aria-expanded="false"')
   })
 
-  it('a refused model leaves a button to the model menu (#1369), and an ordinary divider none', () => {
-    const refused = row({ kind: 'mark', seq: 5, text: '… Pick another model for this session to continue.', mark: 'failed', pickModel: true })
-    expect(testIds(refused.html)).toEqual(['msg-mark', 'msg-mark-pick-model'])
-    expect(refused.text).toContain('Pick another model')
-    expect(testIds(row({ kind: 'mark', seq: 5, text: 'conversation compacted here', mark: 'compaction' }).html)).toEqual(['msg-mark'])
+  it("a refused model's line is the tool's words alone: the stop note offers another model (#2360)", () => {
+    const refused = row({ kind: 'mark', seq: 5, text: 'Codex refused the model gpt-5.5.', mark: 'failed', pickModel: true })
+    expect(testIds(refused.html)).toEqual(['msg-mark'])
+    expect(refused.text).toBe('Codex refused the model gpt-5.5.')
   })
 })
 

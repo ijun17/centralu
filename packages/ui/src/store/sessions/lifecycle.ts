@@ -94,7 +94,7 @@ const startingNow = new Set<string>()
 
 /**
  * Never overwrites (#172): the host broadcasts `session_created`, `handoff` and `user_message` before the response, so
- * they are drawn already, and an overwrite would drop the handoff marker and draw the prompt twice.
+ * they are drawn already, and an overwrite would draw the prompt twice.
  */
 function withOpeningPrompt(
   chat: Record<string, ChatItem[]>,
