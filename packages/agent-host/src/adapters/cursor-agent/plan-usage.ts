@@ -1,5 +1,6 @@
 import { z } from 'zod'
-import type { UsageSnapshot, UsageWindow } from '@cc/protocol'
+import type { UsageWindow } from '@cc/protocol'
+import { NO_LIMITS, type LimitsAnswer } from '../contract.js'
 import type { DashboardMethod } from './usage-contract.js'
 import { tokenExpiry } from './sign-in-token.js'
 import { CursorUsageFailure, type CursorUsageFailureKind } from './usage-failure.js'
@@ -29,14 +30,14 @@ export const PLAN = z.object({ planInfo: z.object({ planName: z.string().optiona
 /**
  * The CLI's `/usage` as numbers (its bundle, 2026.10.22: total percent, else included spend of the limit; the reset at the
  * cycle's end, else the plan's). A plan whose limit is 0 has nothing a percent could be of: measured on a Free plan, the
- * answer says 0% while prompts are refused as over the limit, so it is said as "no limit reported" and never as 0%
+ * answer says 0% while prompts are refused as over the limit, so it is `NO_LIMITS` and never 0%
  */
-export function planUsageSnapshot(period: unknown, plan: unknown): UsageSnapshot {
+export function planUsageAnswer(period: unknown, plan: unknown): LimitsAnswer {
   const p = PERIOD.safeParse(period)
   if (!p.success) throw new CursorUsageFailure('unreadable', 'GetCurrentPeriodUsage: unexpected shape')
   const usage = p.data.planUsage
   const limit = usage?.limit ?? 0
-  if (!usage || limit <= 0) throw new CursorUsageFailure('no-limit', usage ? 'planUsage.limit is 0' : 'no planUsage')
+  if (!usage || limit <= 0) return NO_LIMITS
   const info = PLAN.safeParse(plan).data?.planInfo
   const end = p.data.billingCycleEnd || info?.billingCycleEnd || 0
   // A date out of range loses the reset, not the percents
@@ -67,7 +68,7 @@ export type PlanUsageDeps = {
  * them, the plan's name optional. Any failure is thrown as its kind, whose message is the reason the panel shows; host.log
  * gets one line for each kind the first time it happens in this process
  */
-export function cursorPlanUsage(deps: PlanUsageDeps): () => Promise<UsageSnapshot> {
+export function cursorPlanUsage(deps: PlanUsageDeps): () => Promise<LimitsAnswer> {
   const logged = new Set<CursorUsageFailureKind>()
   return async () => {
     try {
@@ -75,7 +76,7 @@ export function cursorPlanUsage(deps: PlanUsageDeps): () => Promise<UsageSnapsho
       const expiry = tokenExpiry(token)
       if (expiry !== null && expiry <= deps.now()) throw new CursorUsageFailure('signed-out', 'token past its exp')
       const [period, plan] = await Promise.all([deps.ask('GetCurrentPeriodUsage', token), deps.ask('GetPlanInfo', token).catch(() => null)])
-      return planUsageSnapshot(period, plan)
+      return planUsageAnswer(period, plan)
     } catch (e) {
       const failure = e instanceof CursorUsageFailure ? e : new CursorUsageFailure('unreadable', e instanceof Error ? e.name : 'failed')
       if (!logged.has(failure.kind)) {

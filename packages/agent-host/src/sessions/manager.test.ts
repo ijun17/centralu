@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { GridPanel, NormalizedEvent, SessionInfo, StoredMessage, ToolName, TrashedSession, UsageHistory } from '@cc/protocol'
 import { NormalizedEvent as NormalizedEventSchema } from '@cc/protocol'
-import type { AgentAdapter } from '../adapters/contract.js'
+import { NO_LIMITS, type AgentAdapter } from '../adapters/contract.js'
 import { openCodeUsageReader } from '../adapters/opencode/usage.js'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
@@ -734,7 +734,7 @@ describe('while-alive facts are carried in the list', () => {
     expect(r).not.toHaveProperty('notReported')
   })
 
-  it('has one definition of a tool that reports no limits: its adapter has no listUsage; what it says itself is carried (#1623)', async () => {
+  it('says a tool with no listUsage reports no limits, carrying what it says itself (#1623)', async () => {
     const totals = { scope: 'all time', rows: [{ id: 'input', label: 'Input', value: 5, unit: 'tokens' }] }
     const asks: unknown[] = []
     Object.assign(adapter, {
@@ -753,6 +753,33 @@ describe('while-alive facts are carried in the list', () => {
     const limited = await rpc('agents.usage', { tool: 'claude' })
     expect(limited).toMatchObject({ supported: true, usage: { plan: 'max' } })
     expect(limited).not.toHaveProperty('notReported')
+  })
+
+  it('says a tool whose listUsage answers no limits for its plan reports none, read once a minute; not a read that failed after it (#2459)', async () => {
+    let now = 1_000_000
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+    try {
+      let reads = 0
+      let answer: () => Promise<unknown> = async () => NO_LIMITS
+      Object.assign(adapter, { listUsage: () => (reads++, answer()), localUsage: async () => ({ plan: 'Free' }) })
+      for (let i = 0; i < 2; i++) {
+        expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({
+          supported: false,
+          reason: 'Claude Code does not report usage limits',
+          notReported: true,
+          usage: { plan: 'Free', windows: [] },
+        })
+      }
+      expect(reads).toBe(1)
+
+      now += 61_000
+      answer = async () => Promise.reject(new Error('Cursor did not share its usage'))
+      const failed = await rpc('agents.usage', { tool: 'claude' })
+      expect(failed).toMatchObject({ supported: false, reason: 'Cursor did not share its usage', usage: { plan: 'Free', windows: [] } })
+      expect(failed).not.toHaveProperty('notReported')
+    } finally {
+      clock.mockRestore()
+    }
   })
 
   it('passes a provisional answer through, and asks the adapter to settle when the screen does (#1623)', async () => {

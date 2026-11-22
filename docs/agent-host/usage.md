@@ -23,21 +23,22 @@ happens with the token: [security-boundaries/credentials.md](../security-boundar
   never drawn as 0. The plan is `planInfo.planName`, or none when only that call fails.
 - *No limit, no percent.* Measured on a Free plan in the same minute: a prompt refused "You've hit your usage limit", the answer
   `totalPercentUsed: 0` with no `limit` (proto3 leaves out a 0), `GetSandUsageStatus.includedLimitZero: true`. The percent is of a
-  limit of 0; whatever refused the prompt is not in this answer. So a `limit` of 0, or no `planUsage`, is the reason "Cursor does
-  not report a limit for this plan", never 0%. A paid plan's answer is not measured yet (its test input is made by hand, and says so).
+  limit of 0; whatever refused the prompt is not in this answer. So a `limit` of 0, or no `planUsage`, is `NO_LIMITS`: said as
+  a tool that reports no limits (below), with its plan, never 0% nor a failure (owner, #2459). A paid plan's answer is not measured
+  yet (its test input is made by hand, and says so).
 - *Every failure is a reason.* Token not found or unreadable, expired (its JWT `exp`) or answered 401, another 4xx, a 5xx or
   timeout, an answer of another shape: each is one kind with one reason (`usage-failure.ts`) and one host.log line the first time
   in a process, with the status or exit code and never the token or the answer. A failed read keeps the last good answer when
   there is one, else the plan `agent about` says (`localUsage`, below), so the plan stays on screen; the reason shows under
   kept numbers too, as they may no longer hold. The Keychain read is bounded at 3 s and each call at 5 s, under `usageFor`'s
-  15 s. `usageFor` keeps a read, good or failed, for a minute and shares one in flight, so a plan that always fails (Free) is
-  not asked on every poll.
+  15 s. `usageFor` keeps a read, good, failed or no limits, for a minute and shares one in flight, so a Free plan or a read that
+  keeps failing is not asked on every poll.
 - *Drift.* `pnpm drift:cursor-usage` (the weekly drift run) goes red when the installed CLI's bundle no longer carries the
   token's naming and paths, the two methods, or the answers' descriptors (`usage-contract.ts`), searching every file of the
   version, since names move between chunks. A test holds the fields the parser reads to those descriptors.
 
-**What a tool with no limits still says (#1623).** "Reports no limits" has one definition: the adapter has no `listUsage()`
-(`usageFor` derives `notReported` from that and nowhere else). OpenCode has no usage API, but its adapter has an optional
+**What a tool with no limits still says (#1623).** "Reports no limits" has one definition: the adapter has no `listUsage()`, or
+it answers `NO_LIMITS` for the plan (`usageFor` derives `notReported` from that and nowhere else). OpenCode has no usage API, but its adapter has an optional
 `localUsage()`, read from the tool's own command and never its credential or state files, as Cursor's has for its plan:
 Cursor's plan from `agent about --format json` (`subscriptionTier`; the account's email in that output is never read out), what
 stands when its limits cannot be read; OpenCode's local totals

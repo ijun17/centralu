@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { cursorPlanUsage, PERIOD, PLAN, planUsageSnapshot, type PlanUsageDeps } from './plan-usage.js'
+import type { UsageSnapshot } from '@cc/protocol'
+import { NO_LIMITS, type LimitsAnswer } from '../contract.js'
+import { cursorPlanUsage, PERIOD, PLAN, planUsageAnswer, type PlanUsageDeps } from './plan-usage.js'
 import { PERIOD_FREE_RECORDED, PERIOD_PAID_HAND_MADE, PLAN_FREE_RECORDED, PLAN_PAID_HAND_MADE } from './recordings/dashboard.test-helpers.js'
 import { CursorUsageFailure } from './usage-failure.js'
 import { failureOf, jwt } from './usage.test-helpers.js'
@@ -10,6 +12,13 @@ const RESETS = new Date(1795522358574).toISOString()
 const NOW = 1_790_000_000_000
 
 const TOKEN = jwt({ sub: 'person', exp: NOW / 1000 + 3600 })
+
+/** The answer of a plan that has a limit */
+function limited(answer: LimitsAnswer): UsageSnapshot {
+  if (answer === NO_LIMITS) throw new Error('the plan has no limit')
+  return answer
+}
+const planUsageSnapshot = (period: unknown, plan: unknown) => limited(planUsageAnswer(period, plan))
 
 describe("Cursor's plan usage from its dashboard's answers (#2459)", () => {
   it('reads a paid plan as the CLI shows it: Included, Auto and API, each resetting at the cycle end, the plan by name', () => {
@@ -24,14 +33,12 @@ describe("Cursor's plan usage from its dashboard's answers (#2459)", () => {
     })
   })
 
-  it('says the recorded Free plan reports no limit, never 0%: its limit is 0 while prompts are refused as over it', async () => {
-    const f = await failureOf(() => planUsageSnapshot(json(PERIOD_FREE_RECORDED), json(PLAN_FREE_RECORDED)))
-    expect(f.kind).toBe('no-limit')
-    expect(f.message).toBe('Cursor does not report a limit for this plan')
+  it('says the recorded Free plan has no limits, never 0%: its limit is 0 while prompts are refused as over it', () => {
+    expect(planUsageAnswer(json(PERIOD_FREE_RECORDED), json(PLAN_FREE_RECORDED))).toBe(NO_LIMITS)
   })
 
-  it('says no limit when the answer has no planUsage at all', async () => {
-    expect((await failureOf(() => planUsageSnapshot({ billingCycleEnd: '1' }, null))).kind).toBe('no-limit')
+  it('says no limits when the answer has no planUsage at all', () => {
+    expect(planUsageAnswer({ billingCycleEnd: '1' }, null)).toBe(NO_LIMITS)
   })
 
   it('takes the included spend of the limit when the total percent is absent, as the CLI does', () => {
@@ -102,17 +109,19 @@ describe("Cursor's listUsage: token, both methods, one log line per failure kind
     }
   }
 
-  it('asks both methods with the token and answers the snapshot', async () => {
+  it('asks both methods with the token and answers the snapshot, or no limits for a Free plan, with no log line', async () => {
     const d = deps()
-    const snap = await cursorPlanUsage(d)()
+    const snap = limited(await cursorPlanUsage(d)())
     expect(snap.plan).toBe('Pro')
     expect(d.asked.sort()).toEqual(['GetCurrentPeriodUsage', 'GetPlanInfo'])
-    expect(d.lines).toEqual([])
+    const free = deps({ ask: async (method) => json(method === 'GetPlanInfo' ? PLAN_FREE_RECORDED : PERIOD_FREE_RECORDED) })
+    expect(await cursorPlanUsage(free)()).toBe(NO_LIMITS)
+    expect([...d.lines, ...free.lines]).toEqual([])
   })
 
   it('still answers the limits when only the plan answer fails', async () => {
     const d = deps({ ask: async (method) => (method === 'GetPlanInfo' ? Promise.reject(new CursorUsageFailure('refused', 'HTTP 403')) : json(PERIOD_PAID_HAND_MADE)) })
-    const snap = await cursorPlanUsage(d)()
+    const snap = limited(await cursorPlanUsage(d)())
     expect(snap.plan).toBeNull()
     expect(snap.windows).toHaveLength(3)
   })
