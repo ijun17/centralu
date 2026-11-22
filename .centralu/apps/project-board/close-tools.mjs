@@ -2,42 +2,42 @@
 // reason; and the same question for an issue a pull request closes, which queue_merge and integrate ask.
 import { z } from './runtime/centralu-app-runtime.mjs'
 import { forget, itemInput, itemOf } from './board.mjs'
-import { config } from './config.mjs'
 import { FATAL, GitHubError, isOutage, postComment, readIssue, readRepo, readRepoFile, setIssueClosed } from './github.mjs'
 import { answering, serially } from './handlers.mjs'
-import { citedPlans, planItems, planSection } from './plan-items.mjs'
+import { citedPlans, planItems, PLANS, planSection } from './plan-items.mjs'
 import { asError, linesAnswer } from './reply.mjs'
-import { itemState, publicTextProblems } from './rules.mjs'
+import { foreignBareIssueWarnings, itemState, publicTextProblems } from './rules.mjs'
 import { forgetThread } from './threads.mjs'
 import { plural } from './util.mjs'
 import { privateWords } from './words-tools.mjs'
 
-const PLANS = config.rules?.plans ?? 'docs/plans'
-const HOW = 'tick it, name the issue or pull request that carries it (#N), or write "dropped: <why>" in it'
+const HOW = 'tick it, name the issue or pull request that carries it (#N), or add "dropped: <why>" to it'
 
-/** The items an issue's body plans, then those of each plan section it cites, read from the default branch; and what could not be read. */
+/** The items an issue's body plans, then those of each plan section it cites, read from the default branch; and the citations that did not read. */
 export async function issueItems(repo, body) {
   const items = planItems(body)
-  const warnings = []
+  const unread = []
   const cited = citedPlans(body)
-  if (!cited.length) return { items, warnings }
+  if (!cited.length) return { items, unread }
   const { defaultBranch } = await readRepo(repo)
   for (const { file, section } of cited) {
     const path = `${PLANS}/${file}`
     const text = await readRepoFile(repo, path, defaultBranch)
     const part = text === null ? null : planSection(text, section)
-    if (part === null) warnings.push(`${path} ${section}, which the issue cites, is not on ${defaultBranch}: its items were not read.`)
-    else items.push(...planItems(part, `${path} ${section}`))
+    if (part === null) unread.push(`${path} ${section}, which the issue cites, is not on ${defaultBranch}${text === null ? '' : ' (no heading of that section)'}`)
+    else items.push(...planItems(part, `${path} ${section}`, { plan: true }))
   }
-  return { items, warnings }
+  return { items, unread }
 }
 
 const cut = (text) => (text.length > 100 ? `${text.slice(0, 99)}…` : text)
 const itemLine = (item, n) => `item ${n}: "${cut(item.text)}" (${item.where})`
+/** A failure to read that is the issue's or the plan's own, not GitHub's or the machine's */
+const ownFailure = (e) => e instanceof GitHubError && !FATAL.has(e.kind) && !isOutage(e)
 
 /**
- * The open issues among `issues` (as closedIssues names them) that plan items gone nowhere: a problem for each, which says
- * how to account for them or leave the issue open. What cannot be read is a warning; an outage is thrown, as for any read.
+ * The open issues among `issues` (as closedIssues names them) that plan items gone nowhere: a problem for each, which says how
+ * to account for them or leave the issue open. An issue or a plan that does not read is a warning; an outage is thrown, as for any read.
  */
 export async function itemsLeftProblems(repo, issues, what) {
   const problems = []
@@ -45,21 +45,22 @@ export async function itemsLeftProblems(repo, issues, what) {
   for (const name of issues) {
     const want = itemOf(name, repo)
     let issue
+    let read
     try {
       issue = await readIssue(want.repo, want.number)
+      read = issue.pull || issue.state !== 'OPEN' ? null : await issueItems(want.repo, issue.body)
     } catch (e) {
-      if (!(e instanceof GitHubError) || FATAL.has(e.kind) || isOutage(e)) throw e
+      if (!ownFailure(e)) throw e
       warnings.push(`${want.ref}, which ${what} closes, could not be read, so its planned items were not checked: ${e.message}`)
       continue
     }
-    if (issue.pull || issue.state !== 'OPEN') continue
-    const read = await issueItems(want.repo, issue.body)
-    warnings.push(...read.warnings)
+    if (!read) continue
+    warnings.push(...read.unread.map((u) => `${u}: its items were not checked.`))
     const open = read.items.map((item, i) => ({ item, n: i + 1 })).filter((x) => !x.item.state)
     if (!open.length) continue
     const shown = open.slice(0, 5).map((x) => itemLine(x.item, x.n))
     problems.push(
-      `${what} closes ${want.ref}, which plans ${plural(open.length, 'item')} not built, carried or dropped (${shown.join('; ')}${open.length > 5 ? `; and ${open.length - 5} more` : ''}). In ${want.ref}, ${HOW} for each (this pull request's number, for what it builds); or write "None: part of ${want.ref}" under Closes, and close ${want.ref} with close_issue once the rest is done.`,
+      `${what} closes ${want.ref}, which plans ${plural(open.length, 'item')} not built, carried or dropped (${shown.join('; ')}${open.length > 5 ? `; and ${open.length - 5} more` : ''}). For each, in ${want.ref}: ${HOW} (this pull request's number, for what it builds); or write "None: part of ${want.ref}" under Closes, and close ${want.ref} with close_issue once the rest is done.`,
     )
   }
   return { problems, warnings }
@@ -67,13 +68,13 @@ export async function itemsLeftProblems(repo, issues, what) {
 
 const REASONS = { completed: 'completed', 'not planned': 'not_planned' }
 
-/** What the closing comment says of each item: where it went, as the issue says or as `items` gives it. */
+/** What the closing comment says of each item: where it went, as `items` gives it or as the issue says. */
 function itemRecord(item, n, given, notPlanned) {
   const to = given ?? (item.state === 'ticked' ? 'done (ticked)' : item.state ? 'as the item says' : notPlanned ? 'dropped with the issue' : null)
   return `- Item ${n}, "${cut(item.text)}": ${to}`
 }
 
-async function closeIssueChecked({ item, comment, reason = 'completed', items: given = {}, dryRun }) {
+async function closeIssueChecked({ item, comment, reason = 'completed', items: givenItems = {}, dryRun }) {
   const want = itemOf(item)
   const words = await privateWords()
   const said = String(comment ?? '').trim()
@@ -81,25 +82,32 @@ async function closeIssueChecked({ item, comment, reason = 'completed', items: g
   const issue = await readIssue(want.repo, want.number)
   if (issue.pull) throw new GitHubError('input', `${want.ref} is a pull request; close_issue closes issues (a pull request closes when it lands, or with gh pr close).`)
   if (issue.state !== 'OPEN') throw new GitHubError('input', `${want.ref} is closed already; nothing was sent to GitHub.`)
-  const { items, warnings } = await issueItems(want.repo, issue.body)
-  for (const [k, to] of Object.entries(given)) {
-    const n = Number(k)
-    if (!Number.isInteger(n) || n < 1 || n > items.length) problems.push(`items names "${k}", and ${want.ref} has ${items.length ? `items 1 to ${items.length}` : 'no planned items'}.`)
+  const { items, unread } = await issueItems(want.repo, issue.body)
+  // A citation that does not read would close the issue with its plan unchecked: the issue's citation is fixed first
+  problems.push(...unread.map((u) => `${u}: correct the citation in ${want.ref}, or take it out if the plan is not its plan.`))
+  const given = new Map()
+  for (const [k, to] of Object.entries(givenItems)) {
+    const n = /^[1-9]\d*$/.test(k) ? Number(k) : NaN
+    if (!(n <= items.length)) problems.push(`items names "${k}", and ${want.ref} has ${items.length ? `items 1 to ${items.length}` : 'no planned items'}.`)
     else if (!itemState(to)) problems.push(`items.${k} ("${cut(String(to))}") names no issue or pull request (#N) and does not say "dropped: <why>".`)
-    else problems.push(...publicTextProblems(to, words, `items.${k}`))
+    else {
+      given.set(n, to)
+      problems.push(...publicTextProblems(to, words, `items.${k}`))
+    }
   }
   const notPlanned = reason === 'not planned'
-  const open = items.map((x, i) => ({ item: x, n: i + 1 })).filter((x) => !x.item.state && !itemState(given[x.n] ?? ''))
+  const open = items.map((x, i) => ({ item: x, n: i + 1 })).filter((x) => !x.item.state && !given.has(x.n))
   if (open.length && !notPlanned)
-    problems.push(`${want.ref} plans ${plural(open.length, 'item')} not built, carried or dropped. For each, ${HOW} in ${want.ref}; or give items: { "<n>": "#N" or "dropped: <why>" }, which the closing comment records.`)
+    problems.push(`${want.ref} plans ${plural(open.length, 'item')} not built, carried or dropped. For each, in ${want.ref}: ${HOW}; or give items: { "<n>": "#N" or "dropped: <why>" }, which the closing comment records.`)
   if (problems.length)
     return asError(
-      linesAnswer(`Not closed: ${problems.length === 1 ? 'one rule fails' : `${problems.length} rules fail`}; nothing was sent to GitHub.`, [['problems', '', problems], ['open', 'Items left:', open.map((x) => itemLine(x.item, x.n))], ['warnings', 'Warnings:', warnings]], { ok: false, open: open.map((x) => ({ n: x.n, text: x.item.text, where: x.item.where })) }),
+      linesAnswer(`Not closed: ${problems.length === 1 ? 'one rule fails' : `${problems.length} rules fail`}; nothing was sent to GitHub.`, [['problems', '', problems], ['open', 'Items left:', open.map((x) => itemLine(x.item, x.n))]], { ok: false, open: open.map((x) => ({ n: x.n, text: x.item.text, where: x.item.where })) }),
     )
-  const record = items.map((x, i) => itemRecord(x, i + 1, given[i + 1], notPlanned))
+  const record = items.map((x, i) => itemRecord(x, i + 1, given.get(i + 1), notPlanned))
   const body = record.length ? `${said}\n\nPlanned items (${items.length}):\n${record.join('\n')}` : said
+  const warnings = foreignBareIssueWarnings(body, want.repo, 'The comment')
   if (dryRun) return linesAnswer(`Ready to close ${want.ref} as ${reason} (dry run, nothing sent). The comment:`, [['body', '', [body]], ['warnings', 'Warnings:', warnings]], { ok: true, body })
-  // The record first: a close that fails after it leaves an open issue with its comment, and closing again posts a second one
+  // The record first, so a closed issue always says where its items went; a close that fails after it leaves the issue open, and closing again posts a second record
   let c
   try {
     c = await postComment(want.repo, want.number, body)
@@ -116,7 +124,7 @@ export const tools = {
     config: {
       title: 'Close an issue whose planned items all went somewhere',
       description:
-        'Instead of gh issue close: close an issue with a comment saying what was built and where. Refused, with nothing sent, while an item it plans went nowhere: a task-list box, a numbered line (not under a heading on how to reproduce) or a table row starting with a number, in its body or in a plan section it cites (docs/plans/<name>.md §n, #anchor or "Heading", read from the default branch). An item went somewhere when it is ticked, names an issue or pull request (#N), or says "dropped: <why>" in the issue, or when items gives it "#N" or "dropped: <why>". The refusal lists the items left by number. The comment lists every planned item and where it went. reason "not planned" closes with the items left dropped with the issue. dryRun answers the comment without closing.',
+        'Instead of gh issue close: close an issue with a comment saying what was built and where. Refused, with nothing sent, while an item it plans went nowhere: a task-list box, a numbered line (not under a heading on how to reproduce) or a numbered row of a table whose first column is #, Step, Unit or PR, in its body; and in a plan section it cites (docs/plans/<name>.md §n, #anchor or "Heading", read from the default branch; refused when that does not read), its boxes and the numbered lines and rows under a heading of work (pull requests, steps, follow-ups, later). An item went somewhere when it is ticked, names an issue or pull request (#N), or says "dropped: <why>" in the issue, or when items gives it "#N" or "dropped: <why>". The refusal lists the items left by number. The comment lists every planned item and where it went. reason "not planned" closes with the items left dropped with the issue. dryRun answers the comment without closing.',
       inputSchema: z.object({
         item: itemInput,
         comment: z.string().max(20000).describe('What was built and where (the pull requests), or why it is not planned; in English'),

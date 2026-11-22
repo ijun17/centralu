@@ -532,28 +532,30 @@ export async function readJobLog(repo, jobId) {
 /** What starts a comment the main guard posts on the known failures issue (#1496): a note of its own, not a flake a person judged */
 export const GUARD_NOTE = '<!-- main-guard note -->'
 
+/** `gh issue view` of `fields`, as JSON; gh answers it for a pull request's number too. */
+async function issueView(repo, number, fields) {
+  checkRepo(repo)
+  const j = parseJson(await runGh(['issue', 'view', String(number), '-R', repo, '--json', fields]))
+  if (!j) throw new GitHubError('github', 'gh issue view answered with something that is not JSON.')
+  return j
+}
+
 /** An issue's body and comments as one text, and its state; the main guard's notes (`GUARD_NOTE`) are not part of it. */
 export async function readIssueText(repo, number) {
-  checkRepo(repo)
-  const out = await runGh(['issue', 'view', String(number), '-R', repo, '--json', 'body,comments,state'])
-  const j = parseJson(out)
-  if (!j) throw new GitHubError('github', 'gh issue view answered with something that is not JSON.')
+  const j = await issueView(repo, number, 'body,comments,state')
   const comments = (j.comments ?? []).map((c) => c?.body ?? '').filter((b) => !b.startsWith(GUARD_NOTE))
   return { text: [j.body ?? '', ...comments].join('\n\n'), state: j.state ?? null }
 }
 
-/** An issue's title, body and state (OPEN or CLOSED), and whether it is a pull request, which gh answers for the number too. */
+/** An issue's title, body and state (OPEN or CLOSED), and whether it is a pull request. */
 export async function readIssue(repo, number) {
-  checkRepo(repo)
-  let out
+  let j
   try {
-    out = await runGh(['issue', 'view', String(number), '-R', repo, '--json', 'title,body,state,url'])
+    j = await issueView(repo, number, 'title,body,state,url')
   } catch (e) {
-    if (e instanceof GitHubError && !FATAL.has(e.kind)) throw new GitHubError('not-found', `${repo}#${number} is not an issue or pull request this GitHub login can see (${firstLine(e)}).`, { status: httpStatus(e) })
+    if (e instanceof GitHubError && !FATAL.has(e.kind) && !isOutage(e)) throw new GitHubError('not-found', `${repo}#${number} is not an issue or pull request this GitHub login can see (${firstLine(e)}).`, { status: httpStatus(e) })
     throw e
   }
-  const j = parseJson(out)
-  if (!j) throw new GitHubError('github', 'gh issue view answered with something that is not JSON.')
   return { title: j.title ?? '', body: j.body ?? '', state: j.state ?? null, pull: /\/pull\/\d+$/.test(j.url ?? '') }
 }
 

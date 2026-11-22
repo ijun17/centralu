@@ -1064,7 +1064,7 @@ request cannot change its own rules; `docs/commit-conventions.md` from the defau
 10 minutes; paths in `project.json` `rules`). Every tool checks everything before its first write
 and refuses with every reason at once, sending nothing.
 
-- **Public text an agent writes** (`comment`, `file_issue`, `open_pr`, and commit messages): in English (letters of
+- **Public text an agent writes** (`comment`, `file_issue`, `close_issue`, `open_pr`, and commit messages): in English (letters of
   another script are refused outside code, `> ` quotes and addresses; Greek and shared letters such
   as µ pass; Latin-script languages are not told apart), no word from the private list, no
   attribution line (`Co-Authored-By:`, "Generated with").
@@ -1080,24 +1080,30 @@ and refuses with every reason at once, sending nothing.
   `edit_comment` only edits a comment owned by the `gh` login and uses the same public-text checks.
   A bare `#N` attributed next to another repository warns: write `owner/repo#N` before publishing.
 - **`file_issue`** (`title`, `body`, `labels?`, `repo?`, `dryRun?`) files through `gh api … /issues`.
-- **`close_issue`** (`item`, `comment`, `reason?`, `items?`, `dryRun?`; `close-tools.mjs`, the rules in `plan-items.mjs`, #2488):
-  the one way agents close an issue. The plan audit of 2026-11-23 found about 40 planned items that no pull request built and
-  no issue carried, most of them left when an umbrella issue was closed by hand. The items an issue plans are its body's task-list
-  boxes, numbered lines (not under a heading on how to reproduce: a bug's steps) and table rows whose first cell is a number,
-  then those of each plan section the body cites (`docs/plans/<name>.md §n`, `…#anchor` or `… "Heading"`, the forms
-  guard/doc-refs reads; `project.json` `rules.plans` names the folder), read from the default branch. A plan linked without a
-  section is not read: an issue may name a plan in passing, and every step of mailbox.md would then hold it open. An item went
-  somewhere when it is ticked, names an issue or pull request (`#N`, `owner/repo#N`, an address) or says `dropped: <why>`, or
-  when `items` gives it one of the last two by the number the refusal lists. Refused, with nothing sent, while one went nowhere,
-  on an empty or non-English comment, on a pull request, or on a closed issue. The comment, posted before the close, lists every
-  item and where it went, so the record is on the issue. `reason: "not planned"` closes with the items left dropped with the issue,
-  said so in the comment. Declares no risk: it always asks.
+- **`close_issue`** (`item`, `comment`, `reason?`, `items?`, `dryRun?`; `close-tools.mjs`, the reading in `plan-items.mjs`, #2488):
+  the one way agents close an issue. Umbrella issues closed by hand left planned items that no pull request built and no issue
+  carried, and nobody owned them after. The items an issue plans are, in its body: task-list boxes, numbered lines (not under a
+  heading on how to reproduce: a bug's steps), and the numbered rows of a table whose first column is `#`, Step, Unit, PR, Item or
+  Phase (a table of measurements is not work). Then, in each plan section the body cites (`docs/plans/<name>.md §n`, `…#anchor` or
+  `… "Heading"`, one section per citation; `PLANS` in plan-items.mjs), read from the default branch: its boxes, and the numbered
+  lines and rows under a heading of work (pull requests, steps, follow-ups, later, phases). A plan's other numbered lists are rules,
+  facts or the steps of an algorithm, and a section an issue cites as background would never close otherwise. A plan named without a
+  section is not read: an issue may name a plan in passing, and every step of mailbox.md would then hold it open. `§n` names a
+  heading by its number, compared whole (`§1` is not `1.2`); a numbered list item is no section here. An item went somewhere when it
+  is ticked, names an issue or pull request (`#N`, `owner/repo#N`, an address) or says `dropped: <why>`, or when `items` gives it one
+  of the last two by the number the refusal lists. Refused, with nothing sent, while one went nowhere, while a cited section does not
+  read (the issue's citation is corrected first, else its plan would close unchecked), on an empty or non-English comment, on a pull
+  request, or on a closed issue. The comment, posted before the close, lists every item and where it went, so a closed issue always
+  carries its record; a close that fails after it leaves the issue open, and closing again posts the record a second time.
+  `reason: "not planned"` closes with the items left dropped with the issue, said so in the comment. The check is textual: it does
+  not ask whether a `#N` is open, on the same subject or not the issue itself. Declares no risk: it always asks.
 - **A pull request that closes such an issue** (#2488): GitHub closes an issue its merge names after a keyword, whatever the issue
   still plans. `queue_merge` (and `integrate`, for its record) refuses to queue a top that closes an open issue with an item gone
   nowhere, naming the items and the two ways out: account for them in the issue (this pull request's number for what it builds), or
   write `None: part of #N` and close the issue with `close_issue` later. The queue, not `open_pr`: it reads the description and the
-  issue as they are when the change is about to land (both can be edited after `open_pr`), and every landing of this board passes it.
-  A merge by hand is not checked. An issue that cannot be read is a warning, not a refusal.
+  issue when the change is queued (both can be edited after `open_pr`), and every landing of this board is queued. Not checked: a
+  description or an issue edited after it was queued, and a merge by hand. An issue or a cited plan section that cannot be read is a
+  warning there, not a refusal; an outage fails the call as any read does.
 - **`open_pr`** fills the template's `## ` headings from `why`, `whatChanged`, `verified`,
   `situationsChecked`, `usability`, `notExercised` or `sections` (any heading by name, any spelling), drops a
   heading left out (the template says so) and refuses a name the template does not have. **Planned, not built** (`plannedNotBuilt`,
@@ -1325,7 +1331,7 @@ push run of CI is fully green, the full tier included (or `commit`).
    `open_pr`, `pre_pr` and `rebase_stack` routine. `rebase_stack` asks when `path` names a checkout of the caller's choosing
    (its git would run there) or when `push` is true. `open_pr` and `pre_pr` ask unless `skipPrePr` is given (or `dryRun`):
    `pnpm pre-pr` runs the tests and the vitest config of the head the session pushed, outside any sandbox, and also
-   when `path` is set. `queue_merge`, `integrate`, `edit_comment`, `release` and
+   when `path` is set. `queue_merge`, `integrate`, `close_issue`, `edit_comment`, `release` and
    `edit_private_words` declare nothing and always ask. The merges, so a card stays the check on "never merge your
    own pull request" (the owner's call, 2026-10-24); `edit_comment`, because every comment is under the one gh
    login and the owner's cannot be told from the session's; the word list, so a session refused for a private

@@ -1457,7 +1457,7 @@ describe('the merge queue keeps the board app running while it has work (#1236)'
     const r = await call('queue_merge', { pr: 77, owner: 'tester' })
     expect(r.isError).toBe(true)
     expect(r.text).toBe(
-      'Not queued: #77 closes #956, which plans 3 items not built, carried or dropped (item 1: "1. Built here" (the body, "Plan"); item 2: "2. Later" (the body, "Plan"); item 3: "A box" (the body, "Plan")). In #956, tick it, name the issue or pull request that carries it (#N), or write "dropped: <why>" in it for each (this pull request\'s number, for what it builds); or write "None: part of #956" under Closes, and close #956 with close_issue once the rest is done.',
+      'Not queued: #77 closes #956, which plans 3 items not built, carried or dropped (item 1: "1. Built here" (the body, "Plan"); item 2: "2. Later" (the body, "Plan"); item 3: "A box" (the body, "Plan")). For each, in #956: tick it, name the issue or pull request that carries it (#N), or add "dropped: <why>" to it (this pull request\'s number, for what it builds); or write "None: part of #956" under Closes, and close #956 with close_issue once the rest is done.',
     )
     patchGh((st) => (st.issueBodies = { 956: '## Plan\n\n1. Built here (#77)\n2. Later: #2490\n- [x] A box' }))
     expect((await call('queue_merge', { pr: 77, owner: 'tester' })).isError).toBe(false)
@@ -1473,6 +1473,15 @@ describe('the merge queue keeps the board app running while it has work (#1236)'
     const unread = await call('queue_merge', { pr: 77, owner: 'tester' })
     expect(unread.isError).toBe(false)
     expect(unread.text).toContain('Warning: #956, which #77 closes, could not be read, so its planned items were not checked:')
+    await call('unqueue', { pr: 77 })
+    // GitHub failing is no answer about the issue: nothing is queued on it
+    patchGh((st) => {
+      st.issueViewFails = false
+      st.issueViewError = 'HTTP 502: Bad Gateway'
+    })
+    const outage = await call('queue_merge', { pr: 77, owner: 'tester' })
+    expect(outage.isError).toBe(true)
+    expect(outage.text).toMatch(/^Not queued: .*502/)
   })
 
   // Another repository's template may ask for no Closes section: then none is asked for, but a stack's top still carries what its lowers close

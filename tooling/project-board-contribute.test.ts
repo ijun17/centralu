@@ -229,6 +229,14 @@ describe('the items an issue plans, and where each went', () => {
       '|---|---|---|',
       '| 1 | Factories | #2384 |',
       '| 4 | Layout | new |',
+      '',
+      '| Date | Time |',
+      '|---|---|',
+      '| 2026-11-01 | 120 ms |',
+      '````',
+      '```',
+      '1. inside a four-tick fence',
+      '````',
     ].join('\n')
     expect(planItems(body).map((i: { text: string; state: string | null }) => [i.text, i.state])).toEqual([
       ['1. **Close rule**: built in #2495.', 'carried'],
@@ -260,6 +268,31 @@ describe('the items an issue plans, and where each went', () => {
     expect(planSection(plan, '§3.1')).toBe('### 3.1 Detail\n1. one')
     expect(planSection(plan, '§1')).toBeNull()
     expect(planSection(plan, '§15')).toBeNull()
+    // A number is compared whole: §1 is not the 1.2 before it
+    expect(planSection('## 1.2 Detail\n1. a\n## 1. Why\n1. b', '§1')).toBe('## 1. Why\n1. b')
+  })
+
+  it("reads in a plan's section only its boxes and the numbered lines and rows under a heading of work, not its rules or facts", () => {
+    const section = [
+      '## 3. The shell',
+      '1. Receive the content location.',
+      '2. Spawn the keeper.',
+      '- [ ] a box',
+      '### 3.4 The pull requests',
+      '1. PR 1 (#2400)',
+      '2. The rest',
+      '| Step | What |',
+      '|---|---|',
+      '| 5. Contract | not started |',
+    ].join('\n')
+    expect(planItems(section, 'docs/plans/thin-shell.md §3', { plan: true }).map((i: { text: string; state: string | null }) => [i.text, i.state])).toEqual([
+      ['a box', null],
+      ['1. PR 1 (#2400)', 'carried'],
+      ['2. The rest', null],
+      ['| 5. Contract | not started |', null],
+    ])
+    // In an issue's body every numbered line is planned work
+    expect(planItems(section)).toHaveLength(6)
   })
 
   it('takes "None" for Planned, not built, or lines that each name an issue or say dropped, and nothing else', () => {
@@ -617,7 +650,7 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
     expect(refused.text).toBe(
       [
         'Not closed: one rule fails; nothing was sent to GitHub.',
-        '#2488 plans 3 items not built, carried or dropped. For each, tick it, name the issue or pull request that carries it (#N), or write "dropped: <why>" in it in #2488; or give items: { "<n>": "#N" or "dropped: <why>" }, which the closing comment records.',
+        '#2488 plans 3 items not built, carried or dropped. For each, in #2488: tick it, name the issue or pull request that carries it (#N), or add "dropped: <why>" to it; or give items: { "<n>": "#N" or "dropped: <why>" }, which the closing comment records.',
         'Items left:',
         'item 2: "2. Doc guard, later" (the body, "Proposal")',
         'item 3: "3. Templates" (the body, "Proposal")',
@@ -630,7 +663,7 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
     expect(wrong.data.problems).toEqual([
       'items.2 ("later") names no issue or pull request (#N) and does not say "dropped: <why>".',
       'items names "9", and #2488 has items 1 to 5.',
-      '#2488 plans 1 item not built, carried or dropped. For each, tick it, name the issue or pull request that carries it (#N), or write "dropped: <why>" in it in #2488; or give items: { "<n>": "#N" or "dropped: <why>" }, which the closing comment records.',
+      '#2488 plans 1 item not built, carried or dropped. For each, in #2488: tick it, name the issue or pull request that carries it (#N), or add "dropped: <why>" to it; or give items: { "<n>": "#N" or "dropped: <why>" }, which the closing comment records.',
     ])
     expect(writes()).toEqual([])
     const closed = await call('close_issue', { item: 2488, comment: 'Items 1 and 3 landed in #2495.', items: { 2: '#2490', 3: '#2495', 5: 'dropped: one covers it' } })
@@ -646,6 +679,15 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
       ['repos/ijun17/centralu/issues/2488', { state: 'closed', state_reason: 'completed' }],
     ])
     expect((await call('close_issue', { item: 2488, comment: 'Again.' })).text).toBe('Not closed: #2488 is closed already; nothing was sent to GitHub.')
+    // A citation that does not read would close the plan unchecked; an item's number is written as the refusal writes it
+    patchState((s) => (s.issues!['2489'] = { body: '- [ ] a box\n\nIts steps: docs/plans/acp-adapter.md §13' }))
+    const unread = await call('close_issue', { item: 2489, comment: 'Done.', items: { '01': '#5' } })
+    expect(unread.data.problems).toEqual([
+      'docs/plans/acp-adapter.md §13, which the issue cites, is not on main (no heading of that section): correct the citation in #2489, or take it out if the plan is not its plan.',
+      'items names "01", and #2489 has items 1 to 1.',
+      '#2489 plans 1 item not built, carried or dropped. For each, in #2489: tick it, name the issue or pull request that carries it (#N), or add "dropped: <why>" to it; or give items: { "<n>": "#N" or "dropped: <why>" }, which the closing comment records.',
+    ])
+    expect(writes()).toHaveLength(2)
   })
 
   it('closes as not planned with the items left dropped with the issue, and refuses a pull request, an issue nobody can see and a comment not in English', async () => {

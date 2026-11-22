@@ -59,6 +59,7 @@ if (st.rateLimited) fail('API rate limit exceeded for user ID 1. (HTTP 403)')
 if (args[0] === 'issue' && args[1] === 'view') {
   const n = Number(args[2])
   if (st.issueViewFails) fail('GraphQL: Could not resolve to an Issue with the number of ' + n + '. (HTTP 404)')
+  if (st.issueViewError) fail(st.issueViewError)
   out({ body: (st.issueBodies ?? {})[n] ?? '', state: (st.issueStates ?? {})[n]?.state === 'closed' ? 'CLOSED' : 'OPEN', comments: (st.comments ?? []).filter((c) => c.issue === n).map((c) => ({ body: c.body })) })
 } else if (args[0] === 'pr' && args[1] === 'view') {
   const pr = st.prs[args[2]]
