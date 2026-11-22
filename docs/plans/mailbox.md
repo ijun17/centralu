@@ -730,7 +730,7 @@ These were the owner's decisions and live checks of 2026-10-20 (old plan §7.1, 
 | Cover | A row R to S is covered while S has a watched row, open, not held or released, that it sent after R was delivered, caused by the starter of R's delivery turn or by nothing (D23, §10.3) |
 | Released | A needsReply row Centralu stopped watching for its recipient, and whose sender is told (D25); `released_at` |
 | At rest (for a reminder) | §10.1 |
-| Address | As today (`mail/address.ts`): `session:<hostId>/<id>`, `app:<hostId>/<projectId>/<appId>`, `person`, `centralu`. Internal: a tool takes and prints a session's id instead (§11.1) |
+| Address | As today (`mail/address.ts`): `session:<hostId>/<id>`, `app:<hostId>/<projectId>/<appId>`, `person`, `centralu`. Internal: a tool takes and prints a session's id instead (§11.1). Absolute from the first step, with the host's own id inside, so a message stored now is still right when mail crosses a link and no stored id is ever rewritten; the window's hub-relative `<machine>.<id>` is translated at the edge, never stored |
 
 ## 5. The model
 

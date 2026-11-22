@@ -197,7 +197,7 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
 #### FR-5. Project file tree
 
 - Explorer-style tree. **lazy-load** (only directories you open are read — stays light even in a large repo).
-- A `.gitignore`-based filter toggle (default: ignored hidden).
+- A `.gitignore`-based filter toggle (default: ignored files shown, in a fainter ink, #17: a hidden row looks absent and the untracked file is often the one sought). The choice is one app-wide setting and is remembered.
 - Git status overlay (M/A/U shown as **glyphs** — following the achromatic palette decision, no colour is used).
 - Highlight files an agent recently modified (tracking "files the agent just touched").
 - **Notices external changes** (issue #34, shipped 2026-08-25): non-recursive watches on the expanded directories only,
