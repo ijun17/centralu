@@ -480,24 +480,23 @@ describe('cause and clarifications (D9, §9.7)', () => {
     w.records.markDelivered(B, [r.id], w.clock.t, 1)
     w.startTurn(B, r.id)
     const delivered = w.rowOf(r.id, B)
-    const owes = () => true
     w.clock.t += 10
     const inTurn = w.send(B, { to: [C], text: 'asked in the delivery turn' }).message
-    expect(w.records.covering(delivered, owes)?.messageId).toBe(inTurn.id)
+    expect(w.records.covering(delivered)?.messageId).toBe(inTurn.id)
     expect(inTurn.causeId).toBe(r.id)
     expect(before.createdAt).toBeLessThan(delivered.deliveredAt ?? 0)
 
     // Settled, it covers nothing; a later turn that another message started covers nothing
     w.mail.done(C, inTurn.id)
-    expect(w.records.covering(delivered, owes)).toBeNull()
+    expect(w.records.covering(delivered)).toBeNull()
     w.startTurn(B, other.id)
     const later = w.send(B, { to: [A], text: 'asked in a later turn' }).message
     expect(later.causeId).toBe(other.id)
-    expect(w.records.covering(delivered, owes)).toBeNull()
+    expect(w.records.covering(delivered)).toBeNull()
     // A turn the session started itself has no cause, and covers
     w.startTurn(B, null)
     const own = w.send(B, { to: [C], text: 'asked on its own' }).message
-    expect(w.records.covering(delivered, owes)?.messageId).toBe(own.id)
+    expect(w.records.covering(delivered)?.messageId).toBe(own.id)
   })
 })
 

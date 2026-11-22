@@ -33,10 +33,14 @@ export function hostWorld(opts: { store?: Store; clock?: { t: number }; kept?: R
   const table: Record<string, Sess> = { ...SESSIONS, ...opts.extra }
   /** The question cards each session holds, by request id: what a watch's baseline and its catch-up read */
   const cards = new Map<string, string[]>()
+  /** What else a session's info says, as a test sets it (its background work, its state after a failure) */
+  const more = new Map<string, Partial<SessionInfo>>()
+  /** Sessions whose adopted process has not listed its background work yet (`RestartPolicy.backgroundKnown`) */
+  const workUnknown = new Set<string>()
   const info = (id: string): SessionInfo | undefined => {
     const s = table[id]
     const pendingQuestions = (cards.get(id) ?? []).map((requestId) => ({ requestId }))
-    return s && ({ id, name: s.name, projectId: s.projectId, askedBy: s.askedBy ?? null, ...(opts.fromHub?.includes(id) ? { startedFromHub: true } : {}), kind: s.kind ?? 'worker', state: states.get(id)?.kind === 'busy' ? 'working' : 'idle', pendingQuestions, pendingApproval: null } as unknown as SessionInfo)
+    return s && ({ id, name: s.name, projectId: s.projectId, askedBy: s.askedBy ?? null, ...(opts.fromHub?.includes(id) ? { startedFromHub: true } : {}), kind: s.kind ?? 'worker', state: states.get(id)?.kind === 'busy' ? 'working' : 'idle', pendingQuestions, pendingApproval: null, ...more.get(id) } as unknown as SessionInfo)
   }
   const sessions: HostMailSessions = {
     sessionInfo: info,
@@ -53,6 +57,7 @@ export function hostWorld(opts: { store?: Store; clock?: { t: number }; kept?: R
     projectTrusted: (projectId) => store.projects.listProjects().some((p) => p.id === projectId && p.trusted),
     ...(opts.work ? { work: opts.work } : {}),
     readsSession: opts.readsSession ?? (() => ({ untrusted: false })),
+    backgroundKnown: (id) => !workUnknown.has(id),
   }
   const m = hostMail(store, sessions, {
     hostId: HOST,
@@ -60,5 +65,5 @@ export function hostWorld(opts: { store?: Store; clock?: { t: number }; kept?: R
     delivery: { schedule },
   })
   const row = (id: string, recipient: string) => store.mailbox.recipient(id, recipient)
-  return { store, clock, states, delivered, behaviour, advance, endTurn: turnEnder(m.turns), to, row, table, cards, ...m, mail: m.service, stop: () => m.delivery.stop() }
+  return { store, clock, states, delivered, behaviour, advance, endTurn: turnEnder(m.turns), to, row, table, cards, more, workUnknown, ...m, mail: m.service, stop: () => m.delivery.stop() }
 }

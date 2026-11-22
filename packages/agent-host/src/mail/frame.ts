@@ -1,4 +1,5 @@
 import { frameField, type MailDelivered } from '@cc/protocol'
+import { durationText } from '../timing.js'
 import { parseAddress } from './address.js'
 import { parseMailId } from './ids.js'
 import { MAIL_KINDS, type MailKind } from '../dev-services/store/mailbox.js'
@@ -249,6 +250,28 @@ export function buildMessageFrame(
     const frame = [HEAD, `<centralu-mail unread="${total}">`, ...listing, '</centralu-mail>', messageFoot(shown, calls)].join('\n')
     return [frame, ...inlineBlocks(shown, messageHeader, calls.read(), cutBody)].join('\n\n')
   })
+}
+
+/** One row a reminder names (S2): the message, its sender's shown id (`MailReach.shownId`), how long it has waited, and whether this is its last reminder */
+export type ReminderItem = { id: string; from: string; waitedMs: number; last: boolean }
+
+/**
+ * S2, the unanswered reminder (docs/plans/mailbox.md §15): Centralu's words, inline in the wake, naming each message that waits for the receiver's
+ * answer and how to answer or close it, in the receiver's form of the calls. Host fields only, as the frame's: an id and a shown id, never a name
+ * another party wrote
+ */
+export function reminderText(items: readonly ReminderItem[], calls: MessageCalls = PLAIN_MESSAGE_CALLS): string {
+  const id = (v: string) => (isMessageId(v) ? v : 'unknown')
+  const lines = items.map((i) => `- ${id(i.id)} from ${isParty(i.from) ? i.from : 'unknown'}, waiting ${durationText(i.waitedMs)}${i.last && items.some((x) => !x.last) ? ' (last reminder)' : ''}`)
+  const ending = items.every((i) => i.last)
+    ? 'This is the last reminder of these messages: after it, Centralu tells their senders they have no answer.'
+    : `Centralu reminds you once more if they are still open, and not after that.${items.some((i) => i.last) ? ' For those marked last reminder, Centralu tells their senders they have no answer.' : ''}`
+  return [
+    'These messages wait for your answer and have none:',
+    ...lines,
+    `Answer each with ${calls.answer('<id>')}. Close each that needs nothing from you with ${calls.done('<id>')}; a plain note is closed that way. If you cannot answer yet, telling the sender so counts as an answer, and Centralu stops watching that message.`,
+    ending,
+  ].join('\n')
 }
 
 /**

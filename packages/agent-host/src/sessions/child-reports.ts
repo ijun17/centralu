@@ -3,7 +3,7 @@ import {
   // The frame's single-line field (#120) — lives in protocol (app-frames.ts) because the mock
   // also needs to put words into a session built with the same frame.
   frameField,
-  liveBackgroundTasks,
+  workTasks,
 } from '@cc/protocol'
 import { inTurn } from '../idle.js'
 import { agentLook, errorMessage, SHUTDOWN_WORDS } from '@cc/protocol'
@@ -207,7 +207,7 @@ export class ChildReports {
   /** The background work the session's tool lists as running, which a turn ending now does not end (#721). A timer the tool holds (`/loop`, a scheduled prompt) is not work: a report is not held for it, or a loop would hold it for good */
   ownTasksRunning(sessionId: string): BackgroundTask[] {
     const m = this.host.meta.get(sessionId)
-    return m ? liveBackgroundTasks(m.backgroundTasks).filter((t) => !t.timer) : []
+    return m ? workTasks(m.backgroundTasks) : []
   }
   /** Where the session's last response starts, as its preview reads it (#1186): the report names the read that shows it */
   private answerSeq(sessionId: string): number | undefined {

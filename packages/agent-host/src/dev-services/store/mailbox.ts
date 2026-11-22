@@ -517,7 +517,20 @@ export class MailboxRecords {
 
   /** The tool took them, in the turn `turnSeq` started or joined (null: delivered quietly outside a turn) */
   markDelivered(recipient: string, ids: readonly string[], at: number, turnSeq: number | null): void {
-    this.update('delivered_at = ?, last_error = NULL, given_again_at = NULL, turn_seq = ?', [at, turnSeq], recipient, ids)
+    this.transaction(() => {
+      this.update('delivered_at = ?, last_error = NULL, given_again_at = NULL, turn_seq = ?', [at, turnSeq], recipient, ids)
+      // A reminder counts once on each row it names, when it is delivered (docs/plans/mailbox.md §10.4): a row reminded after the reminder was written
+      // was counted by that delivery already, so a reminder given again counts nothing
+      this.db
+        .prepare(
+          `UPDATE mail_recipients SET reminded = reminded + 1, reminded_at = @at
+            WHERE recipient = @recipient AND message_id IN (
+              SELECT o.value FROM mail n, json_each(n.facts, '$.of') o
+               WHERE n.id IN (SELECT value FROM json_each(@ids)) AND n.sender = 'centralu' AND json_valid(n.facts) AND json_type(n.facts, '$.reminder') IS NOT NULL
+                 AND (mail_recipients.reminded_at IS NULL OR mail_recipients.reminded_at < n.created_at))`,
+        )
+        .run({ at, recipient, ids: idList(ids) })
+    })
   }
 
   /** Sets why mail waits for the person (`policy`, `loop`, `failed`, `uncertain`), or clears it with null */
@@ -855,28 +868,63 @@ export class MailboxRecords {
   // ── Cover (§10.3) ──
 
   /**
-   * A row that spares `r` a reminder: of a watched message or task its recipient sent after `r` was delivered, whose cause
-   * is null or the starter of the turn `r` was delivered in, not settled, held or released; for a task, only while
-   * `owes(sender, recipient)`. Null when there is none
+   * A row that spares `r` a reminder (D23): of a watched message or task its recipient sent after `r` was delivered, whose cause
+   * is null or the starter of the turn `r` was delivered in, not settled, held or released. A task's open row is what it owes
+   * (§10.6.3), so it covers while it is open. Null when there is none
    */
-  covering(r: RecipientRow, owes: (owner: string, child: string) => boolean): RecipientRow | null {
+  covering(r: RecipientRow): RecipientRow | null {
     if (r.deliveredAt === null) return null
     const party = parseAddress(r.recipient)
     const starter =
       r.turnSeq !== null && party?.kind === 'session'
         ? (this.db.prepare<[string, number], { s: string | null }>(`SELECT starter_id AS s FROM mail_turns WHERE session_id = ? AND turn_seq = ?`).get(party.sessionId, r.turnSeq)?.s ?? null)
         : null
-    const rows = this.withMessages(
+    return (
       this.rows(
         `m.sender = ? AND m.created_at > ? AND (m.cause_id IS NULL OR m.cause_id = ?) AND ${WATCHED}
            AND r.settled IS NULL AND r.released_at IS NULL AND (r.held IS NULL OR r.held = 'released')
-         ORDER BY m.created_at, m.id, r.recipient`,
+         ORDER BY m.created_at, m.id, r.recipient LIMIT 1`,
         r.recipient,
         r.deliveredAt,
         starter,
-      ),
+      )[0] ?? null
     )
-    return rows.find((x) => x.message.kind !== 'task' || owes(x.message.sender, x.row.recipient))?.row ?? null
+  }
+
+  /**
+   * The rows to `recipient` the unanswered reminder watches (docs/plans/mailbox.md §10.2): of a message that needs a reply, delivered, and neither
+   * settled (an older build's `legacy` row is), released, answered by a held answer nor held. Oldest first
+   */
+  awaitingAnswer(recipient: string): RecipientRow[] {
+    return this.rows(
+      `r.recipient = ? AND m.kind = 'message' AND m.needs_reply = 1 AND r.delivered_at IS NOT NULL AND r.settled IS NULL AND r.released_at IS NULL
+         AND r.answer_id IS NULL AND (r.held IS NULL OR r.held = 'released')
+       ORDER BY r.delivered_at, m.id`,
+      recipient,
+    )
+  }
+
+  /** The sessions with a row the unanswered reminder watches (`awaitingAnswer`), as addresses */
+  awaitingRecipients(): string[] {
+    return this.db
+      .prepare<[], { recipient: string }>(
+        `SELECT DISTINCT r.recipient FROM mail_recipients r JOIN mail m ON m.id = r.message_id
+          WHERE r.recipient LIKE 'session:%' AND m.kind = 'message' AND m.needs_reply = 1 AND r.delivered_at IS NOT NULL AND r.settled IS NULL
+            AND r.released_at IS NULL AND r.answer_id IS NULL AND (r.held IS NULL OR r.held = 'released')`,
+      )
+      .all()
+      .map((r) => r.recipient)
+  }
+
+  /** The senders of rows released for `why` and not told yet (D25): those the reminder's sweep tells, each once its follow-up budget allows */
+  untoldSenders(why: readonly ReleaseWhy[]): string[] {
+    return this.db
+      .prepare<[string], { sender: string }>(
+        `SELECT DISTINCT m.sender FROM mail_recipients r JOIN mail m ON m.id = r.message_id
+          WHERE r.released_at IS NOT NULL AND r.told_at IS NULL AND r.released_why IN (SELECT value FROM json_each(?))`,
+      )
+      .all(JSON.stringify(why))
+      .map((r) => r.sender)
   }
 
   // ── Guards and counts ──
@@ -1196,6 +1244,28 @@ export class MailboxRecords {
 
   endTurn(sessionId: string, turnSeq: number, at: number, outcome: string): void {
     this.db.prepare(`UPDATE mail_turns SET ended_at = ?, outcome = ? WHERE session_id = ? AND turn_seq = ? AND ended_at IS NULL`).run(at, outcome, sessionId, turnSeq)
+  }
+
+  /** How the session's turn `turnSeq` was cut, a stop's cause (`StopWhy`): no reminder follows a turn the person stopped or that failed (docs/plans/mailbox.md §10.1) */
+  setTurnEndedHow(sessionId: string, turnSeq: number, how: string): void {
+    this.db.prepare(`UPDATE mail_turns SET ended_how = ? WHERE session_id = ? AND turn_seq = ?`).run(how, sessionId, turnSeq)
+  }
+
+  /** The session's last turn that ended (a canceled delivery is no turn): who started it, when it ended and how it was cut (`ended_how`, null for a turn that ended as turns do), or null */
+  lastTurnEnded(sessionId: string): { startedBy: string; endedAt: number; endedHow: string | null } | null {
+    const row = this.db
+      .prepare<[string], { started_by: string; ended_at: number; ended_how: string | null }>(
+        `SELECT started_by, ended_at, ended_how FROM mail_turns WHERE session_id = ? AND ended_at IS NOT NULL AND COALESCE(outcome, '') <> 'canceled' ORDER BY turn_seq DESC LIMIT 1`,
+      )
+      .get(sessionId)
+    return row ? { startedBy: row.started_by, endedAt: row.ended_at, endedHow: row.ended_how } : null
+  }
+
+  /** When the turn the row was delivered in ended, or null: still running, or none recorded */
+  turnEndOf(r: Pick<RecipientRow, 'recipient' | 'turnSeq'>): number | null {
+    const party = parseAddress(r.recipient)
+    if (r.turnSeq === null || party?.kind !== 'session') return null
+    return this.db.prepare<[string, number], { e: number | null }>(`SELECT ended_at AS e FROM mail_turns WHERE session_id = ? AND turn_seq = ?`).get(party.sessionId, r.turnSeq)?.e ?? null
   }
 
   /** The running turn's work message is known only now (a delegation is written after its turn began): it is that work's, and the task started it */

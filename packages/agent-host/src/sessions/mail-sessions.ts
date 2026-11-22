@@ -100,7 +100,7 @@ const NO_CARDS: CardHooks = { givers: () => ({ givers: [], answerer: null, sent:
  * What the mailbox's view of sessions reaches of the session manager (#1143), typed as the manager declares each member. The manager builds it
  * with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
  */
-export type MailSessionsHost = Pick<DelegationHost, 'adapters' | 'agentRuns' | 'children' | 'closing' | 'handles' | 'meta' | 'store'> & {
+export type MailSessionsHost = Pick<DelegationHost, 'adapters' | 'agentRuns' | 'children' | 'closing' | 'handles' | 'meta' | 'restartPolicy' | 'store'> & {
   /** What a session's tool says and what goes into its conversation: the mail's delivery and its notes */
   readonly events: SessionEvents
   /** What a session is told of work it gave: the report path the mailbox takes over, and the words a stop notice quotes */
@@ -127,6 +127,11 @@ export class MailSessionsView {
 
   /** What the mailbox asks of the sessions (#1347): set once by the host, null in a manager that has no mailbox */
   hooks: MailHooks | null = null
+
+  /** Whether the session's background work is known (`RestartPolicy.backgroundKnown`): what the unanswered reminder's rest rule reads (docs/plans/mailbox.md §10.1) */
+  backgroundKnown(sessionId: string): boolean {
+    return this.host.restartPolicy.backgroundKnown(sessionId)
+  }
 
   /** A child this host started on a linked machine, by its name there (#2067): mail refuses it as elsewhere, not as gone */
   onLinkedMachine(sessionId: string): { name: string } | undefined {
