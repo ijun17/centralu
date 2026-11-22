@@ -63,7 +63,7 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
             sessions: { ...st.sessions, [sessionId]: { ...cur, live: res.resumed } },
             wakeError: res.resumed
               ? omitKey(st.wakeError, sessionId)
-              : { ...st.wakeError, [sessionId]: res.reason ?? 'unknown reason' },
+              : { ...st.wakeError, [sessionId]: { reason: res.reason ?? 'unknown reason' } },
             wakeLocked:
               res.resumed || !res.lockedElsewhere
                 ? omitKey(st.wakeLocked, sessionId)
@@ -73,7 +73,7 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
       } catch (e) {
         set(
           ifSessionStill(sessionId, (st) => ({
-            wakeError: { ...st.wakeError, [sessionId]: errorMessage(e) },
+            wakeError: { ...st.wakeError, [sessionId]: { reason: errorMessage(e) } },
             wakeLocked: omitKey(st.wakeLocked, sessionId),
           })),
         )
@@ -92,7 +92,7 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
           sessions: { ...st.sessions, [sessionId]: { ...cur, live: res.resumed } },
           wakeError: res.resumed
             ? omitKey(st.wakeError, sessionId)
-            : { ...st.wakeError, [sessionId]: res.reason ?? '' },
+            : { ...st.wakeError, [sessionId]: { reason: res.reason ?? '' } },
           // Once forked, it is no longer locked — if it failed, the fork option is left standing
           wakeLocked: res.resumed ? omitKey(st.wakeLocked, sessionId) : st.wakeLocked,
           toast: res.resumed
@@ -127,7 +127,7 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
           sessions: { ...s.sessions, [sessionId]: { ...cur, live: r.resumed } },
           wakeError: r.resumed
             ? omitKey(s.wakeError, sessionId)
-            : { ...s.wakeError, [sessionId]: r.reason ?? '' },
+            : { ...s.wakeError, [sessionId]: { reason: r.reason ?? '' } },
           toast: r.resumed ? 'Agent restarted' : `Could not restart: ${r.reason ?? ''}`,
         })),
       )

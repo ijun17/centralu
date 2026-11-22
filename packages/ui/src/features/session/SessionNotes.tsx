@@ -25,7 +25,7 @@ type NotedSession = { id: string; state: SessionState; live: boolean; interrupti
  */
 export function useSessionNotes(session: NotedSession | undefined, away: boolean) {
   const waking = useStore((s) => !!(session && s.resuming[session.id]))
-  const wakeError = useStore((s) => (session ? s.wakeError[session.id] : undefined))
+  const wakeError = useStore((s) => (session ? s.wakeError[session.id]?.reason : undefined))
   const state = session?.state
   const interruption = session?.interruption
   // One object while its facts stay, so the note can tell a new stop from the same one
@@ -133,8 +133,10 @@ export function StopNote({ sessionId, stop: current }: { sessionId: string; stop
  */
 export function DormantNote({ sessionId }: { sessionId: string }) {
   const waking = useStore((s) => !!s.resuming[sessionId])
-  const error = useStore((s) => s.wakeError[sessionId])
+  const error = useStore((s) => s.wakeError[sessionId]?.reason)
   const locked = useStore((s) => !!s.wakeLocked[sessionId])
+  // The conversation's line already gives the reason: the note says only what it offers (#2360)
+  const said = useStore((s) => !!s.wakeError[sessionId]?.saidByLine)
   const wake = useStore((s) => s.wake)
   const fork = useStore((s) => s.forkConversation)
 
@@ -146,7 +148,7 @@ export function DormantNote({ sessionId }: { sessionId: string }) {
         className="flex items-center gap-2 border-t border-line-chrome px-conversation py-1.5 text-xs leading-body text-ink-muted"
         data-testid="dormant-note"
       >
-        <span className="min-w-0 flex-1 break-words">Could not resume — {error}</span>
+        <span className="min-w-0 flex-1 break-words">{said ? 'Could not resume' : `Could not resume — ${error}`}</span>
         {/*
          * When something else is holding the lock, **retrying alone never opens it** — the
          * only other way forward is closing the other app. A way to fork and

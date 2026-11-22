@@ -320,7 +320,7 @@ describe('a session deleted while awaited is never revived (#163)', () => {
       history: { [id]: { oldestSeq: 1, more: false, loading: false } },
       drafts: { [id]: { text: 'text being written' } as never },
       stickToBottom: { [id]: true },
-      wakeError: { [id]: 'x' },
+      wakeError: { [id]: { reason: 'x' } },
       wakeLocked: { [id]: true },
     })
     useStore.getState().dispatchEvent({ type: 'session_deleted', sessionId: id } as NormalizedEvent)
@@ -398,10 +398,30 @@ describe('a late lock error offers the fork (#168)', () => {
     const st = useStore.getState()
     expect(st.sessions[id]!.live).toBe(false)
     expect(st.wakeLocked[id]).toBe(true)
-    expect(st.wakeError[id]).toBe('This conversation is already open elsewhere')
+    // The line gives the reason, so the note under the composer does not (#2360)
+    expect(st.wakeError[id]).toEqual({ reason: 'This conversation is already open elsewhere', saidByLine: true })
     expect(st.chat[id]!.map((i) => (i as { text?: string }).text)).toEqual([
       'Could not open this conversation — This conversation is already open elsewhere',
     ])
+  })
+
+  it('a wake after it writes no line, so the note says its reason again (#2360)', async () => {
+    const platform = new MockPlatform()
+    const s = await platform.agents.createSession({ projectId: 'p1', cwd: '/tmp/p1', tool: 'claude', permissionPreset: 'normal' })
+    useStore.setState({ platform, sessions: { [s.id]: { ...s, live: true } as never } })
+    useStore.getState().dispatchEvent({
+      type: 'error',
+      sessionId: s.id,
+      seq: 4,
+      error: { code: 'conversation_locked', message: 'This conversation is already open elsewhere', retryable: true },
+    })
+    expect(useStore.getState().wakeError[s.id]?.saidByLine).toBe(true)
+
+    platform.unresumable.add(s.id)
+    await useStore.getState().wake(s.id)
+    const error = useStore.getState().wakeError[s.id]
+    expect(error?.reason).toBeTruthy()
+    expect(error?.saidByLine).toBeUndefined()
   })
 
   it('any other error leaves the session live and offers no fork', () => {

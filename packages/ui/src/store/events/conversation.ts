@@ -132,7 +132,8 @@ export function conversationEvent(
       ...(notices.length !== st.notices.length ? { notices } : {}),
       ...(lockedLate !== null
         ? {
-            wakeError: { ...st.wakeError, [sessionId]: lockedLate },
+            // This line gives the reason, so the note does not repeat it (#2360)
+            wakeError: { ...st.wakeError, [sessionId]: { reason: lockedLate, saidByLine: true } },
             wakeLocked: { ...st.wakeLocked, [sessionId]: true },
           }
         : {}),

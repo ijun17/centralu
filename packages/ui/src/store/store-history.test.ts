@@ -286,7 +286,7 @@ describe('the cursor for a session where an event arrives before history (#79)',
     useStore.getState().focusSession('e79')
 
     expect(await readAll('e79')).toEqual([
-      ...L(5), 'rm -rf build', 'Hi', 'image:image/png', 'The agent could not finish this turn — boom',
+      ...L(5), 'rm -rf build', 'Hi', 'image:image/png', 'boom',
     ])
   })
 
