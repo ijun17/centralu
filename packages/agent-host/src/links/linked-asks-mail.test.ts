@@ -19,7 +19,7 @@ afterEach(runCleanups)
 
 /** A machine with session w1 and a hub with h1, linked, asks on, each delivering its mail as main.ts does; `machineMail` false: a machine from before mail */
 async function asksRig(o: { machineMail?: boolean } = {}) {
-  const machine = await machineHost(o.machineMail === false ? {} : { mail: 'delivered' })
+  const machine = await machineHost(o.machineMail === false ? { without: ['host.mail'] } : { mail: 'delivered' })
   const hub = await hubHost(machine.port, { mail: 'delivered', origin: 'git@github.com:me/app.git' })
   await hub.mgr.setProjectTrusted('p-hub', true)
   await eventually(() => hub.machine().status === 'connected')
@@ -170,10 +170,13 @@ describe("a machine session's ask_project of a hub's project (#1948 step 6)", { 
       machine.server.call(client, 'hub.askProject', { caller: { sessionId: 'w1', name: 'w1', project: 'remote-project' }, project: 'hub-project', ...(task ? { task } : {}), depth: 1 }, { timeoutMs: 30_000 * SLOW })
     expect(await ask('review the branch')).toMatchObject({ ok: true, state: 'working' })
     const task = taskTo(hub, at.hub('h1'), at.hub('m1.w1'))!
+    const passes = vi.spyOn(hub.mail!.across, 'passOn')
     free()
     await eventually(() => hub.store.mailbox.reportsOn(task.id).length === 1, 10_000 * SLOW)
-    // Not passed to a machine that takes no tasks: its next ask reads it
     const [report] = hub.store.mailbox.reportsOn(task.id)
+    // Not passed to a machine that takes no tasks: its next ask reads it, once the pass the report started is over
+    await eventually(() => passes.mock.calls.some(([id]) => id === report!.id))
+    await Promise.all(passes.mock.results.map((r) => r.value))
     expect(hub.store.mailbox.recipient(report!.id, at.hub('m1.w1'))?.deliveredAt).toBeNull()
     expect(await ask()).toMatchObject({ ok: true, state: 'done', answer: expect.stringContaining('review the branch') })
     expect(hub.store.mailbox.recipient(report!.id, at.hub('m1.w1'))?.deliveredAt).not.toBeNull()

@@ -222,7 +222,7 @@ export function centraluToolsFor(
     return now?.ok && isInTurn(now.state) ? { ok: true, busy: { state: 'mailed', sessionId, sessionName: r.to, messageId: r.messageId, ...(reportBack ? {} : { note: true as const }) } } : { ok: true }
   }
 
-  return {
+  const tools: CentraluTools = {
     readsAs,
     updateCentralu: async (action, signal) => host.updateCentraluAsked(assistantId, action, signal),
     listSessions: async (opts) => {
@@ -840,5 +840,14 @@ export function centraluToolsFor(
     findApps: async () => ({ ok: false, error: 'Only a session in a project attaches apps this way' }),
     attachApp: async () => ({ ok: false, error: 'Only a session in a project attaches apps this way' }),
     detachApp: async () => ({ ok: false, error: 'Only a session in a project attaches apps this way' }),
+  }
+  // Reading a child is how its parent learns what became of the work it gave: the reports about that child count as read
+  return {
+    ...tools,
+    readSession: async (sessionId, limit, opts) => {
+      const r = await tools.readSession(sessionId, limit, opts)
+      if (r.ok && assistantId) host.children.answered(assistantId, sessionId)
+      return r
+    },
   }
 }

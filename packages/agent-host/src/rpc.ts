@@ -24,6 +24,7 @@ import type { UpdateService } from './updates.js'
 import type { UpdateApplyBroker } from './update-apply.js'
 import type { HostRequests } from './host-requests.js'
 import type { AgentVersionService } from './agent-versions.js'
+import type { ToolSignIns } from './tool-sign-ins.js'
 import type { SessionSleeper } from './sessions/sleep.js'
 import type { StopGate } from './lifecycle/stop-gate.js'
 import { resultText, type ExternalApps } from './apps/external/runtime.js'
@@ -86,6 +87,8 @@ export type RpcServices = {
   themes?: ThemeFiles
   /** The installed agent CLIs, and moving sessions to them (#297, agent-versions.ts) */
   agentVersions?: AgentVersionService
+  /** A tool a turn found signed out, and found signed in again by a detect (tool-sign-ins.ts) */
+  signIns?: ToolSignIns
   /** Putting idle sessions to sleep (#568, sessions/sleep.ts) */
   sleeper?: SessionSleeper
   /** Linked machines (#82, links/links.ts). Without it this host links to nothing */
@@ -182,7 +185,7 @@ type RpcContext = { client: number; rights?: 'full' | 'limited'; label?: string 
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
-  { settleDeletedProjects, deleteOutlook, terminals, updates, commands, externalApps, views, inlineViews, themes, agentVersions, sleeper, machines, stopHost, stopGate, handover, systemEnding, activity, updateApply, hubs, mailAcross, appsAcross, mail, watches, requests, serveCredentials }: RpcServices = {},
+  { settleDeletedProjects, deleteOutlook, terminals, updates, commands, externalApps, views, inlineViews, themes, agentVersions, signIns, sleeper, machines, stopHost, stopGate, handover, systemEnding, activity, updateApply, hubs, mailAcross, appsAcross, mail, watches, requests, serveCredentials }: RpcServices = {},
 ) {
   const reportUiCrash = createUiCrashLog((line) => console.error(line))
   /**
@@ -449,7 +452,9 @@ export function createRpcHandler(
         [...adapters.values()].map(async (a) => {
           const { installed, loggedIn, detail, setup } = await a.detect()
           // Every tool in one shape (#59): the header's donut reads `setup.state` for each, whoever installs and signs it in
-          return { ...a.descriptor, installed, loggedIn, detail, setup: setup ?? setupOfDetection(installed, loggedIn) }
+          const shape = setup ?? setupOfDetection(installed, loggedIn)
+          signIns?.detected(a.tool, shape)
+          return { ...a.descriptor, installed, loggedIn, detail, setup: shape }
         }),
       ),
     'agents.installTool': async (p) => toolSetup(p.tool).install(),

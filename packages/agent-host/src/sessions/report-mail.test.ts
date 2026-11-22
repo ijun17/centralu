@@ -327,6 +327,24 @@ describe('what the owner reads with the tool', () => {
   })
 })
 
+describe('the owner reads the child instead', () => {
+  it('read_session of a child counts the reports about it as read, and no other mail', async () => {
+    const { parent, child } = await parentAndChild()
+    const started = await w.mgr.startAgent(parent, { task: 'other job', wait: false })
+    const other = started.ok ? started.sessionId : ''
+    await turnEnds(child, 'all merged')
+    await turnEnds(other, 'tests pass')
+    const note = m.service.send(addr(child), { to: [addr(parent)], text: 'by the way', note: true })
+    const tools = handleOf(parent)!.opts.centraluTools!
+    expect(await tools.readSession('no-such-session')).toMatchObject({ ok: false })
+    expect(read.row(reportsIn(parent, child)[0]!.id, addr(parent))?.readAt).toBeNull()
+    expect(await tools.readSession(child)).toMatchObject({ ok: true })
+    expect(read.row(reportsIn(parent, child)[0]!.id, addr(parent))).toMatchObject({ deliveredAt: expect.any(Number), readAt: expect.any(Number) })
+    expect(read.row(reportsIn(parent, other)[0]!.id, addr(parent))?.readAt).toBeNull()
+    expect(read.row(note.message.id, addr(parent))?.readAt).toBeNull()
+  })
+})
+
 describe('work handed on', () => {
   /** The parent's child hands a part of its work on to a child of its own, without waiting */
   async function handOn() {

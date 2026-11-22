@@ -6,6 +6,7 @@ import { subagentSteps } from '../subagent-steps.js'
 import { UnmappedTypes } from '../unmapped.js'
 import { RetryActivity } from '../retry-activity.js'
 import { ClaudeBackgroundTracker } from './background-tracker.js'
+import { CLAUDE_DESCRIPTOR } from './descriptor.js'
 import { activeGoalEvents, conversationResetEvents, systemEvents } from './cli-messages.js'
 import { ClaudeGoalTracker } from './goal-tracker.js'
 import type { SDKAssistantMessage, SDKModelRefusalFallbackMessage, SDKModelRefusalNoFallbackMessage } from '@anthropic-ai/claude-agent-sdk'
@@ -17,6 +18,17 @@ import { agentReport, agentStats, approvalDetail, editedPaths, toolSummary } fro
 import { rateLimitEvents, resultEvents } from './turn-ending.js'
 
 export { ClaudeBackgroundTracker, ClaudeGoalTracker, approvalDetail, toolSummary }
+
+/*
+ * A turn of a signed-out CLI (measured on 2.1.296 with an empty config folder): one assistant message, "Not logged in · Please run
+ * /login" with `error: "authentication_failed"`, then a failed result with the same words. Not the sign-in refresh race's
+ * (refresh-race.ts), and nothing a retry mends: the turn ends as the header's tool line says it, with the command that signs in
+ */
+const SIGNED_OUT = {
+  code: 'not_logged_in' as const,
+  message: `${CLAUDE_DESCRIPTOR.label} is not signed in. Run ${CLAUDE_DESCRIPTOR.login} in a terminal.`,
+  retryable: false,
+}
 
 /** The settings a Claude process was launched with — the snapshot a `settings_changed` the tool made carries (#304). */
 export type ClaudeLaunchedSettings = { model: string | null; effort: string | null; verbosity: string | null; serviceTier: string | null }
@@ -223,7 +235,7 @@ export class ClaudeStreamNormalizer {
    * (`error` set, model "<synthetic>", #2050), which is not the agent's words and so is no bubble of its own: a failed
    * result already carries those words, or a reason of its own, which it keeps. A process that ends first drops it.
    */
-  private held: { text: string; label: string } | null = null
+  private held: { text: string; label: string; signedOut?: true } | null = null
 
   constructor(
     private readonly sessionId: string,
@@ -444,13 +456,14 @@ export class ClaudeStreamNormalizer {
     if (msg.type === 'assistant' && msg.error) {
       const text = events.flatMap((e) => (e.type === 'message_delta' ? [e.text] : [])).join('')
       events = events.filter((e) => e.type !== 'message_delta')
-      if (text) this.held = { text, label: 'api-error' }
+      if (text) this.held = { text, label: 'api-error', ...(msg.error === 'authentication_failed' ? { signedOut: true as const } : {}) }
     }
     if (type === 'result' && this.held !== null) {
-      const { text, label } = this.held
+      const { text, label, signedOut } = this.held
       this.held = null
       const failed = events.some((e) => e.type === 'error')
-      if (failed && label === 'refusal') events = events.map((e) => (e.type === 'error' ? { ...e, error: { ...e.error, message: text } } : e))
+      if (failed && signedOut) events = events.map((e) => (e.type === 'error' ? { ...e, error: SIGNED_OUT } : e))
+      else if (failed && label === 'refusal') events = events.map((e) => (e.type === 'error' ? { ...e, error: { ...e.error, message: text } } : e))
       else if (!failed) events = [{ type: 'notice', sessionId: this.sessionId, level: 'warning', text, from: 'Claude Code', label }, ...events]
     }
     /*

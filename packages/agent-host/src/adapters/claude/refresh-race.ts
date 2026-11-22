@@ -73,7 +73,8 @@ export class ClaudeRaceRetry {
    *
    * Claude Code lets one process at a time refresh an expired sign-in; another that needs it then ends its turn with
    * "another Claude Code process is refreshing it", which the CLI calls transient. After the delay the new token is
-   * written. The conversation shows the CLI's words and a notice that the message goes again; a second loss is a failure.
+   * written. The conversation shows the CLI's words and a notice that nothing is needed, as the message goes again; a second
+   * loss is a failure, in the CLI's words, which say to sign in again. A signed-out CLI says something else (normalize.ts).
    *
    * What goes again is what the CLI read since its last result. The CLI has already recorded those
    * messages in its conversation, so the model reads them twice, next to each other — the cost of
@@ -101,12 +102,12 @@ export class ClaudeRaceRetry {
     this.host.emit({
       type: 'notice',
       sessionId: this.host.sessionId,
-      level: 'warning',
+      level: 'info',
       from: 'Claude Code',
-      label: 'sign-in',
+      label: 'sign-in refresh',
       audience: 'centralu',
       text: race,
-      summary: `Claude Code could not refresh its sign-in because another Claude Code process was refreshing it at the same moment. Centralu sends the message again in ${Math.max(1, Math.round(delay / 1000))} s.`,
+      summary: `Nothing to do: Claude Code's sign-in was being refreshed by another Claude Code process at the same moment. Centralu sends the message again in ${Math.max(1, Math.round(delay / 1000))} s.`,
     })
     const timer = setTimeout(() => {
       this.retry = null

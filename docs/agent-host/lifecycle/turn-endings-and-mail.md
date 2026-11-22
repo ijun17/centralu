@@ -86,7 +86,8 @@ carrying its last response, one report per giver covering that giver's open task
 told that answer, and a stop (`StopNotices.relayToMailless`), as the relayed report it always had (`SessionLastResponse.relay`, `ChildReports.relayStop`); report marks, a caller's paused reports and `reportRecorder` are
 gone, and a linked machine's report (`LinkedReports`) keeps its own path until mail crosses links. The end of the Assistant's turn on a
 session's request is S12 to the asker, and settles the requests that turn carried. A call that returned the answer marks that report read
-(`answerRecorder`).
+(`answerRecorder`), and so does the caller's `read_session` of the child, where a report points it (#2353): the wake still names the report
+and never carries its answer (security-boundaries/inter-agent-content.md).
 
 **Turns** (mailbox.md §8.2). The delivery begins a turn with its work message (a task, or for the Assistant one asker's request) and the message that
 started it (the person's words when the wake carries them, else its first item); what the turn sends records that starter as its cause and
