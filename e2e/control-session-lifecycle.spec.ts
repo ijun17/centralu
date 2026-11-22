@@ -367,6 +367,8 @@ test('handoff: the note starts a new session and the old one moves to the sessio
   // The receiving agent defaults to the current tool. The note comes from the record by default, for a live session
   // too (#694), and the original is archived by default (#1477): asking the agent is chosen, and so is keeping the original
   await expect(page.getByTestId('handoff-tool-claude')).toHaveAttribute('aria-checked', 'true')
+  // The current tool is the one picked on opening (the other one when the session cannot respond, #78); its label carries no suffix, so every label has one width (#2473)
+  await expect(page.getByTestId('handoff-tool-claude')).toHaveText('Claude Code')
   // Every tool stays inside the dialog and keeps its label on one line, however many rows the picker takes (#2473)
   const panel = await page.getByRole('radiogroup', { name: 'Hand off to' }).locator('..').boundingBox()
   const boxes = await page.locator('[data-testid^="handoff-tool-"]').evaluateAll((els) => els.map((el) => el.getBoundingClientRect()))
