@@ -82,7 +82,7 @@ export function antigravityProfile(deps: AgyProfileDeps = {}): AgyProfile {
         throw rpcError(`Antigravity cannot start: ${folder.why}`, 'refused', { retryable: false, data: { reason: 'no_browser_helper' } })
       }
       return {
-        ...agyLaunch(home, archive, folder.browser),
+        ...agyLaunch(home, archive, folder),
         signInWanted: {
           watch: (wanted: () => void) =>
             folder.watch((text) => {

@@ -456,7 +456,7 @@ describe('the ACP session against a scripted agent', () => {
     ])
   })
 
-  it('closes a process a previous host left (with its open calls), and opens the conversation again in a new one', async () => {
+  it('closes a process a previous host left (with its open calls) before the launch, and opens the conversation again in a new one', async () => {
     const old = new FakeAcpPeer(base)
     let oldGone = false
     old.once('exit', () => (oldGone = true))
@@ -471,10 +471,14 @@ describe('the ACP session against a scripted agent', () => {
       },
       adopt: { process: old, openCalls: [{ callId: 'call-9', tool: 'Bash' }] },
     }
-    const w = world(base, { processSource: source, resumeExternalId: SID })
+    // The launch sweeps folders a gone host left (Antigravity's), the one the old process runs in among them
+    const goneAtLaunch: boolean[] = []
+    const launching: AcpProfile = { ...profile, launch: async (o) => (goneAtLaunch.push(oldGone), profile.launch(o)) }
+    const w = world(base, { processSource: source, resumeExternalId: SID }, launching)
     await w.start()
     expect(old.killed).toBe(true)
     // The new process loads the same conversation, so the old one is gone first
+    expect(goneAtLaunch).toEqual([true])
     expect(goneAtSpawn).toEqual([true])
     expect(w.peers).toHaveLength(0)
     expect((spawned[0] as FakeAcpPeer).methods()).toEqual(['initialize', 'session/load'])

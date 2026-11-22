@@ -50,16 +50,13 @@ export abstract class AcpAdapter implements AgentAdapter {
 
   async createSession(opts: CreateSessionOpts, emit: EventSink): Promise<SessionHandle> {
     const label = this.profile.descriptor.label
+    const source = opts.processSource
+    // Ended and waited for before the launch, whose sweep may take the folder a previous host's process still runs in
+    if (source?.adopt) await closeAdopted(source.adopt, opts.sessionId, emit)
     const launch = await this.profile.launch(opts)
     if (!launch) throw toolNotInstalled(label, this.profile.descriptor.install)
     const spec = { command: launch.command, args: launch.args, cwd: opts.cwd, env: { ...process.env, ...launch.env } }
-    const source = opts.processSource
     const shape = this.profile.shape
-    // The sign-in watch the launch made goes with a start that fails before the session owns it
-    if (source?.adopt) await closeAdopted(source.adopt, opts.sessionId, emit).catch(async (err: unknown) => {
-      await launch.signInWanted?.remove()
-      throw err
-    })
     // Under the keeper the process is the keeper's child, which it sweeps with its tree if this host goes (§3.3); started
     // here, it ends with this host however the host ends (`startToolProcess`, #1562). The session core starts it
     const session = new AcpSession(opts, emit, {

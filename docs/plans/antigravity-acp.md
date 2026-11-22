@@ -209,6 +209,22 @@ agent (review of #1685, follow-up 8).
   the address whole, that exits 0. Before this, `BROWSER` was unset on Windows and the agent's launcher started the
   browser as its own child, inside the host's job object (`lifecycle/work-job.ts`), so a Stop, the sign-in's end or the
   host's exit ended the person's browser with every tab (review of #1685, B2, measured).
+- **Its TEMP on Windows** (`TMP`, `TEMP`, `TMPDIR`) is the same folder's `tmp/`, removed with it (#2456). The agent is
+  a PyInstaller one-file build: every process unpacks itself into TEMP (1.4.3: a 337 MB `_MEI<id>` folder), and only a
+  process that exits by itself removes it. 1.4.3 did not exit on stdin's end within 120 s (signed out, measured), so
+  every stop ended in the tree kill, which left the folder in the person's TEMP (46 of them, about 15 GB, on one
+  machine). The killed tree holds its files 0.9 to 1.9 s past the kill, which the stop does not wait for (the host's
+  quit awaits every session's stop before its server and store close), so a removal refused then is tried once more 5 s later
+  (measured: 2 of 9 refused at first, none left); one still refused waits for a later host's start (`removeStale`).
+  The deepest unpacked path is 137 characters below TEMP and Windows refuses one past 259 with long paths off, so a
+  TEMP past 118 characters (measured: 122 starts, 123 fails with "Failed to create parent directory structure"; 4 kept
+  for a longer `_MEI` id) is refused at start with that reason.
+  Commands the agent runs inherit it, so their temporary files go when the session's process does: at the session's
+  end and when it sleeps (after 15 idle minutes by default). A file the agent left there for a later turn is gone after
+  a sleep, and a daemon a command started outside the tree (a socket or state folder in TEMP) loses it. Nothing in
+  Centralu reads them. On macOS and Linux the system's TEMP stays: the leak there is a 137 KB `cacerts` file a process
+  (measured on macOS; a process that exits by itself removes it), and a TMPDIR under the data folder would put a socket
+  made there (Python's `multiprocessing`) past macOS's 104-character limit.
 - **The host opens it outside its work.** On Windows the terminal broker (`dev-services/broker-pty.ts`), which the host
   starts before it joins the job, starts it (`{op:'open', url}`, `rundll32 url.dll,FileProtocolHandler`, detached, so
   in no job of the broker's either); with no broker there is no job, or the host opens it itself. On macOS and Linux
