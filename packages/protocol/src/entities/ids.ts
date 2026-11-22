@@ -16,9 +16,8 @@ export function isSessionId(value: string): boolean {
 export const ProjectId = z.string().regex(SESSION_ID_RE, 'Not a project id')
 export type ProjectId = z.infer<typeof ProjectId>
 
-export function isProjectId(value: string): boolean {
-  return SESSION_ID_RE.test(value)
-}
+/** The same check for a project id: its rule is the session id's */
+export const isProjectId = isSessionId
 
 /** Open: the tools are what the host has adapters for, sent on the wire; a closed enum would make each one an edit here */
 export const ToolName = z.string().min(1)
@@ -32,10 +31,7 @@ export type AppId = z.infer<typeof AppId>
 export const PermissionPreset = z.enum(['safe', 'normal', 'edits', 'auto'])
 export type PermissionPreset = z.infer<typeof PermissionPreset>
 
-/**
- * A start that names no preset (docs/security-boundaries/presets.md), read by the window and the Assistant's
- * `create_session`; the start names it, so a machine's "Allow auto from a linked computer" switch does not apply.
- */
-export function defaultPresetFor(project: { readonly trusted: boolean; readonly machine?: string | null }): PermissionPreset {
+/** The preset of a start that names none (docs/security-boundaries/presets.md): the start names it, so a machine's "Allow auto" switch does not apply */
+export function defaultPresetFor(project: { readonly trusted: boolean }): PermissionPreset {
   return project.trusted ? 'auto' : 'normal'
 }
