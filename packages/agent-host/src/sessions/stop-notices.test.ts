@@ -338,21 +338,20 @@ describe('a turn ends without finishing', () => {
     await w.until(() => read.row(q.id, addr(child))?.toldAt != null)
     expect(read.row(q.id, addr(child))).toMatchObject({ releasedWhy: 'error', settled: null })
     expect(stopNoticesToPerson()).toEqual([])
-  })
 
-  it('a stop that rests `limited`, which the Inbox does not list, still tells the person in plain words', async () => {
+    // A stop that rests `limited`, which the Inbox does not list, is told in a notice, in plain words
     w.mgr.prefs.setUiPreferences({ continueAfterLimit: false })
-    const child = await w.callerSession()
-    working(child)
-    const q = m.service.send('person', { to: [addr(child)], text: 'are you done?', needsReply: true }).message
-    w.store.mailbox.markDelivered(addr(child), [q.id], Date.now(), m.turns.latest(child)!.seq)
-    handleOf(child).event({ type: 'limit_reached', sessionId: child })
+    const limited = await w.callerSession()
+    working(limited)
+    const asked = m.service.send('person', { to: [addr(limited)], text: 'and you?', needsReply: true }).message
+    w.store.mailbox.markDelivered(addr(limited), [asked.id], Date.now(), m.turns.latest(limited)!.seq)
+    handleOf(limited).event({ type: 'limit_reached', sessionId: limited })
     await w.until(() => stopNoticesToPerson().length === 1)
-    expect(w.mgr.sessionInfo(child)?.state).toBe('limited')
+    expect(w.mgr.sessionInfo(limited)?.state).toBe('limited')
     const notice = stopNoticesToPerson()[0]!.message
-    expect(notice.facts.unanswered).toEqual([{ id: q.id, recipient: addr(child), why: 'limit' }])
+    expect(notice.facts.unanswered).toEqual([{ id: asked.id, recipient: addr(limited), why: 'limit' }])
     expect(notice.body).toContain('reached its usage limit before it answered your message. It can go on after the limit resets; send it a message then.')
-    expect(notice.body).not.toContain(addr(child))
+    expect(notice.body).not.toContain(addr(limited))
   })
 
   it("the person's own Stop writes nothing to their Inbox", async () => {
