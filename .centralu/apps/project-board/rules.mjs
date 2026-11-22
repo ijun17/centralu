@@ -269,14 +269,41 @@ export const multiClosingWarnings = (text, what = 'The description') =>
 // when it is true (the template says so), so it passes.
 const PLACEHOLDER = /^(?:n\/?a|-+|tbd|todo|none\??|\?+|\.+|…)$/i
 
+// --- Planned items (#2488) -------------------------------------------------------------------------
+// Not a file's anchor (plans/x.md#13-heading, docs/plans/x.md#13) nor an HTML entity (&#35;)
+const CARRIER = new RegExp(String.raw`(?<![\w&/.-])(?![\w.-]+\.md#)${ISSUE_REF}(?![\w-])|https?://github\.com/[\w.-]+/[\w.-]+/pull/\d+`, 'i')
+const DROPPED = /\bdropped:\s*\S/i
+
+/** Where a planned item went, by its own text: ticked, an issue or pull request named, or dropped with a reason; null while it is open. */
+export function itemState(text, ticked = false) {
+  if (ticked) return 'ticked'
+  if (DROPPED.test(String(text))) return 'dropped'
+  return CARRIER.test(String(text)) ? 'carried' : null
+}
+
+/** What "Planned, not built" may say: "None" (a plan's last pull request: "Plan items left: none"), or lines that each name the issue carrying an item or say "dropped: <why>". */
+export function plannedProblems(text, heading) {
+  if (/^(?:plan items left:\s*)?none(?:\.|:[^\n]*)?$/i.test(text)) return []
+  if (!text) return [`"${heading}" is empty. Name each planned item this change does not build with the issue that carries it (#N), or "dropped: <why>"; or "None" when it builds all of it.`]
+  const bad = text.split('\n').filter((l) => l.trim() && !itemState(l))
+  return bad.length ? [`"${heading}" has ${bad.length === 1 ? 'a line' : 'lines'} naming no issue (#N) and not saying "dropped: <why>": ${bad.map((l) => `"${l.trim().slice(0, 80)}"`).join(', ')}.`] : []
+}
+
+// The headings that must say something real, and what each may not say
+const REQUIRED = {
+  'Not exercised': (text, heading) =>
+    !text || PLACEHOLDER.test(text) ? [`"${heading}" is ${text ? `only "${text}"` : 'empty'}. Name the surfaces this change touches that you did not run (the packaged app, another platform, a live model session), or "Nothing" when that is true.`] : [],
+  'Planned, not built': plannedProblems,
+}
+
 /**
  * Fills the template's headings from `sections` (keyed by heading, any spelling). A heading left
  * out is dropped (the template: "Delete any heading that does not apply"), except two kinds:
- * `required` ones, which must name something real (not "N/A"), and those whose own guidance says to
+ * `REQUIRED` ones, which must say what their rule asks (not "N/A"), and those whose own guidance says to
  * keep the heading (Usability: "write n/a and keep the heading"), which must say something, n/a
- * included. Both are read from the template, so a changed template changes the rule. Returns { body, problems, warnings }.
+ * included. Both apply only to a heading the template has, so a changed template changes the rule. Returns { body, problems, warnings }.
  */
-export function fillTemplate(template, sections, { required = ['Not exercised'] } = {}) {
+export function fillTemplate(template, sections) {
   const heads = templateSections(template)
   const given = new Map()
   const problems = []
@@ -294,10 +321,11 @@ export function fillTemplate(template, sections, { required = ['Not exercised'] 
   for (const h of heads) {
     const key = headingKey(h.heading)
     const text = given.get(key) ?? ''
-    const must = required.some((r) => headingKey(r) === key)
+    const rule = Object.entries(REQUIRED).find(([r]) => headingKey(r) === key)?.[1]
+    const must = Boolean(rule)
     const keep = /keep the heading/i.test(h.guidance)
-    if (must && (!text || PLACEHOLDER.test(text)))
-      problems.push(`"${h.heading}" is ${text ? `only "${text}"` : 'empty'}. Name the surfaces this change touches that you did not run (the packaged app, another platform, a live model session), or "Nothing" when that is true.`)
+    const said = rule ? rule(text, h.heading) : []
+    if (said.length) problems.push(...said)
     else if (keep && !text) problems.push(`"${h.heading}" is empty, and the template keeps it: ${h.guidance}`)
     if (!text) {
       if (!must && !keep) warnings.push(`"${h.heading}" is left out.`)

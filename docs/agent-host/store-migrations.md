@@ -35,6 +35,8 @@ step against:
 2. **Contract, one release later.** A step that drops or renames a table, column or index, or leaves data an older
    build cannot read or would silently lose, lands one release after the code stopped reading and writing what it
    removes, and declares `breaksOlderReaders: true`. Dropping something an older `schema.sql` creates counts (v13).
+   Its issue is filed when the expand step merges, and that pull request names it under **Planned, not built**: a
+   contract step nobody filed was left behind once a plan's umbrella issue closed (#2481, #2488).
    A rename is both: an expand step adds the new form, and the build that adds it writes both forms and reads only the
    old one, since the previous build writes and deletes only that one (a person who goes back and forward leaves the
    new form stale). Only a build whose floor keeps out every build writing the old form alone may read the new form first

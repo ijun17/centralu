@@ -10,6 +10,7 @@
 import { McpServer, serveStdio, centralu } from './runtime/centralu-app-runtime.mjs'
 import { tools as boardTools } from './board-tools.mjs'
 import { tools as ciTools } from './ci-tools.mjs'
+import { tools as closeTools } from './close-tools.mjs'
 import { tools as contributeTools } from './contribute-tools.mjs'
 import { tools as decisionTools } from './decision-tools.mjs'
 import { tools as helpTools } from './help-tools.mjs'
@@ -19,7 +20,7 @@ import { tools as releaseTools } from './release-tools.mjs'
 import { UI, VIEW_CSP, tools as viewTools, viewResource } from './view-tools.mjs'
 import { tools as wordsTools } from './words-tools.mjs'
 
-const TOOLS = { ...viewTools, ...readerTools, ...ciTools, ...helpTools, ...queueTools, ...decisionTools, ...contributeTools, ...releaseTools, ...wordsTools, ...boardTools }
+const TOOLS = { ...viewTools, ...readerTools, ...ciTools, ...closeTools, ...helpTools, ...queueTools, ...decisionTools, ...contributeTools, ...releaseTools, ...wordsTools, ...boardTools }
 
 /** The order agents and the screen list the tools in, as it was before the tools moved into families. */
 const ORDER = [
@@ -33,6 +34,7 @@ const ORDER = [
   'comment',
   'edit_comment',
   'file_issue',
+  'close_issue',
   'open_pr',
   'pre_pr',
   'commit_check',

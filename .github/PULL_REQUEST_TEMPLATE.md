@@ -48,6 +48,15 @@
   because it is the only one that tells them where to look themselves.
 -->
 
+## Planned, not built
+
+<!--
+  Each item the issue or plan behind this change planned that this change does not build, one per line:
+  the issue that carries it (#N), or "dropped: <why>". "None" when it builds all of it.
+  The last pull request of a plan writes "Plan items left: none", or "Plan items left: #N, #M".
+  A contract step due a release later gets its issue now, named here (CONTRIBUTING.md#before-opening-a-pull-request).
+-->
+
 ## Closes
 
 <!-- Closes #N, one line per issue. Or: None: why it closes no issue (a sweep, part of #N, small enough to go straight to a PR). -->

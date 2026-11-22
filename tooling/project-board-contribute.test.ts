@@ -24,6 +24,8 @@ import {
   // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 } from '../.centralu/apps/project-board/rules.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
+import { citedPlans, planItems, planSection } from '../.centralu/apps/project-board/plan-items.mjs'
+// @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 import { git, topLevel } from '../.centralu/apps/project-board/git.mjs'
 import { endLeftoverFakes, fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { SLOW } from './test-timing.js'
@@ -131,13 +133,13 @@ describe('the rules for public text', () => {
     expect(commitProblems('fix(ui): keep moonbase focus', CONVENTIONS, ['Moonbase']).problems.join()).toMatch(/private list: "Moonbase"/)
   })
 
-  const SECTIONS = { why: 'Because.', whatChanged: 'This.', verified: 'Ran it.', situationsChecked: 'n/a', usability: 'n/a', notExercised: 'Windows.', closes: 'Closes #1' }
+  const SECTIONS = { why: 'Because.', whatChanged: 'This.', verified: 'Ran it.', situationsChecked: 'n/a', usability: 'n/a', notExercised: 'Windows.', plannedNotBuilt: 'None', closes: 'Closes #1' }
 
   it("fills this repository's pull request template, without its guidance, in its order", () => {
-    const r = fillTemplate(TEMPLATE, { 'Not exercised': 'Windows.', Why: 'Because.', 'what changed': 'This.', Verified: 'Ran it.', 'situations checked': 'Two builds on one store: unchanged.', Usability: 'n/a', closes: 'Closes #1' })
+    const r = fillTemplate(TEMPLATE, { 'Not exercised': 'Windows.', Why: 'Because.', 'what changed': 'This.', Verified: 'Ran it.', 'situations checked': 'Two builds on one store: unchanged.', Usability: 'n/a', 'Planned, not built': 'None', closes: 'Closes #1' })
     expect(r.problems).toEqual([])
     expect(r.warnings).toEqual([])
-    expect(r.body).toBe('## Why\n\nBecause.\n\n## What changed\n\nThis.\n\n## Verified\n\nRan it.\n\n## Situations checked\n\nTwo builds on one store: unchanged.\n\n## Usability\n\nn/a\n\n## Not exercised\n\nWindows.\n\n## Closes\n\nCloses #1')
+    expect(r.body).toBe('## Why\n\nBecause.\n\n## What changed\n\nThis.\n\n## Verified\n\nRan it.\n\n## Situations checked\n\nTwo builds on one store: unchanged.\n\n## Usability\n\nn/a\n\n## Not exercised\n\nWindows.\n\n## Planned, not built\n\nNone\n\n## Closes\n\nCloses #1')
     expect(r.body).not.toMatch(/<!--/)
   })
 
@@ -183,19 +185,136 @@ describe('the rules for public text', () => {
   })
 
   it('takes "Nothing" for Not exercised, keeps Situations checked and Usability as the template asks, drops other headings left out, and refuses a heading it does not have', () => {
-    const kept = { 'Not exercised': 'Nothing', 'Situations checked': 'n/a', Usability: 'n/a' }
+    const kept = { 'Not exercised': 'Nothing', 'Planned, not built': 'None', 'Situations checked': 'n/a', Usability: 'n/a' }
     expect(fillTemplate(TEMPLATE, kept).problems).toEqual([])
-    const noUsability = fillTemplate(TEMPLATE, { 'Not exercised': 'Nothing', 'Situations checked': 'n/a' })
+    const noUsability = fillTemplate(TEMPLATE, { 'Not exercised': 'Nothing', 'Planned, not built': 'None', 'Situations checked': 'n/a' })
     expect(noUsability.problems.join()).toMatch(/"Usability" is empty, and the template keeps it/)
     // The self-attack review (#1181): an author who skips it is sent to the situations, not let through
-    const noSituations = fillTemplate(TEMPLATE, { 'Not exercised': 'Nothing', Usability: 'n/a' })
+    const noSituations = fillTemplate(TEMPLATE, { 'Not exercised': 'Nothing', 'Planned, not built': 'None', Usability: 'n/a' })
     expect(noSituations.problems.join()).toMatch(/"Situations checked" is empty, and the template keeps it: .*Two builds on one store/)
     const dropped = fillTemplate(TEMPLATE, { ...kept, Why: 'Because.' })
     expect(dropped.warnings).toEqual(['"What changed" is left out.', '"Verified" is left out.', '"Closes" is left out.'])
-    expect(dropped.body).toBe('## Why\n\nBecause.\n\n## Situations checked\n\nn/a\n\n## Usability\n\nn/a\n\n## Not exercised\n\nNothing')
+    expect(dropped.body).toBe('## Why\n\nBecause.\n\n## Situations checked\n\nn/a\n\n## Usability\n\nn/a\n\n## Not exercised\n\nNothing\n\n## Planned, not built\n\nNone')
     expect(fillTemplate(TEMPLATE, { ...SECTIONS, Screenshots: 'x' }).problems).toEqual([
-      'The template has no heading "Screenshots". Its headings: Why, What changed, Verified, Situations checked, Usability, Not exercised, Closes.',
+      'The template has no heading "Screenshots". Its headings: Why, What changed, Verified, Situations checked, Usability, Not exercised, Planned, not built, Closes.',
     ])
+  })
+})
+
+// #2488: umbrella issues were closed by hand with planned items left, and about 40 such items had no owner
+describe('the items an issue plans, and where each went', () => {
+  it('reads task boxes anywhere, and numbered lines and rows of a table of work only under a heading of work', () => {
+    const body = [
+      '## Proposal',
+      '',
+      '1. **Close rule**: built in #2495.',
+      '2. **Doc guard**: later,',
+      '   once the rest is in.',
+      '3. Templates: dropped: folded into 1.',
+      '4. Read docs/plans/acp-adapter.md#13-the-pull-requests, plans/acp-adapter.md#13-the-pull-requests and &#35;5 first.',
+      '',
+      '- [x] ticked',
+      '- [ ] an open box',
+      '- a plain bullet, no item',
+      '',
+      '## What happened',
+      '',
+      '1. The queue refused it',
+      '',
+      '## Repro',
+      '',
+      '1. Open the app',
+      '',
+      '## Options (pick one)',
+      '',
+      '1. Read it as an id',
+      '',
+      '## Work units',
+      '',
+      '```',
+      '1. in code',
+      '```',
+      '<!-- 5. in a comment -->',
+      '| Unit | What | Issue |',
+      '|---|---|---|',
+      '| 1 | Factories | #2384 |',
+      '| 4 | Layout | new |',
+      '',
+      '| Date | Time |',
+      '|---|---|',
+      '| 2026-11-01 | 120 ms |',
+      '````',
+      '```',
+      '1. inside a four-tick fence',
+      '````',
+    ].join('\n')
+    expect(planItems(body).map((i: { text: string; state: string | null }) => [i.text, i.state])).toEqual([
+      ['1. **Close rule**: built in #2495.', 'carried'],
+      ['2. **Doc guard**: later, once the rest is in.', null],
+      ['3. Templates: dropped: folded into 1.', 'dropped'],
+      ['4. Read docs/plans/acp-adapter.md#13-the-pull-requests, plans/acp-adapter.md#13-the-pull-requests and &#35;5 first.', null],
+      ['ticked', 'ticked'],
+      ['an open box', null],
+      ['| 1 | Factories | #2384 |', 'carried'],
+      ['| 4 | Layout | new |', null],
+    ])
+    expect(planItems(body)[1].where).toBe('the body, "Proposal"')
+    expect(planItems('## To do\n\n1. Built by https://github.com/ijun17/centralu/pull/7')[0].state).toBe('carried')
+    // Facts, causes and observations are not work: without a heading of work no numbered line is an item
+    expect(planItems('1. The cache is stale\n2. The read races the write')).toEqual([])
+  })
+
+  it('reads the plan sections an issue cites, in the forms guard/doc-refs reads, and names the plans it cites with no section', () => {
+    const body = 'Steps in docs/plans/acp-adapter.md §13, see [the plan](../docs/plans/assistant-rename.md#3-steps) and plans/mailbox.md "Words". A bare docs/plans/thin-shell.md is not read.'
+    expect(citedPlans(body)).toEqual({
+      sections: [
+        { file: 'acp-adapter.md', section: '§13' },
+        { file: 'assistant-rename.md', section: '#3-steps' },
+        { file: 'mailbox.md', section: '"Words"' },
+      ],
+      bare: ['thin-shell.md'],
+    })
+    // A plan cited with a section somewhere is not bare where it is named again
+    expect(citedPlans('docs/plans/acp-adapter.md §13, and later docs/plans/acp-adapter.md').bare).toEqual([])
+    const plan = ['# Plan', '## 3. Steps', 'intro', '### 3.1 Detail', '1. one', '## 13. The pull requests', '1. **PR 1** (#2400)', '2. The rest', '## 14. Open questions', '1. A question'].join('\n')
+    const pulls = '## 13. The pull requests\n1. **PR 1** (#2400)\n2. The rest'
+    expect(planSection(plan, '§13')).toBe(pulls)
+    expect(planSection(plan, '#13-the-pull-requests')).toBe(pulls)
+    expect(planSection(plan, '"The pull requests"')).toBe(pulls)
+    expect(planSection(plan, '§3')).toBe('## 3. Steps\nintro\n### 3.1 Detail\n1. one')
+    expect(planSection(plan, '§3.1')).toBe('### 3.1 Detail\n1. one')
+    expect(planSection(plan, '§1')).toBeNull()
+    expect(planSection(plan, '§15')).toBeNull()
+    // A number is compared whole: §1 is not the 1.2 before it
+    expect(planSection('## 1.2 Detail\n1. a\n## 1. Why\n1. b', '§1')).toBe('## 1. Why\n1. b')
+  })
+
+  it("reads in a plan's section only its boxes and the numbered lines and rows under a heading of work, not its rules or facts", () => {
+    const section = [
+      '## 3. The shell',
+      '1. Receive the content location.',
+      '2. Spawn the keeper.',
+      '- [ ] a box',
+      '### 3.4 The pull requests',
+      '1. PR 1 (#2400)',
+      '2. The rest',
+      '| Step | What |',
+      '|---|---|',
+      '| 5. Contract | not started |',
+    ].join('\n')
+    expect(planItems(section, 'docs/plans/thin-shell.md §3').map((i: { text: string; state: string | null }) => [i.text, i.state])).toEqual([
+      ['a box', null],
+      ['1. PR 1 (#2400)', 'carried'],
+      ['2. The rest', null],
+      ['| 5. Contract | not started |', null],
+    ])
+  })
+
+  it('takes "None" for Planned, not built, or lines that each name an issue or say dropped, and nothing else', () => {
+    const planned = (text: string) => fillTemplate(TEMPLATE, { 'Not exercised': 'Nothing', 'Situations checked': 'n/a', Usability: 'n/a', 'Planned, not built': text }).problems
+    for (const ok of ['None', 'none.', 'None: all of it is built here.', 'Plan items left: none', 'Plan items left: #2490, #2491', "- The doc guard: #2490\n- The brief: dropped: Centralu's, not this repository's"]) expect(planned(ok), ok).toEqual([])
+    expect(planned('')).toEqual(['"Planned, not built" is empty. Name each planned item this change does not build with the issue that carries it (#N), or "dropped: <why>"; or "None" when it builds all of it.'])
+    expect(planned('- #2490\n- the rest, later\n- n/a')).toEqual(['"Planned, not built" has lines naming no issue (#N) and not saying "dropped: <why>": "- the rest, later", "- n/a".'])
   })
 })
 
@@ -211,6 +330,11 @@ if (args[0] === 'pr' && args[1] === 'view') {
   const pr = st.prs[args[2]]
   if (!pr) fail('GraphQL: Could not resolve to a PullRequest with the number of ' + args[2] + '.\n')
   json(pr)
+}
+if (args[0] === 'issue' && args[1] === 'view') {
+  const issue = (st.issues ?? {})[args[2]]
+  if (!issue) fail('GraphQL: Could not resolve to an issue or pull request with the number of ' + args[2] + '. (repository.issue)\n')
+  json({ title: 'An issue', body: '', state: 'OPEN', url: 'https://github.com/' + REPO + '/issues/' + args[2], ...issue })
 }
 if (args[0] === 'pr' && args[1] === 'list') {
   if (args.includes('--base')) json(Object.values(st.prs).filter((p) => p.baseRefName === args[args.indexOf('--base') + 1] && p.state === 'OPEN'))
@@ -246,6 +370,12 @@ if (args[0] === 'api' && args[1] === '-X') {
     save()
     json({ id: 1, state: body.state })
   }
+  const closing = /^repos\/[^/]+\/[^/]+\/issues\/(\d+)$/.exec(path)
+  if (method === 'PATCH' && closing) {
+    st.issues[closing[1]].state = 'CLOSED'
+    save()
+    json({ number: Number(closing[1]), state: body.state })
+  }
   const pull = /^repos\/[^/]+\/[^/]+\/pulls\/(\d+)$/.exec(path)
   if (method === 'PATCH' && pull) {
     st.prs[pull[1]].baseRefName = body.base
@@ -275,7 +405,8 @@ let gh: FakeGh
 
 type Pr = { number: number; state: string; headRefName: string; baseRefName: string; headRefOid: string; mergeCommit: { oid: string } | null; isCrossRepository: boolean; title: string; body: string; isDraft: boolean; mergeable: string; url: string; labels?: { name: string }[]; closingIssuesReferences?: { number: number; repository: { name: string; owner: { login: string } } }[] }
 type Status = { state: string; context: string; description: string }
-type State = { mode: string; files: Record<string, string | null>; prs: Record<string, Pr>; prExists?: boolean; labelsRefused?: boolean; statusRefused?: boolean; statuses?: Record<string, Status[]> }
+type Issue = { title?: string; body?: string; state?: string; url?: string }
+type State = { mode: string; files: Record<string, string | null>; prs: Record<string, Pr>; issues?: Record<string, Issue>; prExists?: boolean; labelsRefused?: boolean; statusRefused?: boolean; statuses?: Record<string, Status[]> }
 
 const pr = (number: number, extra: Partial<Pr>): Pr => ({
   number,
@@ -358,6 +489,7 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
       'comment — changes, model',
       'save_answer — changes, app',
       'file_issue — changes, model',
+      'close_issue — changes, model',
       'open_pr — changes, model',
       'commit_check — reads, model',
       'rebase_stack — changes, model',
@@ -448,6 +580,7 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
     situationsChecked: 'Two at once: each call opens its own.',
     usability: 'n/a',
     notExercised: 'The packaged app.',
+    plannedNotBuilt: 'None',
     closes: { none: 'Refs #386' },
     // pnpm pre-pr has its own tests below, on a checkout made for them
     skipPrePr: 'The template is what these tests are about.',
@@ -465,7 +598,7 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
       head: 'feat/tools',
       base: 'main',
       draft: false,
-      body: '## Why\n\nProcedure errors.\n\n## What changed\n\nTools.\n\n## Verified\n\nTests.\n\n`pnpm pre-pr` was not run: The template is what these tests are about.\nTier: deep (pnpm pre-pr was not run, so the paths were not judged).\n\n## Situations checked\n\nTwo at once: each call opens its own.\n\n## Usability\n\nn/a\n\n## Not exercised\n\nThe packaged app.\n\n## Closes\n\nNone: Refs #386',
+      body: '## Why\n\nProcedure errors.\n\n## What changed\n\nTools.\n\n## Verified\n\nTests.\n\n`pnpm pre-pr` was not run: The template is what these tests are about.\nTier: deep (pnpm pre-pr was not run, so the paths were not judged).\n\n## Situations checked\n\nTwo at once: each call opens its own.\n\n## Usability\n\nn/a\n\n## Not exercised\n\nThe packaged app.\n\n## Planned, not built\n\nNone\n\n## Closes\n\nNone: Refs #386',
     })
     // The template was read from the base branch, the place a pull request cannot change for itself
     expect(ghCalls().find((c) => c.args.some((a) => a.includes('/contents/')))!.args[3]).toBe('repos/ijun17/centralu/contents/.github/PULL_REQUEST_TEMPLATE.md?ref=main')
@@ -515,6 +648,95 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
     expect(dry.isError, dry.text).toBe(false)
     expect(dry.data.body).not.toContain('Closes')
     expect((await call('open_pr', { ...PR, dryRun: true })).text).toContain('The template has no heading "Closes".')
+  })
+
+  // A stack on a branch cut before the template had "Planned, not built" fills that branch's template: the field is left out there
+  it('leaves plannedNotBuilt out, rather than refusing it, against a template without the heading', async () => {
+    patchState((s) => (s.files['.github/PULL_REQUEST_TEMPLATE.md'] = TEMPLATE.replace(/## Planned, not built[\s\S]*?(?=## Closes)/, '')))
+    runtime()
+    const dry = await call('open_pr', { ...PR, dryRun: true })
+    expect(dry.isError, dry.text).toBe(false)
+    expect(dry.data.body).not.toContain('Planned, not built')
+  })
+
+  // #2488: #59 and #2133 were closed by hand with planned items left, which then had no owner
+  const UMBRELLA = '## Proposal\n\n1. Close rule (#2495)\n2. Doc guard, later\n3. Templates\n\nIts steps: docs/plans/acp-adapter.md §2'
+  const PLAN = '# X\n\n## 1. Why\n\n1. not cited, not read\n\n## 2. Steps\n\n- [x] step one\n- [ ] step two\n'
+
+  it('closes an issue only once every item it and its cited plan section plan went somewhere, and records where each went', async () => {
+    patchState((s) => {
+      s.issues = { '2488': { body: UMBRELLA } }
+      s.files['docs/plans/acp-adapter.md'] = PLAN
+    })
+    runtime()
+    const refused = await call('close_issue', { item: 2488, comment: 'Items 1 and 3 landed in #2495.' })
+    expect(refused.isError).toBe(true)
+    expect(refused.text).toBe(
+      [
+        'Not closed: one rule fails; nothing was sent to GitHub.',
+        '#2488 plans 3 items not built, carried or dropped. For each, in #2488: tick it, name the issue or pull request that carries it (#N), or add "dropped: <why>" to it; or give items: { "<n>": "#N" or "dropped: <why>" }, which the closing comment records.',
+        'Items left:',
+        'item 2: "2. Doc guard, later" (the body, "Proposal")',
+        'item 3: "3. Templates" (the body, "Proposal")',
+        'item 5: "step two" (docs/plans/acp-adapter.md §2, "2. Steps")',
+      ].join('\n'),
+    )
+    // The plan as it is on the default branch
+    expect(ghCalls().some((c) => c.args.includes('repos/ijun17/centralu/contents/docs/plans/acp-adapter.md?ref=main'))).toBe(true)
+    const wrong = await call('close_issue', { item: 2488, comment: 'Done.', items: { 2: 'later', 9: '#1', 3: '#2495', 5: 'dropped: one covers it' } })
+    expect(wrong.data.problems).toEqual([
+      'items.2 ("later") names no issue or pull request (#N) and does not say "dropped: <why>".',
+      'items names "9", and #2488 has items 1 to 5.',
+      '#2488 plans 1 item not built, carried or dropped. For each, in #2488: tick it, name the issue or pull request that carries it (#N), or add "dropped: <why>" to it; or give items: { "<n>": "#N" or "dropped: <why>" }, which the closing comment records.',
+    ])
+    expect(writes()).toEqual([])
+    const closed = await call('close_issue', { item: 2488, comment: 'Items 1 and 3 landed in #2495.', items: { 2: '#2490', 3: '#2495', 5: 'dropped: one covers it' } })
+    expect(closed.isError, closed.text).toBe(false)
+    expect(closed.text).toBe('Closed #2488 as completed, with where each of its 5 planned items went: https://github.com/ijun17/centralu/issues/2488#issuecomment-1')
+    expect(writes().map((w) => [w.args[3], JSON.parse(w.stdin!)])).toEqual([
+      [
+        'repos/ijun17/centralu/issues/2488/comments',
+        {
+          body: 'Items 1 and 3 landed in #2495.\n\nPlanned items (5):\n- Item 1, "1. Close rule (#2495)": as the item says\n- Item 2, "2. Doc guard, later": #2490\n- Item 3, "3. Templates": #2495\n- Item 4, "step one": done (ticked)\n- Item 5, "step two": dropped: one covers it',
+        },
+      ],
+      ['repos/ijun17/centralu/issues/2488', { state: 'closed', state_reason: 'completed' }],
+    ])
+    expect((await call('close_issue', { item: 2488, comment: 'Again.' })).text).toBe('Not closed: #2488 is closed already; nothing was sent to GitHub.')
+    // A citation that does not read would close the plan unchecked; an item's number is written as the refusal writes it
+    patchState((s) => (s.issues!['2489'] = { body: '- [ ] a box\n\nIts steps: docs/plans/acp-adapter.md §13' }))
+    const unread = await call('close_issue', { item: 2489, comment: 'Done.', items: { '01': '#5' } })
+    expect(unread.data.problems).toEqual([
+      'docs/plans/acp-adapter.md §13, which the issue cites, is not on main (no heading of that section): correct the citation in #2489, or take it out if the plan is not its plan.',
+      'items names "01", and #2489 has items 1 to 1.',
+      '#2489 plans 1 item not built, carried or dropped. For each, in #2489: tick it, name the issue or pull request that carries it (#N), or add "dropped: <why>" to it; or give items: { "<n>": "#N" or "dropped: <why>" }, which the closing comment records.',
+    ])
+    expect(writes()).toHaveLength(2)
+  })
+
+  it('asks a reason for each item left when closing as not planned too, warns of a plan named without a section, and refuses a pull request, an issue nobody can see and a comment not in English', async () => {
+    patchState((s) => (s.issues = { '7': { body: '- [ ] a box' }, '8': { url: 'https://github.com/ijun17/centralu/pull/8' }, '9': { body: 'No plan here; the background is docs/plans/thin-shell.md.' } }))
+    runtime()
+    // Switching the reason does not get past the rule: the item is dropped with its own reason
+    const switched = await call('close_issue', { item: 7, comment: 'Superseded by #10.', reason: 'not planned' })
+    expect(switched.isError).toBe(true)
+    expect(switched.data.open).toEqual([{ n: 1, text: 'a box', where: 'the body' }])
+    const notPlanned = await call('close_issue', { item: 7, comment: 'Superseded by #10.', reason: 'not planned', items: { 1: 'dropped: #10 does it another way' } })
+    expect(notPlanned.isError, notPlanned.text).toBe(false)
+    expect(writes().map((w) => JSON.parse(w.stdin!))).toEqual([{ body: 'Superseded by #10.\n\nPlanned items (1):\n- Item 1, "a box": dropped: #10 does it another way' }, { state: 'closed', state_reason: 'not_planned' }])
+    expect((await call('close_issue', { item: 8, comment: 'Done.' })).text).toBe('Not closed: #8 is a pull request; close_issue closes issues (a pull request closes when it lands, or with gh pr close).')
+    expect((await call('close_issue', { item: 404, comment: 'Done.' })).text).toMatch(/^Not closed: ijun17\/centralu#404 is not an issue or pull request this GitHub login can see/)
+    expect((await call('close_issue', { item: 9, comment: '끝났습니다.' })).data.problems.join()).toMatch(/not in English/)
+    expect(writes()).toHaveLength(2)
+    // An issue that plans nothing closes with the comment alone; a plan it names with no section is not read, and it says so
+    expect((await call('close_issue', { item: 9, comment: 'Done in #11.' })).text).toBe(
+      [
+        'Closed #9 as completed: https://github.com/ijun17/centralu/issues/9#issuecomment-1',
+        'Warnings:',
+        'docs/plans/thin-shell.md, which the issue names without a section, was not read: cite the section that lists its work (thin-shell.md §n) to have it checked.',
+      ].join('\n'),
+    )
+    expect(JSON.parse(writes()[2]!.stdin!)).toEqual({ body: 'Done in #11.' })
   })
 
   // #1066: a stack's lower pull requests are drafts, and build.yml runs no CI for a draft
@@ -994,6 +1216,7 @@ const PR_PLAIN = {
   situationsChecked: 'Two at once: each call opens its own.',
   usability: 'n/a',
   notExercised: 'The packaged app.',
+  plannedNotBuilt: 'None',
   closes: { none: 'Refs #386' },
 }
 

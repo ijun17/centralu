@@ -9,7 +9,8 @@ import { now as clock, systemNow } from './clock.mjs'
 import { itemOf, itemRef, REF_HELP } from './board.mjs'
 import { canMerge, NO_PERMISSION } from './ci.mjs'
 import { APP_DIR, CI, config, QUEUE } from './config.mjs'
-import { asksCloses, closesInput, openPr } from './contribute-tools.mjs'
+import { itemsLeftProblems } from './close-tools.mjs'
+import { asksCloses, closesInput, openPr, PLANNED_HELP } from './contribute-tools.mjs'
 import { GitHubError, markDraft, prsWithHead, readPr, readRepo } from './github.mjs'
 import { answering, serially } from './handlers.mjs'
 import { BATCH_ACTIVE, batchLine } from './batch.mjs'
@@ -253,8 +254,11 @@ async function queueMerge({ pr, lowers = [], owner, author, deleteBranch = true 
     const left = closedIssues(lp.body, top.repo).filter((n) => !carried.has(n))
     if (left.length) problems.push(`${under[i].ref} closes ${left.join(', ')}, and lands as ${top.ref}'s squash, whose description does not: add ${left.map((n) => `"Closes ${n}"`).join(', ')} to ${top.ref}'s ${asks ? 'Closes section' : 'description'}, or take it out of ${under[i].ref}'s description if it should stay open.`)
   }
+  // An issue the merge closes must not leave planned items behind (#2488): GitHub closes it whatever its body still plans
+  const left = await itemsLeftProblems(top.repo, [...carried], top.ref)
+  problems.push(...left.problems)
   // "Closes #a #b" closes #a only (#2194): open_pr writes one keyword per issue, but a description edited by hand can have it
-  const multiClosing = multiClosingWarnings(p.body)
+  const multiClosing = [...multiClosingWarnings(p.body), ...left.warnings]
   // `kind` is 'subject' only when that is the one reason; with others it is 'refused', and `subject` says the title is among them
   if (problems.length) return asError(answer(`Not queued: ${problems.join(' ')}`, { queued: false, kind: long && problems.length === 1 ? 'subject' : 'refused', subject: Boolean(long) }))
 
@@ -327,7 +331,7 @@ const AUTO_NA = 'n/a: an auto-tier change (docs, fixture data or UI assets), in 
  * writes, one at a time with the board's other writes. An open pull request from the branch (an earlier hand-over, or
  * one the session opened) is the record, not a second one.
  */
-async function integrate({ branch, title, why, whatChanged, verified, notExercised, closes, owner }) {
+async function integrate({ branch, title, why, whatChanged, verified, notExercised, plannedNotBuilt = 'None', closes, owner }) {
   const repo = config.repository
   const name = String(branch ?? '').trim().replace(/^refs\/heads\//, '')
   if (!name) return refused('give the branch you pushed.', { kind: 'input' })
@@ -341,7 +345,7 @@ async function integrate({ branch, title, why, whatChanged, verified, notExercis
   if (!QUEUE.batch || !CI.fullTier) return refused(`this repository's merge queue does not batch with two tiers of CI (project.json queue.batch, ci.fullTier), which integrate needs. Open a pull request (open_pr) and queue it (queue_merge).`, { kind: 'setup' })
   const squash = [...String(title ?? '')].length + ' (#9999)'.length
   if (squash > SUBJECT_MAX) return refused(`the squash subject "${title} (#N)" would be about ${squash} characters, over ${SUBJECT_MAX}. Shorten the title.`, { kind: 'subject' })
-  const sections = { why, whatChanged, notExercised, closes, situationsChecked: AUTO_NA, usability: AUTO_NA }
+  const sections = { why, whatChanged, notExercised, plannedNotBuilt, closes, situationsChecked: AUTO_NA, usability: AUTO_NA }
   const dry = await openPr({ title, head: name, base: defaultBranch, ...sections, verifiedNote: verified, dryRun: true })
   if (dry.isError) return refused(dry.content[0].text.replace(/^Not opened: /, ''), { kind: 'record' })
 
@@ -352,10 +356,10 @@ async function integrate({ branch, title, why, whatChanged, verified, notExercis
   if (j.missing) return refused(`the branch ${name} is not on GitHub. Push it first (git push origin ${name}).`, { kind: 'missing' })
   if (j.tier === 'auto' && !j.files) return refused(`${name} adds nothing over ${defaultBranch}; nothing to land.`, { kind: 'empty' })
   if (j.tier !== 'auto') return refused(notAutoText(j, name), { kind: 'tier', tier: j.tier, line: j.line }, becauseLines(j))
-  return serially(integrateWrites)({ repo, name, defaultBranch, title, sections, verified, owner, j })
+  return serially(integrateWrites)({ repo, name, defaultBranch, title, sections, verified, owner, j, body: dry.structuredContent.body })
 }
 
-async function integrateWrites({ repo, name, defaultBranch, title, sections, verified, owner, j }) {
+async function integrateWrites({ repo, name, defaultBranch, title, sections, verified, owner, j, body }) {
   // A fork's pull request whose branch has the same name is not this branch's
   const open = (await prsWithHead(repo, name)).find((p) => p.state === 'OPEN' && !p.isCrossRepository) ?? null
   if (open && open.baseRefName !== defaultBranch)
@@ -368,6 +372,9 @@ async function integrateWrites({ repo, name, defaultBranch, title, sections, ver
   const taken = open ? await readPr(repo, open.number) : null
   const unclosed = taken && (await asksCloses(repo, defaultBranch)) ? closesProblems(taken.body, queueRef(repo, open.number)) : []
   if (unclosed.length) return refused(`${unclosed.join(' ')} Edit its description, then integrate again.`, { kind: 'record', pr: open.number })
+  // What the record closes leaves no planned item behind (#2488), as queue_merge asks
+  const left = await itemsLeftProblems(repo, closedIssues(taken?.body ?? body, repo), taken ? queueRef(repo, open.number) : 'The record')
+  if (left.problems.length) return refused(`${left.problems.join(' ')} Then integrate again.`, { kind: 'record', ...(open ? { pr: open.number } : {}) })
   let number
   let url
   let opened = false
@@ -447,7 +454,7 @@ async function unqueue({ pr }) {
 }
 
 const QUEUE_DESCRIPTION =
-  'Queue pull requests to merge on their own, instead of a gh loop of gh pr merge and gh run rerun: one PR, or a stack as pr (the top) plus lowers (the PRs under it), which lands as one squash through the top after moving its base to main and closes the lowers with "Landed in #N". The queue runs in this app (it survives sessions and restarts): green and mergeable → squash with --match-head-commit and delete the branch; a cancelled run is rerun once per head (one the queue cancelled for a batch, each time), failed jobs once per head; DIRTY → it merges main into the branch itself and pushes that when only mechanical files (project.json queue.conflicts) conflict, else (a stack top whose lower one merged is restacked, as rebase_stack would) hands the conflict to the author session of the PR, posting it into that session itself when it opened the PR with open_pr; a draft that the queuing session opened with open_pr is marked ready; failing again, any other draft, or anything it cannot fix → it tells the session that queued it. Maintainer only; refuses a head without the pre-pr status that open_pr or pre_pr posts, and stops a head pushed after queueing until pre_pr posts it there; refuses a Closes section that closes no issue with a keyword and gives no reason (None: <why>), and a stack whose top does not close an issue a lower closes; merges only when every required check of the CI workflow passed and GitHub says CLEAN, never a draft; UNSTABLE waits unless every check that did not pass is a cancelled duplicate or older run of CI on that head, or a run a batch cancelled. Several PRs whose own CI has not started are tested together in one run on a queue/batch-N branch and then land one by one in order, each only while main has the tree the batch had before it (their own waiting runs are cancelled; a red batch is split). With two tiers of CI (project.json ci.fullTier), the own run of a PR is the quick tier, which lands nothing: once it passes, the PR lands through a batch, a batch of one included, or from a full run on its own head (the full tier the queue starts on its branch itself, gh workflow run build.yml --ref <branch>). What the batch runs depends on project.json ci.landTier: with full, the full tier; with quick (this repository), the fast tier (verify, its test shards and the Windows unit tests), and the heavy jobs too (the e2e shards, chromium and webkit) when the batch holds a change to the screen, as .github/scripts/ci-changes.mjs says (ci.screen); the batch line, its events and the messages say which tier it ran, and the main guard (full tier on main after a landing) stays the net for the rest. If main moves while a batch runs (a merge outside the queue), the batch stops before landing and its pull requests are batched again on the new main by themselves, at most 3 times each on a head, without a message. The queue posts its news (landed, needs attention, with what to relay) into the session that queued it, as a message; the answer also gives a watch command, for a Centralu that cannot post it: run in the background, it exits with the message when an item needs you or lands.'
+  'Queue pull requests to merge on their own, instead of a gh loop of gh pr merge and gh run rerun: one PR, or a stack as pr (the top) plus lowers (the PRs under it), which lands as one squash through the top after moving its base to main and closes the lowers with "Landed in #N". The queue runs in this app (it survives sessions and restarts): green and mergeable → squash with --match-head-commit and delete the branch; a cancelled run is rerun once per head (one the queue cancelled for a batch, each time), failed jobs once per head; DIRTY → it merges main into the branch itself and pushes that when only mechanical files (project.json queue.conflicts) conflict, else (a stack top whose lower one merged is restacked, as rebase_stack would) hands the conflict to the author session of the PR, posting it into that session itself when it opened the PR with open_pr; a draft that the queuing session opened with open_pr is marked ready; failing again, any other draft, or anything it cannot fix → it tells the session that queued it. Maintainer only; refuses a head without the pre-pr status that open_pr or pre_pr posts, and stops a head pushed after queueing until pre_pr posts it there; refuses a Closes section that closes no issue with a keyword and gives no reason (None: <why>), one that closes an open issue with planned items gone nowhere (the rule close_issue holds an issue to; the refusal names the items), and a stack whose top does not close an issue a lower closes; merges only when every required check of the CI workflow passed and GitHub says CLEAN, never a draft; UNSTABLE waits unless every check that did not pass is a cancelled duplicate or older run of CI on that head, or a run a batch cancelled. Several PRs whose own CI has not started are tested together in one run on a queue/batch-N branch and then land one by one in order, each only while main has the tree the batch had before it (their own waiting runs are cancelled; a red batch is split). With two tiers of CI (project.json ci.fullTier), the own run of a PR is the quick tier, which lands nothing: once it passes, the PR lands through a batch, a batch of one included, or from a full run on its own head (the full tier the queue starts on its branch itself, gh workflow run build.yml --ref <branch>). What the batch runs depends on project.json ci.landTier: with full, the full tier; with quick (this repository), the fast tier (verify, its test shards and the Windows unit tests), and the heavy jobs too (the e2e shards, chromium and webkit) when the batch holds a change to the screen, as .github/scripts/ci-changes.mjs says (ci.screen); the batch line, its events and the messages say which tier it ran, and the main guard (full tier on main after a landing) stays the net for the rest. If main moves while a batch runs (a merge outside the queue), the batch stops before landing and its pull requests are batched again on the new main by themselves, at most 3 times each on a head, without a message. The queue posts its news (landed, needs attention, with what to relay) into the session that queued it, as a message; the answer also gives a watch command, for a Centralu that cannot post it: run in the background, it exits with the message when an item needs you or lands.'
 
 export const tools = {
   queue_merge: {
@@ -483,6 +490,7 @@ export const tools = {
         whatChanged: z.string().max(20000).optional(),
         verified: z.string().max(20000).optional().describe('What you ran; the integrator adds its Tier line'),
         notExercised: z.string().max(20000).describe('Surfaces this change touches that were not run ("Nothing" when true); required'),
+        plannedNotBuilt: z.string().max(20000).optional().describe(`${PLANNED_HELP}; default "None"`),
         closes: closesInput.optional(),
         owner: z.string().max(80).optional().describe("Your session's name: the queue's news and a conflict come back to it; default a new id"),
       }),

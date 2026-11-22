@@ -97,6 +97,8 @@ describe('the integrator lands an auto-tier branch without a pull request from i
     expect(body).toContain('## Why\n\nThe guide did not say it.')
     expect(body).toMatch(/## Verified\n\nTier: auto, from `docs\/guide\.md` \(docs\), `docs\/new\.md` \(docs\)\. Judged by the integrator \(#1259 step 3\) from the diff of docs\/guide at [0-9a-f]{7} against main at [0-9a-f]{7}/)
     expect(body).toContain('## Not exercised\n\nNothing')
+    // Not given, it is "None": an auto-tier change rarely builds part of a plan
+    expect(body).toContain('## Planned, not built\n\nNone')
     expect(itemsOnDisk()).toMatchObject([{ pr: 600, owner: 'writer', author: 'writer', auto: { branch: 'docs/guide', head: repo.heads['docs/guide'], main: repo.main } }])
     // A draft, which GitHub and every version of the queue refuse to merge: only this queue lands it
     expect(gh().prs['600']).toMatchObject({ isDraft: true, mergeStateStatus: 'DRAFT' })
@@ -393,7 +395,16 @@ describe('the integrator lands an auto-tier branch without a pull request from i
     expect(r.data).toMatchObject({ integrated: false, kind: 'record', pr: 590 })
     expect(r.text).toContain(`#590's Closes section ("2447") closes no issue`)
     expect(writes()).toEqual([])
-    patchGh((s) => (s.prs['590'].body = '## Closes\n\nCloses #2447'))
+    // #2488: nor may it close an issue whose planned items went nowhere
+    patchGh((s) => {
+      s.prs['590'].body = '## Closes\n\nCloses #2447'
+      s.issueBodies = { 2447: '- [ ] the guide\n- [ ] the index' }
+    })
+    const left = await call('integrate', handOver('docs/guide'))
+    expect(left.data).toMatchObject({ integrated: false, kind: 'record', pr: 590 })
+    expect(left.text).toContain('#590 closes #2447, which plans 2 items not built, carried or dropped (item 1: "the guide" (the body); item 2: "the index" (the body))')
+    expect(writes()).toEqual([])
+    patchGh((s) => (s.issueBodies = { 2447: '- [x] the guide\n- [ ] the index: dropped: no index any more' }))
     expect((await call('integrate', handOver('docs/guide'))).data).toMatchObject({ integrated: true, pr: 590 })
   })
 

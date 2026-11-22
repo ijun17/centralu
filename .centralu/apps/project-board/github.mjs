@@ -309,6 +309,8 @@ const DROPPED = /\bEOF\b|connection (?:reset|closed)|broken pipe/i
  * and counts.
  */
 export const isOutage = (e) => e instanceof GitHubError && (FATAL.has(e.kind) || e.status >= 500 || (e.lost === true && e.status === 0 && DROPPED.test(e.message)))
+/** A failure that is the item's own (not there, not visible, refused), not GitHub's or the machine's: answered about the item, where an outage is thrown */
+export const ownFailure = (e) => e instanceof GitHubError && !isOutage(e)
 
 /**
  * Whether an outage counts toward the item's own limit (`OUTAGE_LIMIT`): a 5xx or a dropped answer that one item meets poll after
@@ -532,14 +534,31 @@ export async function readJobLog(repo, jobId) {
 /** What starts a comment the main guard posts on the known failures issue (#1496): a note of its own, not a flake a person judged */
 export const GUARD_NOTE = '<!-- main-guard note -->'
 
+/** `gh issue view` of `fields`, as JSON; gh answers it for a pull request's number too. */
+async function issueView(repo, number, fields) {
+  checkRepo(repo)
+  const j = parseJson(await runGh(['issue', 'view', String(number), '-R', repo, '--json', fields]))
+  if (!j) throw new GitHubError('github', 'gh issue view answered with something that is not JSON.')
+  return j
+}
+
 /** An issue's body and comments as one text, and its state; the main guard's notes (`GUARD_NOTE`) are not part of it. */
 export async function readIssueText(repo, number) {
-  checkRepo(repo)
-  const out = await runGh(['issue', 'view', String(number), '-R', repo, '--json', 'body,comments,state'])
-  const j = parseJson(out)
-  if (!j) throw new GitHubError('github', 'gh issue view answered with something that is not JSON.')
+  const j = await issueView(repo, number, 'body,comments,state')
   const comments = (j.comments ?? []).map((c) => c?.body ?? '').filter((b) => !b.startsWith(GUARD_NOTE))
   return { text: [j.body ?? '', ...comments].join('\n\n'), state: j.state ?? null }
+}
+
+/** An issue's title, body and state (OPEN or CLOSED), and whether it is a pull request. */
+export async function readIssue(repo, number) {
+  let j
+  try {
+    j = await issueView(repo, number, 'title,body,state,url')
+  } catch (e) {
+    if (ownFailure(e)) throw new GitHubError('not-found', `${repo}#${number} is not an issue or pull request this GitHub login can see (${firstLine(e)}).`, { status: httpStatus(e) })
+    throw e
+  }
+  return { title: j.title ?? '', body: j.body ?? '', state: j.state ?? null, pull: /\/pull\/\d+$/.test(j.url ?? '') }
 }
 
 /**
@@ -827,10 +846,15 @@ export async function createIssue(repo, { title, body, labels }) {
   return { number: issue.number, url: issue.html_url ?? null }
 }
 
+/** Closes an issue, as completed or not planned. */
+export async function setIssueClosed(repo, number, reason) {
+  checkRepo(repo)
+  await restWrite('PATCH', `repos/${repo}/issues/${number}`, { state: 'closed', state_reason: reason }, `closing #${number}`)
+}
+
 /** Closes an issue as not planned, then says why (the main guard's retraction, #2082): closing twice changes nothing, so a try that stops between the two does not say it twice. */
 export async function closeIssue(repo, number, comment) {
-  checkRepo(repo)
-  await restWrite('PATCH', `repos/${repo}/issues/${number}`, { state: 'closed', state_reason: 'not_planned' }, `closing #${number}`)
+  await setIssueClosed(repo, number, 'not_planned')
   await postComment(repo, number, comment)
 }
 
