@@ -3,7 +3,8 @@ import type { UsageWindow } from '@cc/protocol'
 import { NO_LIMITS, type LimitsAnswer } from '../contract.js'
 import type { DashboardMethod } from './usage-contract.js'
 import { tokenExpiry } from './sign-in-token.js'
-import { CursorUsageFailure, type CursorUsageFailureKind } from './usage-failure.js'
+import { LimitsFailure, readWithReasons } from '../token-limits/failure.js'
+import { CURSOR_REASONS } from './usage-failure.js'
 
 /** Connect JSON writes an int64 as a decimal string; a number is taken too */
 const EPOCH_MS = z.union([z.string().regex(/^\d+$/).transform(Number), z.number()])
@@ -34,7 +35,7 @@ export const PLAN = z.object({ planInfo: z.object({ planName: z.string().optiona
  */
 export function planUsageAnswer(period: unknown, plan: unknown): LimitsAnswer {
   const p = PERIOD.safeParse(period)
-  if (!p.success) throw new CursorUsageFailure('unreadable', 'GetCurrentPeriodUsage: unexpected shape')
+  if (!p.success) throw new LimitsFailure('unreadable', 'GetCurrentPeriodUsage: unexpected shape')
   const usage = p.data.planUsage
   const limit = usage?.limit ?? 0
   if (!usage || limit <= 0) return NO_LIMITS
@@ -65,25 +66,14 @@ export type PlanUsageDeps = {
 
 /**
  * Cursor's `listUsage` (#2459): the token read for this request, both methods asked at once as the CLI's `/usage` asks
- * them, the plan's name optional. Any failure is thrown as its kind, whose message is the reason the panel shows; host.log
- * gets one line for each kind the first time it happens in this process
+ * them, the plan's name optional. Any failure is thrown as its kind with Cursor's reason for it (`readWithReasons`)
  */
 export function cursorPlanUsage(deps: PlanUsageDeps): () => Promise<LimitsAnswer> {
-  const logged = new Set<CursorUsageFailureKind>()
-  return async () => {
-    try {
-      const token = await deps.token()
-      const expiry = tokenExpiry(token)
-      if (expiry !== null && expiry <= deps.now()) throw new CursorUsageFailure('signed-out', 'token past its exp')
-      const [period, plan] = await Promise.all([deps.ask('GetCurrentPeriodUsage', token), deps.ask('GetPlanInfo', token).catch(() => null)])
-      return planUsageAnswer(period, plan)
-    } catch (e) {
-      const failure = e instanceof CursorUsageFailure ? e : new CursorUsageFailure('unreadable', e instanceof Error ? e.name : 'failed')
-      if (!logged.has(failure.kind)) {
-        logged.add(failure.kind)
-        deps.log(`[usage] cursor: plan usage not read (${failure.kind}: ${failure.detail})`)
-      }
-      throw failure
-    }
-  }
+  return readWithReasons('cursor', CURSOR_REASONS, (line) => deps.log(line), async () => {
+    const token = await deps.token()
+    const expiry = tokenExpiry(token)
+    if (expiry !== null && expiry <= deps.now()) throw new LimitsFailure('expired', 'token past its exp')
+    const [period, plan] = await Promise.all([deps.ask('GetCurrentPeriodUsage', token), deps.ask('GetPlanInfo', token).catch(() => null)])
+    return planUsageAnswer(period, plan)
+  })
 }

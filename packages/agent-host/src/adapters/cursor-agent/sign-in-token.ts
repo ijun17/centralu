@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { CursorSignInStore } from '../../os.js'
 import { execText } from '../../os/exec.js'
 import { realOs } from '../../os/real.js'
-import { CursorUsageFailure } from './usage-failure.js'
+import { fileErrorCode, LimitsFailure, ownField } from '../token-limits/failure.js'
 
 export type TokenIo = {
   /** A program's stdout; throws when it exits other than 0 */
@@ -42,16 +42,16 @@ export async function readCursorToken(store: CursorSignInStore, io: TokenIo = RE
   try {
     text = await io.readText(store.file)
   } catch (e) {
-    throw new CursorUsageFailure('no-token', `${keychainDetail}auth file ${codeOf(e)}`)
+    throw new LimitsFailure('no-token', `${keychainDetail}auth file ${fileErrorCode(e)}`)
   }
   let json: unknown
   try {
     json = JSON.parse(text)
   } catch {
-    throw new CursorUsageFailure('no-token', `${keychainDetail}auth file is not JSON`)
+    throw new LimitsFailure('no-token', `${keychainDetail}auth file is not JSON`)
   }
   const auth = AUTH_FILE.safeParse(json)
-  if (!auth.success) throw new CursorUsageFailure('no-token', `${keychainDetail}auth file has no accessToken`)
+  if (!auth.success) throw new LimitsFailure('no-token', `${keychainDetail}auth file has no accessToken`)
   return auth.data.accessToken
 }
 
@@ -68,18 +68,8 @@ export function tokenExpiry(token: string): number | null {
 }
 
 function exitOf(e: unknown): string {
-  const ended = field(e, 'ended')
+  const ended = ownField(e, 'ended')
   if (typeof ended === 'string') return `ended by its ${ended}`
-  const code = field(e, 'code')
+  const code = ownField(e, 'code')
   return typeof code === 'number' ? `exit ${code}` : 'did not run'
-}
-
-function codeOf(e: unknown): string {
-  const code = field(e, 'code')
-  return typeof code === 'string' ? code : 'unreadable'
-}
-
-function field(e: unknown, name: 'code' | 'ended'): unknown {
-  const value: unknown = typeof e === 'object' && e !== null ? Object.getOwnPropertyDescriptor(e, name)?.value : undefined
-  return value
 }

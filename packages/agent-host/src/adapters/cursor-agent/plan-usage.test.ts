@@ -3,8 +3,9 @@ import type { UsageSnapshot } from '@cc/protocol'
 import { NO_LIMITS, type LimitsAnswer } from '../contract.js'
 import { cursorPlanUsage, PERIOD, PLAN, planUsageAnswer, type PlanUsageDeps } from './plan-usage.js'
 import { PERIOD_FREE_RECORDED, PERIOD_PAID_HAND_MADE, PLAN_FREE_RECORDED, PLAN_PAID_HAND_MADE } from './recordings/dashboard.test-helpers.js'
-import { CursorUsageFailure } from './usage-failure.js'
-import { failureOf, jwt } from './usage.test-helpers.js'
+import { LimitsFailure } from '../token-limits/failure.js'
+import { failureOf } from '../token-limits/failure.test-helpers.js'
+import { jwt } from './usage.test-helpers.js'
 import { CURSOR_USAGE_CONTRACT } from './usage-contract.js'
 
 const json = (text: string): unknown => JSON.parse(text)
@@ -91,7 +92,7 @@ describe("Cursor's plan usage from its dashboard's answers (#2459)", () => {
   })
 })
 
-describe("Cursor's listUsage: token, both methods, one log line per failure kind (#2459)", () => {
+describe("Cursor's listUsage: token, both methods, a reason per failure kind (#2459)", () => {
   function deps(over: Partial<PlanUsageDeps> = {}): PlanUsageDeps & { asked: string[]; lines: string[] } {
     const asked: string[] = []
     const lines: string[] = []
@@ -120,7 +121,7 @@ describe("Cursor's listUsage: token, both methods, one log line per failure kind
   })
 
   it('still answers the limits when only the plan answer fails', async () => {
-    const d = deps({ ask: async (method) => (method === 'GetPlanInfo' ? Promise.reject(new CursorUsageFailure('refused', 'HTTP 403')) : json(PERIOD_PAID_HAND_MADE)) })
+    const d = deps({ ask: async (method) => (method === 'GetPlanInfo' ? Promise.reject(new LimitsFailure('refused', 'HTTP 403')) : json(PERIOD_PAID_HAND_MADE)) })
     const snap = limited(await cursorPlanUsage(d)())
     expect(snap.plan).toBeNull()
     expect(snap.windows).toHaveLength(3)
@@ -128,7 +129,7 @@ describe("Cursor's listUsage: token, both methods, one log line per failure kind
 
   it('asks nothing with a token past its exp, and says to sign in again; a token not past it, or with no exp, is sent', async () => {
     const expired = deps({ token: async () => jwt({ exp: NOW / 1000 }) })
-    await expect(cursorPlanUsage(expired)()).rejects.toMatchObject({ kind: 'signed-out', message: 'Sign in to Cursor again to see its usage' })
+    await expect(cursorPlanUsage(expired)()).rejects.toMatchObject({ kind: 'expired', message: 'Sign in to Cursor again to see its usage' })
     expect(expired.asked).toEqual([])
     for (const token of [jwt({ exp: NOW / 1000 + 1 }), jwt({ sub: 'person' }), 'not-a-jwt']) {
       const d = deps({ token: async () => token })
@@ -138,22 +139,9 @@ describe("Cursor's listUsage: token, both methods, one log line per failure kind
   })
 
   it('throws each failure as its kind, its message the reason shown', async () => {
-    const d = deps({ token: async () => Promise.reject(new CursorUsageFailure('no-token', 'auth file ENOENT')) })
+    const d = deps({ token: async () => Promise.reject(new LimitsFailure('no-token', 'auth file ENOENT')) })
     await expect(cursorPlanUsage(d)()).rejects.toMatchObject({ kind: 'no-token', message: "Cursor's sign-in could not be read on this computer" })
     const odd = deps({ ask: async () => Promise.reject(new TypeError('boom')) })
     await expect(cursorPlanUsage(odd)()).rejects.toMatchObject({ kind: 'unreadable', message: "Cursor's usage answer could not be read" })
-  })
-
-  it('writes one host.log line per kind, never the token', async () => {
-    let fail: CursorUsageFailure = new CursorUsageFailure('refused', 'GetCurrentPeriodUsage: HTTP 403')
-    const d = deps({ ask: async () => Promise.reject(fail) })
-    const read = cursorPlanUsage(d)
-    await expect(read()).rejects.toBe(fail)
-    await expect(read()).rejects.toBe(fail)
-    expect(d.lines).toEqual(['[usage] cursor: plan usage not read (refused: GetCurrentPeriodUsage: HTTP 403)'])
-    fail = new CursorUsageFailure('unreachable', 'GetCurrentPeriodUsage: HTTP 503')
-    await expect(read()).rejects.toBe(fail)
-    expect(d.lines).toHaveLength(2)
-    expect(d.lines.join('\n')).not.toContain(TOKEN.split('.')[1])
   })
 })

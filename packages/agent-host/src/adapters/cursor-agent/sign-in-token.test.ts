@@ -3,7 +3,8 @@ import type { CursorSignInStore } from '../../os.js'
 import { realOs } from '../../os/real.js'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 import { readCursorToken, tokenExpiry, type TokenIo } from './sign-in-token.js'
-import { failureOf, jwt } from './usage.test-helpers.js'
+import { failureOf } from '../token-limits/failure.test-helpers.js'
+import { jwt } from './usage.test-helpers.js'
 
 const { files, paths } = realOs()
 
@@ -74,9 +75,9 @@ describe("reading cursor-agent's token from the macOS Keychain (#2459)", () => {
   it('says where both stopped when neither has it', async () => {
     const f = await failureOf(readCursorToken(KEYCHAIN, io(NOT_FOUND)))
     expect(f).toMatchObject({ kind: 'no-token', detail: 'keychain exit 44; auth file ENOENT' })
-    // A locked keychain: `security` with no prompt exits, and the reason says the sign-in was not read
+    // A locked keychain: `security` with no prompt exits, and the read says the sign-in was not found
     const locked = await failureOf(readCursorToken(KEYCHAIN, io(LOCKED)))
-    expect(locked).toMatchObject({ kind: 'no-token', message: "Cursor's sign-in could not be read on this computer", detail: 'keychain exit 36; auth file ENOENT' })
+    expect(locked).toMatchObject({ kind: 'no-token', detail: 'keychain exit 36; auth file ENOENT' })
     const notRun = await failureOf(readCursorToken(KEYCHAIN, io(async () => Promise.reject(new Error('spawn failed')))))
     expect(notRun.detail).toBe('keychain did not run; auth file ENOENT')
     // Bounded: a Keychain that holds the read says it ran out of time, not that it did not run
