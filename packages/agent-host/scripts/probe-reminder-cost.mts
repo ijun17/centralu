@@ -35,33 +35,39 @@ const host = new MeasuredHost(data, {
   ENABLE_CLAUDEAI_MCP_SERVERS: 'false',
   CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
 })
+/** The id the host answered with: its answer is the host's raw frame */
+const idOf = (answer: Json): string => {
+  const id: unknown = answer.id
+  if (typeof id !== 'string') throw new Error('the host answered without an id')
+  return id
+}
 const ended = (sessionId: string, since: number) => host.events.slice(since).some((e: Json) => e.sessionId === sessionId && e.type === 'turn_complete')
 
 try {
   await host.start()
-  const p = await host.rpc('projects.add', { path: project })
-  await host.rpc('projects.setTrusted', { projectId: p.id, trusted: true })
-  const make = () => host.rpc('agents.createSession', { projectId: p.id, cwd: project, tool: 'claude', model: 'haiku', permissionPreset: 'normal' })
+  const projectId = idOf(await host.rpc('projects.add', { path: project }))
+  await host.rpc('projects.setTrusted', { projectId, trusted: true })
+  const make = async () => idOf(await host.rpc('agents.createSession', { projectId, cwd: project, tool: 'claude', model: 'haiku', permissionPreset: 'normal' }))
   const a = await make()
   const b = await make()
   recorder.mark('b', 'setup', 'person')
-  await host.turn(b.id, ANSWER
+  await host.turn(b, ANSWER
     ? 'For this whole conversation: when Centralu mail arrives with a question, do not read or answer it; reply only "noted". When Centralu reminds you of it, read it and answer it with the mail tool. Now reply "ready".'
     : 'For this whole conversation: when Centralu mail arrives, do not answer it, do not mark it handled and do not read it. Reply only with the word "noted" and end your turn. Now reply "ready".')
   recorder.mark('a', 'send', 'person')
   const mark = host.events.length
-  await host.turn(a.id, `Call the mail tool exactly once: action "send", to "${b.id}", text "What is 2 + 2? Answer when you can.", kind "question". Then end your turn.`)
+  await host.turn(a, `Call the mail tool exactly once: action "send", to "${b}", text "What is 2 + 2? Answer when you can.", kind "question". Then end your turn.`)
   // B's turn on the question
   const until = Date.now() + 120_000
-  while (Date.now() < until && !ended(b.id, mark)) await delay(500)
-  if (!ended(b.id, mark)) throw new Error('B was never woken by the question')
+  while (Date.now() < until && !ended(b, mark)) await delay(500)
+  if (!ended(b, mark)) throw new Error('B was never woken by the question')
   const atRest = host.events.length
   const before = recorder.requests.length
   recorder.mark('b', 'reminder', 'reminder')
   const restAt = Date.now()
   const limit = Date.now() + 6 * 60_000
-  while (Date.now() < limit && !ended(b.id, atRest)) await delay(1_000)
-  if (!ended(b.id, atRest)) throw new Error('no reminder turn within 6 minutes')
+  while (Date.now() < limit && !ended(b, atRest)) await delay(1_000)
+  if (!ended(b, atRest)) throw new Error('no reminder turn within 6 minutes')
   await delay(1_500)
   await recorder.settle()
   const turn = recorder.requests.slice(before).filter((r) => r.session === 'b' && r.main)
