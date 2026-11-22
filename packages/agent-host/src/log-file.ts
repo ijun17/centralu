@@ -5,7 +5,7 @@ import { realOs } from './os/real.js'
 /**
  * Records the host's output to a file. The Tauri supervisor passes stderr through (`Stdio::inherit`), but a `.app` launched from
  * Finder sends it to /dev/null, and `host-errors.log` is crash-only: a session that went quietly wrong (codex saying why on stderr,
- * the screen saying only "codex app-server exited") left nothing to go on. So all of stderr lands here, from a terminal or from Finder.
+ * the screen saying only "codex app-server exited") would leave nothing to go on. So all of stderr lands here, from a terminal or from Finder.
  */
 
 /** Once one file exceeds this, one generation is rolled off */
@@ -125,7 +125,8 @@ export function lineStamps(now: () => Date = () => new Date()): (text: string) =
 /**
  * Mirrors stderr into a file without intercepting it: a terminal still sees it in development. Failures are swallowed, as failing
  * to log is no reason to kill the host, the parent of every session. Written synchronously: a buffered stream loses the last lines,
- * the ones wanted, when the process ends abruptly; the fd stays open, so no write reopens the file.
+ * the ones wanted, when the process ends abruptly. The fd stays open, so no write reopens the file, and the host's stderr is quiet to
+ * begin with: a write per line costs nothing.
  */
 export function teeStderrToFile(path: string, maxBytes: number = MAX_LOG_BYTES): () => void {
   const file = new RollingFile(path, maxBytes)
