@@ -60,7 +60,7 @@ describe('inbox order (FR-15)', () => {
     expect(inbox.map((i) => i.id)).toEqual(['ok'])
   })
 
-  it('limited with no stopped turn is informational, so it is not put in the inbox (shown in the sidebar only)', () => {
+  it('limited is informational, so it is not put in the inbox (shown in the sidebar only)', () => {
     expect(buildInbox([s('l', 'limited')], NOW)).toHaveLength(0)
   })
 
