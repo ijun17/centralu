@@ -6,7 +6,8 @@ import { SkeletonLines } from '../../components/Skeleton.jsx'
 import { useStore } from '../../store/store.js'
 import { useMachineName, useToolMeta } from '../../store/selectors.js'
 import { CacheSection } from './CacheSection.jsx'
-import { formatCount, formatDuration, formatReadAt } from '../../app/format.js'
+import { formatCount, formatReadAt } from '../../app/format.js'
+import { resetText } from './weekly.js'
 import { HistorySection } from './HistorySection.jsx'
 import { SAME_ACCOUNT_LABEL } from './sameAccount.js'
 import { useLoad } from '../../app/useLoad.js'
@@ -66,13 +67,18 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
     )
   }
 
-  // Failing to read it and there being none are different — the reason is shown as is
+  // Failing to read it and there being none are different — the reason is shown as is, the plan kept when known (#2459)
   if (!state.usage || state.usage.windows.length === 0) {
     return (
       <>
         <p className="px-4 py-6 text-center text-sm leading-body text-ink-muted" data-testid="usage-unavailable">
           Usage unavailable
           {state.reason && <span className="mt-1 block text-xs text-ink-faint">{state.reason}</span>}
+          {state.usage?.plan && (
+            <span className="mt-1 block text-xs text-ink" data-testid="usage-plan">
+              {NOT_REPORTED_COPY.plan(state.usage.plan)}
+            </span>
+          )}
         </p>
         {cache && <div className="px-4 pb-4 [&>section]:mt-0">{cache}</div>}
         <div className="px-4 pb-4 [&>section:first-child]:mt-0">{history}</div>
@@ -87,6 +93,12 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
       {plan && (
         <p className="readout mb-3 text-xs text-ink-faint" data-testid="usage-plan">
           {plan} plan
+        </p>
+      )}
+      {/* The last numbers a failed read keeps may no longer hold: its reason says so (#2459) */}
+      {state.reason && (
+        <p className="mb-3 text-xs text-ink-faint" data-testid="usage-reason">
+          {state.reason}
         </p>
       )}
       {/* A linked machine's limits that are this computer's, because one account is signed in to both (#726) */}
@@ -223,15 +235,6 @@ function ResetTime({ resetsAt }: { resetsAt: string | null }) {
   const at = resetsAt ? Date.parse(resetsAt) : NaN
   const now = useNowUntil(Number.isFinite(at) ? at : undefined)
   return <>{resetText(resetsAt, now)}</>
-}
-
-/** Time remaining: how much is left matters more than the moment */
-function resetText(resetsAt: string | null, now: number): string {
-  if (!resetsAt) return 'reset time unknown'
-  const ms = new Date(resetsAt).getTime() - now
-  if (!Number.isFinite(ms)) return 'reset time unknown'
-  if (ms <= 0) return 'resets soon'
-  return `resets in ${formatDuration(ms, { coarse: true })}`
 }
 
 /** Daily tokens — only the most recent 7 days. Bar length is relative to that day's peak */

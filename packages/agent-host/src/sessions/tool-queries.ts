@@ -10,7 +10,7 @@ import {
   type UsageSnapshot,
   type ToolName,
 } from '@cc/protocol'
-import type { AgentAdapter, LocalUsage, SessionHandle } from '../adapters/contract.js'
+import { NO_LIMITS, type AgentAdapter, type LimitsAnswer, type LocalUsage, type SessionHandle } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
 import { withTimeout } from '../timing.js'
 import { isFromTheFuture } from '../usage-clock.js'
@@ -24,6 +24,11 @@ const MODEL_LIST_RETRY_MS = 60_000
 /** What a tool with no limits to read is told as: plain, since nothing is wrong and nothing is to be done (#1623) */
 function noLimitsReason(label: string): string {
   return `${label} does not report usage limits`
+}
+
+/** A tool's limits, once read, stand for a minute; a clock set back makes them stale */
+function withinAMinute(at: number): boolean {
+  return !isFromTheFuture(at, Date.now()) && Date.now() - at < 60_000
 }
 
 /**
@@ -55,7 +60,7 @@ export class ToolQueries {
   private readonly commandCache = new Map<string, CommandInfo[]>()
 
   /** Usage cache — do not spin up the tool every time the modal opens and closes */
-  private readonly usageCache = new Map<ToolName, { snapshot: UsageSnapshot; at: number }>()
+  private readonly usageCache = new Map<ToolName, { answer: LimitsAnswer; at: number }>()
 
   /**
    * The list of slash commands.
@@ -116,43 +121,84 @@ export class ToolQueries {
     const adapter = this.host.adapters.get(tool)
     const label = adapter?.descriptor.label ?? tool
     /*
-     * The one definition of "this tool reports no limits" (#1616, #1623): its adapter has no `listUsage`. `notReported` is
-     * derived here and nowhere else. What such a tool says about its own usage (its plan, the totals it counted) is
-     * `localUsage`, read from the tool's own command by a reader that keeps its answer (`adapters/usage-read.ts`), so
-     * nothing here is cached.
+     * The one definition of "this tool reports no limits" (#1616, #1623): its adapter has no `listUsage`, or that answers
+     * `NO_LIMITS` (#2459). `notReported` is derived here and nowhere else. What a tool says about its own usage (its plan,
+     * the totals it counted) is `localUsage`, read from the tool's own command by a reader that keeps its answer
+     * (`adapters/usage-read.ts`), so it is not cached here: all such a tool says, or what stands in when `listUsage` fails.
      */
     // No adapter at all is not "reports no limits": nothing is known about the tool, so it stays unknown (#1616 wording)
     if (!adapter) return { supported: false, reason: `${tool} does not support usage queries`, usage: null, cache }
+    const notLoggedIn = { supported: false, reason: `${label} is not logged in on this computer`, usage: null, cache }
+    const none = { supported: false, reason: noLimitsReason(label), notReported: true, usage: null, cache }
+    /** An answer with no limits in it, given what the tool's own command says (its plan, its totals) when it has one */
+    const withLocal = async <A extends object>(answer: A) => {
+      const local = await this.localAnswer(tool, adapter, opts.settle)
+      // The tool's command says nobody is logged in: said as any tool that is not logged in is (a failed read, not "no limits")
+      if (local === 'logged-out') return notLoggedIn
+      return local ? { ...answer, ...local } : answer
+    }
+    const reportsNone = () => withLocal(none)
     if (!adapter.listUsage) {
-      const none = { supported: false, reason: noLimitsReason(label), notReported: true, usage: null, cache }
       // The hub shows its own limits for this machine: only the figures counted here are wanted, so no command is run
-      if (!adapter.localUsage || opts.limits === false) return none
-      try {
-        const local = await adapter.localUsage({ settle: opts.settle, seed: this.localTotalsSeed(tool) })
-        this.keepLocalTotals(tool, local)
-        // The tool's command says nobody is logged in: said as any tool that is not logged in is (a failed read, not "no limits")
-        if (local.loggedOut) return { supported: false, reason: `${label} is not logged in on this computer`, usage: null, cache }
-        const usage: UsageSnapshot = { plan: local.plan, windows: [], daily: [], ...(local.totals ? { totals: local.totals } : {}) }
-        return { ...none, usage, ...(local.provisional ? { provisional: true } : {}) }
-      } catch (err) {
-        console.error(`[usage] ${tool}: the tool's own usage could not be read: ${errorMessage(err)}`)
-        return none
-      }
+      return opts.limits === false ? none : reportsNone()
     }
     // The hub shows its own limits for this machine (same account, #726): only the figures counted here are wanted
     if (opts.limits === false) return { supported: true, usage: null, cache }
 
     const hit = this.usageCache.get(tool)
-    if (hit && !isFromTheFuture(hit.at, Date.now()) && Date.now() - hit.at < 60_000) return { supported: true, usage: hit.snapshot, cache }
+    if (hit && withinAMinute(hit.at)) return hit.answer === NO_LIMITS ? reportsNone() : { supported: true, usage: hit.answer, cache }
 
     try {
-      const snapshot = await withTimeout(adapter.listUsage(), 15_000)
-      this.usageCache.set(tool, { snapshot, at: Date.now() })
-      // A fresh reading is kept for the history (§6.2), whoever asked: the gauge, a turn end or the ten-minute sample
-      void this.host.usageRecorder.snapshot(tool, snapshot)
-      return { supported: true, usage: snapshot, cache }
+      const answer = await this.readLimits(tool, adapter.listUsage.bind(adapter))
+      return answer === NO_LIMITS ? reportsNone() : { supported: true, usage: answer, cache }
     } catch (err) {
-      return { supported: false, reason: (err as Error).message, usage: hit?.snapshot ?? null, cache }
+      const kept = hit && hit.answer !== NO_LIMITS ? hit.answer : null
+      const failed = { supported: false, reason: errorMessage(err), usage: kept, cache }
+      // A failed read keeps the plan on screen (#2459)
+      return kept ? failed : withLocal(failed)
+    }
+  }
+
+  /**
+   * The limits read in flight per tool, shared by whoever asks meanwhile. A failure is not kept: the next ask reads again,
+   * unless the tool's `listUsage` keeps it (Cursor's, `plan-usage.ts`)
+   */
+  private readonly limitReads = new Map<ToolName, Promise<LimitsAnswer>>()
+
+  private readLimits(tool: ToolName, listUsage: () => Promise<LimitsAnswer>): Promise<LimitsAnswer> {
+    const running = this.limitReads.get(tool)
+    if (running) return running
+    const read = withTimeout(listUsage(), 15_000)
+      .then((answer) => {
+        this.usageCache.set(tool, { answer, at: Date.now() })
+        // A fresh reading is kept for the history (§6.2), whoever asked: the gauge, a turn end or the ten-minute sample
+        if (answer !== NO_LIMITS) void this.host.usageRecorder.snapshot(tool, answer)
+        return answer
+      })
+      .finally(() => this.limitReads.delete(tool))
+    this.limitReads.set(tool, read)
+    return read
+  }
+
+  /**
+   * What the tool's own command says of its usage (`localUsage`), as the answer's `usage`; `logged-out` when it says
+   * nobody is; null when it has no such command or the command failed
+   */
+  private async localAnswer(
+    tool: ToolName,
+    adapter: AgentAdapter,
+    settle: boolean | undefined,
+  ): Promise<{ usage: UsageSnapshot; provisional?: true } | 'logged-out' | null> {
+    if (!adapter.localUsage) return null
+    try {
+      const local = await adapter.localUsage({ settle, seed: this.localTotalsSeed(tool) })
+      this.keepLocalTotals(tool, local)
+      if (local.loggedOut) return 'logged-out'
+      const usage: UsageSnapshot = { plan: local.plan, windows: [], daily: [], ...(local.totals ? { totals: local.totals } : {}) }
+      return { usage, ...(local.provisional ? { provisional: true as const } : {}) }
+    } catch (err) {
+      console.error(`[usage] ${tool}: the tool's own usage could not be read: ${errorMessage(err)}`)
+      return null
     }
   }
 

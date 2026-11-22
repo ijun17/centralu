@@ -66,6 +66,25 @@ export function systemSettingsFolder(app: string, env: Readonly<Record<string, s
   return platform === 'darwin' ? `/Library/Application Support/${app}` : `/etc/${app}`
 }
 
+/** Where a CLI on Cursor's credential store keeps its sign-in: a Keychain item, read with `program`, then a JSON file */
+export type CursorSignInStore = { keychain: { program: string; service: string; account: string } | null; file: string }
+
+/**
+ * Cursor's store as its bundle chooses it (`cli-credentials`, read in 2026.10.22 and named by `cursor-agent/usage-contract.ts`):
+ * the login Keychain on macOS, read with `security` as the CLI does, before `~/.<domain>/auth.json`; elsewhere only the file,
+ * under `%APPDATA%\<Domain>` on Windows (the domain title-cased) and the XDG config folder on Linux
+ */
+export function cursorSignInStore(domain: string, env: Readonly<Record<string, string | undefined>> = process.env, home: string = homedir(), platform: Platform = HOST_PLATFORM): CursorSignInStore {
+  if (platform === 'win32') {
+    const folder = domain.charAt(0).toUpperCase() + domain.slice(1).toLowerCase()
+    return { keychain: null, file: win32.join(env.APPDATA || win32.join(home, 'AppData', 'Roaming'), folder, 'auth.json') }
+  }
+  if (platform === 'darwin') {
+    return { keychain: { program: '/usr/bin/security', service: `${domain}-access-token`, account: `${domain}-user` }, file: posix.join(home, `.${domain}`, 'auth.json') }
+  }
+  return { keychain: null, file: posix.join(env.XDG_CONFIG_HOME || posix.join(home, '.config'), domain, 'auth.json') }
+}
+
 /** OpenCode matches a permission's name and pattern in any case on Windows only (1.19.4's `Wildcard.match`: flags `si` there, `s` elsewhere; #1565) */
 export function openCodeMatchesAnyCase(platform: Platform = HOST_PLATFORM): boolean {
   return platform === 'win32'

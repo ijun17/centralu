@@ -5,7 +5,7 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { formatCount } from '../../app/format.js'
 import { useLoad } from '../../app/useLoad.js'
 import { LoadFailedFold } from '../../components/LoadFailed.jsx'
-import { weeklySeries } from './weekly.js'
+import { barSeries } from './weekly.js'
 
 const DAY_MS = 24 * 3_600_000
 const DAYS = 7
@@ -76,7 +76,7 @@ export function HistoryView({
   canOpen: (sessionId: string) => boolean
   onOpen: (sessionId: string) => void
 }) {
-  const weekly = weeklySeries(history.readings)
+  const drawn = barSeries(history.readings)
   const top = topUsage(history.rows, TOP)
   const since = history.recordedSince ? Date.parse(history.recordedSince) : NaN
 
@@ -100,7 +100,7 @@ export function HistoryView({
         </span>
       </div>
 
-      {weekly && <WeeklyLine series={weekly} from={from} to={to} />}
+      {drawn && <UsageLine series={drawn} from={from} to={to} />}
 
       {top.length === 0 ? (
         <p className="mt-2 text-xs text-ink-muted" data-testid="usage-history-empty">
@@ -145,8 +145,8 @@ export function HistoryView({
   )
 }
 
-/** The weekly percent as steps, each reading held until the next; no axis, as the figure beside it is the latest */
-function WeeklyLine({ series, from, to }: { series: NonNullable<ReturnType<typeof weeklySeries>>; from: number; to: number }) {
+/** The top bar's window's percent as steps, each reading held until the next; no axis, as the figure beside it is the latest */
+function UsageLine({ series, from, to }: { series: NonNullable<ReturnType<typeof barSeries>>; from: number; to: number }) {
   const W = 200
   const H = 36
   const x = (t: number) => Math.max(0, Math.min(W, ((t - from) / (to - from)) * W)).toFixed(1)
@@ -160,7 +160,7 @@ function WeeklyLine({ series, from, to }: { series: NonNullable<ReturnType<typeo
   // Less than a day of readings against a seven-day axis is a dot at the edge, not a line: the figure says it
   const drawn = to - first.t >= DAY_MS
   return (
-    <div className="mt-2" data-testid="usage-history-weekly">
+    <div className="mt-2" data-testid="usage-history-line">
       <p className="flex items-baseline gap-2 text-xs">
         <span className="text-ink-muted">{label}</span>
         <span className="readout ml-auto text-ink">{last.percent}% now</span>

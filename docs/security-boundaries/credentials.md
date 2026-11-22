@@ -120,3 +120,27 @@ the keeper handing the token to windows only (slice 4, [keeper.md](keeper.md)): 
 `keeper.sock` gets the limited credential, and a serve host's `serve.json` (slice 5, [remote-host.md](remote-host.md)) holds no
 full credential: a script that reads it, or runs `--connection`, gets the limited one. Every agent's process has its
 session's credential (slice 6). The direct host on Windows gives its token only to the window that started it.
+
+## Cursor's sign-in, read for its usage
+
+The one credential of another program the host reads (owner decision on #2459, 2026-11-22; why: [agent-host/usage.md](../agent-host/usage.md)).
+It is cursor-agent's own access token, and it proves the person to Cursor, so everything here is about where it may go.
+
+- **What is read.** The access token only, never the refresh token or an API key: on macOS the login Keychain's generic
+  password `cursor-access-token` / `cursor-user`, read with `/usr/bin/security find-generic-password … -w` as the CLI reads it
+  (measured on 2026.11.22: no permission prompt for a child of the host), then `~/.cursor/auth.json`; on Windows
+  `%APPDATA%\Cursor\auth.json`; on Linux `$XDG_CONFIG_HOME/cursor/auth.json`, else `~/.config/cursor/auth.json`
+  (`os.ts` `cursorSignInStore`, from the CLI's bundle; held by `pnpm drift:cursor-usage`).
+- **When.** For each usage read something asks for: the top bar's donut every five minutes while the window is shown, whether
+  or not a Cursor session runs, the panel when opened, a turn's end and the ten-minute sample. At most once a minute: `usageFor`
+  keeps an answer that long and shares one read in flight, and Cursor's reader keeps a failure that long. Nothing is read while nobody asks.
+- **Where it goes.** Only as a bearer header to `https://api2.cursor.sh/aiserver.v1.DashboardService/` (`GetCurrentPeriodUsage`,
+  `GetPlanInfo`), the address fixed in code, with redirects refused so it cannot be carried elsewhere.
+- **What never happens with it.** It is not kept past the request (no cache, no store, no file), not logged, not put in an error
+  or a reason (a failure's detail is a status, an exit code or a fixed word), not recorded in a test, and not sent to any other
+  address or process. It is never refreshed: a refresh token may rotate, and a refresh from outside could end the CLI's own
+  sign-in, so an expired token is the reason "Sign in to Cursor again to see its usage". Nothing is ever written to the CLI's store.
+- **Residual.** The read runs as the person, who can already read the same item and file; it gives the host nothing a process
+  of the same user could not take. A Keychain that does prompt (another macOS release, another item ACL) would ask in
+  Centralu's name once: the host stops waiting after 3 s, answers the reason, and asks only the file for the rest of the process
+  (`sign-in-token.ts`), as a read that runs out of time is what a prompt waiting looks like. Measured not to prompt today.

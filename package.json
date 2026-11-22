@@ -33,6 +33,7 @@
     "codex:bindings": "tsx packages/agent-host/scripts/codex-bindings.mjs",
     "drift:claude": "node scripts/claude-sdk-drift.mjs",
     "drift:surface": "tsx scripts/surface-drift.mts",
+    "drift:cursor-usage": "tsx scripts/cursor-usage-drift.mts",
     "smoke:codex": "node packages/agent-host/scripts/smoke-codex.mjs",
     "smoke:cursor": "node packages/agent-host/scripts/smoke-cursor.mjs",
     "smoke:opencode": "node packages/agent-host/scripts/smoke-opencode.mjs",

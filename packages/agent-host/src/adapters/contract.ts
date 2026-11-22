@@ -429,6 +429,13 @@ export type LocalUsage = {
   provisional?: boolean
 }
 
+/**
+ * A `listUsage` answer for a plan its tool sets no limit on (#2459: Cursor's Free plan): the host says it as it says a tool
+ * that reports no limits, with what `localUsage` says, never as a percent nor as a failed read
+ */
+export const NO_LIMITS = 'no-limits'
+export type LimitsAnswer = UsageSnapshot | typeof NO_LIMITS
+
 export interface AgentAdapter {
   readonly tool: ToolName
   /** Absent: Anthropic's, the ratios the cache figures were first drawn with */
@@ -538,15 +545,15 @@ export interface AgentAdapter {
    *
    * Takes no argument because it is a property of the **account**, not a session or a directory.
    * Only covers subscription limits — additional billing (credits) is out of scope.
-   * Throws when it cannot be fetched: the manager degrades with a reason.
+   * Throws when it cannot be fetched: the manager degrades with a reason. `NO_LIMITS` when the plan has none.
    */
-  listUsage?(): Promise<UsageSnapshot>
+  listUsage?(): Promise<LimitsAnswer>
 
   /**
-   * What a tool that **reports no limits** still says about its usage, read from the tool's own command (#1623): its plan,
-   * the totals it counted here. The one definition of "reports no limits" is that `listUsage` is absent; with `localUsage`
-   * the host then answers `supported: false, notReported: true` carrying this. Never reads the tool's credential or state
-   * files, and never waits long: past `settle` the answer may be `provisional` (the command is still running).
+   * What a tool says about its usage from its own command (#1623): its plan, the totals it counted here. A tool reports no
+   * limits when `listUsage` is absent or answers `NO_LIMITS`; with `localUsage` the host then answers `supported: false,
+   * notReported: true` carrying this. Beside a `listUsage`, it is what stands when that read fails (#2459). Never reads the
+   * tool's credential or state files, and never waits long: past `settle` the answer may be `provisional` (still running).
    *
    * `seed` is the last answer the host kept across a restart (its totals carry `asOf`, when they were read). A reader that has
    * read nothing yet in this process stands on it, as on a stale answer: returned at once while a fresh read goes on.

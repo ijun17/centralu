@@ -6,7 +6,11 @@ import type { DetectResult } from '../contract.js'
 import { findCursor } from './install.js'
 import { CURSOR_SURFACE } from './surface.js'
 import { cursorUsageReader } from './usage.js'
+import { askDashboard } from './dashboard.js'
+import { cursorPlanUsage } from './plan-usage.js'
+import { cursorTokenReader } from './sign-in-token.js'
 import { execText } from '../../os/exec.js'
+import { cursorSignInStore } from '../../os.js'
 
 
 /**
@@ -56,7 +60,6 @@ function cursorRefusalIn(answer: string): string | null {
 
 /** `agent status` costs a Node start (~2 s), and pickers ask on every open: one answer is reused this long */
 const STATUS_FOR_MS = 60_000
-
 export function cursorProfile(): AcpProfile {
   let status: { at: number; result: DetectResult } | null = null
   const localUsage = cursorUsageReader(async (timeout) => {
@@ -64,6 +67,13 @@ export function cursorProfile(): AcpProfile {
     if (!install) throw new Error('Cursor CLI not found')
     const r = await execText(install.command, [...install.args, 'about', '--format', 'json'], { timeoutMs: timeout, env: { ...process.env, ...install.env } })
     return r.stdout
+  })
+  const store = cursorSignInStore('cursor')
+  const listUsage = cursorPlanUsage({
+    token: cursorTokenReader(store),
+    ask: (method, token) => askDashboard(method, token),
+    now: Date.now,
+    log: (line) => console.error(line),
   })
   return {
     descriptor: DESCRIPTOR,
@@ -78,6 +88,7 @@ export function cursorProfile(): AcpProfile {
     },
     centraluToolOf: centraluToolOfCall,
     shape: { refusalIn: cursorRefusalIn },
+    listUsage,
     localUsage,
     async detect() {
       if (status && Date.now() - status.at < STATUS_FOR_MS) return status.result

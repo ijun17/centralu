@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { commandInterpreter, openCodeMatchesAnyCase, powershell, systemSettingsFolder, systemTool } from './os.js'
+import { commandInterpreter, cursorSignInStore, openCodeMatchesAnyCase, powershell, systemSettingsFolder, systemTool } from './os.js'
 
 /**
  * Windows looks a relative program path up in the working directory first, and the host works in a project's folder:
@@ -30,6 +30,25 @@ describe('systemSettingsFolder', () => {
     expect(systemSettingsFolder('opencode', {}, 'win32')).toBe('C:\\ProgramData\\opencode')
     expect(systemSettingsFolder('opencode', {}, 'darwin')).toBe('/Library/Application Support/opencode')
     expect(systemSettingsFolder('opencode', {}, 'linux')).toBe('/etc/opencode')
+  })
+})
+
+describe('cursorSignInStore (#2459)', () => {
+  it("is the CLI's file under %APPDATA% on Windows, the domain title-cased, with no Keychain", () => {
+    expect(cursorSignInStore('cursor', { APPDATA: 'D:\\Roaming' }, 'C:\\Users\\p', 'win32')).toEqual({ keychain: null, file: 'D:\\Roaming\\Cursor\\auth.json' })
+    expect(cursorSignInStore('cursor', {}, 'C:\\Users\\p', 'win32').file).toBe('C:\\Users\\p\\AppData\\Roaming\\Cursor\\auth.json')
+  })
+
+  it('is the login Keychain item on macOS, then the file in the home folder', () => {
+    expect(cursorSignInStore('cursor', { XDG_CONFIG_HOME: '/x' }, '/Users/p', 'darwin')).toEqual({
+      keychain: { program: '/usr/bin/security', service: 'cursor-access-token', account: 'cursor-user' },
+      file: '/Users/p/.cursor/auth.json',
+    })
+  })
+
+  it("is the file in XDG's config folder elsewhere, with no Keychain", () => {
+    expect(cursorSignInStore('cursor', { XDG_CONFIG_HOME: '/x' }, '/home/p', 'linux')).toEqual({ keychain: null, file: '/x/cursor/auth.json' })
+    expect(cursorSignInStore('cursor', {}, '/home/p', 'linux').file).toBe('/home/p/.config/cursor/auth.json')
   })
 })
 

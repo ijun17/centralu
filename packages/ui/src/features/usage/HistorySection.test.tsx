@@ -38,7 +38,7 @@ describe('HistoryView (docs/agent-host/usage.md "Usage over time")', () => {
     })
     expect(text).toContain('Last 7 days')
     expect(text).toContain('Weekly 41% now')
-    expect(html).toContain('data-testid="usage-history-weekly"')
+    expect(html).toContain('data-testid="usage-history-line"')
     expect(html).toMatch(/<path d="M[\d.]+,[\d.]+ H[\d.]+ V[\d.]+ H[\d.]+ V[\d.]+ H200"/)
     // Most tokens first; 9 of 10 input tokens came from the cache; only a session on this screen opens
     expect(text.indexOf('Session here')).toBeLessThan(text.indexOf('Old work'))
@@ -55,11 +55,12 @@ describe('HistoryView (docs/agent-host/usage.md "Usage over time")', () => {
     expect(html).not.toContain('<svg')
   })
 
-  it('says so when nothing was recorded, draws no line without a weekly reading, and says since when it knows', () => {
-    const { text, html } = render({ readings: [reading('session', '5 hours', [5])], recordedSince: new Date(FROM + 3 * 24 * 3_600_000).toISOString() })
+  it("says so when nothing was recorded and since when it knows; with no weekly reading, the line is the top bar's window (#2459)", () => {
+    const { text, html } = render({ readings: [reading('session', '5 hours', [10, 30, 55])], recordedSince: new Date(FROM + 3 * 24 * 3_600_000).toISOString() })
     expect(text).toContain('No model requests recorded in the last 7 days')
-    expect(html).not.toContain('usage-history-weekly')
     expect(text).toContain('earlier days are not known')
+    expect(html).toContain('data-testid="usage-history-line"')
+    expect(text).toContain('5 hours 55% now')
   })
 
   it('does not open a project row as a session', () => {

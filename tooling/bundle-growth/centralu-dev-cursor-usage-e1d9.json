@@ -1,0 +1,4 @@
+{
+  "bytes": 800,
+  "reason": "Cursor's plan usage (#2459): the usage panel and donut show a limits read's failure reason under kept numbers and the plan, and draw a tool whose windows are not weekly (Cursor's included, auto and API percents) as its first window. Measured +543 B by pre-pr against main, all in the main chunk; no new dependency. Main sat under the ceiling by less than that, so the growth needs a declaration."
+}

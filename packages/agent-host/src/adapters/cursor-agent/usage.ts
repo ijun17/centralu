@@ -6,11 +6,11 @@ import { localUsageReader } from '../usage-read.js'
 const ABOUT = z.object({ subscriptionTier: z.unknown().optional() })
 
 /**
- * Cursor's usage (#1623). Its CLI has a `/usage` command only on its interactive screen: the ACP server advertises none
- * and print mode answers nothing for it (measured, agent 2026.10.22-27dcf5f). What `agent about --format json` says is the
- * plan, `subscriptionTier` ("Free"; measured 1.6 to 2.3 s a run on Windows). No limit can be read, so the adapter has no
- * `listUsage` and says the plan as its `localUsage`. The command's own output is the only source: the tool's credential and
- * state files are never opened, and the account's email in that output is never kept or sent.
+ * Cursor's plan from its own command (#1623), what stands when its limits cannot be read (`plan-usage.ts`, #2459). Its CLI
+ * has a `/usage` command only on its interactive screen: the ACP server advertises none and print mode answers nothing for
+ * it (measured, agent 2026.10.22-27dcf5f). What `agent about --format json` says is the plan, `subscriptionTier` ("Free";
+ * measured 1.6 to 2.3 s a run on Windows). This reader opens no file of the tool's, and the account's email in that output
+ * is never kept or sent.
  *
  * A logged-out account prints `"subscriptionTier": null` with exit 0 (measured in review, RV1625): the answer then says
  * so, and the host tells it as it tells any tool that is not logged in. A tier the field does not carry at all, or a blank
