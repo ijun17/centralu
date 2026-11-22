@@ -454,7 +454,7 @@ export const Composer = memo(function Composer({
             setCaret(e.target.selectionStart)
             // Also wakes a session put to sleep under a focused box (#568); after a failed wake, its Retry does
             const st = useStore.getState()
-            if (st.sessions[sessionId]?.live === false && !st.wakeError[sessionId]) void wake(sessionId)
+            if (st.sessions[sessionId]?.live === false && !st.wakeError[sessionId]?.reason) void wake(sessionId)
           }}
           onKeyDown={(e) => {
             const composing = composingKey(e.nativeEvent)

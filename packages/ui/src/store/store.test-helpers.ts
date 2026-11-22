@@ -84,7 +84,6 @@ export function resetStore() {
     resuming: {},
     wakeError: {},
     wakeLocked: {},
-    wakeErrorSaid: {},
     notices: [],
     mail: null,
     mailThread: null,

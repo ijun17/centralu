@@ -618,7 +618,7 @@ const noteCases = [
         const st = store.getState()
         store.setState({
           sessions: { ...st.sessions, [sid]: { ...st.sessions[sid], live: false } },
-          wakeError: { ...st.wakeError, [sid]: 'it cannot be resumed' },
+          wakeError: { ...st.wakeError, [sid]: { reason: 'it cannot be resumed' } },
         })
       }, id),
     // The state changes: the reason is cleared (a retry that worked does this)

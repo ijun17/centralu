@@ -170,7 +170,6 @@ export function forgetSessions(s: AppState, gone: ReadonlySet<string>): Partial<
     searchTargets: keep(s.searchTargets),
     wakeError: keep(s.wakeError),
     wakeLocked: keep(s.wakeLocked),
-    wakeErrorSaid: keep(s.wakeErrorSaid),
     watches: keep(s.watches),
     focusedSessionId: s.focusedSessionId && gone.has(s.focusedSessionId) ? null : s.focusedSessionId,
     // The Assistant shows its start state; the next question starts a fresh session (#1653)

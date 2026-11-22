@@ -261,7 +261,6 @@ export const sendActions = (set: StoreSet, get: StoreGet): SendActions => ({
           wakeError: omitKey(s.wakeError, sessionId),
           // Sent, so no lock: the fork offer goes
           wakeLocked: omitKey(s.wakeLocked, sessionId),
-          wakeErrorSaid: omitKey(s.wakeErrorSaid, sessionId),
         })),
       )
     } catch (err) {

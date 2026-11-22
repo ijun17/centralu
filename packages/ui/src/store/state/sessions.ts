@@ -33,14 +33,13 @@ export type SessionsSlice = {
    * selecting it alone does not. Waking on send only would add process startup to the first reply's wait.
    */
   resuming: Record<string, boolean>
-  /** Why waking failed, shown where the screen would otherwise promise that sending resumes it. */
-  wakeError: Record<string, string>
+  /** Why waking failed, said in the note unless the conversation's own line gives it (`saidByLine`, #2360). */
+  wakeError: Record<string, { reason: string; saidByLine?: true }>
   /**
    * Waking failed because another side holds the conversation: the host's own signal, never matched from the reason's
    * wording. Only then is "split off and continue" offered.
    */
   wakeLocked: Record<string, boolean>
-  wakeErrorSaid: Record<string, string>
   /**
    * `preferGrid`: an alert's door (inbox, "done" cards) goes to the session's grid panel if it has one; the sidebar and
    * palette mean "that one, large". `reveal: false` keeps a folded project folded (#205); see `focusSession`.
