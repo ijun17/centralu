@@ -314,7 +314,7 @@ export class AskProjectFlow {
       return { ok: false, error: `${label} is still working on your last task in the session "${chosen.name}". Call ask_project with project "${project}", session "${chosen.id}" and no task to wait for it.` }
     }
     if (!opts.task) return { ok: false, error: `Give a task: what ${label} / ${chosen.name} should do.` }
-    if (!tasks) return { ok: false, error: 'Nothing was sent: this computer gives work to another machine only by mail, and its mail is not running.' }
+    if (!tasks) return { ok: false, error: NO_MAIL }
     // A machine that takes no work from this computer, or not yet: said before the card, which would ask for nothing
     const cannot = tasks.refusal(chosen.id)
     if (cannot) return { ok: false, error: `Could not hand the task to ${label}: ${cannot}` }
@@ -368,12 +368,13 @@ export class AskProjectFlow {
     const label = `${target.name} on ${target.hub}`
     const project = `${target.label}/${target.name}`
     if (target.away) return { ok: false, error: awayRefusal(target.hub, target.away, `${label} cannot be asked`) }
-    const prefix = `${target.label}.`
+    const tasks = this.host.linkedTasks
+    if (!tasks) return { ok: false, error: NO_MAIL }
     // Its session by its id there, or as this host prints it (an older build printed the hub's id in front)
     const given = opts.session?.trim()
-    const session = [prefix, `${target.hubId}.`].reduce((id, p) => (id?.startsWith(p) ? id.slice(p.length) : id), given)
+    const session = [`${target.label}.`, `${target.hubId}.`].reduce((id, p) => (id?.startsWith(p) ? id.slice(p.length) : id), given)
     const onHub = (a: { to: string }) => { const p = parseAddress(a.to); return p?.kind === 'session' && p.host === target.hubId }
-    const kept = opts.task ? [] : (this.host.linkedTasks?.asks(callerId) ?? []).filter((a) => onHub(a) && (!session || a.to === sessionAddress(target.hubId, session)))
+    const kept = opts.task ? [] : tasks.asks(callerId).filter((a) => onHub(a) && (!session || a.to === sessionAddress(target.hubId, session)))
     const [k] = kept
     if (k && kept.length === 1) {
       return this.awaitAsk(callerId, { taskId: k.taskId, sessionId: k.sessionId, child: k.to, sessionName: k.name, project }, null, signal)
@@ -392,10 +393,9 @@ export class AskProjectFlow {
     )
     if (!r.ok) return { ok: false, error: r.error }
     const there = sessionAddress(target.hubId, r.sessionId)
-    // A host with no mailbox has no printer: the form it prints is the one its ids read back as above
-    const base = { project, sessionId: this.host.linkedTasks?.shown(there) ?? `${prefix}${r.sessionId}`, sessionName: r.sessionName }
+    const base = { project, sessionId: tasks.shown(there), sessionName: r.sessionName }
     if (r.state === 'working') {
-      if (r.taskId && opts.task) this.host.linkedTasks?.keep(callerId, there, r.taskId, opts.task)
+      if (r.taskId && opts.task) tasks.keep(callerId, there, r.taskId, opts.task)
       return { ok: true, state: 'working', ...base, ...(r.notice ? { notice: r.notice } : {}) }
     }
     const answer = r.answer ?? ''
@@ -473,6 +473,8 @@ export class AskProjectFlow {
   }
 
 }
+
+const NO_MAIL = 'Nothing was sent: this computer gives work to another machine only by mail, and its mail is not running.'
 
 /**
  * What the caller reads of a turn that ended with the session's own background work still running (#721, #1457): the

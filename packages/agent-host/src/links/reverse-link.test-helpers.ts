@@ -334,7 +334,7 @@ export async function hubHost(
 
 /** A machine and a hub linked to it, connected, with the hub's switch for the machine on unless told otherwise; the hub delivers its mail, the asks' tasks */
 export async function rig(o: { on?: boolean; sessions?: readonly string[]; askTimeoutMs?: number; askHoldMaxMs?: number; preset?: SessionInfo['permissionPreset'] } = {}) {
-  const machine = await machineHost({ sessions: o.sessions, askTimeoutMs: o.askTimeoutMs, askHoldMaxMs: o.askHoldMaxMs })
+  const machine = await machineHost({ sessions: o.sessions, askTimeoutMs: o.askTimeoutMs, askHoldMaxMs: o.askHoldMaxMs, mail: 'delivered' })
   const hub = await hubHost(machine.port, { preset: o.preset, mail: 'delivered' })
   await eventually(() => hub.machine().status === 'connected')
   if (o.on !== false) {

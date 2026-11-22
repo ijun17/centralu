@@ -199,7 +199,7 @@ describe('a linked machine’s session asks the hub’s projects (#550)', () => 
 
 describe('several hubs, and builds from before the reverse direction (#550)', () => {
   it('shows each hub by its own name, and one whose link is down as not reachable', async () => {
-    const machine = await machineHost()
+    const machine = await machineHost({ mail: 'delivered' })
     const a = await hubHost(machine.port, { name: 'Hub mac', project: 'alpha', mail: 'delivered' })
     const b = await hubHost(machine.port, { name: 'Laptop', project: 'beta' })
     for (const h of [a, b]) {

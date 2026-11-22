@@ -160,18 +160,22 @@ describe("a machine session's ask_project of a hub's project (#1948 step 6)", { 
     expect(asks).not.toHaveBeenCalled()
   })
 
-  it('from a machine that keeps no copy (an older build), answers past the bound when it asks again', async () => {
+  it('from a machine that takes no tasks and keeps no copy (an older build), answers past the bound when it asks again', async () => {
     const { machine, hub, at, busy, taskTo, pairApproved } = await asksRig({ machineMail: false })
     pairApproved()
     const free = await busy(hub.mgr, 'h1')
-    expect(await machine.ask({ project: 'hub-project', task: 'review the branch' })).toMatchObject({ ok: true, state: 'working' })
+    // What an older build sends: the call alone, on the hub's connection
+    const client = [...(machine.server as unknown as { byClient: Map<number, unknown> }).byClient.keys()][0]!
+    const ask = (task?: string) =>
+      machine.server.call(client, 'hub.askProject', { caller: { sessionId: 'w1', name: 'w1', project: 'remote-project' }, project: 'hub-project', ...(task ? { task } : {}), depth: 1 }, { timeoutMs: 30_000 * SLOW })
+    expect(await ask('review the branch')).toMatchObject({ ok: true, state: 'working' })
     const task = taskTo(hub, at.hub('h1'), at.hub('m1.w1'))!
     free()
     await eventually(() => hub.store.mailbox.reportsOn(task.id).length === 1, 10_000 * SLOW)
     // Not passed to a machine that takes no tasks: its next ask reads it
     const [report] = hub.store.mailbox.reportsOn(task.id)
     expect(hub.store.mailbox.recipient(report!.id, at.hub('m1.w1'))?.deliveredAt).toBeNull()
-    expect(await machine.ask({ project: 'hub-project' })).toMatchObject({ ok: true, state: 'done', answer: expect.stringContaining('review the branch') })
+    expect(await ask()).toMatchObject({ ok: true, state: 'done', answer: expect.stringContaining('review the branch') })
     expect(hub.store.mailbox.recipient(report!.id, at.hub('m1.w1'))?.deliveredAt).not.toBeNull()
   })
 
