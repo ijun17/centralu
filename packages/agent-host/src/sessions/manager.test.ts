@@ -734,44 +734,46 @@ describe('while-alive facts are carried in the list', () => {
     expect(r).not.toHaveProperty('notReported')
   })
 
-  it('says a tool with no listUsage reports no limits, carrying what it says itself (#1623)', async () => {
-    const totals = { scope: 'all time', rows: [{ id: 'input', label: 'Input', value: 5, unit: 'tokens' }] }
-    const asks: unknown[] = []
-    Object.assign(adapter, {
-      listUsage: undefined,
-      localUsage: async (ask?: unknown) => (asks.push(ask), { plan: 'Free', totals }),
-    })
-    const r = await rpc('agents.usage', { tool: 'claude' })
-    expect(r).toMatchObject({ supported: false, notReported: true, usage: { plan: 'Free', windows: [], daily: [], totals } })
-    expect(r).toHaveProperty('reason', 'Claude Code does not report usage limits')
-    expect(r).not.toHaveProperty('provisional')
-    // The adapter's reader keeps what it read; the host keeps nothing of its own, so each ask goes to it
-    await rpc('agents.usage', { tool: 'claude' })
-    expect(asks).toHaveLength(2)
-    // A tool that has listUsage reports limits, whatever its snapshot says
-    Object.assign(adapter, { listUsage: async () => ({ plan: 'max', windows: [], daily: [] }) })
-    const limited = await rpc('agents.usage', { tool: 'claude' })
-    expect(limited).toMatchObject({ supported: true, usage: { plan: 'max' } })
-    expect(limited).not.toHaveProperty('notReported')
-  })
-
-  it('says a tool whose listUsage answers no limits for its plan reports none, read once a minute; not a read that failed after it (#2459)', async () => {
+  it('has one definition of a tool that reports no limits: no listUsage, or one that answers no limits for the plan, read once a minute (#1623, #2459)', async () => {
     let now = 1_000_000
     const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
     try {
+      const totals = { scope: 'all time', rows: [{ id: 'input', label: 'Input', value: 5, unit: 'tokens' }] }
+      const asks: unknown[] = []
+      Object.assign(adapter, {
+        listUsage: undefined,
+        localUsage: async (ask?: unknown) => (asks.push(ask), { plan: 'Free', totals }),
+      })
+      const r = await rpc('agents.usage', { tool: 'claude' })
+      expect(r).toMatchObject({ supported: false, notReported: true, usage: { plan: 'Free', windows: [], daily: [], totals } })
+      expect(r).toHaveProperty('reason', 'Claude Code does not report usage limits')
+      expect(r).not.toHaveProperty('provisional')
+      // The adapter's reader keeps what it read; the host keeps nothing of its own, so each ask goes to it
+      await rpc('agents.usage', { tool: 'claude' })
+      expect(asks).toHaveLength(2)
+
+      // A tool that has listUsage reports limits, whatever its snapshot says
       let reads = 0
-      let answer: () => Promise<unknown> = async () => NO_LIMITS
-      Object.assign(adapter, { listUsage: () => (reads++, answer()), localUsage: async () => ({ plan: 'Free' }) })
+      let answer: () => Promise<unknown> = async () => ({ plan: 'max', windows: [], daily: [] })
+      Object.assign(adapter, { listUsage: () => (reads++, answer()) })
+      const limited = await rpc('agents.usage', { tool: 'claude' })
+      expect(limited).toMatchObject({ supported: true, usage: { plan: 'max' } })
+      expect(limited).not.toHaveProperty('notReported')
+
+      // Unless it answers that the plan has none (Cursor's Free plan): said as above, with what the tool says itself
+      now += 61_000
+      answer = async () => NO_LIMITS
       for (let i = 0; i < 2; i++) {
         expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({
           supported: false,
           reason: 'Claude Code does not report usage limits',
           notReported: true,
-          usage: { plan: 'Free', windows: [] },
+          usage: { plan: 'Free', windows: [], totals },
         })
       }
-      expect(reads).toBe(1)
+      expect(reads).toBe(2)
 
+      // A read that fails after it is a failure, not "no limits"
       now += 61_000
       answer = async () => Promise.reject(new Error('Cursor did not share its usage'))
       const failed = await rpc('agents.usage', { tool: 'claude' })
