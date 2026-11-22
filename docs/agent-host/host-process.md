@@ -81,7 +81,14 @@ children leave it silently, and what a ConPTY starts leaves it too. At start the
 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` and no breakaway, and holds its only handle (`lifecycle/work-job.ts`, the `work
 job` start step; one PowerShell, run while the store opens). From then on nothing it starts can leave: libuv's job ends
 what can no longer leave it when the host ends, and the job's own flag ends the rest (the test reads the flag back).
-Breakaway stays off because Git for Windows' sh asks for it, and a hook's children then outlived the host.
+Breakaway stays off because Git for Windows' sh asks for it (anything under Git Bash too, as Claude Code's Bash tool is on Windows), and a hook's children then outlived the host: its fork leaves a hook's `sleep` with an exited parent that no tree kill or sweep finds.
+
+The host puts **itself** into the job, not each child by pid: a child added after its spawn may already have started its own. The handle is not
+inheritable, or a child holding it would keep the job alive past the host. Node has no Job Object API and a native addon is a build step per
+architecture for one call; the window could join the job, but `pnpm dev`, e2e and `serve` start the host without it, so the one PowerShell
+(0.3–0.8 s) does it. A host already in a job (a launcher's under `pnpm dev`, a CI runner's) nests this one inside it (measured under a Node
+parent). The next host of a swap is started by the window, so it is in no job of this one's. There is no job per run: each would cost one
+PowerShell per program started.
 
 Terminals are the person's, not the host's work: what is started in one (`code .`, the browser `claude auth login`
 opens) must outlive a host that crashes. They are started by a broker the host starts **before** it joins
