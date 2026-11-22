@@ -156,13 +156,15 @@ function toolItem(
 function appendText(items: ChatItem[], kind: 'assistant' | 'reasoning', e: { seq?: number; text: string }): ChatItem[] {
   const last = items[items.length - 1]
   if (continues(last, kind, e.seq)) {
-    // A message whose empty chunk came unnumbered takes the first number learned
+    // A message whose first chunk came unnumbered takes the first number learned
     return replaceAt(items, items.length - 1, {
       ...last,
       text: last.text + e.text,
       ...(last.storedSeq === undefined ? stored(e.seq) : {}),
     })
   }
+  // As the host's record (`persistMessage`): an empty chunk starts no item, or it is a bubble with nothing in it (#2447)
+  if (!e.text) return items
   return [...items, { kind, seq: ++chatSeq, ...stored(e.seq), text: e.text }]
 }
 

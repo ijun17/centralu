@@ -176,7 +176,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       const item = asObj(paramsOf(n, 'item/completed').item)
       const type = str(item.type)
       if (type === 'agentMessage') {
-        // A fallback for when the streamed deltas were missed (empty when deltas already arrived, to avoid duplicating)
+        // Empty, as its deltas carried the text; the session fills it in when none did (`StreamedMessages`, #2447)
         return str(item.text) ? [{ type: 'message_delta', sessionId, role: 'assistant', text: '', ...messageIdOf(item.id) }] : []
       }
       if (type === 'userMessage' || type === 'reasoning') return []
