@@ -173,9 +173,12 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   after its base is moved to the default branch; the lowers are then closed with "Landed in #N".
   Refuses at once, without maintain or admin, for a draft or a closed pull
   request, for a top based on a branch none of its lowers has, for a top whose head has no `pre-pr` status (below,
-  "pre-pr's status"), and for a top whose squash subject (`Title (#N)`,
+  "pre-pr's status"), for a top whose Closes section neither closes an issue with a keyword nor says `None: <why>`
+  (`closesProblems`, rules.mjs, #2449; the fix is an edit of the description), for a stack whose top's Closes section leaves out
+  an issue that a lower's closes (the lowers close as landed, so only the top's keywords close anything), and for a top whose squash subject (`Title (#N)`,
   the stack lands through its top) is over 72 characters (`kind: 'subject'`, "Shorten the title", nothing
-  queued: #1593, as `integrate` does, #1222). A pull request is in one item only.
+  queued: #1593, as `integrate` does, #1222). A keyword before several references (`Closes #a #b`, which closes #a only,
+  #2194) is a warning (`multiClosingWarnings`). A pull request is in one item only.
   `owner` names the queuing session (default a new id); the answer gives the watch command. `author`
   names the PR's author session, the one that opened or owns it and that a conflict is handed to
   (#1182): default the caller's own, which is the `owner` it gives (an app server cannot tell which
@@ -976,7 +979,7 @@ looked into).
 
 A change whose risk tier is **auto** (docs, fixture data, UI assets: `.centralu/tiers.json`) lands without
 its session opening a pull request. The session pushes a branch made from main and hands it over with
-**`integrate`** (`branch`, `title`, `why`, `notExercised`, `whatChanged?`, `verified?`, `closes?`, `owner?`;
+**`integrate`** (`branch`, `title`, `why`, `notExercised`, `closes`, `whatChanged?`, `verified?`, `owner?`;
 model only, in `queue-tools.mjs`; the judge in `queue-integrate.mjs`).
 
 - **Main is not protected** (no branch protection, no rulesets, 2026-10-19), but the integrator never pushes
@@ -993,7 +996,8 @@ model only, in `queue-tools.mjs`; the judge in `queue-integrate.mjs`).
   else that keeps it from being judged: deep (`unjudged`), so refused.
 - **Refused**, with nothing written: no maintain or admin (then `open_pr` and `mark_ready`), a fork's branch,
   the default branch, a title whose squash subject would be over 72 characters (#1222: before any batch), a
-  description the template refuses (an `open_pr` dry run), a branch not on GitHub, a branch with nothing over
+  description the template refuses (an `open_pr` dry run, `closes` as `open_pr` takes it), an open pull request taken as the
+  record whose own Closes section closes nothing and gives no reason (#2449), a branch not on GitHub, a branch with nothing over
   main, and any tier but auto, with the files and rules that put it there and the normal path (`open_pr`
   after the review its tier asks for, then `queue_merge`).
 - **The record is a draft until the squash** (#1259 review): GitHub refuses to merge a draft, and so does
@@ -1076,8 +1080,14 @@ and refuses with every reason at once, sending nothing.
   A bare `#N` attributed next to another repository warns: write `owner/repo#N` before publishing.
 - **`file_issue`** (`title`, `body`, `labels?`, `repo?`, `dryRun?`) files through `gh api … /issues`.
 - **`open_pr`** fills the template's `## ` headings from `why`, `whatChanged`, `verified`,
-  `situationsChecked`, `usability`, `notExercised`, `closes` or `sections` (any heading by name, any spelling), drops a
-  heading left out (the template says so) and refuses a name the template does not have. The Closes section is rewritten to one keyword per issue (`Closes #a, #b` becomes `Closes #a` and `Closes #b`, `closingPerIssue` in rules.mjs), since GitHub links a keyword to the one reference after it and `Closes #a #b` left #b open (#2194); a list item stays one (`- Closes #a` then `- Closes #b`), a fenced block is left alone, and a list that does not end its clause (`Closes #a, #b in one go`) is left as written with a warning, as is any keyword before two or more references, issue URLs included (`multiClosingWarnings`, also what `queue_merge` warns of in a description still having one). **Not
+  `situationsChecked`, `usability`, `notExercised` or `sections` (any heading by name, any spelling), drops a
+  heading left out (the template says so) and refuses a name the template does not have. **Closes** is written from `closes`
+  (#2449: #2448 wrote "2447" under Closes, GitHub links an issue only after a keyword, and the issue stayed open): a list of
+  the issues merging it closes (`2447`, `"#2448"`, `owner/repo#N`, an issue's URL), each written `Closes #N` on a line of its
+  own, since GitHub links a keyword to the one reference after it (#2194); or `{ none: "<why>" }`, written `None: <why>` (a
+  sweep, part of #N). Text, no `closes`, an empty reason or a Closes given in `sections` is refused. Opened into the default
+  branch, it reads GitHub's `closingIssuesReferences` back and says what the merge closes, with a warning for an issue GitHub
+  does not link (one it cannot see, or a pull request); a stacked one links nothing until its top lands (`queue_merge`). **Not
   exercised** must name something ("Nothing" is a real answer; empty, "N/A", "TBD" are not); a
   heading whose guidance says "keep the heading" (Situations checked, Usability) must not be empty. The title must pass
   the commit subject rules, since it becomes the squash subject; a title that will run past the

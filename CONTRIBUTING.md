@@ -552,6 +552,10 @@ pull request carries its own record in **Verified**; neither is repeated in pull
   Not exercised / Closes).
   **Not exercised** names the surfaces you did not run: the packaged app, another platform, a
   live model session, a logged-out tool.
+  **Closes** names each issue the merge closes with its own keyword (`Closes #N`), or says
+  `None: <why>` (a sweep, part of #N): an issue named without a keyword stays open after the
+  merge. `open_pr` writes the keywords from `closes`, and `queue_merge` refuses a section that
+  does neither.
 - **A move-only refactor lands when nothing is in its way.** A pull request that relocates or
   splits files (moving a module, splitting a test file) conflicts with every open pull request that
   touches those files, and each of them has to be redone by hand. Land it when the merge queue is

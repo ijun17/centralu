@@ -293,7 +293,7 @@ export const ghRun = (conclusion: string | null, attempt = 1, sha = SHA, extra: 
 export const ghPr = (number: number, extra: Record<string, unknown> = {}) => ({
   number,
   title: `feat(apps): change ${number}`,
-  body: '## Why\n\nBecause.\n\n## Closes\n\nRefs #956\n\nCo-Authored-By: Someone <x@example.com>',
+  body: '## Why\n\nBecause.\n\n## Closes\n\nCloses #956\n\nCo-Authored-By: Someone <x@example.com>',
   state: 'OPEN',
   isDraft: false,
   mergeable: 'MERGEABLE',

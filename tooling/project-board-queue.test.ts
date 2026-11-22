@@ -1423,6 +1423,30 @@ describe('the merge queue keeps the board app running while it has work (#1236)'
     expect((await call('queue_merge', { pr: 77, owner: 'tester' })).text).not.toContain('Warning')
   })
 
+  // #2449: #2448's Closes section said "2447" with no keyword, and its issue stayed open after it landed
+  it('refuses a pull request whose Closes section closes no issue and gives no reason, and a stack whose top leaves out what a lower closes', async () => {
+    runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11)] }, runs: { [SHA]: [ghRun(null)] } }))
+    for (const body of ['## Why\n\nBecause.', '## Closes\n\n2447', '## Closes\n\nNone:']) {
+      patchGh((st) => (st.prs['77'] = ghPr(77, { body })))
+      const r = await call('queue_merge', { pr: 77, owner: 'tester' })
+      expect(r.isError, body).toBe(true)
+      expect(r.text).toContain('Write "Closes #N", one line per issue, or "None: <why it closes no issue>"')
+    }
+    patchGh((st) => (st.prs['77'] = ghPr(77, { body: '## Closes\n\nNone: part of #2410' })))
+    expect((await call('queue_merge', { pr: 77, owner: 'tester' })).isError).toBe(false)
+    await call('unqueue', { pr: 77 })
+    // A stack lands as its top's squash: a lower's keywords close nothing
+    patchGh((st) => {
+      st.prs['76'] = ghPr(76, { headRefName: 'feat/low', body: '## Closes\n\nCloses #5\nCloses #956' })
+      st.prs['77'] = ghPr(77, { baseRefName: 'feat/low' })
+    })
+    const stack = await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })
+    expect(stack.isError).toBe(true)
+    expect(stack.text).toContain(`#76 closes #5, and lands as #77's squash, whose Closes section does not: add "Closes #5" to #77's.`)
+    patchGh((st) => (st.prs['77'].body = '## Closes\n\nCloses #956\nCloses #5'))
+    expect((await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })).isError).toBe(false)
+  })
+
   it('holds busy from the moment a pull request is queued until it lands, and releases it then', async () => {
     const r = runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11), ghCheck('windows tests', 'success', 12)] }, runs: { [SHA]: [ghRun(null)] } }))
     const busy = () => r.list().find((a) => a.appId === 'project-board')?.busy

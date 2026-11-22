@@ -8,6 +8,9 @@ import { ownProcesses } from '../packages/agent-host/src/process.test-helpers.js
 import { gitWrapper, removeFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import {
+  closedIssues,
+  closesProblems,
+  closesSection,
   commitProblems,
   englishProblems,
   fillTemplate,
@@ -138,48 +141,23 @@ describe('the rules for public text', () => {
     expect(r.body).not.toMatch(/<!--/)
   })
 
-  // #2194: #2182 wrote "Closes #2158 #2159 …" and GitHub closed the first only
+  // #2449: #2448 wrote "2447" under Closes, and GitHub closed nothing
   const URL = (n: number) => `https://github.com/ijun17/centralu/issues/${n}`
-  it.each([
-    ['Closes #1 #2 #3', 'Closes #1\nCloses #2\nCloses #3'],
-    ['Closes #1, #2 and #3.', 'Closes #1\nCloses #2\nCloses #3.'],
-    ['fixes: #4 & #5', 'fixes: #4\nfixes: #5'],
-    ['Closes owner/repo#7 #8', 'Closes owner/repo#7\nCloses #8'],
-    [`Closes ${URL(1)} ${URL(2)}`, `Closes ${URL(1)}\nCloses ${URL(2)}`],
-    // A list item stays one, at its own indent, and a fenced block is left as written
-    ['- Closes #1 #2', '- Closes #1\n- Closes #2'],
-    ['* Fixes #1, #2\n  - Resolves #3 #4\n3. Closes #5 #6', '* Fixes #1\n* Fixes #2\n  - Resolves #3\n  - Resolves #4\n3. Closes #5\n3. Closes #6'],
-    ['Closes #1 #2\n```\nCloses #3 #4\n```\nCloses #5 #6', 'Closes #1\nCloses #2\n```\nCloses #3 #4\n```\nCloses #5\nCloses #6'],
-  ])('writes each issue of the Closes section with its own keyword: %j', (given, written) => {
-    const r = fillTemplate(TEMPLATE, { ...SECTIONS, closes: given })
-    expect(r.problems).toEqual([])
-    expect(r.body.endsWith(`## Closes\n\n${written}`)).toBe(true)
-    // The same through a section keyed by the heading, as open_pr's `sections` give it
-    const { closes: _, ...rest } = SECTIONS
-    expect(fillTemplate(TEMPLATE, { ...rest, Closes: given }).body).toBe(r.body)
+  const described = (closes: string) => `## Why\n\nBecause.\n\n## Closes\n\n${closes}\n\n## Not exercised\n\nNothing`
+  it('reads what a description closes: one issue per keyword, as GitHub links it, none in code', () => {
+    expect(closedIssues('Closes #1\nfixes: #2\nResolves ijun17/centralu#3', 'ijun17/centralu')).toEqual(['#1', '#2', '#3'])
+    expect(closedIssues(`Closes ${URL(4)}\nCloses owner/repo#5\nCloses #1 #6`, 'ijun17/centralu')).toEqual(['#4', 'owner/repo#5', '#1'])
+    expect(closedIssues('Refs #1, part of #2\n```\nCloses #3\n```\n`Closes #4`', 'ijun17/centralu')).toEqual([])
+    expect(closesSection(described('Closes #1'))).toBe('Closes #1')
+    expect(closesSection('## Why\n\nCloses #1')).toBeNull()
   })
 
-  it('leaves a Closes section alone that is one issue, one keyword each, or prose, and warns of a list it did not rewrite', () => {
-    const fill = (closes: string) => {
-      const r = fillTemplate(TEMPLATE, { ...SECTIONS, closes })
-      return { closes: r.body.split('## Closes\n\n')[1], warnings: r.warnings }
-    }
-    // A list is rewritten, so what stays is not left alone by a rewrite that matches everything
-    expect(fill('Closes #1 #2')).toEqual({ closes: 'Closes #1\nCloses #2', warnings: [] })
-    for (const same of ['Closes #1\nCloses #2', 'Closes #7', 'Refs #1 #2', 'no issue, small enough to go straight to a PR (#1 #2 are context)', '```\nCloses #1 #2\n```', '~~~md\nCloses #3 #4', '`Closes #1 #2` closes the first only', 'the form ``Fixes #3, #4`` is read by GitHub as one'])
-      expect(fill(same)).toEqual({ closes: same, warnings: [] })
-    // A keyword before two or more references that is not a clause of its own: GitHub closes the first only, so it is said
-    for (const [same, quoted] of [
-      ['Closes #1 and #2 stays open as a follow-up', 'Closes #1 and #2'],
-      ['Fixes #1 #2 (both)', 'Fixes #1 #2'],
-      ['Closes #1, #2 in one go', 'Closes #1, #2'],
-      [`Closes ${URL(1)}, ${URL(2)} in one go`, `Closes ${URL(1)}, ${URL(2)}`],
-    ] as const) {
-      const got = fill(same)
-      expect(got.closes).toBe(same)
-      expect(got.warnings).toHaveLength(1)
-      expect(got.warnings.join()).toContain(`The Closes section says "${quoted}"`)
-    }
+  it('refuses a Closes section that closes no issue with a keyword and gives no reason, and says how to write it', () => {
+    for (const ok of ['Closes #2447', 'Fixes #1\nRefs #2', 'None: part of #2410', 'none: a sweep']) expect(closesProblems(described(ok), '#9')).toEqual([])
+    for (const bad of ['2447', '#2408', 'Refs #2386 (no issue of its own)', 'None', 'None:', '`Closes #1`'])
+      expect(closesProblems(described(bad), '#9')).toEqual([expect.stringContaining("#9's Closes section")])
+    expect(closesProblems('## Why\n\nFixes #1', '#9')).toEqual(['#9 has no Closes section. Write "Closes #N", one line per issue, or "None: <why it closes no issue>" (a sweep, part of #N).'])
+    expect(closesProblems(described('2447'), '#9')[0]).toContain('("2447") closes no issue: GitHub closes one only after a keyword.')
   })
 
   it('warns of a hand-written description that closes several issues after one keyword', () => {
@@ -290,7 +268,7 @@ let gitDirs: string[] = []
 let rt: ExternalApps | null = null
 let gh: FakeGh
 
-type Pr = { number: number; state: string; headRefName: string; baseRefName: string; headRefOid: string; mergeCommit: { oid: string } | null; isCrossRepository: boolean; title: string; body: string; isDraft: boolean; mergeable: string; url: string; labels?: { name: string }[] }
+type Pr = { number: number; state: string; headRefName: string; baseRefName: string; headRefOid: string; mergeCommit: { oid: string } | null; isCrossRepository: boolean; title: string; body: string; isDraft: boolean; mergeable: string; url: string; labels?: { name: string }[]; closingIssuesReferences?: { number: number; repository: { name: string; owner: { login: string } } }[] }
 type Status = { state: string; context: string; description: string }
 type State = { mode: string; files: Record<string, string | null>; prs: Record<string, Pr>; prExists?: boolean; labelsRefused?: boolean; statusRefused?: boolean; statuses?: Record<string, Status[]> }
 
@@ -465,7 +443,7 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
     situationsChecked: 'Two at once: each call opens its own.',
     usability: 'n/a',
     notExercised: 'The packaged app.',
-    closes: 'Refs #386',
+    closes: { none: 'Refs #386' },
     // pnpm pre-pr has its own tests below, on a checkout made for them
     skipPrePr: 'The template is what these tests are about.',
   }
@@ -482,10 +460,35 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
       head: 'feat/tools',
       base: 'main',
       draft: false,
-      body: '## Why\n\nProcedure errors.\n\n## What changed\n\nTools.\n\n## Verified\n\nTests.\n\n`pnpm pre-pr` was not run: The template is what these tests are about.\nTier: deep (pnpm pre-pr was not run, so the paths were not judged).\n\n## Situations checked\n\nTwo at once: each call opens its own.\n\n## Usability\n\nn/a\n\n## Not exercised\n\nThe packaged app.\n\n## Closes\n\nRefs #386',
+      body: '## Why\n\nProcedure errors.\n\n## What changed\n\nTools.\n\n## Verified\n\nTests.\n\n`pnpm pre-pr` was not run: The template is what these tests are about.\nTier: deep (pnpm pre-pr was not run, so the paths were not judged).\n\n## Situations checked\n\nTwo at once: each call opens its own.\n\n## Usability\n\nn/a\n\n## Not exercised\n\nThe packaged app.\n\n## Closes\n\nNone: Refs #386',
     })
     // The template was read from the base branch, the place a pull request cannot change for itself
     expect(ghCalls().find((c) => c.args.some((a) => a.includes('/contents/')))!.args[3]).toBe('repos/ijun17/centralu/contents/.github/PULL_REQUEST_TEMPLATE.md?ref=main')
+  })
+
+  // #2449: #2448 gave "2447" for closes, GitHub linked nothing, and the issue stayed open after the merge
+  it('writes a keyword for each issue closes names, says what GitHub will close, and refuses what it cannot write', async () => {
+    const linked = { number: 2447, repository: { name: 'centralu', owner: { login: 'ijun17' } } }
+    patchState((s) => (s.prs['900'] = pr(900, { closingIssuesReferences: [linked] })))
+    runtime()
+    const r = await call('open_pr', { ...PR, closes: [2447, '#2448', 2447] })
+    expect(r.isError, r.text).toBe(false)
+    expect(JSON.parse(writes()[0]!.stdin!).body).toMatch(/## Closes\n\nCloses #2447\nCloses #2448$/)
+    expect(r.text).toContain('pull/900 Closes #2447 on merge. Labelled tier:deep.')
+    expect(r.text).toContain('GitHub links only #2447 to close on merge, not #2448: check that each is an open issue it can see.')
+    const sent = writes().length
+    for (const [closes, said] of [
+      [undefined, 'closes is missing'],
+      ['2447', 'closes takes the issues as a list ([2447, "#2448"]) or { none: "<why>" }, not text ("2447").'],
+      [{ none: '  ' }, 'closes.none needs the reason it closes no issue'],
+    ] as const) {
+      const refused = await call('open_pr', { ...PR, closes, dryRun: true })
+      expect(refused.isError, JSON.stringify(closes)).toBe(true)
+      expect(refused.text).toContain(said)
+    }
+    const hand = await call('open_pr', { ...PR, sections: { Closes: 'Closes #1' }, dryRun: true })
+    expect(hand.text).toContain('Give what it closes as closes, not as sections.Closes')
+    expect(writes()).toHaveLength(sent)
   })
 
   // #1066: a stack's lower pull requests are drafts, and build.yml runs no CI for a draft
@@ -965,7 +968,7 @@ const PR_PLAIN = {
   situationsChecked: 'Two at once: each call opens its own.',
   usability: 'n/a',
   notExercised: 'The packaged app.',
-  closes: 'Refs #386',
+  closes: { none: 'Refs #386' },
 }
 
 describe('open_pr runs pnpm pre-pr before it opens anything', { timeout: 60_000 * SLOW }, () => {
