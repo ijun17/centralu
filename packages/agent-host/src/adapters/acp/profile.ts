@@ -1,5 +1,5 @@
-import type { AdapterCapabilities, ToolDescriptor, UsageSnapshot } from '@cc/protocol'
-import type { AgentSpawnSpec, CreateSessionOpts, DetectResult, LocalUsage } from '../contract.js'
+import type { AdapterCapabilities, ToolDescriptor } from '@cc/protocol'
+import type { AgentSpawnSpec, CreateSessionOpts, DetectResult, LimitsAnswer, LocalUsage } from '../contract.js'
 import type { AdapterSurface } from '../contract/surface.js'
 import type { RequestPermission, ToolCallFields } from './wire.js'
 
@@ -40,7 +40,7 @@ export type AcpProfile = {
    */
   centraluToolOf?(call: ToolCallFields): string | null
   /** The tool's limits (`AgentAdapter.listUsage`); absent, the tool reports none */
-  listUsage?(): Promise<UsageSnapshot>
+  listUsage?(): Promise<LimitsAnswer>
   /**
    * What the tool says about its usage, from its own command (#1623): its plan, the totals it counted. Absent: it says
    * nothing. The reader keeps its own answer and never waits long (`adapters/usage-read.ts`).

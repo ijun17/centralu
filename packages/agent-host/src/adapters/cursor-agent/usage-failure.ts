@@ -8,7 +8,6 @@ const REASONS = {
   refused: 'Cursor did not share its usage',
   unreachable: "Cursor's usage could not be reached",
   unreadable: "Cursor's usage answer could not be read",
-  'no-limit': 'Cursor does not report a limit for this plan',
 } as const
 
 export type CursorUsageFailureKind = keyof typeof REASONS
