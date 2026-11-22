@@ -31,7 +31,7 @@ export type AppId = z.infer<typeof AppId>
 export const PermissionPreset = z.enum(['safe', 'normal', 'edits', 'auto'])
 export type PermissionPreset = z.infer<typeof PermissionPreset>
 
-/** The preset of a start that names none (docs/security-boundaries/presets.md): the start names it, so a machine's "Allow auto" switch does not apply */
+/** The preset of a start that names none (docs/security-boundaries/presets.md): the start names it, so "Allow auto from a linked computer" does not apply */
 export function defaultPresetFor(project: { readonly trusted: boolean }): PermissionPreset {
   return project.trusted ? 'auto' : 'normal'
 }
