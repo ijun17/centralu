@@ -1450,11 +1450,18 @@ describe('the merge queue keeps the board app running while it has work (#1236)'
     expect((await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })).isError).toBe(false)
   })
 
-  // Another repository's template may ask for no Closes section: then none is asked for
-  it('queues a pull request without a Closes section when the template has no Closes heading', async () => {
+  // Another repository's template may ask for no Closes section: then none is asked for, but a stack's top still carries what its lowers close
+  it('asks for no Closes section when the template has no Closes heading, and still for what a stack lower closes', async () => {
     runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11)] }, runs: { [SHA]: [ghRun(null)] }, files: { '.github/PULL_REQUEST_TEMPLATE.md': '## Why\n\n## What changed\n' } }))
-    patchGh((st) => (st.prs['77'] = ghPr(77, { body: '## Why\n\nBecause.' })))
-    expect((await call('queue_merge', { pr: 77, owner: 'tester' })).isError).toBe(false)
+    patchGh((st) => {
+      st.prs['76'] = ghPr(76, { headRefName: 'feat/low', body: '## Why\n\nFixes #5' })
+      st.prs['77'] = ghPr(77, { baseRefName: 'feat/low', body: '## Why\n\nBecause.' })
+    })
+    const stack = await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })
+    expect(stack.isError).toBe(true)
+    expect(stack.text).toBe(`Not queued: #76 closes #5, and lands as #77's squash, whose description does not: add "Closes #5" to #77's Closes section, or take it out of #76's description if it should stay open.`)
+    patchGh((st) => (st.prs['77'].body = '## Why\n\nBecause. Fixes #5'))
+    expect((await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })).isError).toBe(false)
   })
 
   it('holds busy from the moment a pull request is queued until it lands, and releases it then', async () => {
