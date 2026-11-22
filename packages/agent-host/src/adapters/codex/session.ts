@@ -93,6 +93,7 @@ export class CodexSession implements SessionHandle {
 
   /** Which reasoning item the open reasoning row last grew from, so a second item's summary does not run into the first's (#1464) */
   private readonly reasoningParts = new ReasoningParts()
+  /** Which agentMessage items streamed their text, so one that came only whole keeps it (#2447) */
   private readonly streamedMessages = new StreamedMessages()
 
   setPermissionPreset(preset: PermissionPreset): void {

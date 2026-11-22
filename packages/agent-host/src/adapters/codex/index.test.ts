@@ -391,20 +391,20 @@ describe('codex agent messages that come whole', () => {
     expect(said()).toEqual([['msg_1', 'Running the tests now.']])
   })
 
-  it('a completed item whose deltas carried the text says it once; one in a later turn with none says its own', async () => {
+  it('a completed item whose deltas carried the text says it once', async () => {
     const { say, completed, said } = await live()
     say('item/agentMessage/delta', { itemId: 'msg_1', delta: 'Done.' })
     completed('msg_1', 'Done.')
-    say('item/agentMessage/delta', { itemId: 'msg_2', delta: 'Half' })
-    say('turn/completed', { turn: { id: 't1', status: 'interrupted', items: [], error: null } })
-    completed('msg_3', 'Next turn.')
-    expect(said()).toEqual([['msg_1', 'Done.'], ['msg_1', ''], ['msg_2', 'Half'], ['msg_3', 'Next turn.']])
+    completed('msg_2', 'And one more.')
+    expect(said()).toEqual([['msg_1', 'Done.'], ['msg_1', ''], ['msg_2', 'And one more.']])
   })
 
-  it('after a delta that names no item, no completed item of that turn repeats the text', async () => {
+  it('after a delta that names no item, no completed item of that turn repeats the text; the next turn fills again', async () => {
     const { say, completed, said } = await live()
     say('item/agentMessage/delta', { delta: 'Old CLI.' })
     completed('msg_1', 'Old CLI.')
-    expect(said()).toEqual([[undefined, 'Old CLI.'], ['msg_1', '']])
+    say('turn/completed', { turn: { id: 't1', status: 'completed', items: [], error: null } })
+    completed('msg_2', 'Next turn.')
+    expect(said()).toEqual([[undefined, 'Old CLI.'], ['msg_1', ''], ['msg_2', 'Next turn.']])
   })
 })
