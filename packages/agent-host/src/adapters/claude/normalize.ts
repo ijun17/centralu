@@ -7,6 +7,7 @@ import { UnmappedTypes } from '../unmapped.js'
 import { RetryActivity } from '../retry-activity.js'
 import { ClaudeBackgroundTracker } from './background-tracker.js'
 import { CLAUDE_DESCRIPTOR } from './descriptor.js'
+import { notSignedIn } from '../core/tool-process.js'
 import { activeGoalEvents, conversationResetEvents, systemEvents } from './cli-messages.js'
 import { ClaudeGoalTracker } from './goal-tracker.js'
 import type { SDKAssistantMessage, SDKModelRefusalFallbackMessage, SDKModelRefusalNoFallbackMessage } from '@anthropic-ai/claude-agent-sdk'
@@ -29,7 +30,7 @@ export { ClaudeBackgroundTracker, ClaudeGoalTracker, approvalDetail, toolSummary
 const NOT_LOGGED_IN = /^Not logged in\b/
 const SIGNED_OUT = {
   code: 'not_logged_in' as const,
-  message: `${CLAUDE_DESCRIPTOR.label} is not signed in. Run ${CLAUDE_DESCRIPTOR.login} in a terminal.`,
+  message: notSignedIn(CLAUDE_DESCRIPTOR),
   retryable: false,
 }
 

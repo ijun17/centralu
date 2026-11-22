@@ -83,7 +83,8 @@ async function turnCosts(w: ReturnType<typeof world>, s: Awaited<ReturnType<Retu
 describe('the ACP session against a scripted agent', () => {
   it('never calls authenticate, and says the tool is not logged in', async () => {
     const w = world((method) => (method === 'session/new' ? { error: { code: -32000, message: 'Authentication required' } } : base(method, {}, null as never)))
-    await expect(w.start()).rejects.toMatchObject({ code: 'not_logged_in' })
+    // In the tool line's words, as every tool says it
+    await expect(w.start()).rejects.toMatchObject({ code: 'not_logged_in', message: 'Fake is not signed in. Run log in in a terminal.' })
     expect(w.peers[0]!.methods()).toEqual(['initialize', 'session/new'])
   })
 

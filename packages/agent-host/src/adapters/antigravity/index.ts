@@ -12,6 +12,7 @@ import { AgySetup, type AgySetupDeps } from './setup.js'
 import { agyCentraluTool, agyStderrLine, isAgyQuestion, readAgyCall } from './shape.js'
 import { agentSignInUrl, googleAuthorizeUrl } from './sign-in.js'
 import { AGY_SURFACE } from './surface.js'
+import { notSignedIn } from '../core/tool-process.js'
 
 /**
  * What Google's Antigravity agent through ACP can keep (docs/plans/antigravity-adapter.md §6), measured on 1.4.3:
@@ -116,9 +117,9 @@ export function antigravityProfile(deps: AgyProfileDeps = {}): AgyProfile {
       isQuestion: isAgyQuestion,
       editRunsAsNewCall: true,
       stderrLine: agyStderrLine,
-      signedOut(label) {
+      signedOut() {
         setup.noteSignedOut()
-        return rpcError(`${label} is not signed in. Sign in with Google from its line in Centralu, then try again.`, 'not_logged_in')
+        return rpcError(notSignedIn(DESCRIPTOR, 'centralu'), 'not_logged_in')
       },
     },
   }
