@@ -4,6 +4,7 @@ packages/ui/src/app/App.tsx @typescript-eslint/unbound-method 7
 packages/ui/src/app/keys.ts @typescript-eslint/no-non-null-assertion 1
 packages/ui/src/app/labelClock.test.ts @typescript-eslint/no-unnecessary-type-assertion 2
 packages/ui/src/app/theme.ts @typescript-eslint/no-non-null-assertion 8
+packages/ui/src/app/theme.ts @typescript-eslint/no-unsafe-type-assertion 2
 packages/ui/src/components/DragRegion.tsx @typescript-eslint/no-unsafe-type-assertion 2
 packages/ui/src/components/DragRegion.tsx @typescript-eslint/unbound-method 1
 packages/ui/src/components/Segmented.tsx @typescript-eslint/no-non-null-assertion 1

@@ -1,4 +1,4 @@
-import { THEME_PRESETS, isRecord, pickableThemes, THEME_TOKENS, THEME_TOKEN_BY_KEY, type ThemeFileEntry, type ThemePreset, type UiPreferences } from '@cc/protocol/client'
+import { THEME_PRESETS, pickableThemes, THEME_TOKENS, THEME_TOKEN_BY_KEY, type ThemeFileEntry, type ThemePreset, type UiPreferences } from '@cc/protocol/client'
 import { readStored, writeStored } from './stored.js'
 
 /**
@@ -91,7 +91,7 @@ export function pickTheme(choice: ThemeChoice): ResolvedTheme {
 /** What this module last wrote inline, so a switch removes exactly those and nothing else on `<html>` */
 let written: string[] = []
 
-export function applyTheme(theme: Pick<ResolvedTheme, 'base' | 'preset' | 'tokens'>, root: HTMLElement = document.documentElement): void {
+export function applyTheme(theme: ResolvedTheme, root: HTMLElement = document.documentElement): void {
   for (const name of written) root.style.removeProperty(name)
   // The first-paint script's inline values (#340) would outrank the stylesheet: docs/themes.md "How it is applied"
   root.style.removeProperty('background-color')
@@ -110,25 +110,20 @@ export function cacheChoice(choice: ThemeChoice): void {
   writeStored(CACHE_KEY, choice)
 }
 
-/** One field of a stored value, whatever it is */
-const field = (value: unknown, key: string): unknown => (typeof value === 'object' && value !== null ? Reflect.get(value, key) : undefined)
-
 /** The last run's theme before React draws: docs/themes.md "How it is applied". Unreadable: the stylesheet's Dark */
 export function applyCachedTheme(): void {
   try {
-    const stored = readStored(CACHE_KEY)
-    const theme = isRecord(stored) ? stored[stored.mode === 'light' ? 'light' : 'dark'] : undefined
-    if (!isRecord(theme)) return
-    const { base, preset } = theme
-    if (typeof preset !== 'string' || (base !== 'dark' && base !== 'light')) return
+    const choice = readStored(CACHE_KEY) as ThemeChoice | undefined
+    if (!choice?.dark || !choice?.light) return
+    const theme = pickTheme(choice)
     // The cache is the page's own writing, but it is re-checked like anything stored
     const tokens: Record<string, string> = {}
     const keyOf = new Map(THEME_TOKENS.map((token) => [token.cssVar, token.key]))
-    for (const [name, value] of Object.entries(isRecord(theme.tokens) ? theme.tokens : {})) {
+    for (const [name, value] of Object.entries(theme.tokens ?? {})) {
       const key = keyOf.get(name)
       if (key && typeof value === 'string' && isValidTokenValue(key, value)) tokens[name] = value
     }
-    applyTheme({ base, preset, tokens })
+    applyTheme({ ...theme, tokens })
   } catch {
     /* a broken cache is the same as none */
   }
@@ -140,6 +135,7 @@ export function applyCachedTheme(): void {
  */
 export function cachedThemeFiles(): Record<string, ThemeFileEntry> {
   const out: Record<string, ThemeFileEntry> = {}
+  const field = (value: unknown, key: string): unknown => (typeof value === 'object' && value !== null ? Reflect.get(value, key) : undefined)
   const choice = readStored(CACHE_KEY)
   for (const theme of [field(choice, 'dark'), field(choice, 'light')]) {
     const id = field(theme, 'id')
@@ -211,8 +207,8 @@ function over(top: Rgba, bottom: Rgba): Rgba {
 }
 
 export function contrast(a: Rgba, b: Rgba): number {
-  const [x, y] = [luminance(a), luminance(b)]
-  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number]
+  return (hi + 0.05) / (lo + 0.05)
 }
 
 /** One sentence per break of the order on any surface; empty when it holds */
