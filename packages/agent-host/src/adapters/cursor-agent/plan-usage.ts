@@ -56,6 +56,8 @@ export function planUsageAnswer(period: unknown, plan: unknown): LimitsAnswer {
   }
 }
 
+const FAILURE_STANDS_MS = 60_000
+
 export type PlanUsageDeps = {
   token(): Promise<string>
   ask(method: DashboardMethod, token: string): Promise<unknown>
@@ -66,19 +68,26 @@ export type PlanUsageDeps = {
 /**
  * Cursor's `listUsage` (#2459): the token read for this request, both methods asked at once as the CLI's `/usage` asks
  * them, the plan's name optional. Any failure is thrown as its kind, whose message is the reason the panel shows; host.log
- * gets one line for each kind the first time it happens in this process
+ * gets one line for each kind the first time it happens in this process. A failure stands for a minute, as the host keeps
+ * an answer: each read reaches the sign-in store and the network, so one that keeps failing is not made on every ask
  */
 export function cursorPlanUsage(deps: PlanUsageDeps): () => Promise<LimitsAnswer> {
   const logged = new Set<CursorUsageFailureKind>()
+  let failed: { failure: CursorUsageFailure; at: number } | null = null
   return async () => {
+    const now = deps.now()
+    // A clock set back makes it stale
+    if (failed && failed.at <= now && now - failed.at < FAILURE_STANDS_MS) throw failed.failure
+    failed = null
     try {
       const token = await deps.token()
       const expiry = tokenExpiry(token)
-      if (expiry !== null && expiry <= deps.now()) throw new CursorUsageFailure('signed-out', 'token past its exp')
+      if (expiry !== null && expiry <= now) throw new CursorUsageFailure('signed-out', 'token past its exp')
       const [period, plan] = await Promise.all([deps.ask('GetCurrentPeriodUsage', token), deps.ask('GetPlanInfo', token).catch(() => null)])
       return planUsageAnswer(period, plan)
     } catch (e) {
       const failure = e instanceof CursorUsageFailure ? e : new CursorUsageFailure('unreadable', e instanceof Error ? e.name : 'failed')
+      failed = { failure, at: now }
       if (!logged.has(failure.kind)) {
         logged.add(failure.kind)
         deps.log(`[usage] cursor: plan usage not read (${failure.kind}: ${failure.detail})`)

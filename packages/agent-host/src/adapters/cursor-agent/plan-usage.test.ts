@@ -144,14 +144,37 @@ describe("Cursor's listUsage: token, both methods, one log line per failure kind
     await expect(cursorPlanUsage(odd)()).rejects.toMatchObject({ kind: 'unreadable', message: "Cursor's usage answer could not be read" })
   })
 
+  it('lets a failure stand for a minute without reading again; after it, or with the clock set back, it reads again', async () => {
+    let now = NOW
+    let fail: CursorUsageFailure | null = new CursorUsageFailure('unreachable', 'GetCurrentPeriodUsage: TypeError')
+    const d = deps({ now: () => now })
+    let asks = 0
+    const read = cursorPlanUsage({ ...d, ask: async (method, token) => (asks++, fail ? Promise.reject(fail) : d.ask(method, token)) })
+    const first = fail
+    await expect(read()).rejects.toBe(first)
+    const asked = asks
+    fail = new CursorUsageFailure('refused', 'GetCurrentPeriodUsage: HTTP 403')
+    now += 59_999
+    await expect(read()).rejects.toBe(first)
+    expect(asks).toBe(asked)
+    now += 1
+    await expect(read()).rejects.toBe(fail)
+    now -= 10_000
+    fail = null
+    expect(limited(await read()).plan).toBe('Pro')
+  })
+
   it('writes one host.log line per kind, never the token', async () => {
+    let now = NOW
     let fail: CursorUsageFailure = new CursorUsageFailure('refused', 'GetCurrentPeriodUsage: HTTP 403')
-    const d = deps({ ask: async () => Promise.reject(fail) })
+    const d = deps({ ask: async () => Promise.reject(fail), now: () => now })
     const read = cursorPlanUsage(d)
     await expect(read()).rejects.toBe(fail)
+    now += 60_000
     await expect(read()).rejects.toBe(fail)
     expect(d.lines).toEqual(['[usage] cursor: plan usage not read (refused: GetCurrentPeriodUsage: HTTP 403)'])
     fail = new CursorUsageFailure('unreachable', 'GetCurrentPeriodUsage: HTTP 503')
+    now += 60_000
     await expect(read()).rejects.toBe(fail)
     expect(d.lines).toHaveLength(2)
     expect(d.lines.join('\n')).not.toContain(TOKEN.split('.')[1])

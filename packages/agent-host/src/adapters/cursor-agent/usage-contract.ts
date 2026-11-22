@@ -4,6 +4,8 @@
  * person's panel. Names move between chunk files from one version to the next (2026.11.22 put the method paths in
  * `connect-pool-worker.js`), so every file of the version is searched
  */
+/** The one host the token is sent to: the bundle names it, so a moved backend fails the drift check before the panel */
+export const DASHBOARD_HOST = 'api2.cursor.sh'
 export const DASHBOARD_SERVICE = 'aiserver.v1.DashboardService/'
 
 /** The methods `dashboard.ts` calls */
@@ -13,6 +15,7 @@ export type DashboardMethod = (typeof DASHBOARD_METHODS)[number]
 export const CURSOR_USAGE_CONTRACT = {
   /** Where the token is (`os.ts` `cursorSignInStore`): its credential module's naming and paths */
   signIn: ['domain:"cursor"', '-access-token`', '-user`', '"auth.json"', 'toWindowsTitleCase', 'XDG_CONFIG_HOME', 'find-${'],
+  host: [DASHBOARD_HOST],
   methods: DASHBOARD_METHODS.map((m) => DASHBOARD_SERVICE + m),
   /** The answers' descriptors: the field names their JSON is spelled from, and each field's number and type */
   answers: [

@@ -2,10 +2,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { CursorSignInStore } from '../../os.js'
 import { realOs } from '../../os/real.js'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
-import { readCursorToken, tokenExpiry, type TokenIo } from './sign-in-token.js'
+import { cursorTokenReader, tokenExpiry, type TokenIo } from './sign-in-token.js'
 import { failureOf, jwt } from './usage.test-helpers.js'
 
 const { files, paths } = realOs()
+
+/** One read by a reader of its own: what a process asks first */
+const readCursorToken = (store: CursorSignInStore, io?: TokenIo) => cursorTokenReader(store, io)()
 
 describe("reading cursor-agent's token from its file (#2459)", () => {
   let dir: string
@@ -51,8 +54,11 @@ describe("reading cursor-agent's token from the macOS Keychain (#2459)", () => {
     }
   }
 
+  /** As `execText` rejects: the program ran and ended other than by exit 0 */
+  const failed = (end: { code: number | null; ended?: 'timeout' }) => async () => Promise.reject(Object.assign(new Error('exit'), { stdout: '', stderr: '', ...end }))
   /** `security` exits with its OSStatus's low byte: errSecItemNotFound (-25300) and errSecInteractionNotAllowed (-25308, a locked keychain) */
-  const exited = (code: 44 | 36) => async () => Promise.reject(Object.assign(new Error('exit'), { code }))
+  const exited = (code: 44 | 36) => failed({ code })
+  const HELD = failed({ code: null, ended: 'timeout' })
   const NOT_FOUND = exited(44)
   const LOCKED = exited(36)
 
@@ -80,8 +86,26 @@ describe("reading cursor-agent's token from the macOS Keychain (#2459)", () => {
     const notRun = await failureOf(readCursorToken(KEYCHAIN, io(async () => Promise.reject(new Error('spawn failed')))))
     expect(notRun.detail).toBe('keychain did not run; auth file ENOENT')
     // Bounded: a Keychain that holds the read says it ran out of time, not that it did not run
-    const held = await failureOf(readCursorToken(KEYCHAIN, io(async () => Promise.reject(Object.assign(new Error('timeout'), { code: null, ended: 'timeout' })))))
+    const held = await failureOf(readCursorToken(KEYCHAIN, io(HELD)))
     expect(held.detail).toBe('keychain ended by its timeout; auth file ENOENT')
+  })
+
+  it('does not ask the Keychain again in this process once a read ran out of time, as a prompt waiting would; other failures ask again', async () => {
+    const held = io(HELD, '{"accessToken":"tok-file"}')
+    const read = cursorTokenReader(KEYCHAIN, held)
+    for (let i = 0; i < 3; i++) await expect(read()).resolves.toBe('tok-file')
+    expect(held.runs).toHaveLength(1)
+    expect(held.reads).toHaveLength(3)
+    const noFile = cursorTokenReader(KEYCHAIN, io(HELD))
+    await failureOf(noFile())
+    expect((await failureOf(noFile())).detail).toBe('keychain skipped after its timeout; auth file ENOENT')
+    for (const run of [NOT_FOUND, LOCKED, async () => Promise.reject(new Error('spawn failed'))]) {
+      const fake = io(run, '{"accessToken":"tok-file"}')
+      const again = cursorTokenReader(KEYCHAIN, fake)
+      await again()
+      await again()
+      expect(fake.runs).toHaveLength(2)
+    }
   })
 })
 

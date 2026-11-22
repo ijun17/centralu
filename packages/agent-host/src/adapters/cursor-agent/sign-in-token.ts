@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type { CursorSignInStore } from '../../os.js'
-import { execText } from '../../os/exec.js'
+import { errnoCode } from '../../os/errors.js'
+import { execText, isExecFailure } from '../../os/exec.js'
 import { realOs } from '../../os/real.js'
 import { CursorUsageFailure } from './usage-failure.js'
 
@@ -22,27 +23,37 @@ const AUTH_FILE = z.object({ accessToken: z.string().min(1) })
 const JWT_CLAIMS = z.object({ exp: z.number().finite().optional() })
 
 /**
- * cursor-agent's access token, read for one request and never kept (docs/security-boundaries/credentials.md "Cursor's
+ * cursor-agent's access token, read for each request and never kept (docs/security-boundaries/credentials.md "Cursor's
  * sign-in"). The Keychain answers it with a newline (measured, macOS, 2026.11.22: no prompt from the host's children);
- * a missing or locked item falls through to the file. Failures say where they stopped, never what was read
+ * a missing or locked item falls through to the file. A read that runs out of time is what a prompt waiting looks like,
+ * so the Keychain is not asked again in this process. Failures say where they stopped, never what was read
  */
-export async function readCursorToken(store: CursorSignInStore, io: TokenIo = REAL_IO): Promise<string> {
-  let keychainDetail = ''
-  if (store.keychain) {
-    const { program, service, account } = store.keychain
-    try {
-      const token = (await io.run(program, ['find-generic-password', '-a', account, '-s', service, '-w'])).trim()
-      if (token) return token
-      keychainDetail = 'keychain item empty; '
-    } catch (e) {
-      keychainDetail = `keychain ${exitOf(e)}; `
+export function cursorTokenReader(store: CursorSignInStore, io: TokenIo = REAL_IO): () => Promise<string> {
+  let keychainHeld = false
+  return async () => {
+    let keychainDetail = ''
+    if (store.keychain && keychainHeld) keychainDetail = 'keychain skipped after its timeout; '
+    else if (store.keychain) {
+      const { program, service, account } = store.keychain
+      try {
+        const token = (await io.run(program, ['find-generic-password', '-a', account, '-s', service, '-w'])).trim()
+        if (token) return token
+        keychainDetail = 'keychain item empty; '
+      } catch (e) {
+        keychainHeld = isExecFailure(e) && e.ended === 'timeout'
+        keychainDetail = `keychain ${!isExecFailure(e) ? 'did not run' : e.ended ? `ended by its ${e.ended}` : `exit ${String(e.code)}`}; `
+      }
     }
+    return fileToken(store.file, keychainDetail, io)
   }
+}
+
+async function fileToken(file: string, keychainDetail: string, io: TokenIo): Promise<string> {
   let text: string
   try {
-    text = await io.readText(store.file)
+    text = await io.readText(file)
   } catch (e) {
-    throw new CursorUsageFailure('no-token', `${keychainDetail}auth file ${codeOf(e)}`)
+    throw new CursorUsageFailure('no-token', `${keychainDetail}auth file ${errnoCode(e) ?? 'unreadable'}`)
   }
   let json: unknown
   try {
@@ -65,21 +76,4 @@ export function tokenExpiry(token: string): number | null {
   } catch {
     return null
   }
-}
-
-function exitOf(e: unknown): string {
-  const ended = field(e, 'ended')
-  if (typeof ended === 'string') return `ended by its ${ended}`
-  const code = field(e, 'code')
-  return typeof code === 'number' ? `exit ${code}` : 'did not run'
-}
-
-function codeOf(e: unknown): string {
-  const code = field(e, 'code')
-  return typeof code === 'string' ? code : 'unreadable'
-}
-
-function field(e: unknown, name: 'code' | 'ended'): unknown {
-  const value: unknown = typeof e === 'object' && e !== null ? Object.getOwnPropertyDescriptor(e, name)?.value : undefined
-  return value
 }

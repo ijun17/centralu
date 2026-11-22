@@ -8,7 +8,7 @@ import { CURSOR_SURFACE } from './surface.js'
 import { cursorUsageReader } from './usage.js'
 import { askDashboard } from './dashboard.js'
 import { cursorPlanUsage } from './plan-usage.js'
-import { readCursorToken } from './sign-in-token.js'
+import { cursorTokenReader } from './sign-in-token.js'
 import { execText } from '../../os/exec.js'
 import { cursorSignInStore } from '../../os.js'
 
@@ -70,7 +70,7 @@ export function cursorProfile(): AcpProfile {
   })
   const store = cursorSignInStore('cursor')
   const listUsage = cursorPlanUsage({
-    token: () => readCursorToken(store),
+    token: cursorTokenReader(store),
     ask: (method, token) => askDashboard(method, token),
     now: Date.now,
     log: (line) => console.error(line),

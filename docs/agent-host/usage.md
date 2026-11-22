@@ -3,7 +3,9 @@
 **We ask the tool, we do not read its files** (one exception: Cursor, below). `agents.usage` → `ToolQueries.usageFor(tool)`
 → the adapter's optional `listUsage()`, which calls the tool's own API (the Claude SDK for one,
 `app-server` for the other). An adapter that cannot answer throws, and the manager degrades
-with the reason attached rather than showing a confident wrong number.
+with the reason attached rather than showing a confident wrong number. `usageFor` keeps an answer (limits, or no limits for
+the plan) for a minute and shares one read among asks that come together; a failure is not kept, so the next ask reads again,
+unless the adapter's `listUsage` keeps it (Cursor's, below).
 
 **A tool that cannot report limits (#1616).** A tool whose adapter has no `listUsage()` at all is answered
 `supported: false, notReported: true` with a plain reason ("<tool> does not report usage limits"). The mark is positive on
@@ -30,9 +32,9 @@ happens with the token: [security-boundaries/credentials.md](../security-boundar
   timeout, an answer of another shape: each is one kind with one reason (`usage-failure.ts`) and one host.log line the first time
   in a process, with the status or exit code and never the token or the answer. A failed read keeps the last good answer when
   there is one, else the plan `agent about` says (`localUsage`, below), so the plan stays on screen; the reason shows under
-  kept numbers too, as they may no longer hold. The Keychain read is bounded at 3 s and each call at 5 s, under `usageFor`'s
-  15 s. `usageFor` keeps a read, good, failed or no limits, for a minute and shares one in flight, so a Free plan or a read that
-  keeps failing is not asked on every poll.
+  kept numbers too, as they may no longer hold. The Keychain read is bounded at 3 s (one that runs out is not asked again in
+  the process: credentials.md) and each call at 5 s, under `usageFor`'s 15 s. `usageFor` keeps an answer, limits or none, for a minute; Cursor's reader keeps a failure for a minute itself
+  (`plan-usage.ts`), so a Free plan or a read that keeps failing is not asked on every poll.
 - *Drift.* `pnpm drift:cursor-usage` (the weekly drift run) goes red when the installed CLI's bundle no longer carries the
   token's naming and paths, the two methods, or the answers' descriptors (`usage-contract.ts`), searching every file of the
   version, since names move between chunks. A test holds the fields the parser reads to those descriptors.

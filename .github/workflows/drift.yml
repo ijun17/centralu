@@ -132,7 +132,7 @@ jobs:
   # not reviewed, or no longer need a limitation it works around?". Every adapter fills in the contract's `surface`, and
   # this job reads it for each, so a new adapter is watched without editing this file. Findings are news, not a break:
   # they go into one issue per tool (left alone while the week finds the same things), and the job stays green. It goes
-  # red only when a surface cannot be read or the issue cannot be filed.
+  # red when a surface cannot be read, the issue cannot be filed, or a name Cursor's usage read depends on is gone.
   surface:
     runs-on: ubuntu-24.04
     timeout-minutes: 20

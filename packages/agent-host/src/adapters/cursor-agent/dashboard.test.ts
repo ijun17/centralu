@@ -24,7 +24,7 @@ describe("asking Cursor's dashboard with the person's token (#2459)", () => {
     expect(call?.init.headers).toEqual({ Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json', 'Connect-Protocol-Version': '1' })
   })
 
-  it('reads each status as its kind: 2xx answered, 401 signed out, other 4xx and 3xx refused, 5xx unreachable', async () => {
+  it('reads each status as its kind: 2xx answered, 401 signed out, other 4xx and 3xx refused, 429 and 5xx unreachable', async () => {
     await expect(askDashboard('GetPlanInfo', TOKEN, answering(299, '{}'))).resolves.toEqual({})
     const kinds: [number, string][] = [
       [401, 'signed-out'],
@@ -32,6 +32,9 @@ describe("asking Cursor's dashboard with the person's token (#2459)", () => {
       [400, 'refused'],
       [403, 'refused'],
       [404, 'refused'],
+      [428, 'refused'],
+      [429, 'unreachable'],
+      [430, 'refused'],
       [499, 'refused'],
       [500, 'unreachable'],
       [503, 'unreachable'],

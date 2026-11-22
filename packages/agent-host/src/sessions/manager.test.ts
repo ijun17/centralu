@@ -700,7 +700,7 @@ describe('while-alive facts are carried in the list', () => {
     expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ supported: false, reason: 'Cursor did not share its usage', usage: null })
   })
 
-  it('reads the limits once for asks that come together, and not again for a minute after a failure, keeping the last good ones (#2459)', async () => {
+  it('reads the limits once for asks that come together; a failure keeps the last good ones, and the next ask reads again (#2459)', async () => {
     let now = 1_000_000
     const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
     try {
@@ -717,11 +717,9 @@ describe('while-alive facts are carried in the list', () => {
       Object.assign(adapter, { listUsage: async () => (reads++, Promise.reject(new Error('Cursor did not share its usage'))) })
       // The last good numbers, not only the plan the tool's own command says
       expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ supported: false, reason: 'Cursor did not share its usage', usage: good })
-      now += 59_000
+      // A failure is not kept here: a tool that wants it kept keeps it in its listUsage (Cursor's)
+      now += 1_000
       expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ supported: false, reason: 'Cursor did not share its usage', usage: good })
-      expect(reads).toBe(2)
-      now += 2_000
-      await rpc('agents.usage', { tool: 'claude' })
       expect(reads).toBe(3)
     } finally {
       clock.mockRestore()

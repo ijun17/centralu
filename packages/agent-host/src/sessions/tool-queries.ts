@@ -26,7 +26,7 @@ function noLimitsReason(label: string): string {
   return `${label} does not report usage limits`
 }
 
-/** A read of a tool's limits stands for a minute, good or failed; a clock set back makes it stale */
+/** A tool's limits, once read, stand for a minute; a clock set back makes them stale */
 function withinAMinute(at: number): boolean {
   return !isFromTheFuture(at, Date.now()) && Date.now() - at < 60_000
 }
@@ -124,18 +124,20 @@ export class ToolQueries {
      * The one definition of "this tool reports no limits" (#1616, #1623): its adapter has no `listUsage`, or that answers
      * `NO_LIMITS` (#2459). `notReported` is derived here and nowhere else. What a tool says about its own usage (its plan,
      * the totals it counted) is `localUsage`, read from the tool's own command by a reader that keeps its answer
-     * (`adapters/usage-read.ts`), so nothing here is cached: all such a tool says, or what stands in when its `listUsage` fails.
+     * (`adapters/usage-read.ts`), so it is not cached here: all such a tool says, or what stands in when `listUsage` fails.
      */
     // No adapter at all is not "reports no limits": nothing is known about the tool, so it stays unknown (#1616 wording)
     if (!adapter) return { supported: false, reason: `${tool} does not support usage queries`, usage: null, cache }
     const notLoggedIn = { supported: false, reason: `${label} is not logged in on this computer`, usage: null, cache }
     const none = { supported: false, reason: noLimitsReason(label), notReported: true, usage: null, cache }
-    const reportsNone = async () => {
+    /** An answer with no limits in it, given what the tool's own command says (its plan, its totals) when it has one */
+    const withLocal = async <A extends object>(answer: A) => {
       const local = await this.localAnswer(tool, adapter, opts.settle)
       // The tool's command says nobody is logged in: said as any tool that is not logged in is (a failed read, not "no limits")
       if (local === 'logged-out') return notLoggedIn
-      return local ? { ...none, ...local } : none
+      return local ? { ...answer, ...local } : answer
     }
+    const reportsNone = () => withLocal(none)
     if (!adapter.listUsage) {
       // The hub shows its own limits for this machine: only the figures counted here are wanted, so no command is run
       return opts.limits === false ? none : reportsNone()
@@ -152,40 +154,27 @@ export class ToolQueries {
     } catch (err) {
       const kept = hit && hit.answer !== NO_LIMITS ? hit.answer : null
       const failed = { supported: false, reason: errorMessage(err), usage: kept, cache }
-      if (kept) return failed
-      // A failed read keeps the plan on screen (#2459): what the tool's own command says of it, when it has one
-      const local = await this.localAnswer(tool, adapter, opts.settle)
-      if (local === 'logged-out') return notLoggedIn
-      return local ? { ...failed, ...local } : failed
+      // A failed read keeps the plan on screen (#2459)
+      return kept ? failed : withLocal(failed)
     }
   }
 
-  /** The limits read in flight per tool, shared by whoever asks meanwhile */
+  /**
+   * The limits read in flight per tool, shared by whoever asks meanwhile. A failure is not kept: the next ask reads again,
+   * unless the tool's `listUsage` keeps it (Cursor's, `plan-usage.ts`)
+   */
   private readonly limitReads = new Map<ToolName, Promise<LimitsAnswer>>()
 
-  /** The last failed read per tool: kept as long as a good one, so a read that keeps failing is not made on every ask */
-  private readonly limitFailures = new Map<ToolName, { error: Error; at: number }>()
-
   private readLimits(tool: ToolName, listUsage: () => Promise<LimitsAnswer>): Promise<LimitsAnswer> {
-    const failed = this.limitFailures.get(tool)
-    if (failed && withinAMinute(failed.at)) return Promise.reject(failed.error)
     const running = this.limitReads.get(tool)
     if (running) return running
     const read = withTimeout(listUsage(), 15_000)
-      .then(
-        (answer) => {
-          this.usageCache.set(tool, { answer, at: Date.now() })
-          this.limitFailures.delete(tool)
-          // A fresh reading is kept for the history (§6.2), whoever asked: the gauge, a turn end or the ten-minute sample
-          if (answer !== NO_LIMITS) void this.host.usageRecorder.snapshot(tool, answer)
-          return answer
-        },
-        (err: unknown) => {
-          const error = err instanceof Error ? err : new Error(errorMessage(err))
-          this.limitFailures.set(tool, { error, at: Date.now() })
-          throw error
-        },
-      )
+      .then((answer) => {
+        this.usageCache.set(tool, { answer, at: Date.now() })
+        // A fresh reading is kept for the history (§6.2), whoever asked: the gauge, a turn end or the ten-minute sample
+        if (answer !== NO_LIMITS) void this.host.usageRecorder.snapshot(tool, answer)
+        return answer
+      })
       .finally(() => this.limitReads.delete(tool))
     this.limitReads.set(tool, read)
     return read

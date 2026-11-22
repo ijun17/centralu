@@ -20,6 +20,7 @@ describe("the drift contract of Cursor's usage read (#2459)", () => {
   it('names the methods the request makes, at the one address the token goes to', () => {
     expect(CURSOR_USAGE_CONTRACT.methods).toEqual(['aiserver.v1.DashboardService/GetCurrentPeriodUsage', 'aiserver.v1.DashboardService/GetPlanInfo'])
     expect(DASHBOARD_URL).toBe('https://api2.cursor.sh/aiserver.v1.DashboardService/')
+    expect(CURSOR_USAGE_CONTRACT.host).toEqual([new URL(DASHBOARD_URL).host])
   })
 
   it("names the Keychain item and the folder the sign-in store derives from the CLI's domain", () => {

@@ -1,8 +1,8 @@
-import { DASHBOARD_SERVICE, type DashboardMethod } from './usage-contract.js'
+import { DASHBOARD_HOST, DASHBOARD_SERVICE, type DashboardMethod } from './usage-contract.js'
 import { CursorUsageFailure } from './usage-failure.js'
 
 /** The service the CLI's own `/usage` asks (Connect JSON); the token is sent to this origin and nowhere else */
-export const DASHBOARD_URL = `https://api2.cursor.sh/${DASHBOARD_SERVICE}`
+export const DASHBOARD_URL = `https://${DASHBOARD_HOST}/${DASHBOARD_SERVICE}`
 
 /** Measured on Windows (Free plan): each method answers in about 0.7 s */
 const ASK_MS = 5_000
@@ -28,7 +28,8 @@ export async function askDashboard(method: DashboardMethod, token: string, fetch
     throw new CursorUsageFailure('unreachable', `${method}: ${e instanceof Error ? e.name : 'failed'}`)
   }
   if (status === 401) throw new CursorUsageFailure('signed-out', `${method}: HTTP 401`)
-  if (status >= 500) throw new CursorUsageFailure('unreachable', `${method}: HTTP ${status}`)
+  // A rate limit passes, as a server's trouble does: not a refusal to share
+  if (status >= 500 || status === 429) throw new CursorUsageFailure('unreachable', `${method}: HTTP ${status}`)
   if (status < 200 || status >= 300) throw new CursorUsageFailure('refused', `${method}: HTTP ${status}`)
   try {
     const answer: unknown = JSON.parse(text)
