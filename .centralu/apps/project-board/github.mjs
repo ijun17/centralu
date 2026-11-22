@@ -542,6 +542,21 @@ export async function readIssueText(repo, number) {
   return { text: [j.body ?? '', ...comments].join('\n\n'), state: j.state ?? null }
 }
 
+/** An issue's title, body and state (OPEN or CLOSED), and whether it is a pull request, which gh answers for the number too. */
+export async function readIssue(repo, number) {
+  checkRepo(repo)
+  let out
+  try {
+    out = await runGh(['issue', 'view', String(number), '-R', repo, '--json', 'title,body,state,url'])
+  } catch (e) {
+    if (e instanceof GitHubError && !FATAL.has(e.kind)) throw new GitHubError('not-found', `${repo}#${number} is not an issue or pull request this GitHub login can see (${firstLine(e)}).`, { status: httpStatus(e) })
+    throw e
+  }
+  const j = parseJson(out)
+  if (!j) throw new GitHubError('github', 'gh issue view answered with something that is not JSON.')
+  return { title: j.title ?? '', body: j.body ?? '', state: j.state ?? null, pull: /\/pull\/\d+$/.test(j.url ?? '') }
+}
+
 /**
  * Squash-merges a pull request, only while its head is still `sha` (a push after the checks were
  * read makes GitHub refuse). Never `--auto`: auto-merge would merge on GitHub's own reading of the
@@ -827,10 +842,15 @@ export async function createIssue(repo, { title, body, labels }) {
   return { number: issue.number, url: issue.html_url ?? null }
 }
 
+/** Closes an issue, as completed or not planned. */
+export async function setIssueClosed(repo, number, reason) {
+  checkRepo(repo)
+  await restWrite('PATCH', `repos/${repo}/issues/${number}`, { state: 'closed', state_reason: reason }, `closing #${number}`)
+}
+
 /** Closes an issue as not planned, then says why (the main guard's retraction, #2082): closing twice changes nothing, so a try that stops between the two does not say it twice. */
 export async function closeIssue(repo, number, comment) {
-  checkRepo(repo)
-  await restWrite('PATCH', `repos/${repo}/issues/${number}`, { state: 'closed', state_reason: 'not_planned' }, `closing #${number}`)
+  await setIssueClosed(repo, number, 'not_planned')
   await postComment(repo, number, comment)
 }
 

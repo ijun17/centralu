@@ -482,6 +482,14 @@ Then ask these against your change. Put anything you could not check in **Not ex
   every test and did nothing on the real Codex, which answers another status
   ([#2031](https://github.com/ijun17/centralu/pull/2031)). Add or cite a recording of a real run
   ([agent-host/adapters/adding-a-tool.md](docs/agent-host/adapters/adding-a-tool.md) step 3).
+- **Is every planned item built, carried or dropped?** Umbrella issues closed by hand left about 40
+  planned items with no owner (#2488). **Planned, not built** names each item of the issue or plan this change
+  does not build, with the issue that carries it or `dropped: <why>` (`None` when it builds all of it); the
+  last pull request of a plan says there `Plan items left: none`, or `Plan items left: #N, #M`. A contract step due
+  a release later ([store-migrations.md](docs/agent-host/store-migrations.md#migration-steps-expand-then-contract-292))
+  gets its issue when the expand step merges, named in that pull request's **Planned, not built**. Close an
+  issue with the board's `close_issue`: it refuses while an item went nowhere, and `queue_merge` refuses a
+  Closes of such an issue.
 - **Does the test fail for the right reason without the fix?** A helper-only test did not
   support that claim ([#619](https://github.com/ijun17/centralu/pull/619)); use the
   [test guidance above](#what-has-to-pass-before-you-send-it).
@@ -552,14 +560,18 @@ pull request carries its own record in **Verified**; neither is repeated in pull
   Conventional Commits, `<type>(<scope>): <description>`, with a body when the reason does not
   fit the subject.
 - Pull requests use the template (Why / What changed / Verified / Situations checked / Usability /
-  Not exercised / Closes).
+  Not exercised / Planned, not built / Closes).
   **Not exercised** names the surfaces you did not run: the packaged app, another platform, a
   live model session, a logged-out tool.
   **Closes** names each issue the merge closes with its own keyword (`Closes #N`), or says
   `None: <why>` (a sweep, part of #N): an issue named without a keyword stays open after the
   merge. `open_pr` writes the keywords from `closes`, and `queue_merge` refuses a section that
   does neither, and a stack whose top does not close what its lower pull requests do: they close as
-  landed, so only the top's keywords close anything.
+  landed, so only the top's keywords close anything. It also refuses to close an open issue whose
+  planned items (task-list boxes, numbered steps, numbered table rows, in its body or a plan section it
+  cites) are not each ticked, carried by an issue or pull request (`#N`), or `dropped: <why>`: GitHub
+  closes it on merge whatever it still plans. Account for them in the issue, or write `None: part of #N`
+  and close it later with `close_issue`.
 - **A move-only refactor lands when nothing is in its way.** A pull request that relocates or
   splits files (moving a module, splitting a test file) conflicts with every open pull request that
   touches those files, and each of them has to be redone by hand. Land it when the merge queue is
@@ -568,7 +580,7 @@ pull request carries its own record in **Verified**; neither is repeated in pull
   for each moved path. Keep it move-only, so whoever does have to rebase over it can redo the
   move instead of reading a diff.
 - When your session has the project board app's tools, they carry these rules as code: `open_pr`,
-  `comment`, `file_issue`, `commit_check`, `rebase_stack`, `ci_status`, `queue_merge` (many pull
+  `comment`, `file_issue`, `close_issue`, `commit_check`, `rebase_stack`, `ci_status`, `queue_merge` (many pull
   requests or a stack), `mark_ready` (without merge rights), `release`. Use them instead of `gh`
   by hand; `help` says which for what.
 

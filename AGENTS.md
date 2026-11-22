@@ -73,6 +73,8 @@ real-environment cases) and record in Verified who reviewed and what they found
 ([how](CONTRIBUTING.md#review-before-you-say-done)).
 
 With the project board app's tools, use them instead of `gh` by hand (`help` says which for what).
+Close an issue with `close_issue`, never `gh issue close`: it refuses while an item the issue or its cited plan section plans
+went nowhere (built in a PR, carried by an issue, or "dropped: <why>").
 A change whose tier is auto (docs, fixture data, UI assets) needs no PR of yours: push its branch
 and hand it over with `integrate`, which lands it. Owner answers (`list_owner_answers`): record each
 on its issue in English with `comment`, then `mark_answer_recorded`. Never post the owner's text as written.

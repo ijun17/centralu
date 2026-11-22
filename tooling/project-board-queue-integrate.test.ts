@@ -55,7 +55,7 @@ function pushTo(repo: ReturnType<typeof integrateRepo>, branch: string, files: R
 
 const TEMPLATE = readFileSync(join(REPO_ROOT, '.github/PULL_REQUEST_TEMPLATE.md'), 'utf8')
 /** What a session hands over: the branch and the record's text */
-const handOver = (branch: string, extra: Record<string, unknown> = {}) => ({ branch, title: 'docs(guide): say how the guide is read', why: 'The guide did not say it.', notExercised: 'Nothing', closes: { none: 'a guide change with no issue of its own' }, owner: 'writer', ...extra })
+const handOver = (branch: string, extra: Record<string, unknown> = {}) => ({ branch, title: 'docs(guide): say how the guide is read', why: 'The guide did not say it.', notExercised: 'Nothing', plannedNotBuilt: 'None', closes: { none: 'a guide change with no issue of its own' }, owner: 'writer', ...extra })
 const integrateQuick = () => [ghCheck('full tier', 'skipped', 10), ghCheck('verify', 'success', 11), ghCheck('windows tests', 'success', 12)]
 const integrateBatch = (suite: number) => [suiteCheck('full tier', 'skipped', suite * 10, suite), suiteCheck('verify', 'success', suite * 10 + 1, suite), suiteCheck('windows tests', 'success', suite * 10 + 2, suite)]
 
@@ -393,7 +393,16 @@ describe('the integrator lands an auto-tier branch without a pull request from i
     expect(r.data).toMatchObject({ integrated: false, kind: 'record', pr: 590 })
     expect(r.text).toContain(`#590's Closes section ("2447") closes no issue`)
     expect(writes()).toEqual([])
-    patchGh((s) => (s.prs['590'].body = '## Closes\n\nCloses #2447'))
+    // #2488: nor may it close an issue whose planned items went nowhere
+    patchGh((s) => {
+      s.prs['590'].body = '## Closes\n\nCloses #2447'
+      s.issueBodies = { 2447: '- [ ] the guide\n- [ ] the index' }
+    })
+    const left = await call('integrate', handOver('docs/guide'))
+    expect(left.data).toMatchObject({ integrated: false, kind: 'record', pr: 590 })
+    expect(left.text).toContain('#590 closes #2447, which plans 2 items not built, carried or dropped (item 1: "the guide" (the body); item 2: "the index" (the body))')
+    expect(writes()).toEqual([])
+    patchGh((s) => (s.issueBodies = { 2447: '- [x] the guide\n- [ ] the index: dropped: no index any more' }))
     expect((await call('integrate', handOver('docs/guide'))).data).toMatchObject({ integrated: true, pr: 590 })
   })
 

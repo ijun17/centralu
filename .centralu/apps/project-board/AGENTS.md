@@ -1080,9 +1080,28 @@ and refuses with every reason at once, sending nothing.
   `edit_comment` only edits a comment owned by the `gh` login and uses the same public-text checks.
   A bare `#N` attributed next to another repository warns: write `owner/repo#N` before publishing.
 - **`file_issue`** (`title`, `body`, `labels?`, `repo?`, `dryRun?`) files through `gh api … /issues`.
+- **`close_issue`** (`item`, `comment`, `reason?`, `items?`, `dryRun?`; `close-tools.mjs`, the rules in `plan-items.mjs`, #2488):
+  the one way agents close an issue. The plan audit of 2026-11-23 found about 40 planned items that no pull request built and
+  no issue carried, most of them left when an umbrella issue was closed by hand. The items an issue plans are its body's task-list
+  boxes, numbered lines (not under a heading on how to reproduce: a bug's steps) and table rows whose first cell is a number,
+  then those of each plan section the body cites (`docs/plans/<name>.md §n`, `…#anchor` or `… "Heading"`, the forms
+  guard/doc-refs reads; `project.json` `rules.plans` names the folder), read from the default branch. A plan linked without a
+  section is not read: an issue may name a plan in passing, and every step of mailbox.md would then hold it open. An item went
+  somewhere when it is ticked, names an issue or pull request (`#N`, `owner/repo#N`, an address) or says `dropped: <why>`, or
+  when `items` gives it one of the last two by the number the refusal lists. Refused, with nothing sent, while one went nowhere,
+  on an empty or non-English comment, on a pull request, or on a closed issue. The comment, posted before the close, lists every
+  item and where it went, so the record is on the issue. `reason: "not planned"` closes with the items left dropped with the issue,
+  said so in the comment. Declares no risk: it always asks.
+- **A pull request that closes such an issue** (#2488): GitHub closes an issue its merge names after a keyword, whatever the issue
+  still plans. `queue_merge` (and `integrate`, for its record) refuses to queue a top that closes an open issue with an item gone
+  nowhere, naming the items and the two ways out: account for them in the issue (this pull request's number for what it builds), or
+  write `None: part of #N` and close the issue with `close_issue` later. The queue, not `open_pr`: it reads the description and the
+  issue as they are when the change is about to land (both can be edited after `open_pr`), and every landing of this board passes it.
+  A merge by hand is not checked. An issue that cannot be read is a warning, not a refusal.
 - **`open_pr`** fills the template's `## ` headings from `why`, `whatChanged`, `verified`,
   `situationsChecked`, `usability`, `notExercised` or `sections` (any heading by name, any spelling), drops a
-  heading left out (the template says so) and refuses a name the template does not have. **Closes** is written from `closes`
+  heading left out (the template says so) and refuses a name the template does not have. **Planned, not built** (`plannedNotBuilt`,
+  #2488) must be `None` or lines that each name the issue carrying an item (`#N`) or say `dropped: <why>`. **Closes** is written from `closes`
   (#2449: #2448 wrote "2447" under Closes, GitHub links an issue only after a keyword, and the issue stayed open): the issue
   merging it closes, or a list of them (`2447`, `"#2448"`, `owner/repo#N`, an issue's URL), each written `Closes #N` on a line of its
   own, since GitHub links a keyword to the one reference after it (#2194); or `{ none: "<why>" }`, written `None: <why>` (a
@@ -1237,7 +1256,7 @@ push run of CI is fully green, the full tier included (or `commit`).
 - The tool families, each a `tools` table of `{ config, handler }`: `view-tools.mjs` (`show` and the
   screen's resource), `board-tools.mjs` (list_items, get_items, set_item_fields, add_item),
   `reader-tools.mjs` (read_item, read_discussion), `decision-tools.mjs` (save_answer, list_owner_answers,
-  mark_answer_recorded), `contribute-tools.mjs` (comment, edit_comment, file_issue,
+  mark_answer_recorded), `close-tools.mjs` (close_issue), `contribute-tools.mjs` (comment, edit_comment, file_issue,
   open_pr, pre_pr, commit_check, rebase_stack), `ci-tools.mjs` (ci_status,
   mark_ready, read_failed_job), `queue-tools.mjs` (queue_merge, integrate, merge_queue, unqueue), `help-tools.mjs` (help),
   `release-tools.mjs` (release_status, release), `words-tools.mjs` (private_words,
@@ -1258,6 +1277,7 @@ push run of CI is fully green, the full tier included (or `commit`).
   the integrator's judge of a branch's tier, and the record's texts (#1259 step 3).
 - `markdown.mjs` — GitHub Markdown to safe HTML for the reader, and the decision summary parser (pure).
 - `rules.mjs` — the rules for public text, commit messages and the pull request template (pure).
+- `plan-items.mjs`, `close-tools.mjs` — the items an issue and the plan sections it cites plan (pure), and `close_issue` with the check `queue_merge` makes of what a pull request closes (#2488).
 - `answers.mjs` — the owner's saved answers: save, delete, mark recorded (pure; decision-tools.mjs keeps them in the data folder).
 - `dispatch.mjs` — the one way the queue starts CI on a branch (`dispatchOn`, `branchShows`), and the runs that came of it on another commit (`strayRuns`, `cancelStray`) (#2201).
 - `read-back.mjs` — `readBack`: what GitHub shows after a write whose answer was lost.
