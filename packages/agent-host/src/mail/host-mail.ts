@@ -1,5 +1,5 @@
 import { prChecks } from '../dev-services/git-pr.js'
-import { errorMessage, type SessionInfo, isAssistantKind, turnStop } from '@cc/protocol'
+import { errorMessage, type SessionInfo, inboxListing, isAssistantKind, turnStop } from '@cc/protocol'
 import { bytesText } from '../bytes-text.js'
 import { inTurn } from '../idle.js'
 import { heldToContinue, wentWithItsProcess } from '../sessions/interruptions.js'
@@ -202,8 +202,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     stopShown: (address) => {
       const party = parseAddress(address)
       const s = party?.kind === 'session' && party.host === hostId ? sessions.sessionInfo(party.sessionId) : undefined
-      // A session resting `limited` is not listed in the Inbox (`isListedWaiting`): its notice stays
-      return !!s && s.state !== 'limited' && turnStop(s) !== null
+      return !!s && turnStop(s) !== null && inboxListing(s) !== 'never'
     },
     stoppedWords: (address) => {
       const party = parseAddress(address)

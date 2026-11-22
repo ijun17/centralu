@@ -18,8 +18,9 @@ export type StopNoticeOptions = {
    */
   standing?: (sessionAddress: string) => 'turn' | 'rest' | 'cut'
   /**
-   * Whether the session's stop stands on its Inbox row (`turnStop`, with Continue and Done; a session the person has read shows it
-   * in the note in front of them). The person's notice leaves such a stop out, as that row says it (#2360); none when absent
+   * Whether the session's stop stands on its Inbox row (`turnStop` and `inboxListing`, with Continue and Done; a session the
+   * person has read shows it in the note in front of them). The person's notice leaves such a stop out, as that row says
+   * it (#2360). A linked machine's host judges its own sessions: the hub's windows list them by the same rule. None when absent
    */
   stopShown?: (sessionAddress: string) => boolean
   /** The words of the turn a session's stop cut, which its stop notice to a session quotes as that session's own text; none quoted when absent */

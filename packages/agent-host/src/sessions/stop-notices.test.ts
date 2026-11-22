@@ -204,9 +204,10 @@ describe('a turn ends without finishing', () => {
     w.store.mailbox.markDelivered(addr(second.child), [q.id], Date.now(), m.turns.latest(second.child)!.seq)
     says(second.child, 'Rebased onto main, as you asked.')
     handleOf(second.child).event({ type: 'limit_reached', sessionId: second.child })
-    await w.until(() => stopNotices(second.asker).length === 1 && stopNoticesToPerson().length === 1)
+    await w.until(() => stopNotices(second.asker).length === 1 && read.row(q.id, addr(second.child))?.toldAt != null)
     expect(stopNotices(second.asker)[0]!.message.body).not.toContain('Rebased onto main')
-    expect(stopNoticesToPerson()[0]!.message.body).not.toContain('Rebased onto main')
+    // The person's question is told by the session's Inbox row, which quotes nothing (#2360)
+    expect(stopNoticesToPerson()).toEqual([])
 
     // The asker's own turn, into which the person typed
     const third = await askedOwnTurn()
@@ -339,19 +340,22 @@ describe('a turn ends without finishing', () => {
     expect(read.row(q.id, addr(child))).toMatchObject({ releasedWhy: 'error', settled: null })
     expect(stopNoticesToPerson()).toEqual([])
 
-    // A stop that rests `limited`, which the Inbox does not list, is told in a notice, in plain words
+    /*
+     * A usage limit Centralu does not continue, in Claude's order: `limit_reached` ends the turn resting `limited`, and
+     * the notice is judged then; its `error` follows. Codex's limit rests `limited`. Both are on the row (`inboxListing`)
+     */
     w.mgr.prefs.setUiPreferences({ continueAfterLimit: false })
-    const limited = await w.callerSession()
-    working(limited)
-    const asked = m.service.send('person', { to: [addr(limited)], text: 'and you?', needsReply: true }).message
-    w.store.mailbox.markDelivered(addr(limited), [asked.id], Date.now(), m.turns.latest(limited)!.seq)
-    handleOf(limited).event({ type: 'limit_reached', sessionId: limited })
-    await w.until(() => stopNoticesToPerson().length === 1)
-    expect(w.mgr.sessionInfo(limited)?.state).toBe('limited')
-    const notice = stopNoticesToPerson()[0]!.message
-    expect(notice.facts.unanswered).toEqual([{ id: asked.id, recipient: addr(limited), why: 'limit' }])
-    expect(notice.body).toContain('reached its usage limit before it answered your message. It can go on after the limit resets; send it a message then.')
-    expect(notice.body).not.toContain(addr(limited))
+    for (const then of [true, false]) {
+      const limited = await w.callerSession()
+      working(limited)
+      const asked = m.service.send('person', { to: [addr(limited)], text: 'and you?', needsReply: true }).message
+      w.store.mailbox.markDelivered(addr(limited), [asked.id], Date.now(), m.turns.latest(limited)!.seq)
+      handleOf(limited).event({ type: 'limit_reached', sessionId: limited })
+      if (then) handleOf(limited).event({ type: 'error', sessionId: limited, error: { code: 'internal', message: "You've hit your session limit · resets 1:20am", retryable: true } })
+      await w.until(() => read.row(asked.id, addr(limited))?.toldAt != null)
+      expect(w.mgr.sessionInfo(limited)).toMatchObject({ state: then ? 'error' : 'limited', interruption: { reason: 'limit' } })
+    }
+    expect(stopNoticesToPerson()).toEqual([])
   })
 
   it("the person's own Stop writes nothing to their Inbox", async () => {

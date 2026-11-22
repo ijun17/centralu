@@ -1,5 +1,4 @@
-import type { Interruption, SessionState } from '@cc/protocol/client'
-import { isWaiting } from '../session/state-machine.js'
+import { inboxListing, type Interruption, type SessionState } from '@cc/protocol/client'
 import { isUnread, type ReadTracked } from '../unread/unread.js'
 
 /**
@@ -110,9 +109,8 @@ export type InboxItem = InboxCandidate & {
 }
 
 export function isListedWaiting(s: { state: SessionState; interruption?: Interruption | null } & ReadTracked): boolean {
-  if (s.interruption?.reason === 'reconnecting') return true
-  if (s.interruption && s.state === 'idle') return isUnread(s)
-  return s.state === 'waiting_input' ? isUnread(s) : isWaiting(s.state)
+  const listing = inboxListing(s)
+  return listing === 'always' || (listing === 'unread' && isUnread(s))
 }
 
 /** A row with no start time came just now; mail threads are ordered by it too */

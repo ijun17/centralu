@@ -12,7 +12,7 @@ import { appCanLines } from '../../store/uses-lines.js'
 import { inboxCovered, inboxKeyAction } from './inboxKeys.js'
 import { inboxStateLabel } from './inboxLabel.js'
 import { useFocusReturn } from '../../components/focusReturn.js'
-import { CONTINUE_WORDS, turnStop, type MailTaskRow } from '@cc/protocol/client'
+import { CONTINUE_WORDS, inboxListing, turnStop, type Interruption, type MailTaskRow, type SessionState } from '@cc/protocol/client'
 import {
   Kbd,
   StateDot,
@@ -491,9 +491,9 @@ function WaitingTime({ since }: { since: number | null }) {
   )
 }
 
-/** Rows Done applies to (#669): a finished turn, and a turn a quit stopped (#698), both listed only while unread; and an error (#1549) */
-function doneable(it: { state: string; interruption?: { reason: string } | null }): boolean {
-  return it.state === 'waiting_input' || it.state === 'error' || (it.state === 'idle' && !!it.interruption)
+/** Rows Done applies to (#669): those listed only while unread (a finished turn, a stopped one, #698), and an error (#1549) */
+function doneable(it: { state: SessionState; interruption?: Interruption | null }): boolean {
+  return it.state === 'error' || inboxListing(it) === 'unread'
 }
 
 /**

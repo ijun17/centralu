@@ -60,7 +60,7 @@ describe('inbox order (FR-15)', () => {
     expect(inbox.map((i) => i.id)).toEqual(['ok'])
   })
 
-  it('limited is informational, so it is not put in the inbox (shown in the sidebar only)', () => {
+  it('limited with no stopped turn is informational, so it is not put in the inbox (shown in the sidebar only)', () => {
     expect(buildInbox([s('l', 'limited')], NOW)).toHaveLength(0)
   })
 
@@ -128,6 +128,13 @@ describe('stopped turns in the inbox (#698)', () => {
     expect(buildInbox([s('quit', 'idle', { waitingSince: null, interruption: quit, lastSeq: 4, lastReadSeq: 4 })], NOW)).toEqual([])
     // An idle session nothing stopped is not waiting on anyone
     expect(buildInbox([s('idle', 'idle', { waitingSince: null })], NOW)).toEqual([])
+  })
+
+  it('a usage limit that stopped the turn is listed the same way while it rests `limited` (#2360)', () => {
+    const limit = { reason: 'limit' as const, at: NOW - 30_000 }
+    expect(buildInbox([s('l', 'limited', { waitingSince: null, interruption: limit })], NOW).map((i) => i.id)).toEqual(['l'])
+    expect(countWaiting([s('l', 'limited', { waitingSince: null, interruption: limit })])).toEqual({ approval: 0, error: 1, input: 0 })
+    expect(buildInbox([s('l', 'limited', { waitingSince: null, interruption: limit, lastSeq: 4, lastReadSeq: 4 })], NOW)).toEqual([])
   })
 
   it('a tool reconnecting for too long is listed though it works, read or not', () => {
