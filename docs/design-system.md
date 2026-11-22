@@ -178,7 +178,7 @@ strings: a copy drifts (padding, hover, disabled fade) and the next screen copie
 | A command's log, a terminal | `CommandLogView`, `xterm.ts` with `terminalTheme.ts` |
 | Icons | `icons.tsx` |
 | A framed text button | `Button`: `primary` (the action a dialog is for), `secondary`, `quiet` (grey until hovered), `subtle` (faint, inside the conversation), `danger`, `ghost` (no frame), `choice` (a row of a list a question offers: outlined, `surface-selected` under the pointer and for the one picked); `xs` / `sm` / `md` / `lg` (`lg` is a list's row); `busy` with `busyText` |
-| One of several, shown at once | `Segmented` (a radio group: one Tab stop, the arrow keys pick) |
+| One of several, shown at once | `Segmented` (a radio group: one Tab stop, the arrow keys pick); `layout="wrap"` when the options can be wider than the dialog (the handoff's tools): the row breaks between whole options, never inside one (#2473) |
 | A setting that is on or off | `Switch` (a checkbox underneath, drawn as a track and knob); in Settings through `SettingToggle`, laid out with `SettingsLayout.tsx` (page, group card, row) |
 | A capsule | `Pill`: `size="bar"` (the top bar's 28px), `"label"` (a waiting card's kind) or `"line"` (a line of the conversation between two rules; the one size whose words wrap); edges `quiet`, `live`, `solid`, `dashed` |
 | A line of the conversation between messages | `MarkLine`: the two rules and the line's capsule (`Pill size="line"`), or a dashed box for a failure (`failed`); with `folded`, the capsule is a button with the chevron that opens what it explains as a `Fold` (`open`: how it starts); `after` beside it |

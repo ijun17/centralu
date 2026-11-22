@@ -4,7 +4,8 @@ import { useRef, type KeyboardEvent, type ReactNode } from 'react'
  * Pick one of several, shown at once (docs/design-system.md §11): a `radiogroup` named by `label`, with a radio
  * group's keyboard (WAI-ARIA): Tab enters on the picked option and leaves, the arrows move and pick, Home and End go to
  * the ends, a disabled option is skipped. `dim` can still be picked; the screen says below why it will not work yet
- * (a tool that needs a login). `layout="column"` is for options with a second line. `optionClassName` is an option's
+ * (a tool that needs a login). `layout="column"` is for options with a second line; `"wrap"` for more options than a row
+ * holds: an option keeps its words on one line and the row breaks between options. `optionClassName` is an option's
  * inside layout, never its colours.
  */
 export type SegmentedOption<T extends string> = {
@@ -59,7 +60,7 @@ export function Segmented<T extends string>({
   options: readonly SegmentedOption<T>[]
   onChange: (value: T) => void
   size?: 'sm' | 'md'
-  layout?: 'row' | 'column'
+  layout?: 'row' | 'column' | 'wrap'
   className?: string
   optionClassName?: string
   testId?: string
@@ -84,7 +85,7 @@ export function Segmented<T extends string>({
     <div
       role="radiogroup"
       aria-label={label}
-      className={`flex ${layout === 'column' ? 'flex-col gap-1' : 'gap-1.5'} ${className}`}
+      className={`flex ${layout === 'column' ? 'flex-col gap-1' : layout === 'wrap' ? 'flex-wrap gap-1.5' : 'gap-1.5'} ${className}`}
       data-testid={testId}
     >
       {options.map((o, i) => {
@@ -107,7 +108,7 @@ export function Segmented<T extends string>({
             }}
             onKeyDown={(e) => onKeyDown(e, i)}
             className={`rounded-md border transition-colors disabled:cursor-default ${SIZE[size]} ${
-              layout === 'column' ? 'text-left' : ''
+              layout === 'column' ? 'text-left' : layout === 'wrap' ? 'whitespace-nowrap' : ''
             } ${
               on
                 ? 'border-ink-muted bg-surface-hover/40 text-ink'
