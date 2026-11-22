@@ -90,12 +90,7 @@ export function ConfirmHandoff({
           className="mt-1"
           options={tools.map((t) => ({
             value: t.name,
-            label: (
-              <>
-                {t.label}
-                {t.name === tool && <span className="ml-1 text-2xs text-ink-faint">(current)</span>}
-              </>
-            ),
+            label: t.label,
             testId: `handoff-tool-${t.name}`,
           }))}
         />
