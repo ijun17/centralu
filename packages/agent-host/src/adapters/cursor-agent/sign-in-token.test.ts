@@ -51,6 +51,11 @@ describe("reading cursor-agent's token from the macOS Keychain (#2459)", () => {
     }
   }
 
+  /** `security` exits with its OSStatus's low byte: errSecItemNotFound (-25300) and errSecInteractionNotAllowed (-25308, a locked keychain) */
+  const exited = (code: 44 | 36) => async () => Promise.reject(Object.assign(new Error('exit'), { code }))
+  const NOT_FOUND = exited(44)
+  const LOCKED = exited(36)
+
   it("asks `security` for the item's password, as the CLI names it, and strips the newline it answers with", async () => {
     const fake = io(async () => 'tok-1\n')
     await expect(readCursorToken(KEYCHAIN, fake)).resolves.toBe('tok-1')
@@ -59,7 +64,7 @@ describe("reading cursor-agent's token from the macOS Keychain (#2459)", () => {
   })
 
   it('falls through to the file when the item is missing, locked or empty', async () => {
-    for (const run of [async () => Promise.reject(Object.assign(new Error('exit'), { code: 44 })), async () => Promise.reject(Object.assign(new Error('exit'), { code: 36 })), async () => '\n']) {
+    for (const run of [NOT_FOUND, LOCKED, async () =>'\n']) {
       const fake = io(run, '{"accessToken":"tok-file"}')
       await expect(readCursorToken(KEYCHAIN, fake)).resolves.toBe('tok-file')
       expect(fake.reads).toEqual([KEYCHAIN.file])
@@ -67,8 +72,11 @@ describe("reading cursor-agent's token from the macOS Keychain (#2459)", () => {
   })
 
   it('says where both stopped when neither has it', async () => {
-    const f = await failureOf(readCursorToken(KEYCHAIN, io(async () => Promise.reject(Object.assign(new Error('exit'), { code: 44 })))))
+    const f = await failureOf(readCursorToken(KEYCHAIN, io(NOT_FOUND)))
     expect(f).toMatchObject({ kind: 'no-token', detail: 'keychain exit 44; auth file ENOENT' })
+    // A locked keychain: `security` with no prompt exits, and the reason says the sign-in was not read
+    const locked = await failureOf(readCursorToken(KEYCHAIN, io(LOCKED)))
+    expect(locked).toMatchObject({ kind: 'no-token', message: "Cursor's sign-in could not be read on this computer", detail: 'keychain exit 36; auth file ENOENT' })
     const notRun = await failureOf(readCursorToken(KEYCHAIN, io(async () => Promise.reject(new Error('spawn failed')))))
     expect(notRun.detail).toBe('keychain did not run; auth file ENOENT')
     // Bounded: a Keychain that holds the read says it ran out of time, not that it did not run
