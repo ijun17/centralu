@@ -95,9 +95,10 @@ window re-reads that machine and wakes what died. The link keeps one cursor and 
 gets the gap replayed, and a remote that restarted is a new lifetime and a resync. Events of sessions the hub does not
 show are dropped, and session events keep the mirror's names and states current between reads.
 
-**The reverse direction is off** (remote-hub.md §3.2). The link is a client connection the hub opened. The protocol has no
-frame for a host to call its client, and `RemoteClient` drops anything shaped like a request without dispatching it
-(`remote-client.test.ts`), so a compromised remote cannot reach the hub through the link.
+**The reverse direction is off by default** (remote-hub.md §3.2 and §12.7, #550; protocol.md §1 "The reverse direction"). The link is a client
+connection the hub opened. Until the person turns it on for that machine, the hub's `RemoteClient` drops anything shaped like a request without
+dispatching it (`remote-client.test.ts`), so a compromised remote cannot reach the hub through the link; once on, it answers only the handler
+its link was given (`links/reverse-calls.ts`).
 
 **The Assistant reads every machine** (phase 4 step 1, [plans/remote-hub.md](../../plans/remote-hub.md) §12.3;
 `linked-sessions.ts`). The hub's Assistant's `list_sessions`, `read_session` and `recall` include each linked

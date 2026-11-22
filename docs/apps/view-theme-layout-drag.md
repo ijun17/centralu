@@ -111,7 +111,7 @@ even `dragenter`. Only the frame's `dragend` fired. Both engines carry the same 
 So the page never sees the drag, and the DragShield ([views.md](views.md#pinned-in-the-main-area-centralus-way-within-the-standard)) never goes up for it.
 
 **The route instead.** The host adds a small relay to every view's document, before its last
-`</body>` (`views/drag-relay.ts`; the view's CSP already allows inline script). In the view's own
+`</body>` (`views/drag-relay.ts`; the host's CSP for the view allows inline script, but a view whose own `<meta>` CSP forbids it silently loses dropping: the relay never runs). In the view's own
 window it reads the two types at `dragstart`, after the item's handler, and posts them through the
 view's bridge as `centralu/notifications/drag` (`{ phase: "start", uri, text }`); at that drag's
 `dragend` it posts where the drag ended in the view's coordinates, with the view's size (`{ phase:

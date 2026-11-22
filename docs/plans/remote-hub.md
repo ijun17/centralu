@@ -59,63 +59,75 @@ machine it runs on.
 
 ## 3. Rules that keep a mesh simple
 
-1. **A host only exports its own data.** It never re-exports what it sees from another host. Each
-   pair is a direct link; there is no relaying, so there are no loops and no duplicates however
-   the machines are connected.
-2. **Permissions per direction, decided by the side that connects** (owner, 2026-10-05). Being
-   able to open an SSH connection to a machine already shows the person owns it, so the consent is
-   given **once, on the connecting side**, when the link is added. The connecting side controls the
-   other. The reverse direction (the remote host asking the connecting machine for something) is
-   **off by default**, and only the connecting side can turn it on for that link. A compromised
-   server must not be able to reach the Mac by default.
-3. **Machine-qualified ids.** Remote ids are shown to the hub's UI as `<machine>.<id>`. The
-   protocol's id pattern already allows `.` after the first character, and every parser in the UI
-   splits on `/` or `:`, so the prefix passes unchanged. Per-host counters (`term-N`, `run-N`,
-   approval rule integers, pids) need the prefix too.
-   - **Agents take the same ids** (owner, 2026-11-21). Every tool that takes a session (mail,
-     read_session, agent_session) reads one set of forms (`SessionRefs`): an id here,
-     `<computer>.<id>`, a name, or `assistant`, `parent`, `person`, and prints a session in the
-     first two forms (`SessionRefs.shown`). A session's mail address is internal: a tool refuses
-     it, whole or cut short, with the id to write, and never looks it up as a name. A linked
-     machine's session whose name is shaped like an address is still found by that name on its
-     hub; on a machine, a hub's such session is reached by its id. ask_project prints a hub's
-     project and session under the hub's label too (`<label>/<name>`, `<label>.<id>`); the
-     `<hub id>` forms older builds printed are still read.
-   - **A hub's label.** On a machine, a hub's own sessions go under the label the hub sends in
-     `host.hubOffer` (`ownHubLabel`): made from its name, never one of its machines' ids or a role
-     word. An older hub sends none, and the machine makes one from the name, never its own id
-     there; it cannot see that hub's other machines, so the label may be one of theirs, and that
-     machine's sessions are then read as the hub's own and refused (ids are random: never
-     delivered to the wrong session). Two hubs with one label are refused as ambiguous.
-   - **A host that is a machine and a hub.** It shows a hub that links it under the label offered,
-     suffixed (`studio-2`) when one of its own machines has that id (`labelHere`): worked out from
-     the kept offer and its stored machines at each read, never stored itself. Text that hub writes
-     for it still says `studio.<id>`, which reads here as its own machine's session, where there is
-     none: refused. Another machine of that hub goes under the label too when one of its own
-     machines has that machine's id. A machine added or removed later with the id of such a label
-     moves the label (`studio-2` back to `studio`), and the ids shown before are refused from then
-     on. A suffixed label can be the one another hub offered: both answer to it, refused as
-     ambiguous.
-   - **A label changes with the hub's name or machines.** A hub writes for its machines under its
-     label now, and a machine reads by the label of the hub's last offer. A hub offers at each
-     connect and when the asks switch turns, not on a rename: until then, what the hub writes is
-     refused there, never misdelivered.
-   - **Text for the other side.** A notice or an answer written on one computer for a session on
-     the other names sessions as that session's tools print them (`SessionRefs.shown` with the
-     reader): a machine writes its own as `<its id there>.<id>`, a hub its own as `<its label>.<id>`
-     and its other machines' as `<label>.<machine>.<id>`, which a machine reads back whether one
-     hub links it or several. A machine writes for a session on another machine of its hub as that
-     machine reads it, under the label the hub offered. A report crosses as facts, and the reading
-     side words it.
-   - **Labels are for display only.** Mail stores and sends addresses (`session:<host>/<id>`), so a
-     renamed hub breaks no stored reference, only the ids an agent was shown before.
-4. **One orchestrator, apps from every machine.** A remote host's orchestrator and coordinators are
-   not shown on the hub; the hub has one orchestrator. A remote host's **user-folder apps are
-   shown** (owner, 2026-10-05), grouped by machine (in "Your apps" with a machine badge since #734) and qualified by it (`_user/<appId>` collides
-   across machines otherwise). They run on their own machine; their views need the proxy of
-   phase 2, so in phase 1 they are listed and their tools work, and their views say they open in a
-   later version. Phase 2 (§11) opens their views, named by their machine where no project can
-   say it (§11.4).
+### 3.1 A host only exports its own data
+
+It never re-exports what it sees from another host. Each
+pair is a direct link; there is no relaying, so there are no loops and no duplicates however
+the machines are connected.
+
+### 3.2 Permissions per direction, decided by the side that connects
+
+Decided by the owner, 2026-10-05. Being
+able to open an SSH connection to a machine already shows the person owns it, so the consent is
+given **once, on the connecting side**, when the link is added. The connecting side controls the
+other. The reverse direction (the remote host asking the connecting machine for something) is
+**off by default**, and only the connecting side can turn it on for that link. A compromised
+server must not be able to reach the Mac by default.
+
+### 3.3 Machine-qualified ids
+
+Remote ids are shown to the hub's UI as `<machine>.<id>`. The
+protocol's id pattern already allows `.` after the first character, and every parser in the UI
+splits on `/` or `:`, so the prefix passes unchanged. Per-host counters (`term-N`, `run-N`,
+approval rule integers, pids) need the prefix too.
+
+- **Agents take the same ids** (owner, 2026-11-21). Every tool that takes a session (mail,
+  read_session, agent_session) reads one set of forms (`SessionRefs`): an id here,
+  `<computer>.<id>`, a name, or `assistant`, `parent`, `person`, and prints a session in the
+  first two forms (`SessionRefs.shown`). A session's mail address is internal: a tool refuses
+  it, whole or cut short, with the id to write, and never looks it up as a name. A linked
+  machine's session whose name is shaped like an address is still found by that name on its
+  hub; on a machine, a hub's such session is reached by its id. ask_project prints a hub's
+  project and session under the hub's label too (`<label>/<name>`, `<label>.<id>`); the
+  `<hub id>` forms older builds printed are still read.
+- **A hub's label.** On a machine, a hub's own sessions go under the label the hub sends in
+  `host.hubOffer` (`ownHubLabel`): made from its name, never one of its machines' ids or a role
+  word. An older hub sends none, and the machine makes one from the name, never its own id
+  there; it cannot see that hub's other machines, so the label may be one of theirs, and that
+  machine's sessions are then read as the hub's own and refused (ids are random: never
+  delivered to the wrong session). Two hubs with one label are refused as ambiguous.
+- **A host that is a machine and a hub.** It shows a hub that links it under the label offered,
+  suffixed (`studio-2`) when one of its own machines has that id (`labelHere`): worked out from
+  the kept offer and its stored machines at each read, never stored itself. Text that hub writes
+  for it still says `studio.<id>`, which reads here as its own machine's session, where there is
+  none: refused. Another machine of that hub goes under the label too when one of its own
+  machines has that machine's id. A machine added or removed later with the id of such a label
+  moves the label (`studio-2` back to `studio`), and the ids shown before are refused from then
+  on. A suffixed label can be the one another hub offered: both answer to it, refused as
+  ambiguous.
+- **A label changes with the hub's name or machines.** A hub writes for its machines under its
+  label now, and a machine reads by the label of the hub's last offer. A hub offers at each
+  connect and when the asks switch turns, not on a rename: until then, what the hub writes is
+  refused there, never misdelivered.
+- **Text for the other side.** A notice or an answer written on one computer for a session on
+  the other names sessions as that session's tools print them (`SessionRefs.shown` with the
+  reader): a machine writes its own as `<its id there>.<id>`, a hub its own as `<its label>.<id>`
+  and its other machines' as `<label>.<machine>.<id>`, which a machine reads back whether one
+  hub links it or several. A machine writes for a session on another machine of its hub as that
+  machine reads it, under the label the hub offered. A report crosses as facts, and the reading
+  side words it.
+- **Labels are for display only.** Mail stores and sends addresses (`session:<host>/<id>`), so a
+  renamed hub breaks no stored reference, only the ids an agent was shown before.
+
+### 3.4 One orchestrator, apps from every machine
+
+A remote host's orchestrator and coordinators are
+not shown on the hub; the hub has one orchestrator. A remote host's **user-folder apps are
+shown** (owner, 2026-10-05), grouped by machine (in "Your apps" with a machine badge since #734) and qualified by it (`_user/<appId>` collides
+across machines otherwise). They run on their own machine; their views need the proxy of
+phase 2, so in phase 1 they are listed and their tools work, and their views say they open in a
+later version. Phase 2 (§11) opens their views, named by their machine where no project can
+say it (§11.4).
 
 ## 4. Versions: align before connecting (owner, 2026-10-05)
 

@@ -367,7 +367,7 @@ The tabs (conversation/files/git/viewer) were stripped out and replaced by three
 │ sess.│ conversation           │ changed │
 │ list │                        │ filetree│
 └──────┴────────────────────────┴─────────┘
-              ↑ clicking a file overlays these two
+              ↑ clicking a file overlays the conversation
 ```
 
 ### Why not tabs
@@ -377,7 +377,9 @@ screen that replaces the conversation, it is the **evidence** for what the conve
 When an agent says "I changed three files", this is where you check that, so it has to sit alongside.
 Grouping non-substitutes under tabs is what produced dogfooding's "where do I look at git, files, the viewer?"
 
-### Inside the right-hand panel: two tabs, git / files
+### Inside the right-hand panel: tabs
+
+The panel holds four tabs, `git`, `history`, `files` and `terminal` (`PANEL_TABS`); history became a tab of its own in #21. The figure is the first design, with history under the git list.
 
 ```
 ┌─ alpha   main        › ─┐   ← press the branch for the switch screen
@@ -405,8 +407,8 @@ and what you actually want to know is 'what landed when'. Only merges are marked
 ### When collapsed: it does not disappear, a strip remains
 
 Collapse the panel and a 32px vertical strip remains. Closing it without knowing `⌘B`
-still has to leave a visible way back, and the strip keeps the changed file count so that even
-collapsed you can read "something changed". Gone and collapsed are different things.
+still has to leave a visible way back, and the strip is the expand button alone, with no count or label: the
+sidebar's changes capsule already says what changed. Gone and collapsed are different things.
 
 ### The viewer is a wide overlay
 
@@ -415,14 +417,16 @@ be read at 340px. But taking the conversation's place means having to find your 
 Reading code is a deep but **short** act, so covering and then sweeping it away with esc is the right
 mechanism — sweep it away and the conversation is exactly where it was, scroll position included.
 
-The overlay covers **only the centre and the right.** Covering the left as well means missing another
-session calling for me while I read code. That is covering the instruments in a control tower.
+The overlay covers **only the conversation lane** (#15). The sidebar stays visible, so another session calling for me is not missed while I
+read code, and the evidence panel stays too, since the next file is opened from its tree. Covering either would be covering the instruments
+in a control tower.
 
 ### Shortcut changes
 
 | Before | After |
 |---|---|
-| `⌘⇧1~4` switch tab | `⌘B` collapse/expand the evidence panel |
+| (none) | `⌘B` collapse/expand the evidence panel |
+| (none) | `⌘⇧1~4` pick a panel tab by its identity, not its seat (#20) |
 | (none) | `esc` sweep the overlay away |
 
 `⌘1~9` jump project, `⌘I` inbox, `⌘K` palette, `⌘⇧A` next waiting item are unchanged.
