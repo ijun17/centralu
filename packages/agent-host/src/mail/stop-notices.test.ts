@@ -392,6 +392,16 @@ describe('a stopped session Centralu continues by itself (#1415: told once, when
     expect(w.startersNotices(C).filter(continued)).toHaveLength(1)
   })
 
+  it("names a session with no name to a hub's session that started it by the id the hub reads back, in the stop and in the continue", () => {
+    const w = stopWorld()
+    w.hubs.push({ id: 'hub-0000000b', label: 'studio', name: 'Studio', you: 'm1' })
+    w.sessions.set('b', { projectId: 'p1' })
+    const starter = 'session:hub-0000000b/h1'
+    w.stops.sessionStopped(B, 'network', { starter })
+    w.service.stops.stopWaitEnded(B, 'network', starter, end('centralu'))
+    expect(w.startersNotices(starter).map((n) => n.message.body.split(' ')[0])).toEqual(['m1.b,', 'm1.b'])
+  })
+
   it('a wait that ends without a continue (Stop, a message, Don\'t continue, the tries spent) tells the stop as it would have been told, once', () => {
     const w = stopWorld()
     const q = w.ask(A, B)

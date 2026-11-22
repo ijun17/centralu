@@ -20,7 +20,7 @@ import {
   storeWorkWords,
 } from '@cc/protocol'
 import type { LinkDeps, MachineRecord } from './link-deps.js'
-import { hubLabel } from './machine-ids.js'
+import { ownHubLabel } from './machine-ids.js'
 import { belowFloor, NodeTooOld } from './node-floor.js'
 import { nodeFloor } from './install.js'
 import { PendingProjectDeletes } from './pending-project-deletes.js'
@@ -763,7 +763,8 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
 
   private async offerOnce(client: RemoteClient): Promise<void> {
     const self = this.deps.hubSelf?.()
-    if (!self) return
+    const label = ownHubLabel(this.deps)
+    if (!self || !label) return
     const on = this.record.asks === true
     let note: string | null = null
     // Not known on this connection until the machine answers (#1948 step 6): a start before it waits for the connect, never reads as an older machine
@@ -772,7 +773,7 @@ export abstract class LinkedMachineConnection implements RoutedMachine {
     const open = this.deps.hubMail ? (this.deps.openTasks?.(this.id) ?? []) : []
     let lacks: string[] = []
     try {
-      const answer = await client.call('host.hubOffer', { hub: { ...self, label: hubLabel(self.name, this.deps.registry.list().map((r) => r.id)) }, on, ...(this.deps.hubMail ? { mail: true, you: this.id } : {}), ...(open.length ? { open } : {}), ...(this.deps.hubApps ? { apps: true } : {}) })
+      const answer = await client.call('host.hubOffer', { hub: { ...self, label }, on, ...(this.deps.hubMail ? { mail: true, you: this.id } : {}), ...(open.length ? { open } : {}), ...(this.deps.hubApps ? { apps: true } : {}) })
       if (isObj(answer) && Array.isArray(answer.lacks)) lacks = answer.lacks.filter((id): id is string => typeof id === 'string')
       if (this.client === client) this.mailBack = isObj(answer) && answer.mail === true
       if (this.client === client) this.appsBack = isObj(answer) && answer.apps === true

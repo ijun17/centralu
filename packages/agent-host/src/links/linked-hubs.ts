@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { SettingAccess } from '../dev-services/store/settings.js'
 import { NOT_REACHABLE } from '../adapters/contract.js'
 import { LOOKUP_MS } from './machine-reach.js'
-import { hubLabel } from './machine-ids.js'
+import { labelHere } from './machine-ids.js'
 import type { AppsPeer } from './linked-apps.js'
 import type { StartingHub } from '../sessions/hub-preset.js'
 
@@ -27,8 +27,8 @@ type Hub = { id: string; name: string; label: string | null; client: number | nu
 /** How long a message to a hub may take before the send is refused as not known to have arrived */
 const MAIL_MS = 30_000
 
-/** A hub's project as an ask_project names it here: its id qualified by the hub's (`<hub id>.<project id>`) */
-export type HubProjectRef = { id: string; projectId: string; name: string; hub: string; hubId: string; away?: string }
+/** A hub's project as an ask_project names it here: its id under the hub's label (`<label>.<project id>`, `LinkedHubs.peer`) */
+export type HubProjectRef = { id: string; projectId: string; name: string; hub: string; hubId: string; label: string; away?: string }
 
 export type LinkedHubsDeps = {
   /** A call to a connected client (`HostServer.call`) */
@@ -44,6 +44,8 @@ export type LinkedHubsDeps = {
   record?: (sessionId: string, hub: StartingHub) => void
   /** Where the hubs that offer mail here are kept (`MAIL_HUBS_KEY`), so a host that starts while they are away still knows them (#1987) */
   settings?: SettingAccess
+  /** The ids of the machines this host links, when it is a hub too: no hub's label here is one of them (`labelHere`) */
+  machines?: () => Iterable<string>
 }
 
 /**
@@ -185,9 +187,9 @@ export class LinkedHubs {
    * Every offered hub's projects, asked in parallel and each bounded: a hub that is away contributes the projects it
    * last listed, marked, and its name under `away`
    */
-  async projects(): Promise<{ projects: HubProjectRef[]; away: { hubId: string; hub: string; why: string }[] }> {
+  async projects(): Promise<{ projects: HubProjectRef[]; away: { hubId: string; hub: string; label: string; why: string }[] }> {
     const projects: HubProjectRef[] = []
-    const away: { hubId: string; hub: string; why: string }[] = []
+    const away: { hubId: string; hub: string; label: string; why: string }[] = []
     await Promise.all(
       this.asking().map(async (h) => {
         let why: string | null = null
@@ -202,9 +204,10 @@ export class LinkedHubs {
             why = older(err) ? 'it runs a Centralu from before this; update it there' : NOT_REACHABLE
           }
         }
-        if (why) away.push({ hubId: h.id, hub: h.name, why })
+        const label = this.labelOf(h)
+        if (why) away.push({ hubId: h.id, hub: h.name, label, why })
         for (const p of h.projects ?? []) {
-          projects.push({ id: `${h.id}.${p.id}`, projectId: p.id, name: oneLineText(p.name, 120), hub: h.name, hubId: h.id, ...(why ? { away: why } : {}) })
+          projects.push({ id: `${label}.${p.id}`, projectId: p.id, name: oneLineText(p.name, 120), hub: h.name, hubId: h.id, label, ...(why ? { away: why } : {}) })
         }
       }),
     )
@@ -274,9 +277,9 @@ export class LinkedHubs {
   /**
    * A hub that takes mail (#2067), as mail across calls it (`MailAcross`, docs/plans/linked-mail.md §6): on the connection
    * it offered on and no other. `you`: this machine's id there, which a hub from before item 2 does not say. `label`: the
-   * prefix its own sessions go under here, made from its name and never this machine's id there when it offered none (remote-hub.md §3.3)
+   * prefix its own sessions go under here (`labelHere`, remote-hub.md §3.3); `offered`: the one it offered, which its other machines use
    */
-  peer(hubId: string): { id: string; name: string; label: string; reachable: boolean; you: string | null; call(method: string, params: unknown): Promise<unknown> } | undefined {
+  peer(hubId: string): { id: string; name: string; label: string; offered: string | null; reachable: boolean; you: string | null; call(method: string, params: unknown): Promise<unknown> } | undefined {
     // A hub that offered asks and not mail is from before it: called all the same, it answers "Unknown method", which names the cause
     const h = this.hubs.get(hubId)
     if (!h) return undefined
@@ -291,7 +294,8 @@ export class LinkedHubs {
     return {
       id: h.id,
       name: h.name,
-      label: h.label ?? hubLabel(h.name, h.you ? [h.you] : []),
+      label: this.labelOf(h),
+      offered: h.label,
       reachable: h.client !== null,
       you: h.you,
       call: (method, params) => {
@@ -300,6 +304,10 @@ export class LinkedHubs {
         return this.deps.call(client, method, params, { timeoutMs: this.deps.mailTimeoutMs ?? MAIL_MS })
       },
     }
+  }
+
+  private labelOf(h: Hub): string {
+    return labelHere(h.label, h.name, [...(h.you ? [h.you] : []), ...(this.deps.machines?.() ?? [])])
   }
 
   /** Every hub that takes mail, for a search across them */

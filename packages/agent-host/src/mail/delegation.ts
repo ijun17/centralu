@@ -55,9 +55,11 @@ export type LinkedTasks = {
   settled(taskId: string, boundMs: number, o?: { signal?: AbortSignal | undefined; until?: Promise<void> }): Promise<'settled' | 'bound' | 'aborted'>
   /**
    * The caller's ask_project tasks, newest first: open, or reported to a caller not given the report yet. The session each went to by its id as this host
-   * names it (a linked machine's `<machine>.<id>`, a hub's `<hub>.<id>`), and its name
+   * prints it (`MailReach.shownId`: a linked machine's `<machine>.<id>`, a hub's `<label>.<id>`), its address and its name
    */
-  asks(callerId: string): { taskId: string; sessionId: string; name: string }[]
+  asks(callerId: string): { taskId: string; sessionId: string; to: string; name: string }[]
+  /** A session's address as this host prints it, as `asks` does */
+  shown(address: string): string
   /** Why work cannot go to a linked machine's session now (`MailAcross.taskRefusal`), or null */
   refusal(childId: string): string | null
   /** On a machine: the copy of the task a hub wrote for the caller's ask (`HubAskResult.taskId`) to its session `to`, so the report it sends answers it */
@@ -116,13 +118,11 @@ export function linkedTasksOf(mail: MessageService, records: MailboxRecords, acr
     },
     asks: (callerId) => {
       const caller = mail.sessionAddress(callerId)
-      const here = parseAddress(caller)
       const ask = (id: string | null) => {
         const m = id === null ? undefined : records.message(id)
         const to = m?.kind === 'task' && m.origin === 'ask_project' && m.sender === caller ? records.recipients(m.id)[0]?.recipient : undefined
-        const p = to ? parseAddress(to) : null
-        if (!m || !to || p?.kind !== 'session' || here?.kind !== 'session') return []
-        return [{ taskId: m.id, sessionId: p.host === here.host ? p.sessionId : `${p.host}.${p.sessionId}`, name: mail.labelOf(to), at: m.createdAt }]
+        if (!m || !to || parseAddress(to)?.kind !== 'session') return []
+        return [{ taskId: m.id, sessionId: mail.shownId(to), to, name: mail.labelOf(to), at: m.createdAt }]
       }
       const found = [
         ...records.watchedFrom(caller).flatMap((r) => ask(r.messageId)),
@@ -130,6 +130,7 @@ export function linkedTasksOf(mail: MessageService, records: MailboxRecords, acr
       ]
       return found.filter((a, i) => found.findIndex((b) => b.taskId === a.taskId) === i).sort((a, b) => b.at - a.at).map(({ at: _at, ...a }) => a)
     },
+    shown: (address) => mail.shownId(address),
     refusal: (childId) => across.taskRefusal(mail.sessionAddress(childId))?.text ?? null,
     keep: (callerId, to, taskId, text) => across.keepAsk(mail.sessionAddress(callerId), to, taskId, text),
     holdReports: (taskId) => across.holdReports(taskId),

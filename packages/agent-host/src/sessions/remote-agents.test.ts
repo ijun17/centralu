@@ -94,6 +94,7 @@ class Tasks {
         return raceBound(until ? Promise.race([reported, until.then(() => 'settled' as const)]) : reported, boundMs, signal)
       },
       asks: () => [],
+      shown: (address) => address,
       refusal: () => this.refusal,
       keep: () => {},
       holdReports: () => () => {},

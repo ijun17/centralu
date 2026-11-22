@@ -54,11 +54,11 @@ export function world() {
     project: (id) => projects.get(id),
     // The sessions of one project, and of the Assistant's none, are one group
     askGroupMembers: (a) => [...sessions].filter(([, s]) => s.projectId !== null && s.projectId === sessions.get(idOf(a))?.projectId).map(([id]) => addr(id)),
-    shown: (a) => refs.shown(a),
+    shown: (a, reader) => refs.shown(a, reader),
   }
   // The hubs that link this host, as a test adds them: the ids a tool prints for their sessions go by their labels
   const hubs: { id: string; label: string; name: string; you: string | null }[] = []
-  const refs = new SessionRefs({ hostId: HOST, sessions: () => [], assistantId: () => 'orc', computers: () => ({ machine: () => false, hubs: () => hubs, mirrored: () => [] }) })
+  const refs = new SessionRefs({ hostId: HOST, sessions: () => [], assistantId: () => 'orc', computers: () => ({ machine: () => false, label: () => null, hubs: () => hubs, mirrored: () => [] }) })
   const clock = { t: NOW }
   const turns = new Map<string, TurnNow>()
   const reach = mailReach(host)

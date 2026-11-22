@@ -39,8 +39,8 @@ export function mailPeers(o: {
   /** This host's mail id (`hubSelfId`): a machine's session is `session:<it>/<machine>.<id>` here */
   hostId: string
   selfName: () => string
-  /** The machines this host links, when it is a hub */
-  machines?: { get(id: string): Machine | undefined; all(): Machine[] }
+  /** The machines this host links, when it is a hub; `label`: the prefix this hub's own sessions go under on them (`Links.label`) */
+  machines?: { get(id: string): Machine | undefined; all(): Machine[]; label?(): string | null }
   /** The session here that started a machine's child (`LinkedHost.remoteAgentParent`) */
   parentOf?: (qualifiedId: string) => string | undefined
   /** The hubs that link this host, when it is a machine */
@@ -64,6 +64,7 @@ export function mailPeers(o: {
     ...(o.parentOf ? { parentOf: o.parentOf } : {}),
     ...(machines
       ? {
+          label: () => machines.label?.() ?? null,
           machine: (id: string) => {
             const m = machines.get(id)
             return (

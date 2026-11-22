@@ -1,5 +1,5 @@
 import { MACHINE_ID_RE, errorMessage, oneLineText } from '@cc/protocol'
-import { PERSON, ROLE_WORDS, isPerson, isSessionId, parseAddress, sessionAddress, type RoleWord } from './address.js'
+import { PERSON, ROLE_WORDS, inHubTerms, isPerson, isSessionId, parseAddress, sessionAddress, type RoleWord } from './address.js'
 import type { FoundEntry } from './find.js'
 import { refuse } from './rules.js'
 
@@ -15,8 +15,10 @@ export type SessionRef = { role: RoleWord } | { address: string } | { word: stri
 /** The computers a `<computer>.<id>` can name, read at each call: a hub's machines, or the hubs that link a machine */
 export type RefComputers = {
   machine(id: string): boolean
-  /** `you`: this machine's id there, under which that hub names this machine's sessions */
-  hubs(): readonly { id: string; label: string; name: string; you: string | null }[]
+  /** The prefix this hub's own sessions go under on its machines; null on a host that is no hub */
+  label(): string | null
+  /** `you`: this machine's id there, under which that hub names this machine's sessions; `offered`: the label it offered, which its other machines know it by */
+  hubs(): readonly { id: string; label: string; name: string; you: string | null; offered?: string | null }[]
   /** The sessions of this hub's machines named `name` exactly, from its mirror: no computer is asked */
   mirrored(name: string): FoundEntry[]
 }
@@ -27,6 +29,12 @@ export type SessionRefsDeps = {
   assistantId(): string | null
   computers(): RefComputers
 }
+
+/**
+ * How the host a text is read on names sessions, as far as this host knows it: `here` its own sessions' host, the hubs that link it (by label, and
+ * its id there), whether another machine of such a hub goes without that hub's label, and `of`, an address of this host's as that host has it
+ */
+type View = { here: string | null; hubs: readonly { id: string; label: string; you: string | null }[]; bare(machine: string): boolean; of(address: string): string }
 
 const FORMS = 'Name a session by its id (<id> here, <computer>.<id> on another computer), its name, or "assistant", "parent" or "person".'
 
@@ -59,7 +67,8 @@ export class SessionRefs {
     const role = ROLE_WORDS.find((r) => r === t.toLowerCase())
     if (role) return { role }
     const word = this.word(callerId, t)
-    if (word.here.length > 0) return word
+    // A linked machine's session whose name is shaped like an address is found by that name too, as one here is
+    if (word.here.length > 0 || (/^(session|app):/i.test(t) && this.d.computers().mirrored(t).length > 0)) return word
     const p = parseAddress(t)
     if (p?.kind === 'session') throw refuse('bad_address', `${JSON.stringify(oneLineText(t, 80))} is a mail address, which tools do not take. For that session, write ${JSON.stringify(this.shown(t))}. ${FORMS}`)
     if (p) return { address: t }
@@ -110,21 +119,46 @@ export class SessionRefs {
 
   /**
    * How a tool prints `address`, in the form `ref` reads back: a session here by its id, one on another computer as `<computer>.<id>`
-   * (a hub by its label; another machine of a hub under that hub's label too while several hubs link this one), the person as
-   * `person`. An app's address stays as it is. A hub this computer no longer links has no label left: its id stands in, and reads
-   * back as no session
+   * (a hub by its label; another machine of a hub under that hub's label too while several hubs link this one, or one of this host's
+   * machines has its id), the person as `person`. An app's address stays as it is. A hub this computer no longer links has no label left:
+   * its id stands in, and reads back as no session. `reader`: a session on the other side of a link that reads the text, for which it is
+   * printed as its host reads it back (`viewOf`)
    */
-  shown(address: string): string {
+  shown(address: string, reader?: string): string {
     if (isPerson(address)) return PERSON
-    const p = parseAddress(address)
+    const v = this.viewOf(reader)
+    const p = parseAddress(v.of(address))
     if (p?.kind !== 'session') return address
-    if (p.host === this.d.hostId) return p.sessionId
-    const hubs = this.d.computers().hubs()
-    const hub = hubs.find((h) => h.id === p.host)
+    if (p.host === v.here) return p.sessionId
+    const hub = v.hubs.find((h) => h.id === p.host)
     const dot = p.sessionId.indexOf('.')
-    if (dot > 0 && hub?.you === p.sessionId.slice(0, dot)) return p.sessionId.slice(dot + 1)
-    if (dot > 0 && hub && hubs.length === 1) return p.sessionId
+    const machine = p.sessionId.slice(0, dot)
+    if (dot > 0 && hub?.you === machine) return p.sessionId.slice(dot + 1)
+    if (dot > 0 && hub && v.bare(machine)) return p.sessionId
     return `${hub?.label ?? p.host}.${p.sessionId}`
+  }
+
+  /**
+   * How the host `reader` is on names sessions. A machine this hub links knows this hub by the label it offers, and its other machines under
+   * that label, which reads back there whether one hub links it or several; a hub that links this machine names its own sessions and its
+   * machines' by its ids, this host's as its machine, and another of its machines does as this one does, by the label offered. Any other
+   * reader, or none, reads as this host does
+   */
+  private viewOf(reader: string | undefined): View {
+    const c = this.d.computers()
+    const hubs = c.hubs()
+    const r = reader === undefined ? null : parseAddress(reader)
+    if (r?.kind === 'session') {
+      const dot = r.sessionId.indexOf('.')
+      const machine = r.sessionId.slice(0, dot)
+      const label = c.label()
+      if (r.host === this.d.hostId && dot > 0 && label && c.machine(machine)) return { here: null, hubs: [{ id: r.host, label, you: machine }], bare: () => false, of: (a) => a }
+      const hub = hubs.find((h) => h.id === r.host)
+      const of = (a: string) => (hub ? inHubTerms(a, hub.id, hub.you ? { host: this.d.hostId, id: hub.you } : undefined) : a)
+      if (hub && dot > 0 && machine !== hub.you && hub.offered) return { here: null, hubs: [{ id: hub.id, label: hub.offered, you: machine }], bare: () => false, of }
+      if (hub) return { here: hub.id, hubs: [], bare: () => false, of }
+    }
+    return { here: this.d.hostId, hubs, bare: (m) => hubs.length === 1 && !c.machine(m), of: (a) => a }
   }
 
   /** The sessions here a word names: the one with that id, else those of that name but the caller (an heir has the name of the session it replaced) */
