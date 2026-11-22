@@ -421,13 +421,15 @@ function markerParts(e: Marker): {
 
 /**
  * The provider refused the model of the last turn (#1369): its failure line, after the person's last message, says so.
- * Trying again cannot help; picking another model can, and the stop note offers it (#2360).
+ * Trying again cannot help; picking another model can, and the stop note offers it (#2360). The newest failure line
+ * decides: a failure after the refusal is the one the note is about.
  */
 export function lastTurnRefusedModel(items: readonly ChatItem[] | undefined): boolean {
   if (!items) return false
   for (let i = items.length - 1; i >= 0; i--) {
     const it = items[i]
-    if (it?.kind === 'user') return false
+    // A message still being sent has not started a turn: the note stands until the session works
+    if (it?.kind === 'user' && !it.pending) return false
     if (it?.kind === 'mark' && it.mark === 'failed') return !!it.pickModel
   }
   return false

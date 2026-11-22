@@ -70,11 +70,11 @@ export function StopNote({ sessionId, stop: current }: { sessionId: string; stop
   // The plain line's stop, kept while it fades out under a wait that came
   const said = useHeld(stop?.kind === 'wait' ? null : stop)
   const now = useNowUntil(said?.kind === 'stopped' ? said.resetAt : undefined)
-  const refused = useStore((s) => lastTurnRefusedModel(s.chat[sessionId]))
+  const failedNow = current?.kind === 'error' || (current?.kind === 'stopped' && current.error)
+  // Trying again cannot help a refused model; another model can (#1369). Held with the stop, so the note fades out whole
+  const pickModel = useHeld(useStore((s) => (current ? failedNow && lastTurnRefusedModel(s.chat[sessionId]) : null)))
   if (!note.shown || !stop) return null
   const failed = said?.kind === 'error' || !!(said?.kind === 'stopped' && said.error)
-  // Trying again cannot help a refused model; another model can (#1369)
-  const pickModel = failed && refused
   return (
     <div
       className={`${note.leaving ? 'cc-fade-out pointer-events-none' : 'cc-fade'} grid grid-cols-1 border-t border-line-chrome px-conversation py-1.5 text-xs leading-body text-ink-muted`}

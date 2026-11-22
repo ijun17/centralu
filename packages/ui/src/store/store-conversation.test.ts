@@ -429,9 +429,17 @@ describe('a model the provider refused (#1369)', () => {
     expect(last.text).toBe("Codex refused the model gpt-5.5: The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.")
     expect(last.pickModel).toBe(true)
     expect(lastTurnRefusedModel(chat())).toBe(true)
-    // The person's next message starts another turn: the refusal is no longer the last turn's
+    // The person's next message starts another turn, which the refusal is not part of
     mock.emit({ type: 'user_message', sessionId: 'mr-1', seq: 9, text: 'go on' })
     expect(lastTurnRefusedModel(chat())).toBe(false)
+  })
+
+  it('a message still being sent leaves the refusal the last turn’s; a failure after it decides', () => {
+    const [mark] = messagesToChat([{ sessionId: 'mr-4', seq: 4, role: 'system', kind: 'marker', ts: 1, payload: refused('mr-4') }])
+    const sending: ChatItem = { kind: 'user', seq: 5, text: 'go on', pending: true }
+    const other: ChatItem = { kind: 'mark', seq: 6, text: 'Compaction failed — timed out', mark: 'failed' }
+    expect(lastTurnRefusedModel([mark!, sending])).toBe(true)
+    expect(lastTurnRefusedModel([mark!, other])).toBe(false)
   })
 
   it('and the same line after reopening', () => {
