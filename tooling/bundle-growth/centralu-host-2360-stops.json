@@ -1,0 +1,4 @@
+{
+  "bytes": 300,
+  "reason": "One message per stop (#2360): the stop note's label now says when Centralu gave up trying (Interruption.gaveUpAfter, the ' · Centralu gave up after N tries' words) and the Inbox's one listing rule (inboxListing) replaces two hand-kept copies, moved with turnStop into the protocol so the host reads it too. Measured 1,963,736 B against main's 1,963,455 B (4ab990dee, Windows production build), +281 B, all in the main chunk. Trimming the code (one merged condition, plain optional keys) saved 0 to 52 B and the 52 B changed the stop's shape, so it was left out. Plain code with no dependency; lazy loading would not lower the total, which counts every chunk."
+}
