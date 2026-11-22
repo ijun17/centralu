@@ -1,3 +1,4 @@
+import type { ReleaseWhy } from '../dev-services/store/mailbox.js'
 import type { ReceiverState } from './delivery.js'
 
 /**
@@ -19,7 +20,7 @@ export type RestFacts = {
   /** Mail that wakes it waits to be delivered: that delivery goes first */
   mailWaiting: boolean
   /** Its last turn that ended (`MailboxRecords.lastTurnEnded`): who started it, when it ended, and the stop that cut it */
-  lastTurn: { startedBy: string; endedAt: number; endedHow: string | null } | null
+  lastTurn: { startedBy: string; endedAt: number; endedHow: ReleaseWhy | null } | null
 }
 
 export type RestWhy = 'gone' | 'turn' | 'card' | 'limited' | 'error' | 'interrupted' | 'stopped' | 'mail_waiting' | 'person' | 'own_work' | 'own_work_unknown'

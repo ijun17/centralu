@@ -15,33 +15,28 @@ import { HOUR_MS, REMINDER } from './rules.js'
  * notice to the sender crosses as any notice does.
  */
 
-/** Why no reminder went, or what was posted: the decision log's words (§10.8) */
-export type ReminderWhy = RestWhy | 'covered' | 'cap_gap' | 'cap_day' | 'undelivered' | 'grace' | 'again'
+/**
+ * Why no reminder went: the decision log's words (§10.8). `again`: each row's second reminder waits for `againMs`; `nothing`: every row has had its
+ * reminders and waits for its release
+ */
+type ReminderWhy = RestWhy | 'covered' | 'cap_gap' | 'cap_day' | 'undelivered' | 'grace' | 'again' | 'nothing'
 
-export type ReminderDecision =
-  | { remind: RecipientRow[]; n: 1 | 2; quiet: boolean }
-  | { remind: null; why: ReminderWhy; detail?: string }
+type ReminderDecision = { remind: RecipientRow[]; quiet: boolean } | { remind: null; why: ReminderWhy; detail?: string }
 
 /** The releases this sweep writes, and the reminders' words for them: the stop notice owns every other release */
 const REMINDER_RELEASES: readonly ReleaseWhy[] = ['reminders', 'waited', 'working', 'waiting']
 
-export type ReminderOptions = {
-  now?: () => number
-  log?: (line: string) => void
-  limits?: Partial<typeof REMINDER>
-}
 
 export class MailReminders {
   private readonly now: () => number
   private readonly log: (line: string) => void
-  private readonly limits: typeof REMINDER
   /**
    * When each session was last found not at rest (its own work running, say), and when this host started: a session is at rest since the latest of
    * these and its last turn's end (§10.1). Kept in memory, so a restart starts the clock again, as the sleep rule does
    */
   private readonly busySeen = new Map<string, number>()
   private readonly startedAt: number
-  /** The last decision logged per session, so the log says each change once (§10.8) */
+  /** The last line logged per session, its decision and, apart, its notice as a sender, so the log says each change once (§10.8) */
   private readonly logged = new Map<string, string>()
 
   constructor(
@@ -49,11 +44,10 @@ export class MailReminders {
     private readonly records: MailboxRecords,
     /** A session of this host by its address, as the rest rule reads it; null for any address this host does not decide for */
     private readonly facts: (address: string) => RestFacts | null,
-    opts: ReminderOptions = {},
+    opts: { now?: () => number; log?: (line: string) => void } = {},
   ) {
     this.now = opts.now ?? Date.now
     this.log = opts.log ?? ((line) => console.error(line))
-    this.limits = { ...REMINDER, ...opts.limits }
     this.startedAt = this.now()
   }
 
@@ -70,10 +64,10 @@ export class MailReminders {
   }
 
   /** What a reminder to `address` would do now (§10.1 to §10.4), recording when it was found not at rest */
-  decide(address: string, f: RestFacts, now: number): ReminderDecision {
-    const L = this.limits
+  private decide(address: string, f: RestFacts, now: number): ReminderDecision {
+    const L = REMINDER
     const rows = this.records.awaitingAnswer(address).filter((r) => r.reminded < L.perRow)
-    if (rows.length === 0) return { remind: null, why: 'again', detail: 'nothing left to remind' }
+    if (rows.length === 0) return { remind: null, why: 'nothing' }
     const rest = restForReminder(f, now, L.personQuietMs)
     if (!rest.atRest) {
       this.busySeen.set(address, now)
@@ -92,8 +86,7 @@ export class MailReminders {
     }
     const capped = this.capped(address, now)
     if (capped) return { remind: null, why: capped }
-    const remind = uncovered.slice(0, L.rowsAtMost)
-    return { remind, n: remind.some((r) => r.reminded > 0) ? 2 : 1, quiet: this.cold(f, now) }
+    return { remind: uncovered.slice(0, L.rowsAtMost), quiet: this.cold(f, now) }
   }
 
   /**
@@ -101,7 +94,7 @@ export class MailReminders {
    * after its delivery, saying why it is still open: waiting on another (`waiting`), on its own work (`working`), or neither (`waited`)
    */
   private release(address: string, f: RestFacts, now: number): void {
-    const L = this.limits
+    const L = REMINDER
     if (f.receiver.kind === 'gone') return
     const inTurn = f.receiver.kind === 'busy' || f.receiver.joins === true
     for (const r of this.records.awaitingAnswer(address)) {
@@ -123,28 +116,28 @@ export class MailReminders {
       const f = kind === 'session' ? this.facts(sender) : null
       const capped = f ? this.capped(sender, now) : null
       if (capped) {
-        this.say(sender, `sender told later (${capped})`)
+        this.say(sender, `sender told later (${capped})`, 'sender')
         continue
       }
       this.service.stops.tellReleased(sender, REMINDER_RELEASES, f !== null && this.cold(f, now))
-      this.say(sender, 'sender told', true)
+      this.say(sender, 'sender told', 'sender', true)
     }
   }
 
   private act(address: string, d: ReminderDecision): void {
     if (d.remind === null) {
-      this.say(address, `no (${d.why}${d.detail ? `; ${d.detail}` : ''})`)
+      this.say(address, `no (${d.why}${d.detail ? `; ${d.detail}` : ''})`, 'decision')
       return
     }
-    if (this.service.remind(address, d.remind, d.quiet)) {
-      this.say(address, `posted ${d.n}/${this.limits.perRow} rows=${d.remind.length} quiet=${d.quiet ? 'yes' : 'no'}`, true)
-    }
+    const posted = this.service.remind(address, d.remind, d.quiet)
+    if (posted) this.say(address, `posted ${posted.facts.reminder ?? 1}/${REMINDER.perRow} rows=${d.remind.length} quiet=${d.quiet ? 'yes' : 'no'}`, 'decision', true)
   }
 
-  /** One line per change of a session's decision, and one for every reminder posted or sender told (§10.8) */
-  private say(address: string, what: string, always = false): void {
-    if (!always && this.logged.get(address) === what) return
-    this.logged.set(address, what)
+  /** One line per change of a session's decision, and of its notice as a sender, kept apart; one for every reminder posted or sender told (§10.8) */
+  private say(address: string, what: string, as: 'decision' | 'sender', always = false): void {
+    const key = `${as}:${address}`
+    if (!always && this.logged.get(key) === what) return
+    this.logged.set(key, what)
     this.log(`[mail] reminder ${short(address)}: ${what}`)
   }
 
@@ -153,7 +146,7 @@ export class MailReminders {
    * Reminders and notices of unanswered mail count together, read from the store
    */
   private capped(address: string, now: number): 'undelivered' | 'cap_gap' | 'cap_day' | null {
-    const L = this.limits
+    const L = REMINDER
     const sent = this.records.followUpsTo(address, now - 24 * HOUR_MS)
     if (sent.some((r) => r.deliveredAt === null)) return 'undelivered'
     if (sent.length >= L.perDay) return 'cap_day'
@@ -163,7 +156,7 @@ export class MailReminders {
 
   /** Asleep past `warmMs` since its last turn: a follow-up is posted quiet and rides its next wake (#561) */
   private cold(f: RestFacts, now: number): boolean {
-    return f.receiver.kind === 'ready' && !f.receiver.live && now - (f.lastTurn?.endedAt ?? 0) >= this.limits.warmMs
+    return f.receiver.kind === 'ready' && !f.receiver.live && now - (f.lastTurn?.endedAt ?? 0) >= REMINDER.warmMs
   }
 
   /** When the turn that `r`'s last reminder was delivered in ended; the reminder's delivery when it started none (it went quiet) or that turn still runs */

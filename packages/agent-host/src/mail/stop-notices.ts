@@ -435,8 +435,8 @@ function unansweredText(all: readonly { id: string; recipient: string; why: Rele
 ${lastWordsText(s.name, said)}`
   })
   if (rows.length === 0) return stopLines.join('\n')
-  // The person is not told of reminders, which are Centralu's words to an agent: a row released after them reads as one that went unanswered
-  const why = (w: ReleaseWhy | null) => (!w ? WHY_WORDS.gone : person && w === 'reminders' ? 'it has not answered' : WHY_WORDS[w])
+  // The person is not told of reminders, nor of what a session waits on, which are Centralu's words to an agent: such a row reads as one that went unanswered
+  const why = (w: ReleaseWhy | null) => (!w ? WHY_WORDS.gone : person && w === 'reminders' ? 'it has not answered' : person && (w === 'working' || w === 'waiting') ? WHY_WORDS.waited : WHY_WORDS[w])
   const lines = rows.map((r) => `- ${person ? r.name : `${r.id} to ${nameWithId(r.name, r.shown)}`}: ${why(r.why)}.`)
   const later = rows.some((r) => r.why === 'working' || r.why === 'waiting')
   // The person is not told what an agent is: no advice to go on without answers, and no reminders to speak of

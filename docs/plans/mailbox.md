@@ -2362,7 +2362,8 @@ reminder posted:
 ```
 
 The reason is the §10.1 `why`, or `covered`, `cap_gap`, `cap_day`, `undelivered`, `grace`, or `again` (nothing due:
-every row's second reminder waits for `againMs`). A sender's notice is logged as `sender told`, or `sender told later
+every row's second reminder waits for `againMs`), or `nothing` (every row has had its reminders and waits for its
+release). A sender's notice is logged as `sender told`, or `sender told later
 (<cap>)` while its own budget holds it. Ids are the first 8
 characters, as the host logs them today. A test (`reminders.test.ts`) asserts one line per change and none for
 repeats.
@@ -2415,12 +2416,15 @@ M5 was built after #1948 changed what §10 was written against. Where the build 
 - **The reminder** is a Centralu notice whose words are inline in the wake (`flowsDownTo`, as a watch's notice), so
   the session needs no read to learn which messages wait; the words are S2 with the receiver's own calls (`reply`,
   `handled`, or `centralu_run` for the Assistant). A delivered reminder counts once on each row it names
-  (`MailboxRecords.markDelivered`); given again, it counts nothing.
+  (`MailboxRecords.markDelivered`); given again, it counts nothing. A quiet reminder carried by a later wake names
+  the rows it was written with; one whose rows were all answered meanwhile is dropped unread, and a follow-up read
+  that way was never delivered, so it holds no later one (`followUpsTo`).
 - **The Assistant.** Its requests are settled by its request turn (§7.6), so it is reminded only of other
   needsReply messages, as any session, with no per-asker split: `facts.asker` is never set by a reminder.
 - **Senders.** A session of this host is told within its own follow-up budget, and quietly when cold; the person and a
   session on another computer at once. The person's line for a row released after its reminders reads "it has not
-  answered": the person is not told of reminders.
+  answered", and one released while the session worked or waited reads "it has not answered in 2 hours": the person
+  is not told of reminders, nor of what a session waits on.
 - **Linked machines (§10.7 row 35).** Only the receiver's host reminds and releases a row: an address of another host
   is skipped (`restFacts` is null for it), and a linked machine's session has no session on the hub, so it reads as
   gone there. The receiver's host tells the sender by a notice the link carries, and the release crosses back as a

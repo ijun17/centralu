@@ -179,6 +179,9 @@ const WATCHED = `(m.needs_reply = 1 OR m.kind = 'task')`
 const WAITING = `r.read_at IS NULL AND (r.held IS NULL OR r.held = 'released') AND COALESCE(r.settled, '') NOT IN ('withdrawn', 'gone')`
 /** Held for a reason the person acts on */
 const HELD = `r.held IS NOT NULL AND r.held NOT IN ('released', 'dismissed')`
+/** A row the unanswered reminder watches (`awaitingAnswer`, docs/plans/mailbox.md §10.2) */
+const AWAITING = `m.kind = 'message' AND m.needs_reply = 1 AND r.delivered_at IS NOT NULL AND r.settled IS NULL AND r.released_at IS NULL
+  AND r.answer_id IS NULL AND (r.held IS NULL OR r.held = 'released')`
 /** A message that waits for a reply: a task, or a message that needs one (the Inbox's Tasks, #1577) */
 const WORK = `(m.kind = 'task' OR (m.kind = 'message' AND m.needs_reply = 1))`
 /**
@@ -896,12 +899,7 @@ export class MailboxRecords {
    * settled (an older build's `legacy` row is), released, answered by a held answer nor held. Oldest first
    */
   awaitingAnswer(recipient: string): RecipientRow[] {
-    return this.rows(
-      `r.recipient = ? AND m.kind = 'message' AND m.needs_reply = 1 AND r.delivered_at IS NOT NULL AND r.settled IS NULL AND r.released_at IS NULL
-         AND r.answer_id IS NULL AND (r.held IS NULL OR r.held = 'released')
-       ORDER BY r.delivered_at, m.id`,
-      recipient,
-    )
+    return this.rows(`r.recipient = ? AND ${AWAITING} ORDER BY r.delivered_at, m.id`, recipient)
   }
 
   /** The sessions with a row the unanswered reminder watches (`awaitingAnswer`), as addresses */
@@ -909,8 +907,7 @@ export class MailboxRecords {
     return this.db
       .prepare<[], { recipient: string }>(
         `SELECT DISTINCT r.recipient FROM mail_recipients r JOIN mail m ON m.id = r.message_id
-          WHERE r.recipient LIKE 'session:%' AND m.kind = 'message' AND m.needs_reply = 1 AND r.delivered_at IS NOT NULL AND r.settled IS NULL
-            AND r.released_at IS NULL AND r.answer_id IS NULL AND (r.held IS NULL OR r.held = 'released')`,
+          WHERE r.recipient LIKE 'session:%' AND ${AWAITING}`,
       )
       .all()
       .map((r) => r.recipient)
@@ -983,12 +980,15 @@ export class MailboxRecords {
     )
   }
 
-  /** Centralu's follow-ups to `recipient` (reminders and unanswered notices): those undelivered, and those delivered since `since` (D24) */
+  /**
+   * Centralu's follow-ups to `recipient` (reminders and unanswered notices): those waiting to be delivered, and those delivered since `since` (D24). One
+   * read without a delivery (a reminder dropped as settled, `mail read`) waits for nothing and woke nothing, so it is neither
+   */
   followUpsTo(recipient: string, since: number): RecipientRow[] {
     return this.rows(
       `r.recipient = ? AND m.kind = 'notice' AND m.sender = 'centralu'
          AND json_valid(m.facts) AND (json_type(m.facts, '$.reminder') IS NOT NULL OR json_type(m.facts, '$.unanswered') IS NOT NULL)
-         AND (r.delivered_at IS NULL OR r.delivered_at >= ?)
+         AND ((r.delivered_at IS NULL AND r.read_at IS NULL) OR r.delivered_at >= ?)
        ORDER BY m.created_at, m.id`,
       recipient,
       since,
@@ -1247,18 +1247,23 @@ export class MailboxRecords {
   }
 
   /** How the session's turn `turnSeq` was cut, a stop's cause (`StopWhy`): no reminder follows a turn the person stopped or that failed (docs/plans/mailbox.md §10.1) */
-  setTurnEndedHow(sessionId: string, turnSeq: number, how: string): void {
+  setTurnEndedHow(sessionId: string, turnSeq: number, how: ReleaseWhy): void {
     this.db.prepare(`UPDATE mail_turns SET ended_how = ? WHERE session_id = ? AND turn_seq = ?`).run(how, sessionId, turnSeq)
   }
 
-  /** The session's last turn that ended (a canceled delivery is no turn): who started it, when it ended and how it was cut (`ended_how`, null for a turn that ended as turns do), or null */
-  lastTurnEnded(sessionId: string): { startedBy: string; endedAt: number; endedHow: string | null } | null {
+  /**
+   * The session's last turn that ended (a canceled delivery is no turn): who started it, when it ended and how it was cut (`ended_how`, null for a turn
+   * that ended as turns do; a word this build does not know reads as `interrupted`, a stop all the same), or null
+   */
+  lastTurnEnded(sessionId: string): { startedBy: string; endedAt: number; endedHow: ReleaseWhy | null } | null {
     const row = this.db
       .prepare<[string], { started_by: string; ended_at: number; ended_how: string | null }>(
         `SELECT started_by, ended_at, ended_how FROM mail_turns WHERE session_id = ? AND ended_at IS NOT NULL AND COALESCE(outcome, '') <> 'canceled' ORDER BY turn_seq DESC LIMIT 1`,
       )
       .get(sessionId)
-    return row ? { startedBy: row.started_by, endedAt: row.ended_at, endedHow: row.ended_how } : null
+    if (!row) return null
+    const how = row.ended_how === null ? null : (RELEASE_WHY.find((w) => w === row.ended_how) ?? 'interrupted')
+    return { startedBy: row.started_by, endedAt: row.ended_at, endedHow: how }
   }
 
   /** When the turn the row was delivered in ended, or null: still running, or none recorded */

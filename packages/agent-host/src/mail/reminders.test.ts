@@ -148,7 +148,7 @@ describe('MailReminders (docs/plans/mailbox.md §10)', () => {
 
   it('holds a reminder while the session\'s own work runs, reminds 2 minutes after it ends, and releases at 2 hours as still working', () => {
     const h = harness()
-    const q = h.ask(A, B)
+    h.ask(A, B)
     h.over.set(B, { work: 1 })
     h.minutes(30)
     h.sweep()
@@ -169,7 +169,6 @@ describe('MailReminders (docs/plans/mailbox.md §10)', () => {
     other.sweep()
     expect(other.w.rowOf(r, B).releasedWhy).toBe('working')
     expect(other.followUps(A)[0]?.body).toContain('it is still working on its own work after 2 hours')
-    expect(q).toBeTruthy()
   })
 
   it('holds a reminder for 10 minutes after a turn the person started', () => {
@@ -243,7 +242,7 @@ describe('MailReminders (docs/plans/mailbox.md §10)', () => {
 
   it('does not let a question sent before the message came in, or in a later turn another message started, spare it', () => {
     const h = harness()
-    const before = h.w.send(B, { to: [C], text: 'unrelated, earlier', needsReply: true }).message.id
+    h.w.send(B, { to: [C], text: 'unrelated, earlier', needsReply: true })
     const q = h.ask(A, B)
     const other = h.w.send(C, { to: [B], text: 'another thing', needsReply: true }).message.id
     const t = h.w.startTurn(B, other)
@@ -253,7 +252,6 @@ describe('MailReminders (docs/plans/mailbox.md §10)', () => {
     h.minutes(3)
     h.sweep()
     expect(h.followUps(B)[0]?.facts.of).toContain(q)
-    expect(before).toBeTruthy()
   })
 
   it('wakes a session for a follow-up at most once in 20 minutes and 6 times in 24 hours, counted from the store across a restart', () => {
@@ -372,10 +370,10 @@ describe('MailReminders (docs/plans/mailbox.md §10)', () => {
     h.w.mail.stops.partyGone(B)
     expect(h.followUps(A)).toEqual([])
     expect(h.w.rowOf(q, C).releasedAt).toBeNull()
-    // The heir is released at the original 2 hours, after its second reminder
+    // The heir's row is released 2 hours after its first delivery, the clock it kept
     h.minutes(120)
     h.sweep()
-    expect(h.w.rowOf(q, C).releasedAt).not.toBeNull()
+    expect(h.w.rowOf(q, C).releasedWhy).toBe('waited')
     expect(h.followUps(A)).toHaveLength(1)
   })
 
@@ -393,6 +391,43 @@ describe('MailReminders (docs/plans/mailbox.md §10)', () => {
     h.sweep()
     expect(h.followUps(B)).toHaveLength(1)
     expect(h.w.mail.drain(B).messageIds).not.toContain(reminder?.id)
+  })
+
+  it('lets a reminder dropped unread, its messages answered meanwhile, hold no later follow-up', () => {
+    const h = harness()
+    const q = h.ask(A, B)
+    h.over.set(B, { receiver: { kind: 'ready', live: false, quiet: false } })
+    h.minutes(55)
+    h.sweep()
+    expect(h.followUps(B)[0]?.facts.quiet).toBe(true)
+    // B answers in a turn of the person's; at its next wake the reminder has nothing to say and is dropped, read and never delivered
+    h.w.mail.done(B, q)
+    h.over.delete(B)
+    h.w.clock.t += 3_000
+    expect(h.w.mail.drain(B).messageIds).toEqual([])
+    h.ask(C, B, 'a new question')
+    h.minutes(3)
+    h.sweep()
+    expect(h.w.records.followUpsTo(B, 0).filter((r) => r.deliveredAt === null && r.readAt === null)).toHaveLength(1)
+    expect(h.lines.some((l) => l.includes('no (undelivered)'))).toBe(false)
+  })
+
+  it('logs a session decision and its notice as a sender apart, each once per change', () => {
+    const h = harness()
+    // B asked C, which is busy with its own work past 2 hours; B holds A's question and runs its own work, and was followed up a minute ago
+    h.ask(B, C, 'from b')
+    h.over.set(C, { work: 1 })
+    h.minutes(119)
+    h.ask(A, B, 'to b')
+    h.over.set(B, { work: 1 })
+    h.w.mail.notice(B, { body: 'an earlier follow-up', facts: { reminder: 1, of: [] }, dedupeKey: 'earlier' })
+    h.w.records.markDelivered(B, [h.followUps(B)[0]?.id ?? ''], h.w.clock.t, null)
+    h.minutes(2)
+    h.sweep()
+    h.sweep()
+    h.sweep()
+    const of = (who: string) => h.lines.filter((l) => l.startsWith(`[mail] reminder ${who}:`))
+    expect(of('b')).toEqual(['[mail] reminder b: no (own_work; 1 task)', '[mail] reminder b: sender told later (cap_gap)'])
   })
 
   it('logs one line per changed decision and none for repeats', () => {
