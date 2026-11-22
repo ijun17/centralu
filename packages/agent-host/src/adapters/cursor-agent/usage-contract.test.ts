@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { cursorSignInStore } from '../../os.js'
-import { DASHBOARD_URL, type DashboardMethod } from './dashboard.js'
+import { DASHBOARD_URL } from './dashboard.js'
 import { CURSOR_USAGE_CONTRACT, missingFromBundle } from './usage-contract.js'
 
 const ALL = Object.values(CURSOR_USAGE_CONTRACT).flat()
@@ -17,10 +17,9 @@ describe("the drift contract of Cursor's usage read (#2459)", () => {
     expect(missingFromBundle([])).toEqual(ALL)
   })
 
-  it('names the methods the request makes and the address it makes them to', () => {
-    const methods: DashboardMethod[] = ['GetCurrentPeriodUsage', 'GetPlanInfo']
-    const service = new URL(DASHBOARD_URL).pathname.slice(1)
-    expect(CURSOR_USAGE_CONTRACT.methods).toEqual(methods.map((m) => service + m))
+  it('names the methods the request makes, at the one address the token goes to', () => {
+    expect(CURSOR_USAGE_CONTRACT.methods).toEqual(['aiserver.v1.DashboardService/GetCurrentPeriodUsage', 'aiserver.v1.DashboardService/GetPlanInfo'])
+    expect(DASHBOARD_URL).toBe('https://api2.cursor.sh/aiserver.v1.DashboardService/')
   })
 
   it("names the Keychain item and the folder the sign-in store derives from the CLI's domain", () => {

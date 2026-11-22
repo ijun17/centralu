@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { UsageSnapshot, UsageWindow } from '@cc/protocol'
-import type { DashboardMethod } from './dashboard.js'
+import type { DashboardMethod } from './usage-contract.js'
 import { tokenExpiry } from './sign-in-token.js'
 import { CursorUsageFailure, type CursorUsageFailureKind } from './usage-failure.js'
 
