@@ -495,7 +495,7 @@ const signedOutTurn = (cli: Started) => {
 }
 
 describe('a turn of a signed-out Claude Code', () => {
-  it('ends signed out, in the words of the tool line, with nothing sent again', async () => {
+  it('ends signed out, in the words of the tool line, with nothing sent again; another authentication error keeps the CLI words', async () => {
     const { handle, events, cli } = await session(adapter({ retryDelay: () => 0 }))
     handle.send('fix the build')
     expect(text(await cli.input.next())).toBe('fix the build')
@@ -507,18 +507,11 @@ describe('a turn of a signed-out Claude Code', () => {
     expect(events.filter((e) => e.type === 'notice')).toEqual([])
     handle.send('and the tests')
     expect(text(await cli.input.next())).toBe('and the tests')
-    await handle.dispose()
-  })
-
-  it('keeps the CLI words of an authentication error that is not signed out', async () => {
-    const { handle, events, cli } = await session(adapter({ retryDelay: () => 0 }))
-    handle.send('fix the build')
-    await cli.input.next()
     const words = 'Invalid API key · Fix external API key'
-    cli.push({ type: 'assistant', parent_tool_use_id: null, error: 'authentication_failed', message: { id: 'm1', role: 'assistant', model: '<synthetic>', content: [{ type: 'text', text: words }] } })
+    cli.push({ type: 'assistant', parent_tool_use_id: null, error: 'authentication_failed', message: { id: 'm2', role: 'assistant', model: '<synthetic>', content: [{ type: 'text', text: words }] } })
     cli.push({ type: 'result', subtype: 'success', is_error: true, result: words, modelUsage: {} })
     await tick()
-    expect(events.filter((e) => e.type === 'error')).toEqual([{ type: 'error', sessionId: expect.any(String), error: { code: 'internal', message: words, retryable: true } }])
+    expect(events.filter((e) => e.type === 'error').at(-1)).toEqual({ type: 'error', sessionId: expect.any(String), error: { code: 'internal', message: words, retryable: true } })
     await handle.dispose()
   })
 })
