@@ -8,7 +8,6 @@ import { WARNING_TEXT, WARN_HOST_TURNS_PER_HOUR, WARN_PAIR_TURNS_PER_HOUR, hourl
 import type { MailTurns } from './turns.js'
 import type { DrainResult, MessageService } from './messages.js'
 import type { Watches } from './watches.js'
-import type { MailReminders } from './reminders.js'
 
 /**
  * Waking is the mailbox's job (docs/plans/mailbox.md §5): a sender only posts, and `MailDelivery` hands each receiver its mail.
@@ -144,8 +143,8 @@ export type MailDeliveryOptions = {
   across?: (address: string) => boolean
   /** The watches sessions keep (docs/plans/mailbox.md §18.5): they start and stop with the delivery, their timer is its `schedule`, and its sweep runs what is due */
   watches?: Pick<Watches, 'start' | 'stop' | 'due'>
-  /** The unanswered reminder (docs/plans/mailbox.md §10): its sweep runs with this one */
-  reminders?: Pick<MailReminders, 'sweep'>
+  /** The unanswered reminder (`MailReminders`, docs/plans/mailbox.md §10): its sweep runs with this one */
+  reminders?: { sweep(): void }
 }
 
 const DEFAULTS = { sweepEveryMs: 60_000, minWakeGapMs: 30_000, retryBaseMs: 5_000, maxRetryMs: 15 * 60_000, maxAttempts: 6, catchUpAfterMs: 30 * 60_000, crowdOver: 10, resumeAtOnce: 2, warnPairTurns: WARN_PAIR_TURNS_PER_HOUR, warnHostTurns: WARN_HOST_TURNS_PER_HOUR }

@@ -355,7 +355,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       // The turn it cut keeps how: no reminder follows a Stop or a failure until the session's next turn (mailbox.md §10.1)
       const cut = mailTurns.latest(id)
       if (cut) records.setTurnEndedHow(id, cut.seq, why)
-      void service.stops.sessionStopped(addressOf(id), why, { turnSeq: mailTurns.latest(id)?.seq ?? null, ...(o?.told ? { told: o.told.map(addressOf) } : {}), ...(o?.starter ? { starter: addressOf(o.starter) } : {}), ...(o?.held ? { held: true } : {}) })
+      void service.stops.sessionStopped(addressOf(id), why, { turnSeq: cut?.seq ?? null, ...(o?.told ? { told: o.told.map(addressOf) } : {}), ...(o?.starter ? { starter: addressOf(o.starter) } : {}), ...(o?.held ? { held: true } : {}) })
       // A stop Centralu holds to continue (#1415) is a stop only if its wait ends without going on, as its senders are told (`waitEnded`)
       if (!o?.held) watches.changed(addressOf(id), 'stopped')
     },

@@ -1706,7 +1706,13 @@ reads, the same as round 2, because the cap counts wakes and one wake handles ev
 - the senders of rows that were released are told in one gathered notice each, inside their own follow-up budget.
 
 So the expected cost per session per day is one or two follow-ups more than with false by default, and the worst case
-is unchanged. M5's real-surface check measures one, and the decision log (§10.8) shows how often the caps bind.
+is unchanged. The decision log (§10.8) shows how often the caps bind.
+
+**Measured** (#2477, `scripts/probe-reminder-cost.mts`, Claude Haiku through the measurement's recorder, CLI 2.1.296, a
+conversation of about 30k tokens): the reminder came 160 to 177 s after the session came to rest. A session that
+reads and answers it spent 4 requests: 122,291 cache-read tokens, 2,083 cache-write, 12 input and 637 output, about
+4 × the prefix in cache reads, in line with the estimate above. One that only acknowledged it spent 1 request: 29,493
+cache-read and 555 cache-write, the reminder's frame being most of those 555.
 
 ### 10.6 What the sender is told (D25)
 
