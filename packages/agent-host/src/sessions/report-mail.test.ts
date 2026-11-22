@@ -328,7 +328,7 @@ describe('what the owner reads with the tool', () => {
 })
 
 describe('the owner reads the child instead', () => {
-  it('read_session of a child counts the reports about it as read, and no other mail', async () => {
+  it('read_session of a child at rest counts the reports about it as read, and no other mail', async () => {
     const { parent, child } = await parentAndChild()
     const started = await w.mgr.startAgent(parent, { task: 'other job', wait: false })
     if (!started.ok) throw new Error(started.error)
@@ -345,15 +345,11 @@ describe('the owner reads the child instead', () => {
     expect(read.row(reportsIn(parent, child)[0]!.id, addr(parent))).toMatchObject({ deliveredAt: expect.any(Number), readAt: expect.any(Number) })
     expect(read.row(reportsIn(parent, other)[0]!.id, addr(parent))?.readAt).toBeNull()
     expect(read.row(note.message.id, addr(parent))?.readAt).toBeNull()
-  })
-
-  it('read_session of a child back in a turn leaves its report to wake the owner', async () => {
-    const { parent, child } = await parentAndChild()
-    await turnEnds(child, 'all merged')
-    handleOf(child)!.event({ type: 'state_change', sessionId: child, state: 'working' })
-    await w.until(() => w.mgr.sessionInfo(child)?.state === 'working')
-    expect(await handleOf(parent)!.opts.centraluTools!.readSession(child)).toMatchObject({ ok: true, state: 'working' })
-    expect(read.row(reportsIn(parent, child)[0]!.id, addr(parent))?.readAt).toBeNull()
+    // A child back in a turn has not ended it: its report still wakes the owner
+    handleOf(other)!.event({ type: 'state_change', sessionId: other, state: 'working' })
+    await w.until(() => w.mgr.sessionInfo(other)?.state === 'working')
+    expect(await tools.readSession(other)).toMatchObject({ ok: true, state: 'working' })
+    expect(read.row(reportsIn(parent, other)[0]!.id, addr(parent))?.readAt).toBeNull()
   })
 })
 
