@@ -89,7 +89,7 @@ export function isUsableFont(written: string): boolean {
 export type Typography = Pick<UiPreferences, 'bodyFont' | 'codeFont' | 'lineHeight' | 'textSize'>
 
 /** Each read on its own, so a missing or odd field (an older host) is its default */
-export function typographyOf(prefs: Readonly<Record<string, unknown>>): Typography {
+export function typographyOf(prefs: { readonly [K in keyof UiPreferences]?: unknown }): Typography {
   const d = DEFAULT_UI_PREFERENCES
   return {
     bodyFont: typeof prefs.bodyFont === 'string' ? prefs.bodyFont : d.bodyFont,

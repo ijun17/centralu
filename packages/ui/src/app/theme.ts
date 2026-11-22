@@ -1,4 +1,4 @@
-import { THEME_PRESETS, pickableThemes, THEME_TOKENS, THEME_TOKEN_BY_KEY, type ThemeFileEntry, type ThemePreset, type UiPreferences } from '@cc/protocol/client'
+import { THEME_PRESETS, isRecord, pickableThemes, THEME_TOKENS, THEME_TOKEN_BY_KEY, type ThemeFileEntry, type ThemePreset, type UiPreferences } from '@cc/protocol/client'
 import { readStored, writeStored } from './stored.js'
 
 /**
@@ -118,7 +118,7 @@ function cachedTheme(value: unknown): ResolvedTheme | undefined {
   const [id, name, base, preset] = [field(value, 'id'), field(value, 'name'), field(value, 'base'), field(value, 'preset')]
   if (typeof id !== 'string' || typeof name !== 'string' || typeof preset !== 'string' || (base !== 'dark' && base !== 'light')) return undefined
   const stored = field(value, 'tokens')
-  const tokens = Object.fromEntries(Object.entries(typeof stored === 'object' && stored !== null ? stored : {}).filter((e): e is [string, string] => typeof e[1] === 'string'))
+  const tokens = Object.fromEntries(Object.entries(isRecord(stored) ? stored : {}).filter((e): e is [string, string] => typeof e[1] === 'string'))
   return { id, name, base, preset, tokens }
 }
 
