@@ -320,7 +320,7 @@ export const COMMENTS_LEFT = [
  */
 export const COMMENT_SHARE_HELD = {
   files: {
-    'packages/agent-host/src/adapters/acp/profile.ts': 55,
+    'packages/agent-host/src/adapters/acp/profile.ts': 54,
     'packages/agent-host/src/adapters/claude/centralu-mcp.ts': 39,
     'packages/agent-host/src/adapters/claude/history.ts': 38,
     'packages/agent-host/src/adapters/claude/json.ts': 48,
