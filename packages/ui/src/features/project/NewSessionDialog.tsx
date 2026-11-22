@@ -54,7 +54,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
   const { tool, setTool, toolMeta, tools, info, usable, refusal, blocked, detectError, redetect } = useToolChoice(
     project?.defaultTool ?? allTools[0]?.name ?? '',
     machine,
-    { permissionPreset: defaultPresetFor({ trusted: !!project?.trusted, machine }), projectTrusted: !!project?.trusted },
+    { permissionPreset: defaultPresetFor({ trusted: !!project?.trusted }), projectTrusted: !!project?.trusted },
   )
   const [busy, setBusy] = useState(false)
   /**

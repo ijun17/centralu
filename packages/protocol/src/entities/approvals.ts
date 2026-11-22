@@ -3,9 +3,6 @@ import { GitSource } from './git.js'
 import { AppId, PermissionPreset } from './ids.js'
 import { AgentDifficulty } from './tools.js'
 
-/** Defined beside the ids, so `tools.ts` (which this file imports) can name it too without an import cycle */
-export { PermissionPreset } from './ids.js'
-
 export const ApprovalDecision = z.enum(['allow', 'deny', 'always'])
 export type ApprovalDecision = z.infer<typeof ApprovalDecision>
 
