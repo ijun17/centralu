@@ -700,42 +700,25 @@ describe('while-alive facts are carried in the list', () => {
     expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ supported: false, reason: 'Cursor did not share its usage', usage: null })
   })
 
-  it('keeps the last good limits through a failed read, not only the plan (#2459)', async () => {
-    let now = 1_000_000
-    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
-    try {
-      let fail = false
-      const good = { plan: 'Pro', windows: [{ id: 'included', label: 'Included', percent: 40, resetsAt: null, scope: null }], daily: [] }
-      Object.assign(adapter, {
-        listUsage: async () => (fail ? Promise.reject(new Error('Cursor did not share its usage')) : good),
-        localUsage: async () => ({ plan: 'Free' }),
-      })
-      expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ supported: true, usage: good })
-      fail = true
-      now += 61_000
-      expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ supported: false, reason: 'Cursor did not share its usage', usage: good })
-    } finally {
-      clock.mockRestore()
-    }
-  })
-
-  it('reads the limits once for asks that come together, and not again for a minute after a failure (#2459)', async () => {
+  it('reads the limits once for asks that come together, and not again for a minute after a failure, keeping the last good ones (#2459)', async () => {
     let now = 1_000_000
     const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
     try {
       let reads = 0
       let answer: (s: unknown) => void = () => {}
-      Object.assign(adapter, { listUsage: () => (reads++, new Promise((resolve) => (answer = resolve))) })
+      const good = { plan: 'Pro', windows: [{ id: 'included', label: 'Included', percent: 40, resetsAt: null, scope: null }], daily: [] }
+      Object.assign(adapter, { listUsage: () => (reads++, new Promise((resolve) => (answer = resolve))), localUsage: async () => ({ plan: 'Free' }) })
       const asks = [rpc('agents.usage', { tool: 'claude' }), rpc('agents.usage', { tool: 'claude' })]
       await vi.waitFor(() => expect(reads).toBe(1))
-      answer({ plan: 'Pro', windows: [], daily: [] })
-      for (const r of await Promise.all(asks)) expect(r).toMatchObject({ supported: true, usage: { plan: 'Pro' } })
+      answer(good)
+      for (const r of await Promise.all(asks)) expect(r).toMatchObject({ supported: true, usage: good })
 
       now += 61_000
       Object.assign(adapter, { listUsage: async () => (reads++, Promise.reject(new Error('Cursor did not share its usage'))) })
-      expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ supported: false, reason: 'Cursor did not share its usage' })
+      // The last good numbers, not only the plan the tool's own command says
+      expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ supported: false, reason: 'Cursor did not share its usage', usage: good })
       now += 59_000
-      expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ supported: false, reason: 'Cursor did not share its usage' })
+      expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ supported: false, reason: 'Cursor did not share its usage', usage: good })
       expect(reads).toBe(2)
       now += 2_000
       await rpc('agents.usage', { tool: 'claude' })
