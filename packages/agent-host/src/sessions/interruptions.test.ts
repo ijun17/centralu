@@ -397,7 +397,7 @@ describe('a turn a quit stopped (#698)', () => {
     expect(info(b, s.id).lastSeq).toBe(last.seq)
   })
 
-  it('work the person owns (a script started the session, §8.1): the next start gives the person the stop notice, once, and releases the task without a report', async () => {
+  it("work the person owns (a script started the session, §8.1): the next start releases the task without a report, and the session's own Inbox row says the stop (#2360)", async () => {
     const a = host()
     const project = await a.mgr.projectCreation.addProject(root)
     const s = await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })
@@ -410,17 +410,15 @@ describe('a turn a quit stopped (#698)', () => {
     // The next start: its mail's ready step releases what the quit cut and tells the senders
     wireHostMail(host().mgr, store).afterReady()
     const told = () => store.mailbox.feedOf(PERSON, { limit: 50 }).filter((m) => m.sender === 'centralu' && m.kind === 'notice' && m.facts.unanswered !== undefined)
-    await eventually(() => told().length === 1)
-    // The step-1 stop notice, in the person's form: the one path for a stop
-    expect(told()[0]!.facts.unanswered).toEqual([{ id: task.id, recipient: addressOf(s.id), why: 'quit' }])
-    expect(told()[0]!.body).toContain('Centralu quit while')
-    expect(told()[0]!.body).toContain('worked on your message, so it did not answer. Send it a message when you want it to go on.')
-    expect(store.mailbox.reportsOn(task.id)).toEqual([])
+    await eventually(() => store.mailbox.recipient(task.id, addressOf(s.id))?.toldAt != null)
+    // Released and told by the session's stopped row, with its Continue: no notice says it again
     expect(store.mailbox.recipient(task.id, addressOf(s.id))).toMatchObject({ settled: null, releasedWhy: 'quit' })
-    // The start after that finds the session at rest and says nothing more
+    expect(told()).toEqual([])
+    expect(store.mailbox.reportsOn(task.id)).toEqual([])
+    // The start after that finds the session at rest and says nothing
     wireHostMail(host().mgr, store).afterReady()
     await startNoticesRan()
-    expect(told()).toHaveLength(1)
+    expect(told()).toEqual([])
     expect(store.mailbox.reportsOn(task.id)).toEqual([])
   })
 
