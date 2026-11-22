@@ -5,7 +5,7 @@ import { setup } from './control.js'
 /**
  * What a usage donut's ring says (#1616, owner 2026-10-26): a tool whose usage Centralu cannot read at all
  * (`agents.usage` answers `supported: false` with `notReported`) has a plain, dimmed, solid ring and its letter at full ink; a usage that is
- * unknown for now (`supported: true`, no weekly window, a read that failed, or a host that predates the mark) keeps its dashed ring and faint
+ * unknown for now (`supported: true`, no window, a read that failed, or a host that predates the mark) keeps its dashed ring and faint
  * letter. A function, because it runs in Chromium and in WebKit: the desktop app is WKWebView.
  *
  * The mock answers per tool (`toolUsage`), so which donut is unsupported is the flag in the answer. Codex stands for
@@ -72,7 +72,7 @@ export function usageDonutStatesTests(): void {
       await donut(page, 'codex').hover()
       await expect(page.getByTestId('usage-donut-reason-codex')).toHaveText('Codex does not report usage limits.')
 
-      // A usage that is unknown for now (supported, no weekly window) is the dashed, faint one still
+      // A usage that is unknown for now (supported, no window) is the dashed, faint one still
       await answer(page, { claude: WEEKLY(40), codex: UNKNOWN })
       await expectState(page, 'codex', 'unknown')
       await expect.poll(() => letter(donut(page, 'codex'))).not.toBe(known)

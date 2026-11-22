@@ -71,20 +71,23 @@ describe('what the ACP tools keep alike', () => {
   })
 })
 
-describe('what an ACP tool says about its usage (#1623)', () => {
-  it('never has listUsage, the one definition of a tool that reports no limits; localUsage is only what its profile gives', () => {
-    expect('listUsage' in new FakeAdapter(profile)).toBe(false)
-    expect(new FakeAdapter(profile).localUsage).toBeUndefined()
-    const given = new FakeAdapter({ ...profile, localUsage: async () => ({ plan: 'Free' }) })
-    expect('listUsage' in given).toBe(false)
-    expect(given.localUsage).toBeTypeOf('function')
+describe('what an ACP tool says about its usage (#1623, #2459)', () => {
+  it('has listUsage and localUsage only as its profile gives them: listUsage absent is a tool that reports no limits', async () => {
+    const bare = new FakeAdapter(profile)
+    expect(bare.listUsage).toBeUndefined()
+    expect(bare.localUsage).toBeUndefined()
+    const snapshot = { plan: 'Pro', windows: [], daily: [] }
+    const given = new FakeAdapter({ ...profile, listUsage: async () => snapshot, localUsage: async () => ({ plan: 'Free' }) })
+    await expect(given.listUsage?.()).resolves.toBe(snapshot)
+    await expect(given.localUsage?.()).resolves.toEqual({ plan: 'Free' })
   })
 
-  it("is Cursor's and OpenCode's own: a local usage and no limits", () => {
-    for (const p of [cursorProfile(), openCodeProfile()]) {
-      const a = new FakeAdapter(p)
-      expect('listUsage' in a).toBe(false)
-      expect(a.localUsage).toBeTypeOf('function')
-    }
+  it("is Cursor's limits read with its own sign-in and its plan from its own command; OpenCode's local totals and no limits", () => {
+    const cursor = new FakeAdapter(cursorProfile())
+    expect(cursor.listUsage).toBeTypeOf('function')
+    expect(cursor.localUsage).toBeTypeOf('function')
+    const openCode = new FakeAdapter(openCodeProfile())
+    expect(openCode.listUsage).toBeUndefined()
+    expect(openCode.localUsage).toBeTypeOf('function')
   })
 })

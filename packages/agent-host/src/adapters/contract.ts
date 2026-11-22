@@ -543,10 +543,10 @@ export interface AgentAdapter {
   listUsage?(): Promise<UsageSnapshot>
 
   /**
-   * What a tool that **reports no limits** still says about its usage, read from the tool's own command (#1623): its plan,
-   * the totals it counted here. The one definition of "reports no limits" is that `listUsage` is absent; with `localUsage`
-   * the host then answers `supported: false, notReported: true` carrying this. Never reads the tool's credential or state
-   * files, and never waits long: past `settle` the answer may be `provisional` (the command is still running).
+   * What a tool says about its usage from its own command (#1623): its plan, the totals it counted here. The one definition
+   * of "reports no limits" is that `listUsage` is absent; with `localUsage` the host then answers `supported: false,
+   * notReported: true` carrying this. Beside a `listUsage`, it is what stands when that read fails (#2459). Never reads the
+   * tool's credential or state files, and never waits long: past `settle` the answer may be `provisional` (still running).
    *
    * `seed` is the last answer the host kept across a restart (its totals carry `asOf`, when they were read). A reader that has
    * read nothing yet in this process stands on it, as on a stale answer: returned at once while a fresh read goes on.

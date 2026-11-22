@@ -171,3 +171,8 @@ jobs:
       - run: pnpm drift:surface --file-issue
         env:
           GH_TOKEN: ${{ github.token }}
+
+      # Unlike the surface, a break: Cursor's usage read depends on these names (adapters/cursor-agent/usage-contract.ts).
+      # Run whatever the surface step did, so one red step cannot hide the other
+      - if: ${{ !cancelled() }}
+        run: pnpm drift:cursor-usage

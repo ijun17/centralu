@@ -1,4 +1,4 @@
-import type { AdapterCapabilities, ToolDescriptor } from '@cc/protocol'
+import type { AdapterCapabilities, ToolDescriptor, UsageSnapshot } from '@cc/protocol'
 import type { AgentSpawnSpec, CreateSessionOpts, DetectResult, LocalUsage } from '../contract.js'
 import type { AdapterSurface } from '../contract/surface.js'
 import type { RequestPermission, ToolCallFields } from './wire.js'
@@ -39,10 +39,11 @@ export type AcpProfile = {
    * its own rights
    */
   centraluToolOf?(call: ToolCallFields): string | null
+  /** The tool's limits (`AgentAdapter.listUsage`); absent, the tool reports none */
+  listUsage?(): Promise<UsageSnapshot>
   /**
-   * What the tool says about its usage, from its own command (#1623): its plan, the totals it counted. An ACP tool has no
-   * limits to read, so the adapter never has `listUsage` (the one definition of "reports no limits"); with this it still
-   * says what it can. Absent: it says nothing. The reader keeps its own answer and never waits long (`adapters/usage-read.ts`).
+   * What the tool says about its usage, from its own command (#1623): its plan, the totals it counted. Absent: it says
+   * nothing. The reader keeps its own answer and never waits long (`adapters/usage-read.ts`).
    */
   localUsage?(ask?: { settle?: boolean; seed?: LocalUsage }): Promise<LocalUsage>
   /** What it keeps per session, swept as the adapter's (`AgentAdapter.sweepSessionFiles`). Absent: it keeps nothing */

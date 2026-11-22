@@ -55,8 +55,8 @@ describe('HistoryView (docs/agent-host/usage.md "Usage over time")', () => {
     expect(html).not.toContain('<svg')
   })
 
-  it('says so when nothing was recorded, draws no line without a weekly reading, and says since when it knows', () => {
-    const { text, html } = render({ readings: [reading('session', '5 hours', [5])], recordedSince: new Date(FROM + 3 * 24 * 3_600_000).toISOString() })
+  it('says so when nothing was recorded, draws no line without a reading, and says since when it knows', () => {
+    const { text, html } = render({ readings: [], recordedSince: new Date(FROM + 3 * 24 * 3_600_000).toISOString() })
     expect(text).toContain('No model requests recorded in the last 7 days')
     expect(html).not.toContain('usage-history-weekly')
     expect(text).toContain('earlier days are not known')

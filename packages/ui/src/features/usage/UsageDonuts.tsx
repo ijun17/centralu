@@ -5,12 +5,13 @@ import { errorMessage, notSignedIn, type CacheStats, type MachineInfo, type Tool
 import { cacheTooltipLine } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useWhileVisible } from '../../app/useWhileVisible.js'
+import { useNowUntil } from '../../app/useLabelNow.js'
 import { useStore, usageTools } from '../../store/store.js'
 import { useMachineName, useToolMeta } from '../../store/selectors.js'
 import { Tooltip } from '../../components/primitives.jsx'
 import { NOT_REPORTED_COPY, UsagePanel } from './UsagePanel.jsx'
 import { SAME_ACCOUNT_LABEL } from './sameAccount.js'
-import { usageTone, weeklyWindow } from './weekly.js'
+import { barWindow, isWeekly, resetText, usageTone } from './weekly.js'
 import { setupStates, signedOutTools, withLiveSetups } from '../tools/setupLine.js'
 import { ToolSetupLine } from '../tools/ToolSetupLine.jsx'
 
@@ -74,9 +75,10 @@ function connectedIds(machines: Record<string, MachineInfo>): string[] {
 }
 
 /**
- * Usage in the top bar: one weekly donut per tool, per machine (#82, docs/plans/remote-hub.md §6; looks in
- * docs/design-system.md §6, §10). Always on screen, its detail drops below it; weekly only, as the 5-hour window
- * recovers fast. This computer's donuts come first, unnamed; a disconnected machine is not asked until its link is back.
+ * Usage in the top bar: one donut per tool, per machine (#82, docs/plans/remote-hub.md §6; looks in
+ * docs/design-system.md §6, §10). Always on screen, its detail drops below it; the weekly window, as the 5-hour one
+ * recovers fast, else the tool's longest (`barWindow`), as a plan with no weekly window would otherwise always look
+ * unknown. This computer's donuts come first, unnamed; a disconnected machine is not asked until its link is back.
  */
 export function UsageDonuts() {
   const platform = usePlatform()
@@ -387,7 +389,7 @@ const RING_FADE =
   'transition-[opacity,color,stroke-dasharray] duration-150 ease-out motion-reduce:transition-opacity'
 
 /**
- * A donut: the ring is weekly usage, the centre the tool's letter. Its looks: docs/design-system.md §10.
+ * A donut: the ring is the window `barWindow` picks, the centre the tool's letter. Its looks: docs/design-system.md §10.
  * Unknown is usually claude with no live session to ask.
  */
 function Donut({
@@ -417,8 +419,12 @@ function Donut({
   // `<machine>.<tool>`, as the hub names a machine's ids (#82)
   const id = machine ? `${machine}.${tool}` : tool
   const label = machineName ? `${meta.label} on ${machineName}` : meta.label
-  const w = !signedOut && snap?.usage ? weeklyWindow(snap.usage.windows) : null
+  const w = !signedOut && snap?.usage ? barWindow(snap.usage.windows) : null
   const known = w !== null
+  // A window that is not the weekly one is named with its reset, so a monthly ring is not read as a week (`barWindow`)
+  const otherThanWeekly = w !== null && !isWeekly(w)
+  const resetsAt = w?.resetsAt ? Date.parse(w.resetsAt) : NaN
+  const now = useNowUntil(otherThanWeekly && Number.isFinite(resetsAt) ? resetsAt : undefined)
   const unsupported = !known && !signedOut && snap?.limits === 'never'
   const state = known ? 'known' : unsupported ? 'unsupported' : 'unknown'
   // Signed out: the unknown's dashed ring in the signal colour, never the dimmed unsupported
@@ -444,7 +450,7 @@ function Donut({
               {signedOut
                 ? 'Not signed in'
                 : known
-                  ? `${w.label}${w.scope ? ` · ${w.scope}` : ''} — ${percent}% used`
+                  ? `${w.label}${w.scope ? ` · ${w.scope}` : ''} — ${percent}% used${otherThanWeekly ? `, ${resetText(w.resetsAt, now)}` : ''}`
                   : 'Weekly usage unknown'}
             </span>
           )}
@@ -473,7 +479,11 @@ function Donut({
       <button
         type="button"
         onClick={onClick}
-        aria-label={signedOut ? `${label} not signed in` : `${label} ${unsupported ? 'reports no usage limits' : `weekly usage${known ? ` ${percent}%` : ' unknown'}`}`}
+        aria-label={
+          signedOut
+            ? `${label} not signed in`
+            : `${label} ${unsupported ? 'reports no usage limits' : known ? `${otherThanWeekly ? w.label : 'weekly'} usage ${percent}%` : 'weekly usage unknown'}`
+        }
         data-testid={`usage-donut-${id}`}
         data-signed-out={signedOut || undefined}
         data-leaving={leaving || undefined}

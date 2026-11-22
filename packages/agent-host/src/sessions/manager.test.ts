@@ -682,6 +682,43 @@ describe('while-alive facts are carried in the list', () => {
     })
   })
 
+  it("keeps the plan through a failed limits read, from the tool's own command, with the read's reason (#2459)", async () => {
+    let local: () => Promise<unknown> = async () => ({ plan: 'Free' })
+    Object.assign(adapter, { listUsage: async () => Promise.reject(new Error('Cursor did not share its usage')), localUsage: () => local() })
+    const failed = await rpc('agents.usage', { tool: 'claude' })
+    expect(failed).toMatchObject({ supported: false, reason: 'Cursor did not share its usage', usage: { plan: 'Free', windows: [] } })
+    expect(failed).not.toHaveProperty('notReported')
+    expect(failed).not.toHaveProperty('provisional')
+
+    local = async () => ({ plan: null, provisional: true })
+    expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ supported: false, provisional: true, usage: { plan: null } })
+
+    local = async () => ({ plan: null, loggedOut: true })
+    expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ supported: false, reason: 'Claude Code is not logged in on this computer', usage: null })
+
+    local = async () => Promise.reject(new Error('agent about failed'))
+    expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ supported: false, reason: 'Cursor did not share its usage', usage: null })
+  })
+
+  it('keeps the last good limits through a failed read, not only the plan (#2459)', async () => {
+    let now = 1_000_000
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+    try {
+      let fail = false
+      const good = { plan: 'Pro', windows: [{ id: 'included', label: 'Included', percent: 40, resetsAt: null, scope: null }], daily: [] }
+      Object.assign(adapter, {
+        listUsage: async () => (fail ? Promise.reject(new Error('Cursor did not share its usage')) : good),
+        localUsage: async () => ({ plan: 'Free' }),
+      })
+      expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ supported: true, usage: good })
+      fail = true
+      now += 61_000
+      expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ supported: false, reason: 'Cursor did not share its usage', usage: good })
+    } finally {
+      clock.mockRestore()
+    }
+  })
+
   it('does not say a tool with no adapter reports no limits: nothing is known about it, so it is unknown (#1616)', async () => {
     const r = await rpc('agents.usage', { tool: 'cursor' })
     expect(r).toMatchObject({ supported: false, reason: 'cursor does not support usage queries', usage: null })
