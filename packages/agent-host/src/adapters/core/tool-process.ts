@@ -1,4 +1,3 @@
-import type { ToolDescriptor } from '@cc/protocol'
 import { rpcError } from '../../rpc-error.js'
 import { waitForExit } from '../../timing.js'
 import { lineSplitter } from '../../transport/json-lines.js'
@@ -46,14 +45,6 @@ export function tapSessionProcess<P extends AgentProcess>(proc: P, sessionId: st
 /** The answer for a tool whose launch is gone (not installed, or removed since): at the first open and at every relaunch */
 export function toolNotInstalled(label: string, install?: string): Error {
   return rpcError(install ? `${label} is not installed. ${install}` : `${label} is not installed.`, 'tool_not_installed')
-}
-
-/**
- * A tool whose sign-in is gone, in its tool line's words: "<Tool> is not signed in." and how it signs in, from a terminal with its `login`
- * command, or, for a tool Centralu signs in, the `login` step its line offers
- */
-export function notSignedIn(d: Pick<ToolDescriptor, 'label' | 'login'>, from: 'terminal' | 'centralu' = 'terminal'): string {
-  return `${d.label} is not signed in. ${from === 'terminal' ? `Run ${d.login} in a terminal.` : d.login}`
 }
 
 /** A start that failed because the program is not there (`ENOENT`) or cannot be run (`EACCES`): the tool is not installed */

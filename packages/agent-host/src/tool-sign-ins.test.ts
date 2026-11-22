@@ -15,16 +15,22 @@ function signIns() {
 }
 
 describe('a tool a turn found signed out', () => {
-  it('is told to the windows once, as signed out, and once more when a detect finds it signed in again', () => {
+  it('is told to the windows once, as signed out, and from then on every detect that finds it in another state is told', () => {
     const { s, told } = signIns()
+    const out = { type: 'tool_setup', tool: 'claude', setup: setupOfDetection(true, false) }
+    const ready = { type: 'tool_setup', tool: 'claude', setup: setupOfDetection(true, true) }
     s.observe(signedOut('s1'))
     s.observe(signedOut('s2'))
-    expect(told).toEqual([{ type: 'tool_setup', tool: 'claude', setup: setupOfDetection(true, false) }])
     s.detected('claude', setupOfDetection(true, false))
-    expect(told).toHaveLength(1)
+    expect(told).toEqual([out])
     s.detected('claude', setupOfDetection(true, true))
     s.detected('claude', setupOfDetection(true, true))
-    expect(told.slice(1)).toEqual([{ type: 'tool_setup', tool: 'claude', setup: setupOfDetection(true, true) }])
+    expect(told).toEqual([out, ready])
+    // The windows keep the ready they were told over their own detects: a sign-out a detect finds is told as well
+    s.detected('claude', setupOfDetection(true, false))
+    expect(told).toEqual([out, ready, out])
+    s.observe(signedOut('s1'))
+    expect(told).toHaveLength(3)
   })
 
   it('tells nothing for another error, a detect of a tool never told, or a tool its detect did not find signed in from a terminal', () => {

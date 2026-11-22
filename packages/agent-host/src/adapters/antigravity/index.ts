@@ -1,4 +1,4 @@
-import type { AdapterCapabilities, ToolDescriptor } from '@cc/protocol'
+import { notSignedIn, type AdapterCapabilities, type ToolDescriptor } from '@cc/protocol'
 import { dataRoot } from '../../data-dir.js'
 import type { Platform } from '../../os.js'
 import { rpcError } from '../../rpc-error.js'
@@ -12,7 +12,6 @@ import { AgySetup, type AgySetupDeps } from './setup.js'
 import { agyCentraluTool, agyStderrLine, isAgyQuestion, readAgyCall } from './shape.js'
 import { agentSignInUrl, googleAuthorizeUrl } from './sign-in.js'
 import { AGY_SURFACE } from './surface.js'
-import { notSignedIn } from '../core/tool-process.js'
 
 /**
  * What Google's Antigravity agent through ACP can keep (docs/plans/antigravity-adapter.md §6), measured on 1.4.3:
