@@ -1051,7 +1051,7 @@ one live run of the whole path is in the pull request.
 
 **Whether an agent calls it on its own (#1492, one run, 2026-10-24).** An agent cannot see its context size, so Centralu tells it quietly when it
 passes shares (docs/agent-host/context-compaction.md "Telling a growing session"). Claude on its cheapest model (`haiku`, window 1,000,000 as the CLI reported it), an
-in-process host on a temporary store, the shares set to 10% and 25% (the defaults are 30% and 10 points under the tool's 60%, which a 1M window only
+in-process host on a temporary store, the shares set to 10% and 25% (the defaults then were 30% and 10 points under the tool's 60%, which a 1M window only
 reaches at 300k and 500k), one turn of three steps that read thirty 30 KB files (about 8,800 tokens each), write a summary and report. The meter moved
 with every request (18 estimates, one per 3 s, from 35k to 301k; the tool's reading at the turn's end replaced the last, 301,480). The notices arrived
 at 11% (106k) and 26% (256k), once each, in the middle of the Read calls, with no turn started. The agent **kept reading** to the end of the step it was

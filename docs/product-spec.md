@@ -390,7 +390,7 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
   (not as asked for: the CLI clamps what it is given). When the
   model's full window is not known yet the gauge says so ("≤N%", the tooltip names why) instead of passing a smaller window
   off as the full one. Updated from streaming usage events.
-- Threshold warning: the gauge changes colour within 10 points of the compaction point (the tool compacts at 60% by default, so an
+- Threshold warning: the gauge changes colour within 10 points of the compaction point (the tool compacts at 65% by default, so an
   80% threshold would never show before it); where none is known, at 80%.
 - Show a marker in the conversation view when compaction (summarisation) happens.
 - Show a marker when the tool starts a fresh conversation inside the session (Claude Code's `/clear`, #304), and empty

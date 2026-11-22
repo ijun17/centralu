@@ -1,20 +1,20 @@
 import { tmpdir } from 'node:os'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { DEFAULT_AUTO_COMPACT, autoCompactOf, readAutoCompact } from '@cc/protocol'
+import { DEFAULT_AUTO_COMPACT, autoCompactOf, nudgeShares, readAutoCompact } from '@cc/protocol'
 import type { SessionHandle } from '../adapters/contract.js'
 import { FakeHandle, managerWorld } from './manager.test-helpers.js'
 import { ModelWindows, autoCompactTokens } from './auto-compact.js'
 
 /**
- * Where agents compact by themselves is Centralu's setting (#1376): a share of the model's window, 60% unless changed, for
+ * Where agents compact by themselves is Centralu's setting (#1376): a share of the model's window, 65% unless changed, for
  * Claude and Codex alike, and nothing at all when the person turns Centralu's control off.
  */
 const on = DEFAULT_AUTO_COMPACT
 
 describe('autoCompactTokens', () => {
-  it('is 60% of the window by default: 120k of a 200k model, 600k of a 1M one', () => {
-    expect(autoCompactTokens(on, 200_000)).toBe(120_000)
-    expect(autoCompactTokens(on, 1_000_000)).toBe(600_000)
+  it('is 65% of the window by default: 130k of a 200k model, 650k of a 1M one', () => {
+    expect(autoCompactTokens(on, 200_000)).toBe(130_000)
+    expect(autoCompactTokens(on, 1_000_000)).toBe(650_000)
     expect(autoCompactTokens({ controlled: true, share: 0.2, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null }, 128_000)).toBe(25_600)
     expect(autoCompactTokens({ controlled: true, share: 0.6, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null }, 258_400)).toBe(155_040)
     expect(autoCompactTokens({ controlled: true, share: 0.2, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null }, 1)).toBe(1)
@@ -28,15 +28,23 @@ describe('autoCompactTokens', () => {
 })
 
 describe('the setting as stored', () => {
-  it('reads as on at 60% for a record from before it, and field by field otherwise', () => {
-    expect(autoCompactOf({})).toEqual({ controlled: true, share: 0.6, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
-    expect(readAutoCompact({ controlled: false })).toEqual({ controlled: false, share: 0.6, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
-    expect(readAutoCompact({ share: 0.75 })).toEqual({ controlled: true, share: 0.75, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
+  it('reads as on at 65% for a record from before it, and field by field otherwise', () => {
+    expect(autoCompactOf({})).toEqual({ controlled: true, share: 0.65, idleShare: 0.4, nudge: true, nudgeFirst: 0.45, nudgeSecond: null })
+    expect(readAutoCompact({ controlled: false })).toEqual({ controlled: false, share: 0.65, idleShare: 0.4, nudge: true, nudgeFirst: 0.45, nudgeSecond: null })
+    expect(readAutoCompact({ share: 0.75 })).toEqual({ controlled: true, share: 0.75, idleShare: 0.4, nudge: true, nudgeFirst: 0.45, nudgeSecond: null })
     // A value from another build or a hand edit lands inside the range, or is no choice at all
     expect(readAutoCompact({ share: 5 }).share).toBe(0.95)
     expect(readAutoCompact({ share: 0.01 }).share).toBe(0.2)
-    expect(readAutoCompact({ controlled: 'no', share: 'half' })).toEqual({ controlled: true, share: 0.6, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
-    expect(readAutoCompact('x')).toEqual({ controlled: true, share: 0.6, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
+    expect(readAutoCompact({ controlled: 'no', share: 'half' })).toEqual({ controlled: true, share: 0.65, idleShare: 0.4, nudge: true, nudgeFirst: 0.45, nudgeSecond: null })
+    expect(readAutoCompact('x')).toEqual({ controlled: true, share: 0.65, idleShare: 0.4, nudge: true, nudgeFirst: 0.45, nudgeSecond: null })
+  })
+
+  it('keeps the values a person chose, and the reminders default to 45% and 10 points under the share', () => {
+    // The defaults moved from 60%, 30% and 30%: someone who set those keeps them
+    const chosen = { controlled: true, share: 0.6, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null }
+    expect(readAutoCompact(chosen)).toEqual(chosen)
+    expect(nudgeShares(DEFAULT_AUTO_COMPACT)).toEqual({ first: 0.45, second: 0.55 })
+    expect(nudgeShares({ ...DEFAULT_AUTO_COMPACT, share: 0.7 }).second).toBe(0.6)
   })
 })
 
@@ -237,6 +245,8 @@ describe('what a session is launched with', () => {
   let world: ReturnType<typeof managerWorld>
   beforeEach(() => {
     world = managerWorld()
+    // The sizes below are worked out at 60%, 30% and 30%: fixed here, so they do not move with the default
+    world.mgr.prefs.setUiPreferences({ autoCompact: { share: 0.6, idleShare: 0.3, nudgeFirst: 0.3 } })
     Object.assign(world.codexAdapter.capabilities, { backgroundTasks: true })
   })
   const create = async () => {

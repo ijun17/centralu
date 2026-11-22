@@ -41,7 +41,7 @@ function world(initial: Partial<SessionInfo> = {}, settings = memorySettings()) 
   const lines: string[] = []
   const nudges: string[] = []
   const warned: [string, number][] = []
-  const state = { now: 1_000_000, idle: { idle: true } as SessionIdle, running: true, ready: true, setting: { ...DEFAULT_AUTO_COMPACT }, failSend: false, queued: false as boolean | null, failThen: false, thenGate: null as Promise<void> | null, nudgeTaken: true as boolean, modelWindow: undefined as number | null | undefined, noCompact: false }
+  const state = { now: 1_000_000, idle: { idle: true } as SessionIdle, running: true, ready: true, setting: { ...DEFAULT_AUTO_COMPACT, idleShare: 0.3 }, failSend: false, queued: false as boolean | null, failThen: false, thenGate: null as Promise<void> | null, nudgeTaken: true as boolean, modelWindow: undefined as number | null | undefined, noCompact: false }
   const host: SelfCompactionHost = {
     sessions: () => [...sessions.values()],
     session: (id) => sessions.get(id),

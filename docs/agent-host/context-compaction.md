@@ -1,7 +1,7 @@
 # When agents compact
 
 - **When agents compact** (#1376) is Centralu's setting, `UiPreferences.autoCompact` `{ controlled, share }` (optional: a record from
-  before it reads as on at 60%, `autoCompactOf`; an older host ignores the field). The point is a share of the model's context
+  before it reads as on at 65%, `autoCompactOf`; an older host ignores the field). The point is a share of the model's context
   window, for both tools. `launchOptions` (every launch and wake) turns the share and the model's window into tokens
   (`sessions/auto-compact.ts`), `CreateSessionOpts.autoCompactTokens`. **Claude** gets `autoCompactWindow` and `autoCompactEnabled: true` in
   the flag-layer `settings` of the query, next to the code-intelligence plugins (`flagSettings`, no file is touched). The CLI compacts
@@ -45,7 +45,7 @@
   share is at most this, until the tool's next reading under a process with no ceiling teaches it (usually the next start). The stored `context_window` is the
   share window; `capped` and `compactAt` are not stored and come back with the next reading (a record from before may still hold the tool's smaller window until then).
   The gauge's bar warns (darker fill) within 10 points of the mark, and at 80% when no mark is known; the mark stands out of the track above and below, so it still shows once the fill has passed it.
-  **Compacting at a break (#1451).** The share above stays the in-turn backstop (60%); two things compact a session at a break instead
+  **Compacting at a break (#1451).** The share above stays the in-turn backstop (65%); two things compact a session at a break instead
   (`sessions/self-compaction.ts`, `SelfCompaction`), because a long-lived session's whole context is rewritten into the cache after every
   long wait and a compaction in the middle of work breaks the flow. Both send the tool's own command as a turn of its own (`SessionEvents.sendCompact`:
   Claude `/compact [focus]`, Codex's `thread/compact/start` through its slash handling, which takes the bare command, so a focus line
@@ -124,7 +124,7 @@
     (any trigger) marks the session `unread` until the tool's next reading, the sizes read before it are forgotten, and a request judged with only the old reading is
     refused ("no size of the context was read since the last compaction"); the rest rule (`due`) leaves such a session alone too. A failed compaction shrank nothing and marks nothing.
     The context notices tell the agent to set `then` to its next step and end its turn (`context-nudges.ts`).
-  - **A session at rest** for 10 minutes whose context is over `autoCompact.idleShare` of the model's window (default 30%, 10% to 95%; Settings
+  - **A session at rest** for 10 minutes whose context is over `autoCompact.idleShare` of the model's window (default 40%, 10% to 95%; Settings
     and `set_preferences` offer it) **and** over the floor is compacted by a sweep (every minute; the 10 minutes count from the moment the session is idle by every rule of `sessionIdle`: no turn, card, question or background work. A turn's end starts them only if it leaves the session idle; otherwise the sweep that sees it become idle does, so a card answered or background work stopped late does not bring an immediate compact; the share is read against the model's own window, not the smaller one a Claude process started under the CLI's compaction setting reports) before its next turn. Off with the existing
     `autoCompact.controlled` switch. Never a session in a turn, with an approval or question card open, running background work, or without a
     process (`sessionIdle`, the rule of the sleep sweep; a session that sleeps after 15 minutes is compacted at 10 if it was over the share).
@@ -134,9 +134,9 @@
     before the next. A host that starts counts the rest of a session it never saw end a turn from when it first saw it at rest, and a wake from sleep starts the rest again.
     A turn's end is the compact's only after a turn began following the send (Codex's request starts its turn later); a tool that refuses it before that clears the mark. The sweep stops in the shutdown plan with the sleep sweep. Known gap: on Codex a message or mail delivered in the moment between the send and the compact's turn start can take that turn's bookkeeping.
   - **Telling a growing session (#1492).** An agent cannot see how full its context is (Claude Code does not tell the model), so `compact_self`
-    alone depends on it thinking of the tool. When a session's context passes a first share (`autoCompact.nudgeFirst`, default 30% of the model's
+    alone depends on it thinking of the tool. When a session's context passes a first share (`autoCompact.nudgeFirst`, default 45% of the model's
     window) Centralu tells it **once**, quietly, its size and share and "when this step of the work is done, call `compact_self` with `then` set to what you do next, and end your turn", and tells it
-    **once more** at a second share (`nudgeSecond`: default 10 points below the share the tool compacts at, so 50% when that is 60%; **never at or
+    **once more** at a second share (`nudgeSecond`: default 10 points below the share the tool compacts at, so 55% when that is 65%; **never at or
     above it**, held at least 5 points below, `nudgeShares` in `@cc/protocol`), where the tool's own compaction would otherwise come in the middle
     of work (`sessions/context-nudges.ts`, `ContextNudges`). **Quiet:** the note goes in as `SessionHandle.nudge`, which never starts a turn and never
     interrupts one: Claude takes it as quiet input (`shouldQuery: false`, stamped as Centralu's channel), read with the session's next input or at the

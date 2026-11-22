@@ -105,8 +105,8 @@ test('Settings: auto from a linked computer starts on, and turning it off is rem
   await expect(page.getByTestId('settings-hub-auto')).not.toBeChecked()
 })
 
-// #1376: Centralu sets when agents compact, at 60% of the model's window, unless the person turns its control off
-test("Settings: when agents compact starts on at 60%, moves in steps of 5, and turning Centralu's control off hides the shares", async ({ page }) => {
+// #1376: Centralu sets when agents compact, at 65% of the model's window, unless the person turns its control off
+test("Settings: when agents compact starts on at 65%, moves in steps of 5, and turning Centralu's control off hides the shares", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   const open = async () => {
     await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
@@ -116,35 +116,35 @@ test("Settings: when agents compact starts on at 60%, moves in steps of 5, and t
   await open()
   await expect(page.getByTestId('settings-auto-compact')).toBeChecked()
   const share = page.getByTestId('settings-auto-compact-share')
-  await expect(share).toHaveValue('60')
-  await expect(page.getByTestId('settings-auto-compact-share-value')).toHaveText('60% of the window')
+  await expect(share).toHaveValue('65')
+  await expect(page.getByTestId('settings-auto-compact-share-value')).toHaveText('65% of the window')
   await share.focus()
   await page.keyboard.press('ArrowRight')
-  await expect.poll(saved).toEqual({ controlled: true, share: 0.65, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
+  await expect.poll(saved).toEqual({ controlled: true, share: 0.7, idleShare: 0.4, nudge: true, nudgeFirst: 0.45, nudgeSecond: null })
   // #1451: a resting session is compacted over a lower share, moved the same way
   const idle = page.getByTestId('settings-auto-compact-idle-share')
-  await expect(idle).toHaveValue('30')
-  await expect(page.getByTestId('settings-auto-compact-idle-share-value')).toHaveText('30% of the window')
+  await expect(idle).toHaveValue('40')
+  await expect(page.getByTestId('settings-auto-compact-idle-share-value')).toHaveText('40% of the window')
   await idle.focus()
   await page.keyboard.press('ArrowRight')
-  await expect.poll(saved).toEqual({ controlled: true, share: 0.65, idleShare: 0.35, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
+  await expect.poll(saved).toEqual({ controlled: true, share: 0.7, idleShare: 0.45, nudge: true, nudgeFirst: 0.45, nudgeSecond: null })
   // #1492: a growing session is reminded to compact at two shares; the second one follows the share agents compact at until it is moved, and stays below it
   const first = page.getByTestId('settings-auto-compact-nudge-first')
   const second = page.getByTestId('settings-auto-compact-nudge-second')
-  await expect(first).toHaveValue('30')
-  await expect(second).toHaveValue('55')
-  await expect(page.getByTestId('settings-auto-compact-nudge-second-value')).toHaveText('55% of the window')
-  await expect(second).toHaveAttribute('max', '60')
+  await expect(first).toHaveValue('45')
+  await expect(second).toHaveValue('60')
+  await expect(page.getByTestId('settings-auto-compact-nudge-second-value')).toHaveText('60% of the window')
+  await expect(second).toHaveAttribute('max', '65')
   await second.focus()
   await page.keyboard.press('ArrowRight')
-  await expect.poll(saved).toEqual({ controlled: true, share: 0.65, idleShare: 0.35, nudge: true, nudgeFirst: 0.3, nudgeSecond: 0.6 })
+  await expect.poll(saved).toEqual({ controlled: true, share: 0.7, idleShare: 0.45, nudge: true, nudgeFirst: 0.45, nudgeSecond: 0.65 })
   await page.getByTestId('settings-auto-compact-nudge').uncheck()
-  await expect.poll(saved).toEqual({ controlled: true, share: 0.65, idleShare: 0.35, nudge: false, nudgeFirst: 0.3, nudgeSecond: 0.6 })
+  await expect.poll(saved).toEqual({ controlled: true, share: 0.7, idleShare: 0.45, nudge: false, nudgeFirst: 0.45, nudgeSecond: 0.65 })
   await expect(first).toHaveCount(0)
   await page.getByTestId('settings-auto-compact-nudge').check()
 
   await page.getByTestId('settings-auto-compact').uncheck()
-  await expect.poll(saved).toEqual({ controlled: false, share: 0.65, idleShare: 0.35, nudge: true, nudgeFirst: 0.3, nudgeSecond: 0.6 })
+  await expect.poll(saved).toEqual({ controlled: false, share: 0.7, idleShare: 0.45, nudge: true, nudgeFirst: 0.45, nudgeSecond: 0.65 })
   await expect(share).toHaveCount(0)
   await expect(idle).toHaveCount(0)
   await expect(page.getByTestId('settings-auto-compact-nudge')).toHaveCount(0)
@@ -153,7 +153,7 @@ test("Settings: when agents compact starts on at 60%, moves in steps of 5, and t
   await open()
   await expect(page.getByTestId('settings-auto-compact')).not.toBeChecked()
   await page.getByTestId('settings-auto-compact').check()
-  await expect(share).toHaveValue('65')
+  await expect(share).toHaveValue('70')
 })
 
 test('Settings: running agents per project supports preset defaults and a remembered ceiling', async ({ page }) => {

@@ -13,8 +13,11 @@ import { ContextNudges, type ContextNudgesHost } from './context-nudges.js'
 
 const WINDOW = 1_000_000
 
+/** The mechanism tests below read the rule at fixed shares, not at whatever the default is today */
+const SHARES = { ...DEFAULT_AUTO_COMPACT, share: 0.6, idleShare: 0.3, nudgeFirst: 0.3 }
+
 function world(over: { window?: number | null; setting?: Partial<typeof DEFAULT_AUTO_COMPACT>; point?: number | null } = {}) {
-  const setting = { ...DEFAULT_AUTO_COMPACT, ...over.setting }
+  const setting = { ...SHARES, ...over.setting }
   const modelWindow = over.window === undefined ? WINDOW : over.window
   // Where the session's running process compacts, as its last reading said: the setting it was started with, by default
   const point = over.point === undefined ? (modelWindow ? Math.round(modelWindow * setting.share) : null) : over.point
@@ -335,6 +338,8 @@ describe('on the session manager (#1492)', () => {
 
   beforeEach(() => {
     world = managerWorld()
+    // The sizes below are read at fixed shares, as in the fake host above
+    world.mgr.prefs.setUiPreferences({ autoCompact: { share: SHARES.share, idleShare: SHARES.idleShare, nudgeFirst: SHARES.nudgeFirst } })
   })
   afterEach(async () => {
     await world.mgr.tenure.disposeAll()

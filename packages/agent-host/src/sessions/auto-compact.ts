@@ -7,7 +7,7 @@ export type WindowSettings = SettingAccess & { deleteAppSetting(key: string): vo
 
 /**
  * Where an agent compacts by itself, as Centralu sets it (#1376): the share of the model's context window the person chose
- * (60% unless changed), in tokens, for the tool to take at launch. Nothing when Centralu's control is off, or when the
+ * (65% unless changed), in tokens, for the tool to take at launch. Nothing when Centralu's control is off, or when the
  * model's window is not known yet. What a tool accepts of the number is its adapter's to enforce.
  */
 

@@ -86,10 +86,10 @@ export const NUDGE_SECOND_GAP = 0.1
 export const NUDGE_MARGIN = 0.05
 export const DEFAULT_AUTO_COMPACT: AutoCompact = {
   controlled: true,
-  share: 0.6,
-  idleShare: 0.3,
+  share: 0.65,
+  idleShare: 0.4,
   nudge: true,
-  nudgeFirst: 0.3,
+  nudgeFirst: 0.45,
   nudgeSecond: null,
 }
 
@@ -249,7 +249,7 @@ export function autoContinueOf(prefs: Pick<UiPreferences, 'continueAfterLimit' |
   return { limit: prefs.continueAfterLimit !== false, network: prefs.continueOnNetwork !== false }
 }
 
-/** The auto-compact setting in force: the saved one, else the default (on, at 60%) */
+/** The auto-compact setting in force: the saved one, else the default (on, at 65%) */
 export function autoCompactOf(prefs: Pick<UiPreferences, 'autoCompact'>): AutoCompact {
   return prefs.autoCompact ?? DEFAULT_AUTO_COMPACT
 }

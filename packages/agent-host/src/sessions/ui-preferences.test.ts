@@ -51,13 +51,13 @@ describe('screen preferences across builds', () => {
     }
   })
 
-  it("the auto-compact setting (#1376) reads as on at 60% for an older record, merges field by field, and an older build's write keeps it", () => {
+  it("the auto-compact setting (#1376) reads as on at 65% for an older record, merges field by field, and an older build's write keeps it", () => {
     const { mgr, row } = setup(JSON.stringify({ textSize: 1 }))
     // Not in the record until chosen: an older record reads as the default through autoCompactOf, and nothing is written for it
     expect(mgr.prefs.uiPreferences().autoCompact).toBeUndefined()
-    expect(mgr.prefs.setUiPreferences({ autoCompact: { share: 0.5 } }).autoCompact).toEqual({ controlled: true, share: 0.5, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
+    expect(mgr.prefs.setUiPreferences({ autoCompact: { share: 0.5 } }).autoCompact).toEqual({ controlled: true, share: 0.5, idleShare: 0.4, nudge: true, nudgeFirst: 0.45, nudgeSecond: null })
     // One field at a time: the share stays when the control is turned off
-    expect(mgr.prefs.setUiPreferences({ autoCompact: { controlled: false } }).autoCompact).toEqual({ controlled: false, share: 0.5, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
+    expect(mgr.prefs.setUiPreferences({ autoCompact: { controlled: false } }).autoCompact).toEqual({ controlled: false, share: 0.5, idleShare: 0.4, nudge: true, nudgeFirst: 0.45, nudgeSecond: null })
     // The record keeps the two fields every build knows; the resting share is beside it, not inside (#1451)
     expect(row().autoCompact).toEqual({ controlled: false, share: 0.5 })
     expect(row().autoCompactIdleShare).toBeUndefined()
@@ -66,12 +66,21 @@ describe('screen preferences across builds', () => {
     expect(row().autoCompact).toEqual({ controlled: false, share: 0.5 })
   })
 
+  it('a person who chose only the share keeps it, and what they never chose reads the current default (the defaults moved to 65%, 40%, 45%)', () => {
+    // The record an earlier build wrote for someone who moved only the share: the other fields were never stored
+    const { mgr } = setup(JSON.stringify({ autoCompact: { controlled: true, share: 0.6 } }))
+    expect(mgr.prefs.uiPreferences().autoCompact).toEqual({ controlled: true, share: 0.6, idleShare: 0.4, nudge: true, nudgeFirst: 0.45, nudgeSecond: null })
+    // Beside the record, a chosen resting share and first reminder stay as chosen
+    const chosen = setup(JSON.stringify({ autoCompact: { controlled: true, share: 0.6 }, autoCompactIdleShare: 0.3, autoCompactNudgeFirst: 0.3 }))
+    expect(chosen.mgr.prefs.uiPreferences().autoCompact).toEqual({ controlled: true, share: 0.6, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
+  })
+
   it('the resting share (#1451) is stored beside the auto-compact record, so an older build saving autoCompact cannot erase it', () => {
     const { mgr, store, row } = setup(JSON.stringify({ textSize: 1 }))
-    expect(mgr.prefs.setUiPreferences({ autoCompact: { idleShare: 0.45, nudge: true, nudgeFirst: 0.3, nudgeSecond: null } }).autoCompact).toEqual({ controlled: true, share: 0.6, idleShare: 0.45, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
+    expect(mgr.prefs.setUiPreferences({ autoCompact: { idleShare: 0.45, nudge: true, nudgeFirst: 0.3, nudgeSecond: null } }).autoCompact).toEqual({ controlled: true, share: 0.65, idleShare: 0.45, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
     expect(row().autoCompactIdleShare).toBe(0.45)
     expect(row().autoCompact).toBeUndefined()
-    expect(mgr.prefs.uiPreferences().autoCompact).toEqual({ controlled: true, share: 0.6, idleShare: 0.45, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
+    expect(mgr.prefs.uiPreferences().autoCompact).toEqual({ controlled: true, share: 0.65, idleShare: 0.45, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
     // The previous build's save: its merge knows two fields and writes the record back over what it did not read
     const older = { ...row(), autoCompact: { controlled: true, share: 0.7 } }
     store.settings.setAppSetting(KEY, JSON.stringify(older))
@@ -84,13 +93,13 @@ describe('screen preferences across builds', () => {
   it('the notices’ settings (#1492) are stored beside the record too, and an older build’s save of autoCompact cannot erase them', () => {
     const { mgr, store, row } = setup(JSON.stringify({ textSize: 1 }))
     const set = mgr.prefs.setUiPreferences({ autoCompact: { nudge: false, nudgeFirst: 0.4, nudgeSecond: 0.5 } }).autoCompact
-    expect(set).toEqual({ controlled: true, share: 0.6, idleShare: 0.3, nudge: false, nudgeFirst: 0.4, nudgeSecond: 0.5 })
+    expect(set).toEqual({ controlled: true, share: 0.65, idleShare: 0.4, nudge: false, nudgeFirst: 0.4, nudgeSecond: 0.5 })
     // Nothing of them inside the record an older build rewrites; each has its own field of the row
     expect(row().autoCompact).toBeUndefined()
     expect(row()).toMatchObject({ autoCompactNudge: false, autoCompactNudgeFirst: 0.4, autoCompactNudgeSecond: 0.5 })
     // The previous build's save: autoCompact written back as the two fields it knows, over the row it read
     store.settings.setAppSetting(KEY, JSON.stringify({ ...row(), autoCompact: { controlled: true, share: 0.7 } }))
-    expect(mgr.prefs.uiPreferences().autoCompact).toEqual({ controlled: true, share: 0.7, idleShare: 0.3, nudge: false, nudgeFirst: 0.4, nudgeSecond: 0.5 })
+    expect(mgr.prefs.uiPreferences().autoCompact).toEqual({ controlled: true, share: 0.7, idleShare: 0.4, nudge: false, nudgeFirst: 0.4, nudgeSecond: 0.5 })
     // Back to the default second share: null is stored, and it follows the share again
     expect(mgr.prefs.setUiPreferences({ autoCompact: { nudgeSecond: null } }).autoCompact).toMatchObject({ share: 0.7, nudgeSecond: null })
     expect(mgr.prefs.uiPreferences().autoCompact).toMatchObject({ nudgeSecond: null })
@@ -99,15 +108,15 @@ describe('screen preferences across builds', () => {
 
   it('refuses a second share at or above the share agents compact at, judging a patch that moves both on the new share (#1492)', () => {
     const { mgr } = setup(JSON.stringify({ textSize: 1 }))
-    // The share is 60% unless changed
-    expect(() => mgr.prefs.setUiPreferences({ autoCompact: { nudgeSecond: 0.6 } })).toThrow(/at least 5 points below the share agents compact at \(60%\)/)
+    // The share is 65% unless changed
+    expect(() => mgr.prefs.setUiPreferences({ autoCompact: { nudgeSecond: 0.65 } })).toThrow(/at least 5 points below the share agents compact at \(65%\)/)
     expect(() => mgr.prefs.setUiPreferences({ autoCompact: { nudgeSecond: 0.7 } })).toThrow(/must be at least 5 points below/)
-    expect(() => mgr.prefs.setUiPreferences({ autoCompact: { nudgeSecond: 0.58 } })).toThrow(/must be at least 5 points below/)
+    expect(() => mgr.prefs.setUiPreferences({ autoCompact: { nudgeSecond: 0.63 } })).toThrow(/must be at least 5 points below/)
     expect(mgr.prefs.uiPreferences().autoCompact).toBeUndefined()
     expect(mgr.prefs.setUiPreferences({ autoCompact: { nudgeSecond: 0.55 } }).autoCompact?.nudgeSecond).toBe(0.55)
     // The new share counts when the patch carries both
     expect(() => mgr.prefs.setUiPreferences({ autoCompact: { share: 0.5, nudgeSecond: 0.55 } })).toThrow(/\(50%\)/)
-    expect(mgr.prefs.setUiPreferences({ autoCompact: { share: 0.7, nudgeSecond: 0.65 } }).autoCompact).toMatchObject({ share: 0.7, nudgeSecond: 0.65 })
+    expect(mgr.prefs.setUiPreferences({ autoCompact: { share: 0.7, nudgeFirst: 0.3, nudgeSecond: 0.65 } }).autoCompact).toMatchObject({ share: 0.7, nudgeSecond: 0.65 })
     // Nothing of the refused change was written
     expect(mgr.prefs.uiPreferences().autoCompact).toMatchObject({ share: 0.7, nudgeSecond: 0.65 })
     // A share lowered under a second share chosen before takes it down: the setting stays one that can be saved again whole
@@ -117,7 +126,7 @@ describe('screen preferences across builds', () => {
 
   it('judges the whole setting that results, so what prefs.get gives can always be sent back whole (#1504 review)', () => {
     const { mgr, store, row } = setup(JSON.stringify({ textSize: 1 }))
-    mgr.prefs.setUiPreferences({ autoCompact: { nudgeSecond: 0.55 } })
+    mgr.prefs.setUiPreferences({ autoCompact: { nudgeFirst: 0.3, nudgeSecond: 0.55 } })
     // The share alone is lowered under the stored second: accepted, and the second goes down with it (read back as saved)
     const lowered = mgr.prefs.setUiPreferences({ autoCompact: { share: 0.4 } }).autoCompact
     expect(lowered).toMatchObject({ share: 0.4, nudgeSecond: 0.35 })
@@ -149,7 +158,7 @@ describe('screen preferences across builds', () => {
     expect(both.message).toMatch(/second reminder \(30%\) must be above the first \(50%\)/)
     expect(both).toMatchObject({ code: 'refused', retryable: false, data: { reason: 'bad_value' } })
     // Each alone, judged against the other as stored
-    mgr.prefs.setUiPreferences({ autoCompact: { nudgeSecond: 0.4 } })
+    mgr.prefs.setUiPreferences({ autoCompact: { nudgeFirst: 0.3, nudgeSecond: 0.4 } })
     expect(refused({ autoCompact: { nudgeFirst: 0.45 } }).message).toMatch(/must be above the first \(45%\)/)
     expect(refused({ autoCompact: { nudgeSecond: 0.3 } }).message).toMatch(/must be above the first \(30%\)/)
     // The second share above the tool's: the same refusal, with the code

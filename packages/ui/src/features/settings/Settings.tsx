@@ -805,7 +805,7 @@ function HubAutoSwitch() {
 
 /**
  * When agents compact by themselves (#1376): a share of the model's window, set by Centralu for Claude and Codex alike. On
- * by default at 60%; off, nothing is passed and each agent's own settings decide.
+ * by default at 65%; off, nothing is passed and each agent's own settings decide.
  */
 function AutoCompactSetting({ setPrefs }: { setPrefs: (patch: UiPreferencesPatch) => Promise<void> }) {
   const setting = useStore((s) => autoCompactOf(s.prefs))
