@@ -82,12 +82,14 @@ describe('the unanswered reminder over the host (§10)', () => {
     const far = [sessionAddress('hub-bbbbbbbb', 'b'), at('m1.z')]
     w.store.mailbox.insert(
       { id: `${HOST}.m_01JZZZZZZZZZZZZZZZZZZZZZZ1`, senderProject: 'p1', needsReply: true, replyTo: null, causeId: null, depth: 0, urgent: false, facts: {}, choices: null, subject: null, dedupeKey: null, legacyThread: null, createdAt: w.clock.t, sender: A, kind: 'message', body: 'across', origin: 'mail' },
-      far.map((recipient) => ({ recipient, recipientProject: null, dueAt: w.clock.t, deliveredAt: w.clock.t })),
+      [...far, at('c')].map((recipient) => ({ recipient, recipientProject: null, dueAt: w.clock.t, deliveredAt: w.clock.t })),
     )
     await w.advance(3 * 60 * MINUTE_MS)
     for (const r of far) {
       expect(w.row(`${HOST}.m_01JZZZZZZZZZZZZZZZZZZZZZZ1`, r)).toMatchObject({ reminded: 0, releasedAt: null })
       expect(w.store.mailbox.followUpsTo(r, 0)).toEqual([])
     }
+    // The same message's row to a session here is this host's: reminded, then released
+    expect(w.row(`${HOST}.m_01JZZZZZZZZZZZZZZZZZZZZZZ1`, at('c'))).toMatchObject({ reminded: 2, releasedWhy: 'reminders' })
   })
 })
