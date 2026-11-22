@@ -323,7 +323,7 @@ async function cardTexts(page: Page): Promise<string[]> {
 }
 
 /** The marks in the conversation that say a turn failed */
-const failure = async (page: Page) => (await page.getByTestId('msg-mark').allInnerTexts()).map(text).filter((t) => t.startsWith('The agent could not finish this turn'))
+const failure = async (page: Page) => (await page.locator('[data-testid="msg-mark"][data-mark="failed"]').allInnerTexts()).map(text)
 
 export const REPLAYS: Replay[] = [
   {
@@ -382,7 +382,7 @@ export const REPLAYS: Replay[] = [
     scenario: 'failed',
     async shows(page, held) {
       // The CLI's own message (a synthetic one, no model behind it) is the error line only: no bubble (`expectPane`), and the note under the composer points to the line (#2050)
-      expect(text(await page.getByTestId('msg-mark').innerText())).toBe(`The agent could not finish this turn — ${text(held.failure!)}`)
+      expect(text(await page.getByTestId('msg-mark').innerText())).toBe(text(held.failure!))
       await expect(page.getByTestId('msg-assistant')).toHaveCount(0)
       await expect(page.getByTestId('stop-note')).toBeVisible()
     },

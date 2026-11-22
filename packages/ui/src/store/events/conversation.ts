@@ -134,6 +134,8 @@ export function conversationEvent(
         ? {
             wakeError: { ...st.wakeError, [sessionId]: lockedLate },
             wakeLocked: { ...st.wakeLocked, [sessionId]: true },
+            // The words this line gives, so the note does not repeat them (#2360); every writer that writes no line clears it
+            wakeErrorSaid: { ...st.wakeErrorSaid, [sessionId]: lockedLate },
           }
         : {}),
       ...(trimmed

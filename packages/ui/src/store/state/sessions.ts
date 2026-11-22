@@ -40,6 +40,7 @@ export type SessionsSlice = {
    * wording. Only then is "split off and continue" offered.
    */
   wakeLocked: Record<string, boolean>
+  wakeErrorSaid: Record<string, string>
   /**
    * `preferGrid`: an alert's door (inbox, "done" cards) goes to the session's grid panel if it has one; the sidebar and
    * palette mean "that one, large". `reveal: false` keeps a folded project folded (#205); see `focusSession`.

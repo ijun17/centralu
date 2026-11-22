@@ -191,6 +191,7 @@ export const useStore = create<AppState>()(isolatedListeners((rawSet, get) => {
     resuming: {},
     wakeError: {},
     wakeLocked: {},
+    wakeErrorSaid: {},
     panelOpen: true,
     panelLayout: defaultLayout(),
     view: 'focus' as 'focus' | 'grid' | 'assistant' | 'app',

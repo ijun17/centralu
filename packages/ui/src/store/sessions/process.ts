@@ -68,6 +68,8 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
               res.resumed || !res.lockedElsewhere
                 ? omitKey(st.wakeLocked, sessionId)
                 : { ...st.wakeLocked, [sessionId]: true },
+            // A wake's answer writes no line, so its reason is the note's to say
+            wakeErrorSaid: omitKey(st.wakeErrorSaid, sessionId),
           })),
         )
       } catch (e) {
@@ -75,6 +77,7 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
           ifSessionStill(sessionId, (st) => ({
             wakeError: { ...st.wakeError, [sessionId]: errorMessage(e) },
             wakeLocked: omitKey(st.wakeLocked, sessionId),
+            wakeErrorSaid: omitKey(st.wakeErrorSaid, sessionId),
           })),
         )
       }
@@ -93,6 +96,7 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
           wakeError: res.resumed
             ? omitKey(st.wakeError, sessionId)
             : { ...st.wakeError, [sessionId]: res.reason ?? '' },
+          wakeErrorSaid: omitKey(st.wakeErrorSaid, sessionId),
           // Once forked, it is no longer locked — if it failed, the fork option is left standing
           wakeLocked: res.resumed ? omitKey(st.wakeLocked, sessionId) : st.wakeLocked,
           toast: res.resumed
@@ -128,6 +132,7 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
           wakeError: r.resumed
             ? omitKey(s.wakeError, sessionId)
             : { ...s.wakeError, [sessionId]: r.reason ?? '' },
+          wakeErrorSaid: omitKey(s.wakeErrorSaid, sessionId),
           toast: r.resumed ? 'Agent restarted' : `Could not restart: ${r.reason ?? ''}`,
         })),
       )

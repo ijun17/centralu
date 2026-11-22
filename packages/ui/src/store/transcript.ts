@@ -435,13 +435,17 @@ function refusedModel(e: Extract<NormalizedEvent, { type: 'error' }>): string | 
   return 'model' in data && typeof data.model === 'string' ? data.model : null
 }
 
-/** The tool's own sentence as is: rewording it would erase the cause (#107) */
+/**
+ * The tool's own sentence as is: rewording it would erase the cause (#107). That the turn stopped is the note's to say
+ * ("Stopped: error"), so the line does not say it again (#2360).
+ */
 function errorText(e: Extract<NormalizedEvent, { type: 'error' }>): string {
   // No turn was running: the conversation could not be opened at all (#168)
   if (e.error.code === 'conversation_locked') return `Could not open this conversation — ${e.error.message}`
   // Trying again cannot help; picking another model can, and the row offers it (#1369)
-  if (refusedModel(e)) return `The agent could not finish this turn — ${e.error.message} Pick another model for this session to continue.`
-  return `The agent could not finish this turn — ${e.error.message}`
+  if (refusedModel(e)) return `${e.error.message} Pick another model for this session to continue.`
+  // A failure with no words of its own is still a line, not an empty box
+  return e.error.message || 'The agent stopped and gave no reason'
 }
 
 /** A live subagent step as the stored row the host would read back (#222) — the same shape `messagesToChat` draws */

@@ -391,6 +391,18 @@ describe('a failed turn reaches the screen (#107)', () => {
   })
 })
 
+describe('a failed turn\'s line (#2360)', () => {
+  const failed = (message: string) =>
+    messagesToChat([
+      { sessionId: 'f-1', seq: 2, role: 'system', kind: 'marker', ts: 1, payload: { type: 'error', sessionId: 'f-1', error: { code: 'internal', message, retryable: false } } },
+    ]).map((i) => (i as { text?: string }).text)
+
+  it("holds the tool's words alone, and a failure with none still says something", () => {
+    expect(failed('app-server exited (code 0)')).toEqual(['app-server exited (code 0)'])
+    expect(failed('')).toEqual(['The agent stopped and gave no reason'])
+  })
+})
+
 describe('a model the provider refused (#1369)', () => {
   const refused = (sessionId: string) =>
     ({
@@ -413,8 +425,10 @@ describe('a model the provider refused (#1369)', () => {
 
     const last = (useStore.getState().chat['mr-1'] ?? []).at(-1) as { kind: string; text: string; pickModel?: true }
     expect(last.kind).toBe('mark')
-    expect(last.text).toContain("The 'gpt-5.5' model is not supported")
-    expect(last.text).toContain('Pick another model')
+    // The tool's words and the way on, nothing of a turn: the note under the composer says it stopped (#2360)
+    expect(last.text).toBe(
+      "Codex refused the model gpt-5.5: The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account. Pick another model for this session to continue.",
+    )
     expect(last.pickModel).toBe(true)
   })
 

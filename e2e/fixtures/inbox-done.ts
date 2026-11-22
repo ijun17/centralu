@@ -229,7 +229,7 @@ export function inboxDoneTests() {
     expect(await hostStateOf(page, target)).toBe('idle')
     // The transcript keeps the error line and its reason
     await page.evaluate((sid) => (window as any).__store.getState().focusSession(sid), target)
-    await expect(page.getByTestId('session-view')).toContainText('The agent could not finish this turn — app-server exited (code 0)')
+    await expect(page.getByTestId('session-view').locator('[data-testid="msg-mark"][data-mark="failed"]')).toHaveText(['app-server exited (code 0)'])
 
     await fail(page, target, 'a second failure')
     await expect.poll(() => stateOf(page, target)).toBe('error')

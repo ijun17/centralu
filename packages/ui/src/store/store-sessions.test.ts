@@ -322,13 +322,14 @@ describe('a session deleted while awaited is never revived (#163)', () => {
       stickToBottom: { [id]: true },
       wakeError: { [id]: 'x' },
       wakeLocked: { [id]: true },
+      wakeErrorSaid: { [id]: 'x' },
     })
     useStore.getState().dispatchEvent({ type: 'session_deleted', sessionId: id } as NormalizedEvent)
 
     const st = useStore.getState()
     expect(st.notices.map((n) => n.sessionId)).toEqual(['other'])
-    expect([st.history[id], st.drafts[id], st.stickToBottom[id], st.wakeError[id], st.wakeLocked[id]]).toEqual([
-      undefined, undefined, undefined, undefined, undefined,
+    expect([st.history[id], st.drafts[id], st.stickToBottom[id], st.wakeError[id], st.wakeLocked[id], st.wakeErrorSaid[id]]).toEqual([
+      undefined, undefined, undefined, undefined, undefined, undefined,
     ])
   })
 
@@ -402,6 +403,36 @@ describe('a late lock error offers the fork (#168)', () => {
     expect(st.chat[id]!.map((i) => (i as { text?: string }).text)).toEqual([
       'Could not open this conversation — This conversation is already open elsewhere',
     ])
+    // The line gives the reason, so the note under the composer does not (#2360)
+    expect(st.wakeErrorSaid[id]).toBe('This conversation is already open elsewhere')
+  })
+
+  it('a wake after it writes no line, so the note says its reason again (#2360)', async () => {
+    const platform = new MockPlatform()
+    const s = await platform.agents.createSession({ projectId: 'p1', cwd: '/tmp/p1', tool: 'claude', permissionPreset: 'normal' })
+    useStore.setState({ platform, sessions: { [s.id]: { ...s, live: true } as never } })
+    useStore.getState().dispatchEvent({
+      type: 'error',
+      sessionId: s.id,
+      seq: 4,
+      error: { code: 'conversation_locked', message: 'This conversation is already open elsewhere', retryable: true },
+    })
+    expect(useStore.getState().wakeErrorSaid[s.id]).toBe('This conversation is already open elsewhere')
+
+    platform.unresumable.add(s.id)
+    await useStore.getState().wake(s.id)
+    const st = useStore.getState()
+    expect(st.wakeError[s.id]).toBeTruthy()
+    expect(st.wakeErrorSaid[s.id]).toBeUndefined()
+  })
+
+  it('and a fork after it clears it too (#2360)', async () => {
+    const platform = new MockPlatform()
+    const s = await platform.agents.createSession({ projectId: 'p1', cwd: '/tmp/p1', tool: 'claude', permissionPreset: 'normal' })
+    const lock = 'This conversation is already open elsewhere'
+    useStore.setState({ platform, sessions: { [s.id]: { ...s, live: false } as never }, wakeError: { [s.id]: lock }, wakeErrorSaid: { [s.id]: lock } })
+    await useStore.getState().forkConversation(s.id)
+    expect(useStore.getState().wakeErrorSaid[s.id]).toBeUndefined()
   })
 
   it('any other error leaves the session live and offers no fork', () => {

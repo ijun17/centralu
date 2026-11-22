@@ -318,7 +318,7 @@ test('Reconnecting looks different from waiting for a response, and leaves no fa
 
   await emitEvent(page, 0, { type: 'activity', activity: null })
   await expect(page.getByTestId('activity-label')).toHaveText('Waiting for response')
-  await expect(page.getByText('could not finish this turn')).toHaveCount(0)
+  await expect(page.locator('[data-testid="msg-mark"][data-mark="failed"]')).toHaveCount(0)
 })
 
 /*
@@ -334,9 +334,10 @@ test('A lock error that arrives after the session was handed back offers Continu
     type: 'error',
     error: { code: 'conversation_locked', message: 'This conversation is already open elsewhere', retryable: true },
   })
-  await expect(page.getByTestId('dormant-note')).toContainText('already open elsewhere')
-  await expect(page.getByTestId('dormant-fork')).toBeVisible()
+  // The line in the conversation gives the tool's words; the note says only what it offers (#2360)
   await expect(page.getByText('Could not open this conversation — This conversation is already open elsewhere')).toBeVisible()
+  await expect(page.getByTestId('dormant-note')).toHaveText(/^Could not resume\s*Continue in a fork\s*Retry$/)
+  await expect(page.getByTestId('dormant-fork')).toBeVisible()
 })
 
 /**
