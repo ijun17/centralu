@@ -17,7 +17,7 @@ import {
   type StoredMail,
 } from '../dev-services/store/mailbox.js'
 import { CENTRALU, PERSON, isPerson, parseAddress, senderKind, sessionAddress } from './address.js'
-import { buildMessageFrame, mailLine, type ListedMail, type MessageCalls, type MessageFrameItem } from './frame.js'
+import { buildMessageFrame, mailLine, reminderText, type ListedMail, type MessageCalls, type MessageFrameItem } from './frame.js'
 import { UlidMaker, messageIdOf } from './ids.js'
 import type { TurnReport } from './turn-report.js'
 import { answerAtRest, type LastResponse } from './last-response.js'
@@ -33,6 +33,7 @@ import {
   READ_CHAIN,
   READ_CHARS,
   READ_ITEMS,
+  REMINDER,
   REFUSAL_TEXT,
   bodyLimit,
   cutTask,
@@ -535,6 +536,25 @@ export class MessageService {
     return stored.duplicate ? undefined : stored
   }
 
+  /**
+   * The unanswered reminder (S2, docs/plans/mailbox.md §10): one notice to `recipient` naming `rows`, which wait for its answer, inline in the wake.
+   * Each row counts it once it is delivered (`MailboxRecords.markDelivered`). `quiet`: posted without waking, for the next wake to carry. Undefined
+   * when this reminder of these rows was written already
+   */
+  remind(recipient: string, rows: readonly RecipientRow[], quiet: boolean): MailRow | undefined {
+    const now = this.now()
+    const named = rows.flatMap((r) => {
+      const m = this.records.message(r.messageId)
+      return m ? [{ row: r, item: { id: m.id, from: this.reach.shownId(m.sender, recipient), waitedMs: now - (r.deliveredAt ?? now), last: r.reminded + 1 >= REMINDER.perRow } }] : []
+    })
+    if (named.length === 0) return undefined
+    return this.notice(recipient, {
+      body: reminderText(named.map((n) => n.item), this.opts.calls?.(recipient)),
+      facts: { reminder: named.some((n) => n.item.last) ? 2 : 1, of: named.map((n) => n.item.id), reason: 'reminder', ...(quiet ? { quiet: true } : {}) },
+      dedupeKey: `reminder:${recipient}:${hash16(named.map((n) => `${n.row.messageId}/${n.row.reminded}`).sort())}`,
+    })
+  }
+
   /** `mail done` (D8): as a recipient, no answer is needed; as the sender, the message is withdrawn for every unsettled recipient */
   done(by: string, id: string): { settled: number; how: 'done' | 'withdrawn' | 'none' | 'unwatched' } {
     return this.run(() => {
@@ -690,7 +710,7 @@ export class MessageService {
         row,
         message,
         request,
-        down: flowsDownTo({ fromPerson: sender === 'person', fromSession: sender === 'session', kind: message.kind, toAssistant, fromParent: parent === message.sender, watch: sender === 'centralu' && message.facts.watch !== undefined, forPerson: this.forPerson(message) !== undefined }),
+        down: flowsDownTo({ fromPerson: sender === 'person', fromSession: sender === 'session', kind: message.kind, toAssistant, fromParent: parent === message.sender, watch: sender === 'centralu' && (message.facts.watch !== undefined || message.facts.reminder !== undefined), forPerson: this.forPerson(message) !== undefined }),
       })
     }
 
@@ -1075,14 +1095,14 @@ export class MessageService {
     })
   }
 
-  /** A reminder whose messages are all settled (or gone) has nothing to say (§8.2 step 1) */
+  /** A reminder whose messages are all settled, released, answered by a held answer or moved away has nothing to say (§8.2 step 1) */
   private reminderSettled(m: MailRow, recipient: string): boolean {
     return (
       m.kind === 'notice' &&
       m.facts.reminder !== undefined &&
       (m.facts.of ?? []).every((id) => {
         const row = this.records.recipient(id, recipient)
-        return row === undefined || row.settled !== null
+        return row === undefined || row.settled !== null || row.releasedAt !== null || row.answerId !== null
       })
     )
   }

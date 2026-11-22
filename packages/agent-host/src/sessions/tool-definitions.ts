@@ -803,7 +803,7 @@ export const AGENT_BUDGET_CHARS = 1330
 export const MAIL_TOOLS = [
   {
     name: 'mail',
-    description: `Work and messages with sessions, apps and the person; cite=true (to "assistant") only when the person's last message here asked for it. Ask the person with kind: "question". In a report, say what each claim rests on and what you did not check.`,
+    description: `Work and messages with sessions, apps and the person; cite=true (to "assistant") only when the person's last message here asked for it. Ask the person with kind: "question", and choices (2-6 short answers to pick) when a few fit. In a report, say what each claim rests on and what you did not check.`,
     schema: z.object({
       action: z.enum(['inbox', 'read', 'handled', 'send', 'reply', 'close', 'find', 'watch']),
       thread: z.string().optional(),
@@ -822,7 +822,7 @@ export const MAIL_TOOLS = [
 ] as const satisfies readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
 
 /** The ceiling for MAIL_TOOLS, counted like READER_BUDGET_CHARS (deferred on Claude, loaded on Codex). How it moved: docs/tool-cost.md §17 */
-export const MAIL_BUDGET_CHARS = 1175
+export const MAIL_BUDGET_CHARS = 1229
 
 /**
  * Compacting this session at a break (#1451, sessions/self-compaction.ts). Loaded, not deferred: the description is the

@@ -1,5 +1,5 @@
 import { prChecks } from '../dev-services/git-pr.js'
-import { errorMessage, type SessionInfo, inboxListing, isAssistantKind, turnStop } from '@cc/protocol'
+import { errorMessage, type SessionInfo, inboxListing, isAssistantKind, turnStop, workTasks } from '@cc/protocol'
 import { bytesText } from '../bytes-text.js'
 import { inTurn } from '../idle.js'
 import { heldToContinue, wentWithItsProcess } from '../sessions/interruptions.js'
@@ -24,6 +24,8 @@ import type { MailboxRecords } from '../dev-services/store/mailbox.js'
 import { MailTurns } from './turns.js'
 import type { StopWhy } from './stop-notices.js'
 import { Watches } from './watches.js'
+import { MailReminders } from './reminders.js'
+import type { RestFacts } from './rest.js'
 
 /**
  * What the mail of this host reads of its sessions (docs/plans/mailbox.md §16 M3a): the manager answers it in `main.ts`, and tests answer it from
@@ -61,6 +63,8 @@ export type HostMailSessions = {
   work?: MailToolHost['work']
   /** A child this host started on a linked machine, with the name its mail shows (`MailSessionsView.onLinkedMachine`, #2067); none for any other id */
   onLinkedMachine?(id: string): { name: string } | undefined
+  /** Whether the session's background work is known: false for an adopted process whose tool has not listed it yet (`RestartPolicy.backgroundKnown`); known when absent */
+  backgroundKnown?(id: string): boolean
 }
 
 /** What the manager answers for mail (`main.ts` and the tests that run a real manager both wire mail through it) */
@@ -86,6 +90,7 @@ export function mailSessionsOf(
     settleAtRest: (id) => mgr.mail.settleAtRest(id),
     questionSettled: (id) => mgr.mail.questionSettled(id),
     relayStop: (receiverId, stoppedId, why, told) => mgr.mail.relayStop(receiverId, stoppedId, why, told),
+    backgroundKnown: (id) => mgr.mail.backgroundKnown(id),
   }
 }
 
@@ -271,8 +276,29 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       return path ? prChecks(path, number, signal) : null
     },
   })
-  const delivery = new MailDelivery(service, records, sessions.mailSessions(), {
+  const mailSessions = sessions.mailSessions()
+  /**
+   * A session of this host as the unanswered reminder's rest rule reads it (docs/plans/mailbox.md §10.1); null for an address another host decides
+   * for, another computer's session, whose own host reminds it. A linked machine's session on a hub has no session here, so it reads as gone
+   */
+  const restFacts = (address: string): RestFacts | null => {
+    const party = parseAddress(address)
+    if (party?.kind !== 'session' || party.host !== hostId || across.foreign(address)) return null
+    const s = sessions.sessionInfo(party.sessionId)
+    return {
+      receiver: mailSessions.receiver(party.sessionId),
+      error: s?.state === 'error',
+      interrupted: (s?.interruption ?? null) !== null,
+      work: workTasks(s?.backgroundTasks ?? []).length,
+      workKnown: sessions.backgroundKnown?.(party.sessionId) ?? true,
+      mailWaiting: service.wakingFor(address),
+      lastTurn: records.lastTurnEnded(party.sessionId),
+    }
+  }
+  const reminders = new MailReminders(service, records, restFacts, { now })
+  const delivery = new MailDelivery(service, records, mailSessions, {
     watches,
+    reminders,
     turns: mailTurns,
     ...(opts.now ? { now: opts.now } : {}),
     // When it last ran: a host that was off a long while does not wake a crowd of sleeping sessions. A setting the previous build never reads
@@ -326,7 +352,10 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     },
     // The turn that was cut is the session's latest: the questions delivered in it are the ones it left unanswered
     stopped: (id, why, o) => {
-      void service.stops.sessionStopped(addressOf(id), why, { turnSeq: mailTurns.latest(id)?.seq ?? null, ...(o?.told ? { told: o.told.map(addressOf) } : {}), ...(o?.starter ? { starter: addressOf(o.starter) } : {}), ...(o?.held ? { held: true } : {}) })
+      // The turn it cut keeps how: no reminder follows a Stop or a failure until the session's next turn (mailbox.md §10.1)
+      const cut = mailTurns.latest(id)
+      if (cut) records.setTurnEndedHow(id, cut.seq, why)
+      void service.stops.sessionStopped(addressOf(id), why, { turnSeq: cut?.seq ?? null, ...(o?.told ? { told: o.told.map(addressOf) } : {}), ...(o?.starter ? { starter: addressOf(o.starter) } : {}), ...(o?.held ? { held: true } : {}) })
       // A stop Centralu holds to continue (#1415) is a stop only if its wait ends without going on, as its senders are told (`waitEnded`)
       if (!o?.held) watches.changed(addressOf(id), 'stopped')
     },

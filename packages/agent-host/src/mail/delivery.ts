@@ -143,6 +143,8 @@ export type MailDeliveryOptions = {
   across?: (address: string) => boolean
   /** The watches sessions keep (docs/plans/mailbox.md §18.5): they start and stop with the delivery, their timer is its `schedule`, and its sweep runs what is due */
   watches?: Pick<Watches, 'start' | 'stop' | 'due'>
+  /** The unanswered reminder (`MailReminders`, docs/plans/mailbox.md §10): its sweep runs with this one */
+  reminders?: { sweep(): void }
 }
 
 const DEFAULTS = { sweepEveryMs: 60_000, minWakeGapMs: 30_000, retryBaseMs: 5_000, maxRetryMs: 15 * 60_000, maxAttempts: 6, catchUpAfterMs: 30 * 60_000, crowdOver: 10, resumeAtOnce: 2, warnPairTurns: WARN_PAIR_TURNS_PER_HOUR, warnHostTurns: WARN_HOST_TURNS_PER_HOUR }
@@ -150,9 +152,10 @@ const DEFAULTS = { sweepEveryMs: 60_000, minWakeGapMs: 30_000, retryBaseMs: 5_00
 export class MailDelivery {
   private readonly now: () => number
   private readonly schedule: (ms: number, fn: () => void) => () => void
-  private readonly o: Required<Omit<MailDeliveryOptions, 'now' | 'schedule' | 'heartbeat' | 'turns' | 'across' | 'watches'>>
+  private readonly o: Required<Omit<MailDeliveryOptions, 'now' | 'schedule' | 'heartbeat' | 'turns' | 'across' | 'watches' | 'reminders'>>
   private readonly across: ((address: string) => boolean) | undefined
   private readonly watches: MailDeliveryOptions['watches']
+  private readonly reminders: MailDeliveryOptions['reminders']
   private readonly heartbeat: MailDeliveryOptions['heartbeat']
   private readonly turns: MailTurns | undefined
   /** One delivery in flight per mailbox; a change that comes meanwhile is looked at when it ends */
@@ -200,9 +203,10 @@ export class MailDelivery {
       })
     this.heartbeat = opts.heartbeat
     this.turns = opts.turns
-    this.o = { ...DEFAULTS, ...Object.fromEntries(Object.entries(opts).filter(([k]) => k !== 'now' && k !== 'schedule' && k !== 'heartbeat' && k !== 'turns' && k !== 'across' && k !== 'watches')) }
+    this.o = { ...DEFAULTS, ...Object.fromEntries(Object.entries(opts).filter(([k]) => k !== 'now' && k !== 'schedule' && k !== 'heartbeat' && k !== 'turns' && k !== 'across' && k !== 'watches' && k !== 'reminders')) }
     this.across = opts.across
     this.watches = opts.watches
+    this.reminders = opts.reminders
   }
 
   /** Begins hearing the mailbox and sweeping. A host that is leaving does not (`stop`) */
@@ -287,6 +291,11 @@ export class MailDelivery {
       this.watches?.due(now)
     } catch (e) {
       console.error(`[mail] the watches' sweep failed; it runs again at the next one: ${errorMessage(e)}`)
+    }
+    try {
+      this.reminders?.sweep()
+    } catch (e) {
+      console.error(`[mail] the reminders' sweep failed; it runs again at the next one: ${errorMessage(e)}`)
     }
     this.moveOnWorkOfGoneSessions()
     const recipients = this.records.dueRecipients().filter(this.here)

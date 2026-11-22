@@ -159,6 +159,8 @@ export const REMINDER = {
   /** After the first reminder's turn ended; also the wait after the second before the row is released */
   againMs: 20 * 60_000,
   perRow: 2,
+  /** The rows one reminder names, the oldest first (the most `facts.of` holds): the rest wait for the next */
+  rowsAtMost: 10,
   /** Between two follow-up wakes of one session (reminders and notices to a sender together) */
   gapMs: 20 * 60_000,
   perDay: 6,
@@ -307,7 +309,7 @@ export function pickWork(candidates: readonly WorkPick[], now: number): string |
 /**
  * Whether a body is inline in the wake (§8.2 step 4), after the frame and quoted: the person's words; a `task` from a session to a session that is
  * not the Assistant; a `message` from the receiver's parent (`askedBy`) to a receiver that is not the Assistant; a watch's notice to the session that
- * set it (§18.5: Centralu's words and the session's own note); the Assistant's `send_to_session` note (`forPersonOf`, #2258). Everything else is pulled
+ * set it (§18.5: Centralu's words and the session's own note), or the unanswered reminder (S2, Centralu's words alone); the Assistant's `send_to_session` note (`forPersonOf`, #2258). Everything else is pulled
  * with `mail read`: a session's words to the Assistant never flow down, whatever their kind
  */
 export function flowsDownTo(f: { fromPerson: boolean; fromSession: boolean; kind: MailKind; toAssistant: boolean; fromParent: boolean; watch: boolean; forPerson?: boolean }): boolean {

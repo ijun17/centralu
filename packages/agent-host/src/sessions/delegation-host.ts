@@ -46,7 +46,7 @@ export type DelegationHost = {
   readonly adapters: Map<string, AgentAdapter>
   readonly agentRuns: Map<string, AgentRunWait>
   answerRoutedCard: (callerId: string, sessionId: string, card: string | undefined, text: string) => Promise<ChildRunResult>
-  readonly restartPolicy: Pick<RestartPolicy, 'applyDeferredRestart'>
+  readonly restartPolicy: Pick<RestartPolicy, 'applyDeferredRestart' | 'backgroundKnown'>
   readonly hostCards: Pick<HostCards, 'askHost' | 'withdrawHostAsk'>
   autoBoundaryOpen: (sessionId: string, boundary?: string) => boolean
   /** The project-trust gate (`ProjectRegistry.trustGate`, #2159): null, or the one refusal */

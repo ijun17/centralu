@@ -407,7 +407,7 @@ gives them are what the builds of store v61 to v64 kept in tables of their own: 
 Where it is stored:
 
 - `mail_turns`: the thread each turn of a session belonged to. Since v65 also `message_id`, the turn's work message, and
-  `starter_id`, the message that started it (what the turn sends records as its cause), and `ended_how` (written from M5).
+  `starter_id`, the message that started it (what the turn sends records as its cause), and `ended_how`, the cause of the stop that cut it (`StopWhy`, written since #2477: no unanswered reminder follows such a turn).
   From M3a the host writes `message_id` and `starter_id` and leaves `thread_id` NULL; a turn continued after a restart
   or an update keeps its row.
 - `mail`: mail without threads (v65, [plans/mailbox.md](plans/mailbox.md) §6.1, #1684): one message, its sender, kind

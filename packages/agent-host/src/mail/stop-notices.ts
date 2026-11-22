@@ -248,6 +248,14 @@ export class StopNotices {
     return why === 'gone' ? [...questions, ...tasks].filter(({ row }) => !isRoleVia(row.via)) : [...questions, ...tasks]
   }
 
+  /**
+   * The rows the unanswered reminder released (`why`: `reminders`, `waited`, `working`, `waiting`; docs/plans/mailbox.md §10.3) that `sender` was not
+   * told of, in one notice (D25, S3), as a stop's are. `quiet`: posted without waking, for the sender's next wake to carry. One write
+   */
+  tellReleased(sender: string, why: readonly ReleaseWhy[], quiet: boolean): void {
+    this.d.run(() => this.tellUnanswered(sender, 0, { why, quiet }))
+  }
+
   /** One write: `release` releases rows and adds each released question's sender to `senders`; then each sender is told once, in one notice (D25) */
   private releaseAndTell(release: (now: number, senders: Set<string>) => void): void {
     this.d.run(() => {
@@ -264,11 +272,12 @@ export class StopNotices {
    * without telling the person are not listed all at once.
    * It wakes a session, unless a quit cut it (`wakes`)
    */
-  private tellUnanswered(sender: string, since: number): void {
+  private tellUnanswered(sender: string, since: number, only?: { why: readonly ReleaseWhy[]; quiet: boolean }): void {
     const kind = senderKind(sender)
     // The person is not told what they did themselves (their own Stop, deleting a session), nor the rows older builds released without telling them
     const released = this.d.records
       .releasedUntold(sender)
+      .filter((r) => !only || (r.releasedWhy !== null && only.why.includes(r.releasedWhy)))
       .filter((r) => kind !== 'person' || ((r.releasedAt ?? 0) >= since && r.releasedWhy !== 'stopped' && r.releasedWhy !== 'gone'))
     // Nor a stop the session's own row in their Inbox says: it is told there, once (#2360)
     const shown = kind === 'person' ? released.filter((r) => isStop(r.releasedWhy) && !!this.d.stopShown?.(r.recipient)) : []
@@ -286,7 +295,7 @@ export class StopNotices {
     const written = this.d.notice(sender, {
       kind: 'notice',
       body: unansweredText(unanswered.map((u) => ({ ...u, name: this.d.reach.labelOf(u.recipient, sender), shown: this.d.reach.shownId(u.recipient, sender) })), kind === 'person', words),
-      facts: { unanswered, ...(kind === 'session' && !this.wakes(sender, true) ? { quiet: true } : {}) },
+      facts: { unanswered, ...(kind === 'session' && (only?.quiet === true || !this.wakes(sender, true)) ? { quiet: true } : {}) },
       dedupeKey: `unanswered:${sender}:${hash16(rows.map((r) => `${r.messageId}/${r.recipient}`).sort())}`,
     })
     this.d.records.markTold(rows, this.d.now())
@@ -426,7 +435,9 @@ function unansweredText(all: readonly { id: string; recipient: string; why: Rele
 ${lastWordsText(s.name, said)}`
   })
   if (rows.length === 0) return stopLines.join('\n')
-  const lines = rows.map((r) => `- ${person ? r.name : `${r.id} to ${nameWithId(r.name, r.shown)}`}: ${r.why ? WHY_WORDS[r.why] : WHY_WORDS.gone}.`)
+  // The person is not told of reminders, nor of what a session waits on, which are Centralu's words to an agent: such a row reads as one that went unanswered
+  const why = (w: ReleaseWhy | null) => (!w ? WHY_WORDS.gone : person && w === 'reminders' ? 'it has not answered' : person && (w === 'working' || w === 'waiting') ? WHY_WORDS.waited : WHY_WORDS[w])
+  const lines = rows.map((r) => `- ${person ? r.name : `${r.id} to ${nameWithId(r.name, r.shown)}`}: ${why(r.why)}.`)
   const later = rows.some((r) => r.why === 'working' || r.why === 'waiting')
   // The person is not told what an agent is: no advice to go on without answers, and no reminders to speak of
   if (person) return [`${rows.length} of your messages went unanswered:`, ...lines, ...stopLines].join('\n')

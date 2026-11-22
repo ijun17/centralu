@@ -43,7 +43,7 @@ describe('mail without threads: the rules that need no store (docs/plans/mailbox
 
   it('keeps every constant of the design in one place', () => {
     expect([MAX_RECIPIENTS, HOLD_UNTRUSTED_OUT, WARN_PAIR_TURNS_PER_HOUR, WARN_HOST_TURNS_PER_HOUR]).toEqual([10, true, 20, 120])
-    expect(REMINDER).toEqual({ graceMs: 120_000, personQuietMs: 600_000, againMs: 1_200_000, perRow: 2, gapMs: 1_200_000, perDay: 6, warmMs: 3_000_000, unansweredAfterMs: 7_200_000 })
+    expect(REMINDER).toEqual({ graceMs: 120_000, personQuietMs: 600_000, againMs: 1_200_000, perRow: 2, rowsAtMost: 10, gapMs: 1_200_000, perDay: 6, warmMs: 3_000_000, unansweredAfterMs: 7_200_000 })
   })
 
   describe('quietAnswer (D3)', () => {

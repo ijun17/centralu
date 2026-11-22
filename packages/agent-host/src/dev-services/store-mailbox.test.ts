@@ -280,36 +280,34 @@ describe('covering (§10.3)', () => {
     const r = send({ sender: A, needsReply: true, createdAt: NOW }, B)
     box.markDelivered(B, [r], NOW, 3)
     const row = () => must(box.recipient(r, B))
-    const owes = () => true
     expect(before).toBeTruthy()
     const other = send({ sender: B, needsReply: true, causeId: 'h1.m_other', createdAt: NOW + 1 }, C)
     const plain = send({ sender: B, causeId: 'h1.m_start', createdAt: NOW + 2 }, C)
     const held = send({ sender: B, needsReply: true, causeId: 'h1.m_start', createdAt: NOW + 3 }, to(C, { held: 'policy' }))
     expect([other, plain, held]).toHaveLength(3)
-    expect(box.covering(row(), owes)).toBeNull()
+    expect(box.covering(row())).toBeNull()
 
     const started = send({ sender: B, needsReply: true, causeId: 'h1.m_start', createdAt: NOW + 4 }, C)
-    expect(box.covering(row(), owes)?.messageId).toBe(started)
+    expect(box.covering(row())?.messageId).toBe(started)
     box.settle(started, C, 'answered', NOW + 5)
-    expect(box.covering(row(), owes)).toBeNull()
+    expect(box.covering(row())).toBeNull()
     const own = send({ sender: B, needsReply: true, createdAt: NOW + 6 }, C)
-    expect(box.covering(row(), owes)?.messageId).toBe(own)
+    expect(box.covering(row())?.messageId).toBe(own)
     box.markReleased(own, C, NOW + 7, 'waited')
-    expect(box.covering(row(), owes)).toBeNull()
+    expect(box.covering(row())).toBeNull()
 
-    // A task covers only while it is owed
+    // A task covers while its row is open: it is what the task owes (§10.6.3)
     const task = send({ sender: B, kind: 'task', causeId: 'h1.m_start', createdAt: NOW + 8 }, C)
-    expect(box.covering(row(), () => false)).toBeNull()
-    expect(box.covering(row(), (owner, child) => owner === B && child === C)?.messageId).toBe(task)
+    expect(box.covering(row())?.messageId).toBe(task)
 
     // A row delivered outside a turn is covered by a send with no cause only
     const quiet = send({ sender: A, needsReply: true, createdAt: NOW + 9 }, B)
     box.markDelivered(B, [quiet], NOW + 9, null)
     box.settle(task, C, 'reported', NOW + 10)
     send({ sender: B, needsReply: true, causeId: 'h1.m_start', createdAt: NOW + 11 }, C)
-    expect(box.covering(must(box.recipient(quiet, B)), owes)).toBeNull()
+    expect(box.covering(must(box.recipient(quiet, B)))).toBeNull()
     const free = send({ sender: B, needsReply: true, createdAt: NOW + 12 }, C)
-    expect(box.covering(must(box.recipient(quiet, B)), owes)?.messageId).toBe(free)
+    expect(box.covering(must(box.recipient(quiet, B)))?.messageId).toBe(free)
   })
 })
 
@@ -435,18 +433,19 @@ describe('handoff and trash', () => {
     expect(box.recipient(fromOther, A)).toBeDefined()
   })
 
-  it('moveRole delivers afresh even when read', () => {
-    const { box, send } = world()
+  it('moveRole delivers afresh even when read, its reminders counted again', () => {
+    const { box, send, db } = world()
     const NEW = 'session:h1/orc2'
     const asked = send({ sender: A, needsReply: true }, to(ORC, { via: 'orchestrator' }))
     box.markDelivered(ORC, [asked], NOW, 3)
     box.markRead(ORC, [asked], NOW)
+    db.prepare(`UPDATE mail_recipients SET reminded = 2, reminded_at = ? WHERE message_id = ?`).run(NOW, asked)
     const direct = send({ sender: A, needsReply: true }, ORC)
     const done = send({ sender: A, needsReply: true }, to(ORC, { via: 'orchestrator' }))
     box.markDelivered(ORC, [done], NOW, 3)
     box.settle(done, ORC, 'answered', NOW)
     expect(box.moveRole(NEW)).toEqual([asked])
-    expect(box.recipient(asked, NEW)).toMatchObject({ deliveredAt: null, readAt: null, attemptAt: null, turnSeq: null, attempts: 0, via: 'orchestrator' })
+    expect(box.recipient(asked, NEW)).toMatchObject({ deliveredAt: null, readAt: null, attemptAt: null, turnSeq: null, attempts: 0, reminded: 0, remindedAt: null, via: 'orchestrator' })
     expect(box.recipient(direct, ORC)).toBeDefined()
     expect(box.recipient(done, ORC)).toBeDefined()
   })
