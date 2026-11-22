@@ -241,7 +241,7 @@ export function closesSection(body) {
 export function closedIssues(text, repository) {
   const own = String(repository ?? '').toLowerCase()
   const name = (ref) => {
-    const m = /(?:github\.com\/([\w.-]+\/[\w.-]+)\/issues\/|([\w.-]+\/[\w.-]+)?#)(\d+)/.exec(ref)
+    const m = /(?:github\.com\/([\w.-]+\/[\w.-]+)\/issues\/|([\w.-]+\/[\w.-]+)?#)(\d+)/i.exec(ref)
     const repo = (m[1] ?? m[2] ?? own).toLowerCase()
     return repo === own ? `#${m[3]}` : `${repo}#${m[3]}`
   }

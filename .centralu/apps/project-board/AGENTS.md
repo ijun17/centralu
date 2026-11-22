@@ -173,7 +173,7 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   after its base is moved to the default branch; the lowers are then closed with "Landed in #N".
   Refuses at once, without maintain or admin, for a draft or a closed pull
   request, for a top based on a branch none of its lowers has, for a top whose head has no `pre-pr` status (below,
-  "pre-pr's status"), for a top whose Closes section neither closes an issue with a keyword nor says `None: <why>`
+  "pre-pr's status"), for a top whose Closes section (when the template has that heading) neither closes an issue with a keyword nor says `None: <why>`
   (`closesProblems`, rules.mjs, #2449; the fix is an edit of the description), for a stack whose top's description does not
   close an issue that a lower's does (the lowers close as landed, so only the top's keywords close anything; read anywhere in the
   descriptions, as GitHub reads them), and for a top whose squash subject (`Title (#N)`,
@@ -1086,7 +1086,7 @@ and refuses with every reason at once, sending nothing.
   (#2449: #2448 wrote "2447" under Closes, GitHub links an issue only after a keyword, and the issue stayed open): the issue
   merging it closes, or a list of them (`2447`, `"#2448"`, `owner/repo#N`, an issue's URL), each written `Closes #N` on a line of its
   own, since GitHub links a keyword to the one reference after it (#2194); or `{ none: "<why>" }`, written `None: <why>` (a
-  sweep, part of #N). What is not an issue, no `closes`, an empty list or reason, or a Closes given in `sections` is refused. Opened into the default
+  sweep, part of #N). What is not an issue (a pull request's URL included), no `closes`, an empty list or reason, a reason with a closing keyword in it, or a Closes given in `sections` is refused. A template with no Closes heading (another repository's) asks for none, and refuses a `closes` given as it refuses any heading it lacks. Opened into the default
   branch, it reads GitHub's `closingIssuesReferences` back and says what the merge closes, with a warning for an issue GitHub
   does not link (one it cannot see, or a pull request); a stacked one links nothing until its top lands (`queue_merge`). **Not
   exercised** must name something ("Nothing" is a real answer; empty, "N/A", "TBD" are not); a

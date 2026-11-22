@@ -11,7 +11,7 @@ import { renderMarkdown } from './markdown.mjs'
 import { noteOpened } from './opened.mjs'
 import { postPrePr, prePrDescription, readPrePr, runPrePr } from './pre-pr.mjs'
 import { answer, asError, linesAnswer } from './reply.mjs'
-import { closedIssues, CLOSES_FORM, CLOSES_HEADING, commitProblems, DEFAULT_CONVENTIONS, fillTemplate, foreignBareIssueWarnings, headingKey, parseConventions, publicTextProblems, subjectProblems } from './rules.mjs'
+import { closedIssues, CLOSES_FORM, CLOSES_HEADING, commitProblems, DEFAULT_CONVENTIONS, fillTemplate, foreignBareIssueWarnings, headingKey, parseConventions, publicTextProblems, subjectProblems, templateSections } from './rules.mjs'
 import { rebaseStack, StackRefusal } from './stack.mjs'
 import { forgetThread } from './threads.mjs'
 import { privateWords } from './words-tools.mjs'
@@ -90,6 +90,20 @@ const ruleFiles = freshCache({ ttlMs: 10 * 60_000, max: 50 }) // `${repo} ${path
 /** A rules file from the repository on GitHub, kept 10 minutes; null when the repository has none. */
 const ruleFile = (repo, path, ref) => ruleFiles.get(`${repo.toLowerCase()} ${path} ${ref}`, () => readRepoFile(repo, path, ref))
 
+/** The pull request template of `repo` on `ref`, or null when it has none. */
+async function templateOf(repo, ref) {
+  for (const path of RULES.prTemplates) {
+    const text = await ruleFile(repo, path, ref)
+    if (text !== null) return text
+  }
+  return null
+}
+
+const hasClosesHeading = (template) => templateSections(template).some((h) => headingKey(h.heading) === headingKey(CLOSES_HEADING))
+
+/** Whether `repo`'s template on `ref` has a Closes heading: only then does a pull request have to say what it closes (#2449). */
+export const asksCloses = async (repo, ref) => hasClosesHeading(await templateOf(repo, ref))
+
 /** The commit conventions of `repo` (its default branch), or the usual ones with a note why. */
 async function conventionsOf(repo) {
   const { defaultBranch } = await readRepo(repo)
@@ -126,22 +140,27 @@ const PR_SECTIONS = { why: 'Why', whatChanged: 'What changed', verified: 'Verifi
 /** What a pull request closes, as open_pr and integrate take it (#2449): the tool writes one keyword per issue, so none is left out */
 export const closesInput = z
   .union([itemRef, z.array(itemRef).max(20), z.object({ none: z.string().max(2000) })])
-  .describe(`The issue merging it closes, or a list of them, each ${REF_HELP} ("Closes #N" is written for each); or { none: "<why it closes no issue>" } (a sweep, part of #N); required`)
+  .describe(`The issue merging it closes, or a list of them, each ${REF_HELP} ("Closes #N" is written for each); or { none: "<why it closes no issue>" } (a sweep, part of #N); required when the template has a Closes heading`)
 
 /** The Closes section written from `closes` for a pull request of `repo` (`issues`: what it closes, as closedIssues names them), or what is wrong with it. */
 function closesOf(closes, repo) {
   if (closes === undefined) return { problem: `closes is missing: give the issues merging it closes, or { none: "<why>" }. ${CLOSES_FORM}` }
   if (closes !== null && typeof closes === 'object' && !Array.isArray(closes)) {
     const why = String(closes.none ?? '').trim()
-    return why ? { text: `None: ${why}`, issues: [] } : { problem: 'closes.none needs the reason it closes no issue (a sweep, part of #N).' }
+    if (!why) return { problem: 'closes.none needs the reason it closes no issue (a sweep, part of #N).' }
+    // GitHub reads a keyword anywhere in the description, so a reason that has one closes that issue after all
+    const closed = closedIssues(why, repo)
+    return closed.length ? { problem: `closes.none says it closes ${closed.join(', ')}, and GitHub would close it on merge: give it as closes, or reword the reason.` } : { text: `None: ${why}`, issues: [] }
   }
   const list = Array.isArray(closes) ? closes : [closes]
   if (!list.length) return { problem: 'closes names no issue: give one, or { none: "<why>" }.' }
+  const pulls = list.filter((c) => /\/pull\/\d/i.test(String(c)))
+  if (pulls.length) return { problem: `closes takes issues, not pull requests (${pulls.join(', ')}).` }
   try {
     const issues = closedIssues(list.map((c) => itemOf(c, repo)).map((w) => `Closes ${w.repo}#${w.number}`).join('\n'), repo)
     return { text: issues.map((i) => `Closes ${i}`).join('\n'), issues }
   } catch (e) {
-    return { problem: `closes: ${e.message}` }
+    return { problem: `closes: ${e.message} When it closes no issue, give { none: "<why>" }.` }
   }
 }
 
@@ -163,12 +182,12 @@ export async function openPr({ title, head, base, draft, repo, sections, dryRun,
   const r = repoOf(repo)
   const info = await readRepo(r)
   const target = base ?? info.defaultBranch
-  let template = null
-  for (const path of RULES.prTemplates) if ((template = await ruleFile(r, path, target)) !== null) break
+  const template = await templateOf(r, target)
   if (template === null) throw new GitHubError('setup', `${r} has no pull request template on ${target} to fill (looked for ${RULES.prTemplates.join(', ')}). Nothing was opened.`)
   const given = { ...sections }
   for (const [k, heading] of Object.entries(PR_SECTIONS)) if (named[k] !== undefined) given[heading] = named[k]
-  const closes = closesOf(named.closes, r)
+  // Without a Closes heading the template asks for none; a closes given anyway is refused as any heading it lacks
+  const closes = named.closes !== undefined || hasClosesHeading(template) ? closesOf(named.closes, r) : { issues: [] }
   const handWritten = Object.keys(sections ?? {}).some((k) => headingKey(k) === headingKey(CLOSES_HEADING))
   if (closes.text !== undefined) given[CLOSES_HEADING] = closes.text
   // What pnpm pre-pr said (or why it did not run) goes under Verified, where a reviewer reads what was run

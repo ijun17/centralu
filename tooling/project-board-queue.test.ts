@@ -40,6 +40,8 @@ import { REPO_ROOT, R, SHA, SHA2, A, B, C, type Row, check, NOW, PROJECT, LISTS,
  */
 
 const ref = (_repo: string, n: number) => `#${n}`
+// This repository's pull request template, which has a Closes heading
+const CLOSES_TEMPLATE = readFileSync(join(REPO_ROOT, '.github/PULL_REQUEST_TEMPLATE.md'), 'utf8')
 
 // --- The decisions ---------------------------------------------------------------------------------
 
@@ -1425,7 +1427,7 @@ describe('the merge queue keeps the board app running while it has work (#1236)'
 
   // #2449: #2448's Closes section said "2447" with no keyword, and its issue stayed open after it landed
   it('refuses a pull request whose Closes section closes no issue and gives no reason, and a stack whose top leaves out what a lower closes', async () => {
-    runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11)] }, runs: { [SHA]: [ghRun(null)] } }))
+    runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11)] }, runs: { [SHA]: [ghRun(null)] }, files: { '.github/PULL_REQUEST_TEMPLATE.md': CLOSES_TEMPLATE } }))
     for (const body of ['## Why\n\nBecause.', '## Closes\n\n2447', '## Closes\n\nNone:']) {
       patchGh((st) => (st.prs['77'] = ghPr(77, { body })))
       const r = await call('queue_merge', { pr: 77, owner: 'tester' })
@@ -1442,10 +1444,17 @@ describe('the merge queue keeps the board app running while it has work (#1236)'
     })
     const stack = await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })
     expect(stack.isError).toBe(true)
-    expect(stack.text).toContain(`#76 closes #5, and lands as #77's squash, whose description does not: add "Closes #5" to #77's Closes section.`)
+    expect(stack.text).toContain(`#76 closes #5, and lands as #77's squash, whose description does not: add "Closes #5" to #77's Closes section, or take it out of #76's description if it should stay open.`)
     // GitHub reads a keyword anywhere in the description, and an issue's URL is the same issue
     patchGh((st) => (st.prs['77'].body = '## Why\n\nFixes https://github.com/ijun17/centralu/issues/5\n\n## Closes\n\nCloses #956'))
     expect((await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })).isError).toBe(false)
+  })
+
+  // Another repository's template may ask for no Closes section: then none is asked for
+  it('queues a pull request without a Closes section when the template has no Closes heading', async () => {
+    runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11)] }, runs: { [SHA]: [ghRun(null)] }, files: { '.github/PULL_REQUEST_TEMPLATE.md': '## Why\n\n## What changed\n' } }))
+    patchGh((st) => (st.prs['77'] = ghPr(77, { body: '## Why\n\nBecause.' })))
+    expect((await call('queue_merge', { pr: 77, owner: 'tester' })).isError).toBe(false)
   })
 
   it('holds busy from the moment a pull request is queued until it lands, and releases it then', async () => {

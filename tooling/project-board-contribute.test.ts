@@ -148,6 +148,7 @@ describe('the rules for public text', () => {
     expect(closedIssues('Closes #1\nfixes: #2\nResolves ijun17/centralu#3', 'ijun17/centralu')).toEqual(['#1', '#2', '#3'])
     expect(closedIssues(`Closes ${URL(4)}\nCloses owner/repo#5\nCloses #1 #6`, 'ijun17/centralu')).toEqual(['#4', 'owner/repo#5', '#1'])
     expect(closedIssues('Refs #1, part of #2\n```\nCloses #3\n```\n`Closes #4`', 'ijun17/centralu')).toEqual([])
+    expect(closedIssues('CLOSES HTTPS://GITHUB.COM/IJUN17/CENTRALU/Issues/7', 'ijun17/centralu')).toEqual(['#7'])
     expect(closesSection(described('Closes #1'))).toBe('Closes #1')
     expect(closesSection('## Why\n\nCloses #1')).toBeNull()
     // Its heading as the template's are matched, CRLF as GitHub's editor writes it, and no heading read inside a code block
@@ -484,8 +485,11 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
     for (const [closes, said] of [
       [undefined, 'closes is missing'],
       ['Refs #2386 (no issue of its own)', 'closes: "Refs #2386 (no issue of its own)" is not an issue or pull request.'],
+      ['Refs #2386 (no issue of its own)', 'When it closes no issue, give { none: "<why>" }.'],
       [[], 'closes names no issue'],
       [{ none: '  ' }, 'closes.none needs the reason it closes no issue'],
+      [{ none: 'a sweep; Closes #2449 later' }, 'closes.none says it closes #2449, and GitHub would close it on merge'],
+      [[5, 'https://github.com/ijun17/centralu/pull/2448'], 'closes takes issues, not pull requests (https://github.com/ijun17/centralu/pull/2448).'],
     ] as const) {
       const refused = await call('open_pr', { ...PR, closes, dryRun: true })
       expect(refused.isError, JSON.stringify(closes)).toBe(true)
@@ -501,6 +505,17 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
     const hand = await call('open_pr', { ...PR, sections: { Closes: 'Closes #1' }, dryRun: true })
     expect(hand.text).toContain('Give what it closes as closes, not as sections.Closes')
     expect(writes()).toHaveLength(sent)
+  })
+
+  // Another repository's template may have no Closes heading: nothing is asked for, and a closes given is refused as any heading it lacks
+  it('asks for no closes when the template has no Closes heading', async () => {
+    patchState((s) => (s.files['.github/PULL_REQUEST_TEMPLATE.md'] = TEMPLATE.split('## Closes')[0]!))
+    runtime()
+    const { closes: _, ...withoutCloses } = PR
+    const dry = await call('open_pr', { ...withoutCloses, dryRun: true })
+    expect(dry.isError, dry.text).toBe(false)
+    expect(dry.data.body).not.toContain('Closes')
+    expect((await call('open_pr', { ...PR, dryRun: true })).text).toContain('The template has no heading "Closes".')
   })
 
   // #1066: a stack's lower pull requests are drafts, and build.yml runs no CI for a draft

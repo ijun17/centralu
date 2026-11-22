@@ -9,7 +9,7 @@ import { now as clock, systemNow } from './clock.mjs'
 import { itemOf, itemRef, REF_HELP } from './board.mjs'
 import { canMerge, NO_PERMISSION } from './ci.mjs'
 import { APP_DIR, CI, config, QUEUE } from './config.mjs'
-import { closesInput, openPr } from './contribute-tools.mjs'
+import { asksCloses, closesInput, openPr } from './contribute-tools.mjs'
 import { GitHubError, markDraft, prsWithHead, readPr, readRepo } from './github.mjs'
 import { answering, serially } from './handlers.mjs'
 import { BATCH_ACTIVE, batchLine } from './batch.mjs'
@@ -244,13 +244,13 @@ async function queueMerge({ pr, lowers = [], owner, author, deleteBranch = true 
   // The squash subject is "Title (#N)" and must fit (#1593: before any batch, as integrate does, #1222); a stack lands through its top
   const long = longSubject(p)
   if (long) problems.push(longSubjectText(long))
-  // The top's Closes section closes with a keyword or says why not (#2449). A stack lands as its top's squash and its lowers
+  // The top's Closes section, when the template has one, closes with a keyword or says why not (#2449). A stack lands as its top's squash and its lowers
   // close as landed, so only the top's keywords close anything, wherever in its description GitHub reads them
-  problems.push(...closesProblems(p.body, top.ref))
+  if (await asksCloses(top.repo, defaultBranch)) problems.push(...closesProblems(p.body, top.ref))
   const carried = new Set(closedIssues(p.body, top.repo))
   for (const [i, lp] of lowerPrs.entries()) {
     const left = closedIssues(lp.body, top.repo).filter((n) => !carried.has(n))
-    if (left.length) problems.push(`${under[i].ref} closes ${left.join(', ')}, and lands as ${top.ref}'s squash, whose description does not: add ${left.map((n) => `"Closes ${n}"`).join(', ')} to ${top.ref}'s Closes section.`)
+    if (left.length) problems.push(`${under[i].ref} closes ${left.join(', ')}, and lands as ${top.ref}'s squash, whose description does not: add ${left.map((n) => `"Closes ${n}"`).join(', ')} to ${top.ref}'s Closes section, or take it out of ${under[i].ref}'s description if it should stay open.`)
   }
   // "Closes #a #b" closes #a only (#2194): open_pr writes one keyword per issue, but a description edited by hand can have it
   const multiClosing = multiClosingWarnings(p.body)
@@ -365,7 +365,7 @@ async function integrateWrites({ repo, name, defaultBranch, title, sections, ver
     return refused(`#${open.number}, open from ${name}, is labelled tier:${labelled}, and integrate lands only auto. Land it as a pull request of that tier (its review, then queue_merge), or take the label off if it was wrong.`, { kind: 'label', pr: open.number, tier: labelled })
   // An open pull request is the record as it is, so its own Closes section must close with a keyword or say why not (#2449)
   const taken = open ? await readPr(repo, open.number) : null
-  const unclosed = taken ? closesProblems(taken.body, queueRef(repo, open.number)) : []
+  const unclosed = taken && (await asksCloses(repo, defaultBranch)) ? closesProblems(taken.body, queueRef(repo, open.number)) : []
   if (unclosed.length) return refused(`${unclosed.join(' ')} Edit its description, then integrate again.`, { kind: 'record', pr: open.number })
   let number
   let url
