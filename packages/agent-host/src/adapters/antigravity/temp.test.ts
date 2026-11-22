@@ -155,6 +155,22 @@ describe("the agent's TEMP", () => {
     const refused = await browserFolder(long, 'win32', {}, id)
     expect(refused.browser).toBe('')
     expect(refused.why).toMatch(/at most 118 characters \(it has 119\)\. Move Centralu's data folder to a shorter path\.$/)
+    expect(refused.refusal).toBe('temp_unusable')
     expect(leftovers(long, '.sign-in-')).toEqual([])
+  })
+
+  it('on Windows refuses a session whose TEMP cannot be made, for that cause, leaving no folder', async () => {
+    const t = temp()
+    fakeInstall(t.home, WINDOWS)
+    fakeSignIn(t.home)
+    // Where the sessions' TEMP folders go, a file
+    write(pathIn(t.home.root, 'tmp'), 'not a folder')
+    const specs: AgentSpawnSpec[] = []
+    const adapter = new AntigravityAdapter(antigravityProfile({ dataDir: t.dir, platform: 'win32', arch: 'x64' }), unpacking(t.dir, specs, []))
+    const err: unknown = await adapter.createSession(sessionOpts('agy-t5'), driven().emit).catch((e: unknown) => e)
+    expect(err).toMatchObject({ code: 'refused', retryable: false, data: { reason: 'temp_unusable' } })
+    expect(String(err)).toMatch(/could not make that folder \(\w+\)\. Check that Centralu can write to its data folder\.$/)
+    expect(specs).toEqual([])
+    expect(leftovers(t.home, '.sign-in-')).toEqual([])
   })
 })

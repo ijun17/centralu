@@ -439,6 +439,8 @@ export type BrowserFolder = {
   browser: string
   /** With no `browser`: which path holds which character, in plain words, for the refusal to show as it is. Else empty */
   why: string
+  /** With no `browser`: the cause, as a refused session's `data.reason` says it. Else null */
+  refusal: 'no_browser_helper' | 'temp_unusable' | null
   /**
    * Calls `found` with each address the helper hands over (a watch, and a look now for one written before the watch
    * began). Each is taken once: the file is removed as it is read, so a later process on the same folder is not told of it
@@ -556,14 +558,13 @@ export async function browserFolder(home: AgyHome, platform: Platform = HOST_PLA
       await removeStale(spare, '.sign-in-')
       dir = resolve(await mkdtemp(join(spare, `.sign-in-${ownerTag()}-`)))
     } catch (err) {
-      const code: unknown = err instanceof Error ? Reflect.get(err, 'code') : undefined
-      return noHelper(`${data}, and ${spare}, the folder Centralu tries instead, could not be written to${typeof code === 'string' ? ` (${code})` : ''}. ${move}`)
+      return noHelper(`${data}, and ${spare}, the folder Centralu tries instead, could not be written to${codeNote(err)}. ${move}`)
     }
   }
   const temp = platform !== 'win32' ? '' : session ? sessionTemp(home, session) : join(dir, 'tmp')
   if (temp.length > WINDOWS_TEMP_MAX) {
-    await realOs().files.promises.rm(dir, { recursive: true, force: true }).catch(() => {})
-    return noHelper(`Antigravity unpacks itself into ${temp}, and on Windows that path can have at most ${WINDOWS_TEMP_MAX} characters (it has ${temp.length}). Move Centralu's data folder to a shorter path.`)
+    await removeDir(dir)
+    return noHelper(`Antigravity unpacks itself into ${temp}, and on Windows that path can have at most ${WINDOWS_TEMP_MAX} characters (it has ${temp.length}). Move Centralu's data folder to a shorter path.`, 'temp_unusable')
   }
   await chmod(dir, 0o700).catch(() => {})
   let browser: string
@@ -583,7 +584,14 @@ export async function browserFolder(home: AgyHome, platform: Platform = HOST_PLA
     await realOs().files.promises.rm(dir, { recursive: true, force: true }).catch(() => {})
     return noHelper(`the helper's folder ${dir} has a path Antigravity cannot be given (it holds ${unusableIn(dir, sep)}).`)
   }
-  if (temp) await mkdir(temp, { recursive: true })
+  if (temp) {
+    try {
+      await mkdir(temp, { recursive: true })
+    } catch (err) {
+      await removeDir(dir)
+      return noHelper(`Antigravity unpacks itself into ${temp}, and Centralu could not make that folder${codeNote(err)}. Check that Centralu can write to its data folder.`, 'temp_unusable')
+    }
+  }
   // The session's latest process from here, so the only one to remove unpacks from its TEMP: the host may start the next
   // before an earlier handle's stop is over, and that end would otherwise take a live process's files
   const mine = Symbol('latest')
@@ -597,6 +605,7 @@ export async function browserFolder(home: AgyHome, platform: Platform = HOST_PLA
   return {
     browser,
     why: '',
+    refusal: null,
     watch(found) {
       const look = () => {
         let names: string[]
@@ -720,8 +729,14 @@ const unusableIn = (path: string, listSep: string): string =>
     .map((c) => `"${c}"`)
     .join(' and ')
 
-/** No helper, and why: nothing on disk to remove */
-const noHelper = (why: string): BrowserFolder => ({ browser: '', why, watch() {}, temp: '', async remove() {} })
+/** No folder, and why: nothing on disk to remove */
+const noHelper = (why: string, refusal: NonNullable<BrowserFolder['refusal']> = 'no_browser_helper'): BrowserFolder => ({ browser: '', why, refusal, watch() {}, temp: '', async remove() {} })
+
+/** A failed call's error code, as ` (EACCES)`, or empty */
+const codeNote = (err: unknown) => {
+  const code: unknown = err instanceof Error ? Reflect.get(err, 'code') : undefined
+  return typeof code === 'string' ? ` (${code})` : ''
+}
 
 /** The person's browser on this machine, started apart from the host and never through a shell */
 export function openInBrowser(url: string, platform: Platform = HOST_PLATFORM): void {

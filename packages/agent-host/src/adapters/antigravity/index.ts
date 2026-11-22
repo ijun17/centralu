@@ -76,10 +76,10 @@ export function antigravityProfile(deps: AgyProfileDeps = {}): AgyProfile {
       const folder = await browserFolder(home, deps.platform, deps.helperPlaces, opts.sessionId)
       if (folder.browser === '') {
         // Without a helper the agent's launcher would start the browser itself, on Windows inside the host's job, and a
-        // stored sign-in that stopped working would hang the start again (#1685): refused rather than started.
-        // A path does not change between tries, so the refusal is not worth retrying (#1688)
+        // stored sign-in that stopped working would hang the start again (#1685); without its TEMP it cannot unpack itself.
+        // Refused rather than started. A path does not change between tries, so the refusal is not worth retrying (#1688)
         console.error(`[Antigravity] session refused: ${folder.why}`)
-        throw rpcError(`Antigravity cannot start: ${folder.why}`, 'refused', { retryable: false, data: { reason: 'no_browser_helper' } })
+        throw rpcError(`Antigravity cannot start: ${folder.why}`, 'refused', { retryable: false, data: { reason: folder.refusal } })
       }
       return {
         ...agyLaunch(home, archive, folder),
