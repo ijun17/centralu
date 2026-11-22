@@ -1,41 +1,32 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { CursorSignInStore } from '../../os.js'
+import { realOs } from '../../os/real.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 import { readCursorToken, tokenExpiry, type TokenIo } from './sign-in-token.js'
-import { CursorUsageFailure } from './usage-failure.js'
+import { failureOf } from './usage-failure.test-helpers.js'
 
-async function failureOf(p: Promise<unknown>): Promise<CursorUsageFailure> {
-  try {
-    await p
-  } catch (e) {
-    if (e instanceof CursorUsageFailure) return e
-    throw e
-  }
-  throw new Error('did not fail')
-}
+const { files, paths } = realOs()
 
 describe("reading cursor-agent's token from its file (#2459)", () => {
   let dir: string
   let store: CursorSignInStore
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'cursor-sign-in-'))
-    store = { keychain: null, file: join(dir, 'auth.json') }
+    dir = tempRoot('cursor-sign-in-')
+    store = { keychain: null, file: paths.path.join(dir, 'auth.json') }
   })
-  afterEach(() => rmSync(dir, { recursive: true, force: true }))
+  afterEach(() => removeTree(dir))
 
   it('reads the access token of the file, as the CLI writes it', async () => {
-    writeFileSync(store.file, JSON.stringify({ accessToken: 'tok-1', refreshToken: 'ref-1' }, null, 2))
+    files.writeFileSync(store.file, JSON.stringify({ accessToken: 'tok-1', refreshToken: 'ref-1' }, null, 2))
     await expect(readCursorToken(store)).resolves.toBe('tok-1')
   })
 
   it('says the sign-in could not be read when the file is missing, not JSON, or has no access token, never quoting it', async () => {
     expect(await failureOf(readCursorToken(store))).toMatchObject({ kind: 'no-token', detail: 'auth file ENOENT' })
-    writeFileSync(store.file, '{"accessToken":"tok-secret"')
+    files.writeFileSync(store.file, '{"accessToken":"tok-secret"')
     const notJson = await failureOf(readCursorToken(store))
     expect(notJson).toMatchObject({ kind: 'no-token', detail: 'auth file is not JSON' })
-    writeFileSync(store.file, JSON.stringify({ refreshToken: 'ref-secret', accessToken: '' }))
+    files.writeFileSync(store.file, JSON.stringify({ refreshToken: 'ref-secret', accessToken: '' }))
     const noToken = await failureOf(readCursorToken(store))
     expect(noToken).toMatchObject({ kind: 'no-token', detail: 'auth file has no accessToken' })
     expect(`${notJson.detail} ${noToken.detail} ${noToken.message}`).not.toContain('secret')
