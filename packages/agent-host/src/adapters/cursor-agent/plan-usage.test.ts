@@ -2,16 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { cursorPlanUsage, PERIOD, PLAN, planUsageSnapshot, type PlanUsageDeps } from './plan-usage.js'
 import { PERIOD_FREE_RECORDED, PERIOD_PAID_HAND_MADE, PLAN_FREE_RECORDED, PLAN_PAID_HAND_MADE } from './recordings/dashboard.test-helpers.js'
 import { CursorUsageFailure } from './usage-failure.js'
-import { failureOf } from './usage-failure.test-helpers.js'
+import { failureOf, jwt } from './usage.test-helpers.js'
 import { CURSOR_USAGE_CONTRACT } from './usage-contract.js'
 
 const json = (text: string): unknown => JSON.parse(text)
 const RESETS = new Date(1795522358574).toISOString()
 const NOW = 1_790_000_000_000
 
-function jwt(claims: object): string {
-  return `eyJhbGciOiJIUzI1NiJ9.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.signature`
-}
 const TOKEN = jwt({ sub: 'person', exp: NOW / 1000 + 3600 })
 
 describe("Cursor's plan usage from its dashboard's answers (#2459)", () => {
@@ -61,6 +58,8 @@ describe("Cursor's plan usage from its dashboard's answers (#2459)", () => {
     expect(resets({ billingCycleEnd: '0' }, { planInfo: { billingCycleEnd: '1795522358574' } })).toBe(RESETS)
     expect(resets({}, { planInfo: { billingCycleEnd: 1795522358574 } })).toBe(RESETS)
     expect(resets({}, null)).toBeNull()
+    // In nanoseconds, past what a date can hold: the percents stay, the reset is not known
+    expect(resets({ billingCycleEnd: '1795522358574000000' }, null)).toBeNull()
   })
 
   it('has no plan name when the plan answer is missing, of another shape or blank', () => {

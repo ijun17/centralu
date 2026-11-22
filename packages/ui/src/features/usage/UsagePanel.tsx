@@ -95,6 +95,12 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
           {plan} plan
         </p>
       )}
+      {/* The last numbers a failed read keeps may no longer hold: its reason says so (#2459) */}
+      {state.reason && (
+        <p className="mb-3 text-xs text-ink-faint" data-testid="usage-reason">
+          {state.reason}
+        </p>
+      )}
       {/* A linked machine's limits that are this computer's, because one account is signed in to both (#726) */}
       {state.sameAccount && (
         <p className="mb-3 text-xs text-ink-faint" data-testid="usage-same-account">

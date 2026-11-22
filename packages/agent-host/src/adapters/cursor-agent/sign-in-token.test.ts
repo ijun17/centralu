@@ -3,7 +3,7 @@ import type { CursorSignInStore } from '../../os.js'
 import { realOs } from '../../os/real.js'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 import { readCursorToken, tokenExpiry, type TokenIo } from './sign-in-token.js'
-import { failureOf } from './usage-failure.test-helpers.js'
+import { failureOf, jwt } from './usage.test-helpers.js'
 
 const { files, paths } = realOs()
 
@@ -71,12 +71,13 @@ describe("reading cursor-agent's token from the macOS Keychain (#2459)", () => {
     expect(f).toMatchObject({ kind: 'no-token', detail: 'keychain exit 44; auth file ENOENT' })
     const notRun = await failureOf(readCursorToken(KEYCHAIN, io(async () => Promise.reject(new Error('spawn failed')))))
     expect(notRun.detail).toBe('keychain did not run; auth file ENOENT')
+    // Bounded: a Keychain that holds the read says it ran out of time, not that it did not run
+    const held = await failureOf(readCursorToken(KEYCHAIN, io(async () => Promise.reject(Object.assign(new Error('timeout'), { code: null, ended: 'timeout' })))))
+    expect(held.detail).toBe('keychain ended by its timeout; auth file ENOENT')
   })
 })
 
 describe('when a token stops being accepted (#2459)', () => {
-  const jwt = (claims: unknown) => `h.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.s`
-
   it('reads the exp claim of a JWT, in ms', () => {
     expect(tokenExpiry(jwt({ exp: 1_798_131_368, type: 'session' }))).toBe(1_798_131_368_000)
   })

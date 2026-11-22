@@ -451,16 +451,19 @@ function Donut({
                 ? 'Not signed in'
                 : known
                   ? `${w.label}${w.scope ? ` · ${w.scope}` : ''} — ${percent}% used${otherThanWeekly ? `, ${resetText(w.resetsAt, now)}` : ''}`
-                  : 'Weekly usage unknown'}
+                  : 'Usage unknown'}
             </span>
           )}
-          {/* Why the numbers equal this computer's, or why there are none, never a blank (#726) */}
+          {/*
+            Why the numbers equal this computer's, or why there are none, never a blank (#726); a failed read's reason also under
+            the last numbers it keeps, which may no longer hold (#2459)
+          */}
           {!signedOut && known && snap?.sameAccount && (
             <span className="readout block text-ink-faint" data-testid={`usage-donut-same-${id}`}>
               {SAME_ACCOUNT_LABEL}
             </span>
           )}
-          {!signedOut && !known && (unsupported || snap?.reason) && (
+          {!signedOut && (unsupported || snap?.reason) && (
             <span className={`readout ${unsupported ? 'mt-1' : ''} block text-ink-faint`} data-testid={`usage-donut-reason-${id}`}>
               {unsupported ? NOT_REPORTED_COPY.title(meta.label) : snap.reason}
             </span>
@@ -482,7 +485,7 @@ function Donut({
         aria-label={
           signedOut
             ? `${label} not signed in`
-            : `${label} ${unsupported ? 'reports no usage limits' : known ? `${otherThanWeekly ? w.label : 'weekly'} usage ${percent}%` : 'weekly usage unknown'}`
+            : `${label} ${unsupported ? 'reports no usage limits' : known ? `${otherThanWeekly ? w.label : 'weekly'} usage ${percent}%` : 'usage unknown'}`
         }
         data-testid={`usage-donut-${id}`}
         data-signed-out={signedOut || undefined}

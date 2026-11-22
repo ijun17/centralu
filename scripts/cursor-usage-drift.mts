@@ -1,9 +1,6 @@
 /**
- * Goes red when the installed Cursor CLI no longer carries what reading its plan usage depends on (#2459): where its
- * token is, the two methods asked, the answers' fields (`adapters/cursor-agent/usage-contract.ts`). Reads the bundle of
- * the version the launcher would start; no login, no request.
- *
- *   pnpm drift:cursor-usage
+ * `pnpm drift:cursor-usage`: red when the installed Cursor CLI's bundle (the version the launcher would start) no longer
+ * carries what reading its plan usage depends on (`adapters/cursor-agent/usage-contract.ts`, #2459). No login, no request.
  */
 import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'

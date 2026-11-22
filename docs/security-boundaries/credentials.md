@@ -131,8 +131,9 @@ It is cursor-agent's own access token, and it proves the person to Cursor, so ev
   (measured on 2026.11.22: no permission prompt for a child of the host), then `~/.cursor/auth.json`; on Windows
   `%APPDATA%\Cursor\auth.json`; on Linux `$XDG_CONFIG_HOME/cursor/auth.json`, else `~/.config/cursor/auth.json`
   (`os.ts` `cursorSignInStore`, from the CLI's bundle; held by `pnpm drift:cursor-usage`).
-- **When.** For each usage read the panel, a turn's end or the ten-minute sample asks for while a Cursor session runs, at most
-  once a minute (`usageFor`'s cache). Nothing is read while nobody asks.
+- **When.** For each usage read something asks for: the top bar's donut every five minutes while the window is shown, whether
+  or not a Cursor session runs, the panel when opened, a turn's end and the ten-minute sample. At most once a minute: `usageFor`
+  keeps a read, good or failed, that long and shares one in flight. Nothing is read while nobody asks.
 - **Where it goes.** Only as a bearer header to `https://api2.cursor.sh/aiserver.v1.DashboardService/` (`GetCurrentPeriodUsage`,
   `GetPlanInfo`), the address fixed in code, with redirects refused so it cannot be carried elsewhere.
 - **What never happens with it.** It is not kept past the request (no cache, no store, no file), not logged, not put in an error
@@ -141,5 +142,5 @@ It is cursor-agent's own access token, and it proves the person to Cursor, so ev
   sign-in, so an expired token is the reason "Sign in to Cursor again to see its usage". Nothing is ever written to the CLI's store.
 - **Residual.** The read runs as the person, who can already read the same item and file; it gives the host nothing a process
   of the same user could not take. A Keychain that does prompt (another macOS release, another item ACL) would ask in
-  Centralu's name at each read; the host stops waiting after 3 s and answers the reason, but nothing keeps the next read from
-  asking again. Not mitigated: measured not to happen today.
+  Centralu's name at each read, up to once a minute; the host stops waiting after 3 s and answers the reason, but nothing keeps
+  the next read from asking again. Not mitigated: measured not to happen today.

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { askDashboard, DASHBOARD_URL } from './dashboard.js'
 import { PERIOD_FREE_RECORDED } from './recordings/dashboard.test-helpers.js'
-import { failureOf } from './usage-failure.test-helpers.js'
+import { failureOf } from './usage.test-helpers.js'
 
 const TOKEN = 'header.payload-that-is-secret.signature'
 

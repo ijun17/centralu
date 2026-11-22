@@ -92,6 +92,61 @@ export function usageDonutStatesTests(): void {
       await expect(page.getByTestId('usage-donut-reason-codex')).toHaveText('not logged in')
     })
 
+    test('a tool with no weekly window draws the one that resets last, named with its reset; a weekly one is not (#2459)', async ({ page }) => {
+      await setup(page, { projects: ['/tmp/alpha'] })
+      const later = new Date(Date.now() + 9 * 86_400_000).toISOString()
+      const sooner = new Date(Date.now() + 3_600_000).toISOString()
+      const window = (id: string, label: string, percent: number, resetsAt: string) => ({ id, label, percent, resetsAt, scope: null })
+      const monthly = { supported: true, usage: { plan: 'Pro', windows: [window('session', '5h', 80, sooner), window('included', 'Included', 35, later)], daily: [] } }
+      await answer(page, { claude: { supported: true, usage: { plan: 'max', windows: [window('weekly_all', 'Weekly', 40, later)], daily: [] } }, codex: monthly })
+
+      await expectState(page, 'codex', 'known')
+      await expect(donut(page, 'codex')).toHaveAttribute('data-percent', '35')
+      await expect(donut(page, 'codex')).toHaveAttribute('aria-label', 'Codex Included usage 35%')
+      await donut(page, 'codex').hover()
+      await expect(page.getByTestId('usage-donut-tip-codex')).toContainText(/Included — 35% used, resets in 8d \d+h/)
+
+      await expect(donut(page, 'claude')).toHaveAttribute('aria-label', 'Claude Code weekly usage 40%')
+      await donut(page, 'claude').hover()
+      await expect(page.getByTestId('usage-donut-tip-claude')).toContainText('Weekly — 40% used')
+      await expect(page.getByTestId('usage-donut-tip-claude')).not.toContainText('resets')
+    })
+
+    test('a failed read says why: under the last numbers it keeps, and beside the plan when it has no numbers (#2459)', async ({ page }) => {
+      await setup(page, { projects: ['/tmp/alpha'] })
+      const reason = 'Codex did not share its usage'
+      const kept = { supported: false, reason, usage: { plan: 'Pro', windows: [{ id: 'included', label: 'Included', percent: 35, resetsAt: null, scope: null }], daily: [] } }
+      await answer(page, { claude: WEEKLY(40), codex: kept })
+
+      await expectState(page, 'codex', 'known')
+      await donut(page, 'codex').hover()
+      await expect(page.getByTestId('usage-donut-reason-codex')).toHaveText(reason)
+      await donut(page, 'codex').click()
+      await expect(page.getByTestId('usage-panel')).toBeVisible()
+      await expect(page.getByTestId('usage-reason')).toHaveText(reason)
+      // A read that worked has no reason to give
+      await donut(page, 'claude').click()
+      await expect(page.getByTestId('usage-drop-title')).toHaveText('Claude Code')
+      await expect(page.getByTestId('usage-panel')).toBeVisible()
+      await expect(page.getByTestId('usage-reason')).toHaveCount(0)
+      const close = async () => {
+        await page.keyboard.press('Escape')
+        await expect(page.getByTestId('usage-drop')).toHaveCount(0)
+      }
+
+      await close()
+      await answer(page, { claude: WEEKLY(40), codex: { supported: false, reason, usage: { plan: 'Free', windows: [], daily: [] } } })
+      await donut(page, 'codex').click()
+      await expect(page.getByTestId('usage-unavailable')).toContainText(reason)
+      await expect(page.getByTestId('usage-plan')).toHaveText('Free plan')
+
+      await close()
+      await answer(page, { claude: WEEKLY(40), codex: { supported: false, reason, usage: null } })
+      await donut(page, 'codex').click()
+      await expect(page.getByTestId('usage-unavailable')).toContainText(reason)
+      await expect(page.getByTestId('usage-plan')).toHaveCount(0)
+    })
+
     test('a call that fails is not an answer: each donut keeps what it last knew (RV1624)', async ({ page }) => {
       await setup(page, { projects: ['/tmp/alpha'] })
       await answer(page, { claude: WEEKLY(40), codex: UNSUPPORTED })

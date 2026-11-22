@@ -46,7 +46,7 @@ export function usageTone(percent: number): string {
  * The stored series of the window the top bar draws, the weekly one or else the longest (`barWindow` on each latest
  * point), of the account read last, so a changed account shows
  */
-export function weeklySeries(readings: readonly UsageHistoryReadings[]): UsageHistoryReadings | null {
+export function barSeries(readings: readonly UsageHistoryReadings[]): UsageHistoryReadings | null {
   const live = readings.flatMap((s) => {
     const point = s.points[s.points.length - 1]
     return point ? [{ s, point }] : []

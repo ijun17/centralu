@@ -251,7 +251,7 @@ test('the dropdown shows the last 7 days: the weekly window over time and the se
 
   const section = page.getByTestId('usage-history')
   await expect(section).toContainText('Last 7 days')
-  await expect(page.getByTestId('usage-history-weekly')).toContainText('41% now')
+  await expect(page.getByTestId('usage-history-line')).toContainText('41% now')
   await expect(page.getByTestId(`usage-history-row-${here}`)).toContainText('94.0% hit')
   await expect(page.getByTestId('usage-history-row-gone')).toContainText('Older work')
   expect(await page.evaluate(() => (window as unknown as MockWindow).__mock.usageHistoryCalls.map((c: { by: string }) => c.by))).toEqual(['session'])
