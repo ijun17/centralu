@@ -32,22 +32,23 @@ export function letterOf(e: Pick<KeyboardEvent, 'key' | 'code'>): string | null 
   return spot ? spot[1]!.toLowerCase() : null
 }
 
-/** The element a key event landed on, read as one: its fields are checked before use (tests hand in plain objects) */
-const elementOf = (target: EventTarget | null) => target as HTMLElement | null
+/** A field of the element a key event landed on, whatever the target is (tests hand in plain objects, a window's own target has no such field) */
+const fieldOf = (target: EventTarget | null, name: string): unknown => (target ? Reflect.get(target, name) : undefined)
 
 /** Arrow keys and Enter inside a field that accepts text belong to the field (#181) */
 export function isTextEntry(target: EventTarget | null): boolean {
-  const el = elementOf(target)
-  if (!el || typeof el.tagName !== 'string') return false
-  if (el.isContentEditable || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') return true
-  if (el.tagName !== 'INPUT') return false
-  const type = ((el as HTMLInputElement).type || 'text').toLowerCase()
+  const tag = fieldOf(target, 'tagName')
+  if (typeof tag !== 'string') return false
+  if (fieldOf(target, 'isContentEditable') === true || tag === 'TEXTAREA' || tag === 'SELECT') return true
+  if (tag !== 'INPUT') return false
+  const kind = fieldOf(target, 'type')
+  const type = (typeof kind === 'string' && kind ? kind : 'text').toLowerCase()
   return !['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color', 'file'].includes(type)
 }
 
 export function pressesItself(target: EventTarget | null): boolean {
-  const el = elementOf(target)
-  return !!el && typeof el.closest === 'function' && el.closest('button, a[href], [role="button"]') !== null
+  const closest = fieldOf(target, 'closest')
+  return typeof closest === 'function' && closest.call(target, 'button, a[href], [role="button"]') !== null
 }
 
 /**

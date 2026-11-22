@@ -334,9 +334,8 @@ class WebSystemPort implements SystemPort {
     this.warned = true
     throw new Error(reason)
   }
-  async alert(_kind: AlertKind, sound: boolean) {
+  async alert(_kind: AlertKind, _sound: boolean) {
     // No dock, and autoplay policy routinely blocks a sound, so the dev build passes this quietly
-    void sound
   }
   async setBadge(_count: number) {
     /* A browser has no dock badge */

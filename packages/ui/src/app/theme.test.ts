@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ThemeFileEntry } from '@cc/protocol'
 import { usableThemeFiles } from '../store/store.js'
-import { activeSide, cachedThemeFiles, contrast, pickableThemes, resolveSide, unusableValues, urgencyBreaks, type Rgba } from './theme.js'
+import { activeSide, applyCachedTheme, cachedThemeFiles, contrast, pickableThemes, resolveSide, unusableValues, urgencyBreaks, type Rgba } from './theme.js'
 
 const file = (over: Partial<ThemeFileEntry>): ThemeFileEntry => ({
   id: 'mine',
@@ -165,5 +165,36 @@ describe('a custom theme whose file is broken at start', () => {
     expect(resolveSide('dark', 'mine', usableThemeFiles({ themeFiles: [broken], lastGoodThemes }))).toMatchObject({ id: 'mine', tokens: { '--color-surface-floor': '#101820' } })
     vi.stubGlobal('localStorage', { getItem: () => null })
     expect(cachedThemeFiles()).toEqual({})
+  })
+})
+
+describe('the cached theme before first paint', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  const dark = { id: 'dark', name: 'Dark', base: 'dark', preset: 'dark', tokens: {} }
+  const light = { id: 'light', name: 'Light', base: 'light', preset: 'light', tokens: { '--color-surface-floor': '#fafafa' } }
+  /** A page with a root to write on and a cache holding the given value */
+  const page = (stored: unknown) => {
+    const root = { dataset: {} as Record<string, string>, style: { setProperty: vi.fn(), removeProperty: vi.fn() } }
+    vi.stubGlobal('document', { documentElement: root })
+    vi.stubGlobal('window', { dispatchEvent: vi.fn() })
+    vi.stubGlobal('CustomEvent', class {})
+    vi.stubGlobal('localStorage', { getItem: () => JSON.stringify(stored) })
+    return root
+  }
+
+  it('paints the side the mode picks, with its own tokens', () => {
+    const root = page({ mode: 'light', dark, light })
+    applyCachedTheme()
+    expect(root.dataset).toMatchObject({ theme: 'light', themeBase: 'light' })
+    expect(root.style.setProperty).toHaveBeenCalledWith('--color-surface-floor', '#fafafa')
+  })
+
+  it('paints nothing from a cache that is not a theme choice: no mode, a side missing or a side with no base', () => {
+    for (const stored of [{ mode: 'sepia', dark, light }, { mode: 'dark', dark }, { mode: 'dark', dark, light: { ...light, base: 'blue' } }, 'dark', [dark, light]]) {
+      const root = page(stored)
+      applyCachedTheme()
+      expect(root.dataset).toEqual({})
+    }
   })
 })

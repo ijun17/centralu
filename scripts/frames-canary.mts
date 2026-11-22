@@ -23,6 +23,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { isObj, str, type Obj } from '../packages/agent-host/src/json-value.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const ADAPTERS = join(ROOT, 'packages/agent-host/src/adapters')
@@ -169,10 +170,6 @@ const FOLDERS: Record<string, { dir: string; prefix: string }> = {
 
 /** One recorded line: which way it went (`in` from the tool, `out` to it, `exit`), and the message */
 export type Frame = { dir: string; msg?: unknown }
-
-type Obj = Record<string, unknown>
-const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v)
-const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 
 /** A JSON-RPC message (Codex's app-server), as against a stream-json line (Claude Code) */
 const isRpc = (m: Obj) => 'jsonrpc' in m || (typeof m.method === 'string' && !('type' in m)) || ('id' in m && ('result' in m || 'error' in m) && !('type' in m))

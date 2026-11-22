@@ -110,16 +110,31 @@ export function cacheChoice(choice: ThemeChoice): void {
   writeStored(CACHE_KEY, choice)
 }
 
+/** One field of a stored value, whatever it is */
+const field = (value: unknown, key: string): unknown => (typeof value === 'object' && value !== null ? Reflect.get(value, key) : undefined)
+
+/** A theme as `resolveChoice` wrote it, checked field by field; undefined when the cache holds something else */
+function cachedTheme(value: unknown): ResolvedTheme | undefined {
+  const [id, name, base, preset] = [field(value, 'id'), field(value, 'name'), field(value, 'base'), field(value, 'preset')]
+  if (typeof id !== 'string' || typeof name !== 'string' || typeof preset !== 'string' || (base !== 'dark' && base !== 'light')) return undefined
+  const stored = field(value, 'tokens')
+  const tokens = Object.fromEntries(Object.entries(typeof stored === 'object' && stored !== null ? stored : {}).filter((e): e is [string, string] => typeof e[1] === 'string'))
+  return { id, name, base, preset, tokens }
+}
+
 /** The last run's theme before React draws: docs/themes.md "How it is applied". Unreadable: the stylesheet's Dark */
 export function applyCachedTheme(): void {
   try {
-    const choice = readStored(CACHE_KEY) as ThemeChoice | undefined
-    if (!choice?.dark || !choice?.light) return
-    const theme = pickTheme(choice)
+    const stored = readStored(CACHE_KEY)
+    const mode = field(stored, 'mode')
+    const dark = cachedTheme(field(stored, 'dark'))
+    const light = cachedTheme(field(stored, 'light'))
+    if (!dark || !light || (mode !== 'dark' && mode !== 'light' && mode !== 'system')) return
+    const theme = pickTheme({ mode, dark, light })
     // The cache is the page's own writing, but it is re-checked like anything stored
     const tokens: Record<string, string> = {}
     const keyOf = new Map(THEME_TOKENS.map((token) => [token.cssVar, token.key]))
-    for (const [name, value] of Object.entries(theme.tokens ?? {})) {
+    for (const [name, value] of Object.entries(theme.tokens)) {
       const key = keyOf.get(name)
       if (key && typeof value === 'string' && isValidTokenValue(key, value)) tokens[name] = value
     }
@@ -135,7 +150,6 @@ export function applyCachedTheme(): void {
  */
 export function cachedThemeFiles(): Record<string, ThemeFileEntry> {
   const out: Record<string, ThemeFileEntry> = {}
-  const field = (value: unknown, key: string): unknown => (typeof value === 'object' && value !== null ? Reflect.get(value, key) : undefined)
   const choice = readStored(CACHE_KEY)
   for (const theme of [field(choice, 'dark'), field(choice, 'light')]) {
     const id = field(theme, 'id')
@@ -207,8 +221,8 @@ function over(top: Rgba, bottom: Rgba): Rgba {
 }
 
 export function contrast(a: Rgba, b: Rgba): number {
-  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number]
-  return (hi + 0.05) / (lo + 0.05)
+  const [x, y] = [luminance(a), luminance(b)]
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)
 }
 
 /** One sentence per break of the order on any surface; empty when it holds */

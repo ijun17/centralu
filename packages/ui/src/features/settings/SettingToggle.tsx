@@ -5,8 +5,8 @@ import { SettingsRow } from './SettingsLayout.jsx'
 /**
  * One Settings switch (#850 item 12): a card row, label and hint on the left, switch on the right. A change returning
  * a promise disables it until settled, or a second click would race the keeper's answer. A checkbox underneath
- * (`Switch`) with `testId` on the input. `more` is the rest of a long hint behind "More"; `hintInside` changes nothing
- * in the layout; `children` stand beside the switch; `className` only places the row.
+ * (`Switch`) with `testId` on the input. `more` is the rest of a long hint behind "More"; `children` stand beside the switch;
+ * `className` only places the row.
  */
 export function SettingToggle({
   checked,
@@ -14,7 +14,6 @@ export function SettingToggle({
   label,
   hint,
   more,
-  hintInside: _hintInside = false,
   disabled = false,
   testId,
   className = '',
@@ -25,7 +24,6 @@ export function SettingToggle({
   label: ReactNode
   hint?: ReactNode
   more?: ReactNode
-  hintInside?: boolean
   disabled?: boolean
   testId?: string
   className?: string

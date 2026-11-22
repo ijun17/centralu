@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { spawnSync, type SpawnOptions } from 'node:child_process'
 import { existsSync, lstatSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join, win32 } from 'node:path'
@@ -62,6 +62,8 @@ export function probeLoginShell(
   if (platform === 'win32') return []
   const shell = env.SHELL
   if (!shell || !existsSync(shell)) return []
+  // `detached` is honoured by spawnSync as by spawn (setsid; measured, Node 26), though its options type leaves it out
+  const detached: Pick<SpawnOptions, 'detached'> = { detached: true }
   const r = spawnSync(shell, ['-ilc', 'command -p echo "__CC_PATH__:$PATH"'], {
     encoding: 'utf8',
     windowsHide: true,
@@ -71,8 +73,7 @@ export function probeLoginShell(
     stdio: ['ignore', 'pipe', 'ignore'],
     // So that a shell init script does not pop up an interactive prompt
     env: { ...env, TERM: 'dumb', CI: '1' },
-    // Honoured by spawnSync as by spawn (setsid; measured, Node 26), though its options type leaves it out
-    ...({ detached: true } as object),
+    ...detached,
   })
   if (r.error && r.pid > 1) {
     try {
@@ -92,7 +93,6 @@ export function probeLoginShell(
   return line ? line.slice('__CC_PATH__:'.length).split(delimiter).filter(Boolean) : []
 }
 
-/** Augments PATH and returns the result; called once at host startup, and a no-op from `pnpm host`, whose PATH is already right */
 /**
  * The login shell lookup costs about a second (terminal creation measured 1 to 4 s), and PATH cannot change while the process
  * lives, so it is asked once
@@ -103,6 +103,7 @@ export function __resetToolPathCache(): void {
   cachedShellPath = null
 }
 
+/** Augments PATH and returns the result; called once at host startup, and a no-op from `pnpm host`, whose PATH is already right */
 export function ensureToolPath(): { path: string; source: 'shell' | 'fallback' | 'unchanged' } {
   const current = (process.env.PATH ?? '').split(delimiter).filter(Boolean)
 

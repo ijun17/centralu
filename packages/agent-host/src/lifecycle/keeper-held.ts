@@ -92,10 +92,8 @@ const named = (cs: HeldChild[]) => cs.map((c) => `${c.id} pid ${c.pid}`).join(',
  * of their own, `sleep &`), then KILL after `graceMs` to what the first shot saw still in the same group (a job keeps no
  * terminal once its shell is gone) plus what joined a session meanwhile, never to a pid that has gone. Only with no other host
  * up (this host holds the instance lock), since it speaks on the children service's control connection. A keeper that answers
- * `ok: false`, does not answer, or lists a child that cannot be read is told nothing. Such a keeper rolls back a handoff this
- * build's keeper refused and swaps its host under itself (`move_keeper`); this host does not stand by for a swap, so that swap
- * fails before the running host is touched: the update from such a build is a full quit of Centralu. Returns how many children
- * it ended, how many it could not, and how many processes of their terminals did not end.
+ * `ok: false`, does not answer, or lists a child that cannot be read is told nothing. Returns how many children it ended, how many
+ * it could not, and how many processes of their terminals did not end.
  */
 export async function endHeld(
   io: HeldIo,

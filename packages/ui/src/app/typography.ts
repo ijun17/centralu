@@ -1,4 +1,4 @@
-import { DEFAULT_UI_PREFERENCES, LineHeight, nearestTextSize, type UiPreferences } from '@cc/protocol/client'
+import { DEFAULT_UI_PREFERENCES, LineHeight, isRecord, nearestTextSize, type UiPreferences } from '@cc/protocol/client'
 import { readStored, writeStored } from './stored.js'
 
 /** Fonts, line height and text size on `<html>`: docs/themes.md "Text: size, fonts and line height" */
@@ -89,12 +89,12 @@ export function isUsableFont(written: string): boolean {
 export type Typography = Pick<UiPreferences, 'bodyFont' | 'codeFont' | 'lineHeight' | 'textSize'>
 
 /** Each read on its own, so a missing or odd field (an older host) is its default */
-export function typographyOf(prefs: Partial<UiPreferences>): Typography {
+export function typographyOf(prefs: Readonly<Record<string, unknown>>): Typography {
   const d = DEFAULT_UI_PREFERENCES
   return {
     bodyFont: typeof prefs.bodyFont === 'string' ? prefs.bodyFont : d.bodyFont,
     codeFont: typeof prefs.codeFont === 'string' ? prefs.codeFont : d.codeFont,
-    lineHeight: LineHeight.safeParse(prefs.lineHeight).success ? (prefs.lineHeight as LineHeight) : d.lineHeight,
+    lineHeight: LineHeight.safeParse(prefs.lineHeight).data ?? d.lineHeight,
     textSize: typeof prefs.textSize === 'number' && Number.isFinite(prefs.textSize) ? nearestTextSize(prefs.textSize) : d.textSize,
   }
 }
@@ -149,8 +149,8 @@ export function cacheTypography(t: Typography): void {
 /** Before anything is drawn: a font or zoom arriving with the preferences, a round trip later, reflows the screen */
 export function applyCachedTypography(): void {
   try {
-    const cached = readStored(CACHE_KEY) as Partial<UiPreferences> | undefined
-    if (cached === undefined) return
+    const cached = readStored(CACHE_KEY)
+    if (!isRecord(cached)) return
     applyTypography(typographyOf(cached))
   } catch {
     /* a broken cache is the same as none */

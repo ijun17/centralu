@@ -129,8 +129,7 @@ export const layoutActions = (set: StoreSet, get: StoreGet): LayoutActions => ({
 
   setPanelWidth(px) {
     const s = get()
-    const sidebar = s.panelOpen ? s.sidebarWidth : s.sidebarWidth
-    set({ panelWidth: fitWidth(px, PANEL_MIN, PANEL_MAX, sidebar, s.prefs.textSize) })
+    set({ panelWidth: fitWidth(px, PANEL_MIN, PANEL_MAX, s.sidebarWidth, s.prefs.textSize) })
     get().saveWorkspace()
   },
 
