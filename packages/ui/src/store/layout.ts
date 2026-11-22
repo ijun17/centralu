@@ -58,6 +58,7 @@ type LayoutActions = Pick<
   | 'setPanelSplit'
   | 'setSidebarWidth'
   | 'openFile'
+  | 'setViewerMarkdown'
   | 'revealFile'
   | 'openGit'
   | 'openCommit'
@@ -151,6 +152,10 @@ export const layoutActions = (set: StoreSet, get: StoreGet): LayoutActions => ({
 
   openFile(path, projectId, sessionId) {
     set({ viewerPath: path, viewerProjectId: projectId ?? null, viewerSessionId: sessionId ?? null, overlay: { kind: 'viewer' } })
+  },
+
+  setViewerMarkdown(view) {
+    set({ viewerMarkdown: view })
   },
 
   // A path relative to the viewed session's project, as a file link's; through the file tree's port and wording

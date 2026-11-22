@@ -44,6 +44,12 @@ export type LayersSlice = {
   viewerProjectId: string | null
   /** The session whose folder (worktree) the file is read through (#1209); `null` reads the project's own folder. */
   viewerSessionId: string | null
+  /**
+   * How the viewer shows a Markdown file (#2454): the last view the person picked, for every file, in this window only.
+   * A `file.md:42` link shows the text without changing it.
+   */
+  viewerMarkdown: 'rendered' | 'text'
+  setViewerMarkdown(view: 'rendered' | 'text'): void
   paletteOpen: boolean
   /**
    * Screen-covering layers open now (#158, `useOpenLayer`): their open state is local to each component. The approval

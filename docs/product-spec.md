@@ -210,6 +210,10 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
 - Click a file → syntax-highlighted read-only view. Search (within the file), line numbers, copy line link.
 - Toggle between diff mode and normal mode.
 - Large files use virtual scrolling; binaries/images get a preview or a notice.
+- A Markdown file (`.md`, `.markdown`) opens rendered, by the conversation's renderer and at its reading width (about
+  80 characters); "Rendered | Text" in the header, right after the path, switches to its text, where the in-file search
+  is. The view last picked holds for every Markdown file in that window. A `file.md:42` link opens the text at that line
+  and leaves the pick as it was. An SVG's "Preview | Text" is the same switch (owner, 2026-11-22, #2454).
 - No editing (non-goal). An "open in IDE" button (the same mechanism as FR-4's line-level jump).
 
 #### FR-7. Per-project and per-session tool selection

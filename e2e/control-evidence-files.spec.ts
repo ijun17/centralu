@@ -404,12 +404,90 @@ test('Viewer: SVG toggles between the rendered image and raw source', async ({ p
   await page.getByTestId('file-logo.svg').click()
 
   await expect(page.getByTestId('viewer-image')).toBeVisible()
-  await page.getByTestId('viewer-svg-text').click()
+  await page.getByTestId('viewer-view-text').click()
   await expect(page.getByTestId('viewer-image')).toHaveCount(0)
   await expect(page.getByTestId('code-viewer')).toContainText(svg)
   await expect(page.getByTestId('viewer-search')).toBeVisible()
-  await page.getByTestId('viewer-svg-preview').click()
+  await page.getByTestId('viewer-view-rendered').click()
   await expect(page.getByTestId('viewer-image')).toBeVisible()
+})
+
+/** The person's pick is the view of every Markdown file they open next in this window (#2454) */
+test('Viewer: a Markdown file opens rendered, and the view picked holds for the next one', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.fsState.entries[''] = [
+      { name: 'a.md', path: 'a.md', isDir: false, ignored: false },
+      { name: 'b.md', path: 'b.md', isDir: false, ignored: false },
+    ]
+    m.fsState.files['a.md'] = '# Alpha\n\nFirst **file**.'
+    m.fsState.files['b.md'] = '# Beta\n\nSecond file.'
+  })
+  await newSession(page, 'alpha', 'task')
+  await page.getByTestId('evidence-tab-files').click()
+  await page.getByTestId('file-a.md').click()
+
+  const rendered = page.getByTestId('viewer-rendered')
+  await expect(rendered.locator('h1')).toHaveText('Alpha')
+  await expect(page.getByTestId('viewer-search')).toBeHidden()
+  // The switch stays at one place in both views
+  const at = async () => (await page.getByTestId('viewer-view').boundingBox())!.x
+  // The conversation's reading width: a wide window leaves the right side empty
+  const [pane, text] = [await rendered.boundingBox(), await rendered.getByTestId('markdown').boundingBox()]
+  expect(text!.width).toBeLessThan(pane!.width - 200)
+
+  const renderedAt = await at()
+  await page.getByTestId('viewer-view-text').click()
+  await expect(rendered).toHaveCount(0)
+  expect(await at()).toBe(renderedAt)
+  await expect(page.getByTestId('code-viewer')).toContainText('First **file**.')
+  await expect(page.getByTestId('viewer-search')).toBeVisible()
+
+  await page.getByTestId('file-b.md').click()
+  await expect(page.getByTestId('viewer-path')).toHaveText('b.md')
+  await expect(page.getByTestId('code-viewer')).toContainText('# Beta')
+  await expect(rendered).toHaveCount(0)
+  await page.getByTestId('viewer-view-rendered').click()
+  await expect(rendered.locator('h1')).toHaveText('Beta')
+})
+
+/**
+ * A narrow window (#2454): the header keeps the path's start, the switch, the search and Open in IDE inside it, and a
+ * wide table scrolls sideways rather than break its words; the text keeps the conversation's reading width.
+ */
+test('Viewer at 420 px: the header fits, and a wide table scrolls sideways', async ({ page }) => {
+  await page.setViewportSize({ width: 420, height: 720 })
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const row = (cells: string[]) => `| ${cells.join(' | ')} |`
+  const heads = ['Component', 'Responsibility', 'Configuration', 'Dependencies', 'Ownership']
+  await page.evaluate((text: string) => {
+    ;(window as any).__mock.fsState.files['docs/architecture/overview-of-components.md'] = text
+  }, ['# Overview', '', row(heads), row(heads.map(() => '---')), row(heads.map((h) => `${h}s`))].join('\n'))
+  await newSession(page, 'alpha', 'task')
+  await page.evaluate(() => (window as any).__store.getState().openFile('docs/architecture/overview-of-components.md'))
+
+  const header = page.getByTestId('code-viewer').locator('header')
+  const inside = async (testId: string) => {
+    const [h, b] = [await header.boundingBox(), await page.getByTestId(testId).boundingBox()]
+    expect(b!.x).toBeGreaterThanOrEqual(h!.x)
+    expect(b!.x + b!.width).toBeLessThanOrEqual(h!.x + h!.width)
+  }
+  const table = page.getByTestId('viewer-rendered').locator('table')
+  await expect(table).toBeVisible()
+  await inside('viewer-view')
+  await inside('viewer-open-ide')
+  // Cells that broke their words would fit the width instead
+  expect(await table.evaluate((t) => t.scrollWidth > t.clientWidth)).toBe(true)
+
+  const renderedAt = (await page.getByTestId('viewer-view').boundingBox())!.x
+  await page.getByTestId('viewer-view-text').click()
+  await expect(page.getByTestId('viewer-search')).toBeVisible()
+  expect((await page.getByTestId('viewer-view').boundingBox())!.x).toBe(renderedAt)
+  await inside('viewer-view')
+  await inside('viewer-search')
+  await inside('viewer-open-ide')
 })
 
 /** The expand indicator is collapsed=right, expanded=down. The same glyph rotates, so the two states never drift apart */

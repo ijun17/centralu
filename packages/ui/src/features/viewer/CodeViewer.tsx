@@ -4,7 +4,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import type { FsFile } from '@cc/platform/ports'
 import { useStore } from '../../store/store.js'
-import { useProjectMachine } from '../../store/selectors.js'
+import { sessionFolderOf, useProjectMachine } from '../../store/selectors.js'
 import { useRemoteIde } from '../machines/remoteIde.js'
 import { useShortcut } from '../../app/shortcut.js'
 import { formatBytes } from '../../app/format.js'
@@ -12,6 +12,8 @@ import { isPlainEnter } from '../../app/keys.js'
 import { Kbd } from '../../components/primitives.jsx'
 import { SkeletonLines } from '../../components/Skeleton.jsx'
 import { TextInput } from '../../components/TextField.jsx'
+import { Segmented } from '../../components/Segmented.jsx'
+import { Markdown } from '../session/Markdown.jsx'
 import { TRUNCATED_NOTICE, wholeFileText } from './copy.js'
 import { useVirtualCopy } from './useVirtualCopy.js'
 import { clearViewerJump, currentViewerJump, requestViewerJump, useViewerJump } from './jump.js'
@@ -47,6 +49,9 @@ export function CodeViewer({ projectId, sessionId = null }: { projectId: string;
   const [query, setQuery] = useState('')
   /** An SVG is both source and a picture, so the person picks which one to look at. */
   const [svgPreview, setSvgPreview] = useState(true)
+  const markdownView = useStore((s) => s.viewerMarkdown)
+  // A link in a rendered file opens as the same link in the conversation would, from the folder the file was read in
+  const root = useStore((s) => (sessionId ? sessionFolderOf(s, sessionId) : (s.projects[projectId]?.path ?? null)))
   const scrollRef = useRef<HTMLDivElement>(null)
   const rowsRef = useRef<HTMLDivElement>(null)
   /**
@@ -104,7 +109,17 @@ export function CodeViewer({ projectId, sessionId = null }: { projectId: string;
 
   const image = file?.image && isViewerImage(file.image) ? file.image : null
   const isSvg = image?.mime === 'image/svg+xml'
+  const markdown = !!file && !file.binary && MARKDOWN.test(path ?? '')
+  // A line link lands in the text while that landing stands; the view the person picked stays as it was (#2454)
+  const byLine = jump?.path === path || landedIndex >= 0
+  const view = isSvg ? (svgPreview ? 'rendered' : 'text') : markdown ? (byLine ? 'text' : markdownView) : null
   const showingImage = !!image && (!isSvg || svgPreview)
+  const showingRendered = markdown && view === 'rendered'
+  const pickView = (v: 'rendered' | 'text') => {
+    if (isSvg) return setSvgPreview(v === 'rendered')
+    setLandedIndex(-1)
+    useStore.getState().setViewerMarkdown(v)
+  }
   const lines = useMemo(() => (file?.text ?? '').split('\n'), [file])
   const matches = useMemo(() => {
     if (!query.trim()) return new Set<number>()
@@ -156,7 +171,7 @@ export function CodeViewer({ projectId, sessionId = null }: { projectId: string;
       widest = Math.max(widest, Math.ceil(w))
     }
     if (widest > rowsWidth) setRowsWidth(widest)
-  }, [virtualItems, file, showingImage, rowsWidth])
+  }, [virtualItems, file, showingImage, showingRendered, rowsWidth])
 
   // Copy and ⌘A over rows that are not all mounted: one rule with the diff (useVirtualCopy)
   const copyLines = useMemo(() => lines.map((text) => ({ text })), [lines])
@@ -167,7 +182,7 @@ export function CodeViewer({ projectId, sessionId = null }: { projectId: string;
     lines: copyLines,
     wholeText,
     resetKey: path,
-    ready: !!file && !showingImage,
+    ready: !!file && !showingImage && !showingRendered,
   })
 
   if (!path) {
@@ -185,15 +200,34 @@ export function CodeViewer({ projectId, sessionId = null }: { projectId: string;
     <section className="flex min-h-0 flex-1 flex-col" data-testid="code-viewer">
       {/* The panel's tab row height (31px, PanelTabs), so this bar's line meets the tabs' line beside it */}
       <header className="flex h-[31px] shrink-0 items-center gap-2 border-b border-line px-3">
-        <span className="readout truncate text-xs text-ink-muted" data-testid="viewer-path">
+        <span className="readout truncate text-xs text-ink-muted" title={path} data-testid="viewer-path">
           {path}
         </span>
-        {!showingImage && (
+        {/*
+          Right after the path (#2454). The search keeps its room while the other view shows, so the switch stays at one
+          place in both; in a narrow window the path and the search give way.
+        */}
+        {view && (
+          <Segmented
+            label="View"
+            size="sm"
+            className="shrink-0"
+            value={view}
+            onChange={pickView}
+            options={[
+              { value: 'rendered', label: isSvg ? 'Preview' : 'Rendered', testId: 'viewer-view-rendered' },
+              { value: 'text', label: 'Text', testId: 'viewer-view-text' },
+            ]}
+            testId="viewer-view"
+          />
+        )}
+        {(view || !showingImage) && (
           <>
             <TextInput
               size="xs"
               surface="raised"
-              className="ml-2 w-40"
+              className={`ml-2 w-40 min-w-16 ${view === 'rendered' ? 'invisible' : ''}`}
+              aria-hidden={view === 'rendered' || undefined}
               placeholder="Search in file"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -204,39 +238,12 @@ export function CodeViewer({ projectId, sessionId = null }: { projectId: string;
               }}
               data-testid="viewer-search"
             />
-            {query && (
-              <span className="readout text-2xs text-ink-faint" data-testid="viewer-match-count">
+            {query && view !== 'rendered' && (
+              <span className="readout shrink-0 text-2xs text-ink-faint" data-testid="viewer-match-count">
                 {matchAt >= 0 ? `${matchAt + 1}/${matchLines.length}` : `${matches.size} lines`}
               </span>
             )}
           </>
-        )}
-        {isSvg && (
-          <span
-            className="ml-2 flex overflow-hidden rounded-md border border-line text-2xs"
-            data-testid="viewer-svg-mode"
-          >
-            <button
-              type="button"
-              className={`px-2 py-0.5 transition-colors ${
-                !svgPreview ? 'bg-surface-hover text-ink' : 'text-ink-faint hover:text-ink'
-              }`}
-              onClick={() => setSvgPreview(false)}
-              data-testid="viewer-svg-text"
-            >
-              Text
-            </button>
-            <button
-              type="button"
-              className={`border-l border-line px-2 py-0.5 transition-colors ${
-                svgPreview ? 'bg-surface-hover text-ink' : 'text-ink-faint hover:text-ink'
-              }`}
-              onClick={() => setSvgPreview(true)}
-              data-testid="viewer-svg-preview"
-            >
-              Preview
-            </button>
-          </span>
         )}
         {!remote && (
           <button
@@ -299,7 +306,8 @@ export function CodeViewer({ projectId, sessionId = null }: { projectId: string;
         <SkeletonLines lines={8} className="p-3" label="Loading the file" />
       ) : showingImage && image ? (
         <div
-          className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 overflow-auto bg-surface-floor p-4"
+          key="image"
+          className={`${view ? 'cc-fade ' : ''}flex min-h-0 flex-1 flex-col items-center justify-center gap-2 overflow-auto bg-surface-floor p-4`}
           data-testid="viewer-image"
         >
           <img
@@ -314,6 +322,12 @@ export function CodeViewer({ projectId, sessionId = null }: { projectId: string;
         <p className="p-3 text-sm text-ink-faint" data-testid="viewer-binary">
           {file.previewError ?? `Binary file (${formatBytes(file.bytes)})`}
         </p>
+      ) : showingRendered ? (
+        // The conversation's renderer and reading width (#2454): on a wide window the right side stays empty
+        <div key="rendered" className="cc-fade min-h-0 flex-1 overflow-auto px-4 py-3" data-testid="viewer-rendered">
+          <Markdown text={file.text} projectRoot={root} projectId={projectId} linkSessionId={sessionId} />
+          {file.truncated && <p className="pt-2 text-xs text-ink-faint">{TRUNCATED_NOTICE}</p>}
+        </div>
       ) : (
         /*
          * `tabIndex={0}` region, as GitPanel's diff (#139): it scrolls sideways, and at -1 the keyboard could not come back
@@ -321,11 +335,12 @@ export function CodeViewer({ projectId, sessionId = null }: { projectId: string;
          * a step of the line-height scale, so a theme's `--leading-code` cannot desynchronise the rows from it.
          */
         <div
+          key="text"
           ref={scrollRef}
           role="region"
           aria-label="Code"
           tabIndex={0}
-          className="min-h-0 flex-1 overflow-auto font-mono text-xs leading-[18px] focus:outline-none"
+          className={`${view ? 'cc-fade ' : ''}min-h-0 flex-1 overflow-auto font-mono text-xs leading-[18px] focus:outline-none`}
           {...copyProps}
         >
           <div
@@ -363,6 +378,9 @@ export function CodeViewer({ projectId, sessionId = null }: { projectId: string;
     </section>
   )
 }
+
+/** A Markdown file opens rendered, with its text one switch away (#2454) */
+const MARKDOWN = /\.(md|markdown)$/i
 
 /** The host is the primary gate; this keeps a malformed adapter response from becoming a data URL. */
 function isViewerImage(image: NonNullable<FsFile['image']>): boolean {

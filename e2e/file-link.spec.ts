@@ -119,6 +119,33 @@ test('`path:line` lands on that line, and says which one it landed on', async ({
 })
 
 /**
+ * A Markdown file opens rendered, but `file.md:42` names a place in its text (#2454): the text opens there, and the
+ * view picked for Markdown stays as it was, so the next Markdown file opens rendered. A link inside it opens as in
+ * the conversation.
+ */
+test('`file.md:line` opens the text at that line; the next Markdown file still opens rendered', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await seedFiles(page, {
+    'docs/plan.md': ['# Plan', '', ...Array.from({ length: 200 }, (_, i) => `Step ${i + 1}.`)].join('\n'),
+    'notes.md': '# Notes\n\nThe plan is `docs/plan.md`.',
+  })
+  await newSession(page, 'alpha', 'work')
+  await agentSays(page, 'The step is at `docs/plan.md:150`.')
+
+  await page.getByTestId('file-link').click()
+  await expect(page.locator('[data-landed]')).toContainText('Step 148.')
+  await expect(page.getByTestId('viewer-view-text')).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('viewer-rendered')).toHaveCount(0)
+
+  await page.evaluate(() => (window as any).__store.getState().openFile('notes.md'))
+  const rendered = page.getByTestId('viewer-rendered')
+  await expect(rendered.locator('h1')).toHaveText('Notes')
+  await rendered.getByTestId('file-link').click()
+  await expect(page.getByTestId('viewer-path')).toHaveText('docs/plan.md')
+  await expect(rendered.locator('h1')).toHaveText('Plan')
+})
+
+/**
  * Nothing checks the path against the disk before it becomes a link — that would be an
  * RPC per span of every message, to answer a question only a click ever asks. So the link
  * is a guess, and this is the test that the app admits it when the guess is wrong instead

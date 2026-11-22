@@ -226,6 +226,7 @@ export const useStore = create<AppState>()(isolatedListeners((rawSet, get) => {
     viewerPath: null,
     viewerProjectId: null,
     viewerSessionId: null,
+    viewerMarkdown: 'rendered',
     paletteOpen: false,
     openLayers: 0,
     approvalsInFlight: {} as Record<string, true>,
