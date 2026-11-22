@@ -481,6 +481,21 @@ describe('MailReminders (docs/plans/mailbox.md §10)', () => {
     expect(h.w.rowOf(q, C)).toMatchObject({ reminded: 1, releasedAt: null })
   })
 
+  it('drops a reminder left undelivered at a live original whose messages a handoff moved away', () => {
+    const h = harness()
+    const q = h.ask(A, B)
+    h.over.set(B, { receiver: { kind: 'ready', live: false, quiet: false } })
+    h.minutes(55)
+    h.sweep()
+    const reminder = h.followUps(B)[0]?.id
+    expect(reminder).toBeDefined()
+    h.w.mail.handOver(B, C, { senders: [A] })
+    expect(h.w.rowOf(q, C).reminded).toBe(0)
+    h.over.delete(B)
+    h.w.clock.t += 3_000
+    expect(h.w.mail.drain(B).messageIds).not.toContain(reminder)
+  })
+
   it('holds a reminder for 10 minutes after a turn the person\'s mail started, as after the person\'s own words', () => {
     const h = harness()
     const q = h.w.send(A, { to: [B], text: 'q', needsReply: true }).message.id

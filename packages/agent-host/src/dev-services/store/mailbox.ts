@@ -182,8 +182,8 @@ const HELD = `r.held IS NOT NULL AND r.held NOT IN ('released', 'dismissed')`
 /** A row the unanswered reminder watches (`awaitingAnswer`, docs/plans/mailbox.md §10.2) */
 const AWAITING = `m.kind = 'message' AND m.needs_reply = 1 AND r.delivered_at IS NOT NULL AND r.settled IS NULL AND r.released_at IS NULL
   AND r.answer_id IS NULL AND (r.held IS NULL OR r.held = 'released')`
-/** Centralu's unanswered reminder (`MessageService.remind`) */
-const REMINDER_NOTICE = `(m.sender = 'centralu' AND m.kind = 'notice' AND json_valid(m.facts) AND json_type(m.facts, '$.reminder') IS NOT NULL)`
+/** Message `n` is Centralu's unanswered reminder (`MessageService.remind`) */
+const isReminder = (n: string) => `(${n}.sender = 'centralu' AND ${n}.kind = 'notice' AND json_valid(${n}.facts) AND json_type(${n}.facts, '$.reminder') IS NOT NULL)`
 /** A message that waits for a reply: a task, or a message that needs one (the Inbox's Tasks, #1577) */
 const WORK = `(m.kind = 'task' OR (m.kind = 'message' AND m.needs_reply = 1))`
 /**
@@ -531,7 +531,7 @@ export class MailboxRecords {
           `UPDATE mail_recipients SET reminded = reminded + 1, reminded_at = @at
             WHERE recipient = @recipient AND message_id IN (
               SELECT o.value FROM mail n, json_each(n.facts, '$.of') o
-               WHERE n.id IN (SELECT value FROM json_each(@ids)) AND n.sender = 'centralu' AND json_valid(n.facts) AND json_type(n.facts, '$.reminder') IS NOT NULL
+               WHERE n.id IN (SELECT value FROM json_each(@ids)) AND ${isReminder('n')}
                  AND (mail_recipients.reminded_at IS NULL OR mail_recipients.reminded_at < n.created_at))`,
         )
         .run({ at, recipient, ids: idList(ids) })
@@ -1053,7 +1053,7 @@ export class MailboxRecords {
     return this.db
       .prepare<{ from: string; to: string; senders: string }, { id: string }>(
         `SELECT r.message_id AS id FROM mail_recipients r JOIN mail m ON m.id = r.message_id
-          WHERE r.recipient = @from AND ((r.settled IS NULL AND ${WATCHED}) OR r.read_at IS NULL) AND m.sender <> @to AND ${inScope} AND NOT ${REMINDER_NOTICE}
+          WHERE r.recipient = @from AND ((r.settled IS NULL AND ${WATCHED}) OR r.read_at IS NULL) AND m.sender <> @to AND ${inScope} AND NOT ${isReminder('m')}
           ORDER BY m.created_at, m.id`,
       )
       .all({ from, to, senders: idList(scope === 'all' ? [] : scope.senders) })
