@@ -20,6 +20,7 @@ import {
   type TrashedSession,
   type TrashedSubagentSteps,
   type ToolName,
+  errorMessage,
   isAssistantKind,
 } from '@cc/protocol'
 import type { AgentAdapter, SessionHandle } from '../adapters/contract.js'
@@ -682,7 +683,19 @@ export class SessionTrash {
        * predecessor's name) is also caught in this same pass.
        */
       if (record.projectId) await this.host.sweepOrphanHandoffNotes(record.projectId).catch(() => {})
+      await this.sweepSessionFiles()
     })
+  }
+
+  /**
+   * What each tool's adapter keeps per session (`AgentAdapter.sweepSessionFiles`), for the sessions deleted for good: after
+   * a purge, and at the host's start for a purge that ended before it. A session being started is kept from before its
+   * launch (`unborn`), and an archived one until it is purged. Never throws: what stays is swept at a later one
+   */
+  async sweepSessionFiles(): Promise<void> {
+    let trashed: Set<string> | undefined
+    const kept = (id: string) => this.host.meta.has(id) || this.host.record.unborn.has(id) || (trashed ??= this.host.store.trash.trashedIds()).has(id)
+    await Promise.all([...this.host.adapters.values()].map(async (a) => a.sweepSessionFiles?.(kept))).catch((e: unknown) => console.error(`[archive] the sweep of sessions' tool files stopped: ${errorMessage(e)}`))
   }
 
   /**

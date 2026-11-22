@@ -1,6 +1,6 @@
 import type { AdapterSurface, SurfaceBaseline, SurfaceInputs, ToolSurface } from '../contract.js'
 import { acpCapabilities, acpInitialize } from '../acp/surface-kit.js'
-import { agyHome, agyPlatformKey, isInstalled } from './agent-files.js'
+import { agyHome, agyPlatformKey, browserFolder, isInstalled } from './agent-files.js'
 import { agyLaunch } from './launch.js'
 import { AGY_RELEASE } from './release.js'
 import { agyStderrLine } from './shape.js'
@@ -12,10 +12,16 @@ async function gather(): Promise<SurfaceInputs> {
   const archive = key ? AGY_RELEASE.archives[key] : null
   const home = agyHome(dataRoot(), AGY_RELEASE.version)
   if (!archive || !isInstalled(home, archive)) throw new Error('Antigravity is not installed by Centralu on this machine')
-  // `initialize` alone starts no sign-in, so no helper: an empty `BROWSER` still keeps the person's own out
-  const launch = agyLaunch(home, archive, '')
-  const initialize = await acpInitialize({ ...launch, cwd: home.root, env: { ...process.env, ...launch.env } }, 'antigravity-surface', agyStderrLine)
-  return { version: AGY_RELEASE.version, initialize }
+  // A folder of its own as every process has (on Windows its TEMP, `agyEnv`); `initialize` alone starts no sign-in, so it is not watched
+  const folder = await browserFolder(home)
+  if (folder.browser === '') throw new Error(`Antigravity cannot start: ${folder.why}`)
+  try {
+    const launch = agyLaunch(home, archive, folder)
+    const initialize = await acpInitialize({ ...launch, cwd: home.root, env: { ...process.env, ...launch.env } }, 'antigravity-surface', agyStderrLine)
+    return { version: AGY_RELEASE.version, initialize }
+  } finally {
+    await folder.remove()
+  }
 }
 
 function readAgySurface(inputs: SurfaceInputs): ToolSurface {

@@ -25,7 +25,7 @@ import { realOs } from '../../os/real.js'
  * - which of Google's builds this machine takes (`agyPlatformKey`)
  * - the folder layout under Centralu's data folder, and what is on disk there (`agyHome`, `isInstalled`, `hasSignIn`)
  * - the install: the download to disk, the unpack with each OS's file modes, the one rename that puts it in place
- * - the private folder of a process's `BROWSER` helper (`browserFolder`), and the person's browser (`openInBrowser`)
+ * - the private folder of a process's `BROWSER` helper and TEMP (`browserFolder`), and the person's browser (`openInBrowser`)
  */
 
 /** The registry's name for this machine's build, or null where Google ships none (a 32-bit or another OS) */
@@ -43,12 +43,12 @@ export function agyPlatformKey(platform: Platform = HOST_PLATFORM, arch: string 
  *
  *     <version>/             the server and its harness, side by side, and `install.json` written last
  *     gemini-home/           GEMINI_HOME: the agent's settings, conversations, and its token where it keeps a file (not on
- *                            a Mac with a usable Keychain, plan §4.2). Not versioned, so a session made
- *                            under one Centralu still loads under the next (ids are per GEMINI_HOME, spike §3)
+ *                            a Mac with a usable Keychain, plan §4.2). Not versioned: a session made under one Centralu
+ *                            still loads under the next (ids are per GEMINI_HOME, spike §3)
  *     .install-<owner>-<random>/  an install in progress (removed when it ends, however it ends)
- *     .sign-in-<owner>-<random>/  one process's browser helper and the address it hands over (a sign-in's or a session's;
- *                            removed when that process's sign-in or session ends; in the person's own folder instead,
- *                            `spareFolder`, where the data folder's path cannot be put in `BROWSER`)
+ *     .sign-in-<owner>-<random>/  one process's browser helper, its address and its TEMP if not a session's (removed when
+ *                            it ends; in `spareFolder` where the data folder's path cannot be put in `BROWSER`)
+ *     tmp/<session>/         a session's TEMP (`sessionTemp`), until the session is deleted for good
  *
  * `<owner>` names the host process that made the folder (`ownerTag`), so another host never removes it while that one runs
  */
@@ -439,12 +439,21 @@ export type BrowserFolder = {
   browser: string
   /** With no `browser`: which path holds which character, in plain words, for the refusal to show as it is. Else empty */
   why: string
+  /** With no `browser`: the cause, as a refused session's `data.reason` says it. Else null */
+  refusal: 'no_browser_helper' | 'temp_unusable' | null
   /**
    * Calls `found` with each address the helper hands over (a watch, and a look now for one written before the watch
    * began). Each is taken once: the file is removed as it is read, so a later process on the same folder is not told of it
    */
   watch(found: (text: string) => void): void
-  /** Ends the watch and removes the folder */
+  /**
+   * On Windows, TMP, TEMP and TMPDIR of the agent's process, which 1.4.3 unpacks itself into (337 MB a process, left when
+   * it is killed, which it is as it ignores stdin's end): a session's own (`sessionTemp`), or `tmp/` in this folder for
+   * any other process. Empty elsewhere, where the system's stays (macOS: 137 KB a process, measured, and a longer TMPDIR
+   * would put a socket made there past its 104-character limit), and with no `browser`
+   */
+  temp: string
+  /** Ends the watch and removes the folder, and from a session's TEMP what the agent unpacked */
   remove(): Promise<void>
 }
 
@@ -520,7 +529,7 @@ export function notOwnFolder(facts: { folder: FolderFact; above: readonly Folder
  *   with no shell (CPython 3.14 `webbrowser.get`, the agent's runtime), so the address reaches the helper whole. The
  *   helper exits 0, so the launcher does not fall back to the default browser
  */
-export async function browserFolder(home: AgyHome, platform: Platform = HOST_PLATFORM, places: HelperPlaces = {}): Promise<BrowserFolder> {
+export async function browserFolder(home: AgyHome, platform: Platform = HOST_PLATFORM, places: HelperPlaces = {}, session?: string): Promise<BrowserFolder> {
   const node = places.node ?? process.execPath
   // A path holding the separator the launcher splits `BROWSER` at, or `%s`, cannot be in it (#1688): a data folder with one
   // falls back to `spareFolder`; that one too (or unwritable), or on Windows a Node path with one, leaves no helper. Each
@@ -549,9 +558,13 @@ export async function browserFolder(home: AgyHome, platform: Platform = HOST_PLA
       await removeStale(spare, '.sign-in-')
       dir = resolve(await mkdtemp(join(spare, `.sign-in-${ownerTag()}-`)))
     } catch (err) {
-      const code: unknown = err instanceof Error ? Reflect.get(err, 'code') : undefined
-      return noHelper(`${data}, and ${spare}, the folder Centralu tries instead, could not be written to${typeof code === 'string' ? ` (${code})` : ''}. ${move}`)
+      return noHelper(`${data}, and ${spare}, the folder Centralu tries instead, could not be written to${codeNote(err)}. ${move}`)
     }
+  }
+  const temp = platform !== 'win32' ? '' : session ? sessionTemp(home, session) : join(dir, 'tmp')
+  if (temp.length > WINDOWS_TEMP_MAX) {
+    await removeDir(dir)
+    return noHelper(`Antigravity unpacks itself into ${temp}, and on Windows that path can have at most ${WINDOWS_TEMP_MAX} characters (it has ${temp.length}). Move Centralu's data folder to a shorter path.`, 'temp_unusable')
   }
   await chmod(dir, 0o700).catch(() => {})
   let browser: string
@@ -571,11 +584,28 @@ export async function browserFolder(home: AgyHome, platform: Platform = HOST_PLA
     await realOs().files.promises.rm(dir, { recursive: true, force: true }).catch(() => {})
     return noHelper(`the helper's folder ${dir} has a path Antigravity cannot be given (it holds ${unusableIn(dir, sep)}).`)
   }
+  if (temp) {
+    try {
+      await mkdir(temp, { recursive: true })
+    } catch (err) {
+      await removeDir(dir)
+      return noHelper(`Antigravity unpacks itself into ${temp}, and Centralu could not make that folder${codeNote(err)}. Check that Centralu can write to its data folder.`, 'temp_unusable')
+    }
+  }
+  // The session's latest process from here, so the only one to remove unpacks from its TEMP: the host may start the next
+  // before an earlier handle's stop is over, and that end would otherwise take a live process's files
+  const mine = Symbol('latest')
+  const latest = () => session !== undefined && latestOf.get(session) === mine
+  if (session && temp) {
+    latestOf.set(session, mine)
+    await removeUnpacked(temp, await unpacked(temp))
+  }
   let watcher: FSWatcher | null = null
   const taken = new Set<string>()
   return {
     browser,
     why: '',
+    refusal: null,
     watch(found) {
       const look = () => {
         let names: string[]
@@ -604,12 +634,61 @@ export async function browserFolder(home: AgyHome, platform: Platform = HOST_PLA
       }
       look()
     },
+    temp,
     async remove() {
       watcher?.close()
-      await realOs().files.promises.rm(dir, { recursive: true, force: true }).catch(() => {})
+      // Still the latest once listed: no later process of the session had started, so every name is an ended one's
+      const left = latest() ? await unpacked(temp).then((names) => (latest() ? names : [])) : []
+      const rm = async () => (await Promise.all([removeDir(dir), removeUnpacked(temp, latest() ? left : [])])).every(Boolean)
+      const done = () => {
+        if (session !== undefined && latest()) latestOf.delete(session)
+      }
+      // A killed agent's tree holds its files a moment past the stop, which does not wait for it (on Windows 0.9 to 1.9 s
+      // after the kill, measured): tried once more then; what is still refused waits for a later start's sweep, or the
+      // session's next start
+      if (await rm()) done()
+      else setTimeout(() => void rm().then(done), HELD_AGAIN_MS).unref()
     },
   }
 }
+
+const HELD_AGAIN_MS = 5_000
+
+/** Each session's latest process, by the folder `browserFolder` made for it */
+const latestOf = new Map<string, symbol>()
+
+/** A session's TEMP on Windows, the same for each of its processes, so what the agent keeps there outlasts a sleep */
+export function sessionTemp(home: AgyHome, session: string): string {
+  return join(home.root, 'tmp', session)
+}
+
+/** The folders 1.4.3 has unpacked itself into (`_MEI<id>`): all Centralu removes from a session's TEMP while it lives */
+async function unpacked(temp: string): Promise<string[]> {
+  const names = await readdir(temp).catch((): string[] => [])
+  return names.filter((n) => n.startsWith('_MEI'))
+}
+
+/** Whether each of `names` in `temp` is gone */
+async function removeUnpacked(temp: string, names: readonly string[]): Promise<boolean> {
+  const gone = await Promise.all(names.map((n) => removeDir(join(temp, n))))
+  return gone.every(Boolean)
+}
+
+const removeDir = (dir: string): Promise<boolean> => realOs().files.promises.rm(dir, { recursive: true, force: true }).then(() => true, () => false)
+
+/** Removes every session's TEMP that `kept` does not keep: the session it was made for has been deleted for good */
+export async function sweepSessionTemps(home: AgyHome, kept: (session: string) => boolean): Promise<void> {
+  const root = join(home.root, 'tmp')
+  const names = await readdir(root).catch((): string[] => [])
+  await Promise.all(names.filter((n) => !kept(n)).map((n) => removeDir(join(root, n))))
+}
+
+/**
+ * The longest `temp` 1.4.3's Windows build unpacks into, less 4 characters (measured, long paths off: 122 starts, 123 fails
+ * with "Failed to create parent directory structure", which names no cause). Its deepest file is 137 characters below
+ * `temp`, counting a `_MEI<id>` of 13, as each of the 8 seen was; the 4 are for an id that is longer
+ */
+const WINDOWS_TEMP_MAX = 118
 
 /**
  * The Windows helper: the address to `url-<pid>-<time>` beside it, through a temporary name (each run its own, so the
@@ -650,8 +729,14 @@ const unusableIn = (path: string, listSep: string): string =>
     .map((c) => `"${c}"`)
     .join(' and ')
 
-/** No helper, and why: nothing on disk to remove */
-const noHelper = (why: string): BrowserFolder => ({ browser: '', why, watch() {}, async remove() {} })
+/** No folder, and why: nothing on disk to remove */
+const noHelper = (why: string, refusal: NonNullable<BrowserFolder['refusal']> = 'no_browser_helper'): BrowserFolder => ({ browser: '', why, refusal, watch() {}, temp: '', async remove() {} })
+
+/** A failed call's error code, as ` (EACCES)`, or empty */
+const codeNote = (err: unknown) => {
+  const code: unknown = err instanceof Error ? Reflect.get(err, 'code') : undefined
+  return typeof code === 'string' ? ` (${code})` : ''
+}
 
 /** The person's browser on this machine, started apart from the host and never through a shell */
 export function openInBrowser(url: string, platform: Platform = HOST_PLATFORM): void {

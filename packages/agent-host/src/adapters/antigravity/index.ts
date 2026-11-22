@@ -5,7 +5,7 @@ import { rpcError } from '../../rpc-error.js'
 import type { AgentProcess, AgentSpawnSpec, DetectResult } from '../contract.js'
 import { AcpAdapter } from '../acp/adapter.js'
 import { ACP_CAPABILITIES, type AcpProfile } from '../acp/profile.js'
-import { agyAppFinder, agyHome, agyPlatformKey, browserFolder, type AgyHome, type HelperPlaces } from './agent-files.js'
+import { agyAppFinder, agyHome, agyPlatformKey, browserFolder, sweepSessionTemps, type AgyHome, type HelperPlaces } from './agent-files.js'
 import { agyLaunch } from './launch.js'
 import { AGY_RELEASE, type AgyArchive } from './release.js'
 import { AgySetup, type AgySetupDeps } from './setup.js'
@@ -66,23 +66,23 @@ export function antigravityProfile(deps: AgyProfileDeps = {}): AgyProfile {
     agySetup: setup,
     home,
     archive,
-    async launch() {
+    async launch(opts) {
       if (!archive || !setup.installed()) return null
       // Its own BROWSER helper (`browserFolder`): the agent never opens a browser itself, and the helper handed the agent's
       // own login request in a session's process is how a stored sign-in that stopped working is told (`SignInWanted`).
       // No address is opened from a session: the person asked for a conversation, and the line offers Sign in. Every
       // command the agent runs inherits `BROWSER`, so any other address (`gcloud auth login`, a script opening a page) is
       // only logged, never opened and never taken for a sign-in (plan §4.4)
-      const folder = await browserFolder(home, deps.platform, deps.helperPlaces)
+      const folder = await browserFolder(home, deps.platform, deps.helperPlaces, opts.sessionId)
       if (folder.browser === '') {
         // Without a helper the agent's launcher would start the browser itself, on Windows inside the host's job, and a
-        // stored sign-in that stopped working would hang the start again (#1685): refused rather than started.
-        // A path does not change between tries, so the refusal is not worth retrying (#1688)
+        // stored sign-in that stopped working would hang the start again (#1685); without its TEMP it cannot unpack itself.
+        // Refused rather than started. A path does not change between tries, so the refusal is not worth retrying (#1688)
         console.error(`[Antigravity] session refused: ${folder.why}`)
-        throw rpcError(`Antigravity cannot start: ${folder.why}`, 'refused', { retryable: false, data: { reason: 'no_browser_helper' } })
+        throw rpcError(`Antigravity cannot start: ${folder.why}`, 'refused', { retryable: false, data: { reason: folder.refusal } })
       }
       return {
-        ...agyLaunch(home, archive, folder.browser),
+        ...agyLaunch(home, archive, folder),
         signInWanted: {
           watch: (wanted: () => void) =>
             folder.watch((text) => {
@@ -100,6 +100,7 @@ export function antigravityProfile(deps: AgyProfileDeps = {}): AgyProfile {
         },
       }
     },
+    sweepSessionFiles: (kept) => sweepSessionTemps(home, kept),
     async installedVersion() {
       return setup.installed() ? AGY_RELEASE.version : null
     },

@@ -412,6 +412,7 @@ export class SessionManager {
      * someone. A failure here is no reason to block session restore, so it is not awaited.
      */
     void this.handoffNotes.sweepOrphanHandoffNotes().catch(() => {})
+    void this.trash.sweepSessionFiles()
     // Worktree folders a removal left part way (#2344); listed now, before this host can make one of its own
     this.worktreeSweep = this.worktrees.sweepLeftoverWorktrees().catch((e: Error) => console.error(`[worktree] the sweep of leftover worktrees stopped: ${e.message}`))
     // Recovery folders a purge moved aside and never finished with (#647): back for an entry still in the session archive, gone otherwise

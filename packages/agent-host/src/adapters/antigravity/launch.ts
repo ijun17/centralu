@@ -1,4 +1,4 @@
-import { agyProgram, type AgyHome } from './agent-files.js'
+import { agyProgram, type AgyHome, type BrowserFolder } from './agent-files.js'
 import type { AgyArchive } from './release.js'
 
 /**
@@ -9,13 +9,15 @@ import type { AgyArchive } from './release.js'
  * - No token store is chosen for it: the agent picks its own as shipped (1.4.3: the macOS Keychain when one is usable,
  *   otherwise a file in `GEMINI_HOME`; Windows and Linux always the file, which the agent can read, plan §4.2)
  * - `BROWSER`: the process's own helper (`browserFolder`), always set, so the person's own `BROWSER` never reaches the agent
- *   and the agent never starts a browser itself (an empty value where no helper could be written)
+ *   and the agent never starts a browser itself
+ * - `TMP`, `TEMP`, `TMPDIR` on Windows: the folder Centralu keeps for what the agent unpacks there (`BrowserFolder.temp`)
  */
-function agyEnv(home: AgyHome, browser: string): Record<string, string> {
-  return { GEMINI_HOME: home.geminiHome, BROWSER: browser }
+function agyEnv(home: AgyHome, folder: Pick<BrowserFolder, 'browser' | 'temp'>): Record<string, string> {
+  const temp: Record<string, string> = folder.temp ? { TMP: folder.temp, TEMP: folder.temp, TMPDIR: folder.temp } : {}
+  return { GEMINI_HOME: home.geminiHome, BROWSER: folder.browser, ...temp }
 }
 
 /** How the installed server starts: the registry's command and arguments, in its own folder's isolation */
-export function agyLaunch(home: AgyHome, archive: AgyArchive, browser: string): { command: string; args: string[]; env: Record<string, string> } {
-  return { command: agyProgram(home, archive), args: [...archive.args], env: agyEnv(home, browser) }
+export function agyLaunch(home: AgyHome, archive: AgyArchive, folder: Pick<BrowserFolder, 'browser' | 'temp'>): { command: string; args: string[]; env: Record<string, string> } {
+  return { command: agyProgram(home, archive), args: [...archive.args], env: agyEnv(home, folder) }
 }
