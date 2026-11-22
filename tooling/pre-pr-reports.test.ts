@@ -10,7 +10,7 @@ import { realRunners } from '../scripts/pre-pr.mjs'
 // @ts-expect-error — a plain .mjs script, as above
 import { depErrorsOf, failuresOf, filesRunMs, orphansOf, passingNewTests, vitestTests } from '../scripts/pre-pr-reports.mjs'
 // @ts-expect-error — a plain .mjs script, as above
-import { canonical, unlinkLinks } from '../scripts/pre-pr-worktrees.mjs'
+import { canonical, ENV, unlinkLinks } from '../scripts/pre-pr-worktrees.mjs'
 import { recordedReport, tempDir, yieldBetweenTests } from './pre-pr.test-helpers.js'
 
 yieldBetweenTests()
@@ -84,6 +84,24 @@ describe("what pre-pr reads in its tools' answers", () => {
       expect(new Set(tests.map((t: { status: string }) => t.status))).toEqual(new Set(['skipped']))
       expect(vitestTests(null, dir)).toEqual([])
     } finally {
+      unlinkLinks(dir)
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 90_000 * SLOW)
+
+  it('tells each run that CI\'s verify job compares the app\'s JS with main\'s, so CI set where pre-pr runs does not ask it for main\'s record', () => {
+    const dir = tempDir('cc-prepr-env-')
+    // This run may be one pre-pr started, whose environment every run it starts inherits: only the runner's own setting counts
+    const inherited = ENV.CC_BUNDLE_COMPARED_BY
+    delete ENV.CC_BUNDLE_COMPARED_BY
+    try {
+      symlinkSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'node_modules'), join(dir, 'node_modules'), 'junction')
+      // What tooling/styles.test.ts asks of its environment before it demands main's record
+      writeFileSync(join(dir, 'env.test.ts'), "import { expect, it } from 'vitest'\nit('is told', () => expect(Boolean(process.env.CI) && !process.env.CC_BUNDLE_COMPARED_BY).toBe(false))\n")
+      const r = realRunners.vitest(dir, ['env.test.ts'], { timeoutMs: 60_000 * SLOW, env: { CI: '1' } })
+      expect(vitestTests(r.report, dir).map((t: { status: string }) => t.status)).toEqual(['passed'])
+    } finally {
+      if (inherited !== undefined) ENV.CC_BUNDLE_COMPARED_BY = inherited
       unlinkLinks(dir)
       rmSync(dir, { recursive: true, force: true })
     }

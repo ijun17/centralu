@@ -107,7 +107,8 @@ export function judgeBundle({ bytes, base, declarations, required, allowance = B
   const notes = []
   const howTo = (need) =>
     `Find out what grew first (a heavy dependency, a feature larger than it should be). If the growth is meant, ` +
-    `add ${GROWTH_DIR}/<your-branch>.json in this pull request: { "bytes": ${need}, "reason": "<what grew, and why it has to>" }.`
+    `add ${GROWTH_DIR}/<your-branch>.json in this pull request: { "bytes": ${need}, "reason": "<what grew, and why it has to>" }. ` +
+    `A new file there does not raise the pull request's tier (.centralu/tiers.json "bundle-growth").`
   const roof = ceiling + sum(declarations)
   if (bytes > roof) {
     problems.push(`The app's JS is ${bytes} B, over the ceiling of ${roof} B (${ceiling} B and ${declarations.length} declaration(s) in ${GROWTH_DIR}). ${howTo(Math.ceil((bytes - roof) / 1000) * 1000)}`)

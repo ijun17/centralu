@@ -2,7 +2,8 @@
 //
 // The rules are .centralu/tiers.json. Each file takes the highest tier of the rules that match it
 // (light when none does), a test also its subject's (x.test.ts: x.ts), and the change takes the
-// highest tier of its files. No rules, rules that cannot be read, or any failure: deep.
+// highest tier of its files. A rule's `exceptAdded` leaves a path out only when the change adds
+// it. No rules, rules that cannot be read, or any failure: deep.
 //
 //   auto    lands after the fast gate with no review (docs, fixture data, UI assets).
 //   light   one review by another model inside the author's session before it says done.
@@ -108,7 +109,7 @@ export function parseRules(text, source = RULES_FILE) {
     // ignoreCase: the globs match whatever the case (a script named x.BAT runs on Windows and macOS as x.bat does)
     const flags = r.ignoreCase ? 'i' : ''
     const globs = (list, key) => {
-      if (list === undefined && key === 'except') return []
+      if (list === undefined && key !== 'paths') return []
       if (!Array.isArray(list) || (key === 'paths' && !list.length) || list.some((g) => typeof g !== 'string' || !g)) fail(`${at}: ${key} must be a list of globs.`)
       return list.map((g) => {
         try {
@@ -118,7 +119,7 @@ export function parseRules(text, source = RULES_FILE) {
         }
       })
     }
-    return { id: r.id, tier: r.tier, why: r.why.trim(), paths: globs(r.paths, 'paths'), except: globs(r.except, 'except') }
+    return { id: r.id, tier: r.tier, why: r.why.trim(), paths: globs(r.paths, 'paths'), except: globs(r.except, 'except'), exceptAdded: globs(r.exceptAdded, 'exceptAdded') }
   })
   return { fallback: raw.fallback, rules }
 }
@@ -126,9 +127,13 @@ export function parseRules(text, source = RULES_FILE) {
 const rank = (tier) => TIERS.indexOf(tier)
 const higher = (a, b) => (rank(b) > rank(a) ? b : a)
 
-/** A path's own tier by the rules: { tier, rules } with the ids of the rules that gave it (none: the fallback). */
-function ownTier(p, rules) {
-  const hits = rules.rules.filter((r) => r.paths.some((re) => re.test(p)) && !r.except.some((re) => re.test(p)))
+/**
+ * A path's own tier by the rules: { tier, rules } with the ids of the rules that gave it (none: the fallback). `added`: the
+ * change adds the path, known only from its modes, so a bare path is never taken out by `exceptAdded`.
+ */
+function ownTier(p, rules, added = false) {
+  const out = (r) => r.except.some((re) => re.test(p)) || (added && r.exceptAdded.some((re) => re.test(p)))
+  const hits = rules.rules.filter((r) => r.paths.some((re) => re.test(p)) && !out(r))
   if (!hits.length) return { tier: rules.fallback, rules: [] }
   const tier = hits.map((r) => r.tier).reduce(higher)
   return { tier, rules: hits.filter((r) => r.tier === tier).map((r) => r.id) }
@@ -148,8 +153,8 @@ export function subjectsOf(path) {
   return rs ? [`${rs[1]}/mod.rs`, `${rs[1]}.rs`] : []
 }
 
-/** git's file modes that say what a path is, beside a plain file (100644) */
-export const MODES = { link: '120000', submodule: '160000', executable: '100755' }
+/** git's file modes that say what a path is, beside a plain file (100644); `absent` is the side where it is not there */
+export const MODES = { link: '120000', submodule: '160000', executable: '100755', absent: '000000' }
 
 /**
  * What a change to a path's mode makes it, whatever its name: { tier, mode } or null. A symbolic link or a
@@ -174,7 +179,7 @@ export function modeTier(entry) {
  */
 export function tierOfFile(path, rules, entry = null, commentsOnly = false) {
   const p = String(path).split('\\').join('/').replace(/^\.\//, '')
-  let best = { path: p, ...ownTier(p, rules) }
+  let best = { path: p, ...ownTier(p, rules, entry?.oldMode === MODES.absent) }
   for (const s of subjectsOf(p)) {
     const t = ownTier(s, rules)
     if (rank(t.tier) > rank(best.tier)) best = { path: p, ...t, tests: s }

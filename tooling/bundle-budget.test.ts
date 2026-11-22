@@ -32,6 +32,10 @@ describe('the app\'s JS is judged against main\'s plus an allowance, and under a
     expect(v.problems[0]).toContain(`+${BUNDLE_ALLOWANCE + 12_345} B against main's ${MAIN} B (c63b2867)`)
     // Rounded up to whole kilobytes, so the number written passes
     expect(v.problems[0]).toContain(`add ${GROWTH_DIR}/<your-branch>.json in this pull request: { "bytes": 13000, "reason":`)
+    // What it says of the tier is what the rules do: a rule of that name gives a new declaration light
+    expect(v.problems[0]).toContain(`does not raise the pull request's tier (.centralu/tiers.json "bundle-growth")`)
+    const rules = JSON.parse(readFileSync(new URL('../.centralu/tiers.json', import.meta.url), 'utf8')) as { rules: { id: string; tier: string; paths: string[] }[] }
+    expect(rules.rules.find((r) => r.id === 'bundle-growth')).toMatchObject({ tier: 'light', paths: expect.arrayContaining([`${GROWTH_DIR}/*.json`]) })
   })
 
   it('lets a new declaration add its bytes, and no more', () => {
