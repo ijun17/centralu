@@ -181,6 +181,9 @@ describe('ChatRow: approvals and marks', () => {
     expect(failed.html).toContain('data-mark="failed"')
     expect(failed.html).toMatch(/rounded-field border border-dashed/)
     expect(failed.html).not.toContain('rounded-full')
+    // A compaction's sentence says what happened, so it has no icon; the other kinds keep theirs (owner, 2026-11-22)
+    expect(divider.html).not.toContain('<svg')
+    expect(failed.html).toContain('<svg')
 
     // A notice for the person starts open: the capsule says who and what, the explanation is under it
     const notice = row({ kind: 'mark', seq: 5, text: 'ignored', mark: 'notice', notice: { head: 'Codex · config warning', audience: 'you', body: 'the key is unknown', from: 'Codex' } })
