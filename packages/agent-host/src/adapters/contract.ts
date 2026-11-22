@@ -518,6 +518,8 @@ export interface AgentAdapter {
    * it as-is (saying "deleted" while the original survives would be the worst outcome).
    */
   deleteExternalConversation?(externalId: string, cwd: string): Promise<void>
+  /** Removes what it keeps per session (Antigravity's TEMP on Windows) of each session `kept` does not keep. Never throws */
+  sweepSessionFiles?(kept: (sessionId: string) => boolean): Promise<void>
   /**
    * The last compact summary of a dead tool process (#78) — becomes the head of the handoff
    * record when one exists.

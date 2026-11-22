@@ -1,16 +1,16 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { FakeAcpPeer, type PeerScript } from '../acp/fake-peer.test-helpers.js'
 import type { AgentSpawnSpec } from '../contract.js'
-import { agyHome, browserFolder, ownerTag } from './agent-files.js'
+import { agyHome, browserFolder, sessionTemp } from './agent-files.js'
 import { AntigravityAdapter, antigravityProfile } from './index.js'
 import { AGY_RELEASE } from './release.js'
 import { runSignIn } from './sign-in.js'
 import { driven, fakeInstall, fakeSignIn, folder, HOST_TEST_ARCHIVE, HOST_TEST_PLATFORM, inFolder, leftovers, pathIn, sessionOpts, tempData, TEST_ARCHIVE, write } from './agent-files.test-helpers.js'
 
 /**
- * The agent's TEMP on Windows: 1.4.3 unpacks itself there on every start (337 MB) and leaves it when killed, so every
- * Antigravity process gets the `tmp/` of its own folder, which goes with that folder. The agent is a scripted peer that
- * unpacks a stand-in where its TEMP says, as the real one does
+ * The agent's TEMP on Windows: 1.4.3 unpacks itself there on every start (337 MB) and leaves it when killed, so it is a
+ * folder of Centralu's: a session's own across its processes, any other process's gone with it. The agent is a scripted
+ * peer that unpacks a stand-in where its TEMP says, as the real one does
  */
 
 const WINDOWS = AGY_RELEASE.archives['windows-x86_64']
@@ -48,7 +48,7 @@ function unpacking(root: string, specs: AgentSpawnSpec[], peers: FakeAcpPeer[]) 
 }
 
 describe("the agent's TEMP", () => {
-  it("is a session's own folder's tmp/: what its killed process unpacked goes with the session, and the next one starts afresh", async () => {
+  it("is a session's own across its processes: what the agent keeps there outlasts a sleep, what it unpacked does not", async () => {
     const t = temp()
     fakeInstall(t.home, WINDOWS)
     fakeSignIn(t.home)
@@ -59,19 +59,48 @@ describe("the agent's TEMP", () => {
     const w = driven()
     const first = await adapter.createSession(sessionOpts('agy-t1'), w.emit)
     const env = specs[0]!.env ?? {}
-    expect(env.TEMP).toMatch(/[\\/]\.sign-in-[^\\/]+[\\/]tmp$/)
+    expect(env.TEMP).toBe(sessionTemp(t.home, 'agy-t1'))
     expect([env.TMP, env.TMPDIR]).toEqual([env.TEMP, env.TEMP])
-    // A session runs one process: once it is gone (killed while idle), the host retires the handle and the next message
-    // opens the conversation in a new one (sessions/session-events.ts)
+    write(pathIn(String(env.TEMP), 'daemon.sock'), 'a command kept this for a later turn')
+    // Asleep: the host disposes the handle once its process is gone (here killed, as on Windows), and wakes it in a new one
     peers[0]!.exit(null, 'SIGKILL')
     await w.event((e) => e.type === 'session_live' && !e.live)
     await first.dispose()
+    expect(inFolder(String(env.TEMP))).toEqual(['daemon.sock'])
     expect(leftovers(t.home, '.sign-in-')).toEqual([])
+    // An unpack the end could not remove (a tree that still held it) goes at the session's next start
+    folder(pathIn(String(env.TEMP), '_MEI-held'))
     const next = await adapter.createSession(sessionOpts('agy-t1', 'normal', { resumeExternalId: 'ses-t' }), w.emit)
-    expect(specs[1]!.env?.TEMP).not.toBe(env.TEMP)
-    expect(inFolder(String(specs[1]!.env?.TEMP))).toEqual(['_MEI2'])
+    expect(specs[1]!.env?.TEMP).toBe(env.TEMP)
+    expect(inFolder(String(env.TEMP)).sort()).toEqual(['_MEI2', 'daemon.sock'])
     await next.dispose()
-    expect(leftovers(t.home, '.sign-in-')).toEqual([])
+    expect(inFolder(String(env.TEMP))).toEqual(['daemon.sock'])
+  })
+
+  it("keeps a later process's unpack from an earlier handle's later end", async () => {
+    const t = temp()
+    fakeInstall(t.home, WINDOWS)
+    fakeSignIn(t.home)
+    const specs: AgentSpawnSpec[] = []
+    const adapter = new AntigravityAdapter(antigravityProfile({ dataDir: t.dir, platform: 'win32', arch: 'x64' }), unpacking(t.dir, specs, []))
+    const earlier = await adapter.createSession(sessionOpts('agy-t4'), driven().emit)
+    // The host lets go of a handle and disposes it without waiting (a crash, an app agent's end), and the next message starts another
+    const later = await adapter.createSession(sessionOpts('agy-t4', 'normal', { resumeExternalId: 'ses-t' }), driven().emit)
+    await earlier.dispose()
+    expect(inFolder(sessionTemp(t.home, 'agy-t4'))).toEqual(['_MEI2'])
+    await later.dispose()
+    expect(inFolder(sessionTemp(t.home, 'agy-t4'))).toEqual([])
+  })
+
+  it("goes when the session is deleted for good, and only then (the host's sweep)", async () => {
+    const t = temp()
+    const adapter = new AntigravityAdapter(antigravityProfile({ dataDir: t.dir, platform: 'win32', arch: 'x64' }))
+    for (const id of ['live', 'deleted']) {
+      folder(sessionTemp(t.home, id))
+      write(pathIn(sessionTemp(t.home, id), 'kept.txt'), id)
+    }
+    await adapter.sweepSessionFiles?.((id) => id === 'live')
+    expect(inFolder(pathIn(t.home.root, 'tmp'))).toEqual(['live'])
   })
 
   it("is the sign-in's own folder's tmp/ too, gone when the sign-in ends", async () => {
@@ -104,21 +133,24 @@ describe("the agent's TEMP", () => {
     await handle.dispose()
   })
 
-  it('on Windows is refused past 118 characters (1.4.3 unpacks into at most 122), saying so and leaving no folder', async () => {
+  it("on Windows is refused past 118 characters with the session's id (1.4.3 unpacks into at most 122), saying so and leaving no folder", async () => {
     const t = temp()
-    // The data folder's length that makes the TEMP `browserFolder` makes `length` characters long (one separator, one character)
-    const tail = `/tools/antigravity/.sign-in-${ownerTag()}-123456/tmp`.length
+    const id = 'agy-t3'
+    // The data folder's length that makes a session's TEMP `length` characters long (one separator, one character). A
+    // short id, as a session's 36 would leave no room under the system's temporary folder on macOS
+    const tail = `/tools/antigravity/tmp/${id}`.length
     const at = (length: number) => {
       const pad = length - tail - t.dir.length - 1
       expect(pad).toBeGreaterThan(0)
       return agyHome(pathIn(t.dir, 'd'.repeat(pad)), AGY_RELEASE.version)
     }
-    const fits = await browserFolder(at(118), 'win32')
+    const fits = await browserFolder(at(118), 'win32', {}, id)
+    expect(fits.temp).toBe(sessionTemp(at(118), id))
     expect(fits.temp).toHaveLength(118)
     expect(fits.browser).not.toBe('')
     await fits.remove()
     const long = at(119)
-    const refused = await browserFolder(long, 'win32')
+    const refused = await browserFolder(long, 'win32', {}, id)
     expect(refused.browser).toBe('')
     expect(refused.why).toMatch(/at most 118 characters \(it has 119\)\. Move Centralu's data folder to a shorter path\.$/)
     expect(leftovers(long, '.sign-in-')).toEqual([])

@@ -45,6 +45,8 @@ export type AcpProfile = {
    * says what it can. Absent: it says nothing. The reader keeps its own answer and never waits long (`adapters/usage-read.ts`).
    */
   localUsage?(ask?: { settle?: boolean; seed?: LocalUsage }): Promise<LocalUsage>
+  /** What it keeps per session, swept as the adapter's (`AgentAdapter.sweepSessionFiles`). Absent: it keeps nothing */
+  sweepSessionFiles?(kept: (sessionId: string) => boolean): Promise<void>
   /**
    * Its `/compact` compacts though the agent does not advertise the command, and leaves no protocol frame: the core reads
    * Centralu's compact turn instead (`AcpSessionDeps.infersCompaction`). Measured, never assumed: without it a session is

@@ -23,10 +23,15 @@ export abstract class AcpAdapter implements AgentAdapter {
     // No `listUsage`, ever: an ACP tool reports no limits. What its own command says is `localUsage`, when it has one
     const localUsage = profile.localUsage?.bind(profile)
     if (localUsage) this.localUsage = localUsage
+    const sweep = profile.sweepSessionFiles?.bind(profile)
+    if (sweep) this.sweepSessionFiles = sweep
   }
 
   /** What the tool's own command says about its usage (the profile's `localUsage`), when it has one */
   readonly localUsage?: (ask?: { settle?: boolean; seed?: LocalUsage }) => Promise<LocalUsage>
+
+  /** What the tool keeps per session, swept (the profile's `sweepSessionFiles`), when it keeps any */
+  readonly sweepSessionFiles?: (kept: (sessionId: string) => boolean) => Promise<void>
 
   get descriptor() {
     return this.profile.descriptor

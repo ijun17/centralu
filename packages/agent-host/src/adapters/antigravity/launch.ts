@@ -10,7 +10,7 @@ import type { AgyArchive } from './release.js'
  *   otherwise a file in `GEMINI_HOME`; Windows and Linux always the file, which the agent can read, plan §4.2)
  * - `BROWSER`: the process's own helper (`browserFolder`), always set, so the person's own `BROWSER` never reaches the agent
  *   and the agent never starts a browser itself
- * - `TMP`, `TEMP`, `TMPDIR` on Windows: the same folder's `tmp/`, so what the agent unpacks there goes with that folder
+ * - `TMP`, `TEMP`, `TMPDIR` on Windows: the folder Centralu keeps for what the agent unpacks there (`BrowserFolder.temp`)
  */
 function agyEnv(home: AgyHome, folder: Pick<BrowserFolder, 'browser' | 'temp'>): Record<string, string> {
   const temp: Record<string, string> = folder.temp ? { TMP: folder.temp, TEMP: folder.temp, TMPDIR: folder.temp } : {}
