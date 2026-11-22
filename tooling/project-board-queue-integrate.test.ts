@@ -55,7 +55,7 @@ function pushTo(repo: ReturnType<typeof integrateRepo>, branch: string, files: R
 
 const TEMPLATE = readFileSync(join(REPO_ROOT, '.github/PULL_REQUEST_TEMPLATE.md'), 'utf8')
 /** What a session hands over: the branch and the record's text */
-const handOver = (branch: string, extra: Record<string, unknown> = {}) => ({ branch, title: 'docs(guide): say how the guide is read', why: 'The guide did not say it.', notExercised: 'Nothing', owner: 'writer', ...extra })
+const handOver = (branch: string, extra: Record<string, unknown> = {}) => ({ branch, title: 'docs(guide): say how the guide is read', why: 'The guide did not say it.', notExercised: 'Nothing', closes: { none: 'a guide change with no issue of its own' }, owner: 'writer', ...extra })
 const integrateQuick = () => [ghCheck('full tier', 'skipped', 10), ghCheck('verify', 'success', 11), ghCheck('windows tests', 'success', 12)]
 const integrateBatch = (suite: number) => [suiteCheck('full tier', 'skipped', suite * 10, suite), suiteCheck('verify', 'success', suite * 10 + 1, suite), suiteCheck('windows tests', 'success', suite * 10 + 2, suite)]
 
@@ -381,6 +381,20 @@ describe('the integrator lands an auto-tier branch without a pull request from i
     expect(taken.data).toMatchObject({ integrated: true, pr: 590, opened: false })
     expect(writes().map(short2)).toEqual(['draft 590'])
     expect(gh().prs['590'].isDraft).toBe(true)
+  })
+
+  // #2449: the record is the open pull request as it is, so its own Closes section is held to the rule
+  it('refuses a pull request open from the branch whose Closes section closes no issue and gives no reason', async () => {
+    const repo = integrateRepo({ 'docs/guide': { 'docs/guide.md': 'read it top down\n' } })
+    const head = repo.heads['docs/guide']!
+    const open = ghPr(590, { headRefName: 'docs/guide', headRefOid: head, body: '## Closes\n\n2447' })
+    integrateRuntime(repo, 'docs/guide', { prs: { '590': open }, checks: { [head]: [ghCheck('verify', null, 11)] }, runs: { [head]: [ghRun(null, 1, head, { head_branch: 'docs/guide' })] }, on: {} })
+    const r = await call('integrate', handOver('docs/guide'))
+    expect(r.data).toMatchObject({ integrated: false, kind: 'record', pr: 590 })
+    expect(r.text).toContain(`#590's Closes section ("2447") closes no issue`)
+    expect(writes()).toEqual([])
+    patchGh((s) => (s.prs['590'].body = '## Closes\n\nCloses #2447'))
+    expect((await call('integrate', handOver('docs/guide'))).data).toMatchObject({ integrated: true, pr: 590 })
   })
 
   it('says to try again when GitHub cannot be reached to judge it, rather than calling it deep', async () => {

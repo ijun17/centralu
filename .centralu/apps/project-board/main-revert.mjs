@@ -144,6 +144,10 @@ function revertBody({ red, culprit, how, name, defaultBranch, tip }) {
     '## Not exercised',
     '',
     'Nothing beyond what CI runs: the revert is mechanical.',
+    '',
+    '## Closes',
+    '',
+    'None: a revert; the issue the main guard files for the failure stays open for the fix.',
   ].join('\n')
 }
 

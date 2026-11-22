@@ -11,6 +11,8 @@ import { guardDrives, queueBusy } from '../.centralu/apps/project-board/queue-dr
 import { attributeByPaths, BLAME_KEEP_MS, carried, cleanGreen, earlierFlakes, mainVerdict, nextStep, passedAfterBlame, rememberBlame, sortCommits } from '../.centralu/apps/project-board/main-guard.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { blameRestedOnMore } from '../.centralu/apps/project-board/main-revert.mjs'
+// @ts-expect-error — plain .mjs of a Centralu app
+import { closesProblems } from '../.centralu/apps/project-board/rules.mjs'
 import { REPO_ROOT, R, SHA, ghCheck, ghRun, ghPr, type Gh, ghState, appRef, root, rt, fake, IDLE_SERVER, NO_TIERS, FAST_LAND, runtime, call, gh, patchGh, writes, ghCalls, filesNamed, queueFile, queueOnDisk, notices, until, polls, stateOf, short2, watch, seedQueue, landed, itemsOnDisk, appTmp, forgetApp } from './project-board-queue.test-helpers.js'
 
 describe('agents find the board tool for the gh command they would type', { timeout: 60_000 * SLOW }, () => {
@@ -388,6 +390,8 @@ describe('the main guard reverts what broke main, at the front of the queue (#12
     expect(g(repo.origin, 'rev-parse', `${tip}^{tree}`)).toBe(g(repo.origin, 'rev-parse', `${repo.green}^{tree}`))
     expect(g(repo.work, 'status', '--porcelain')).toBe('')
     expect(writes().filter((w) => w[0] === 'pr-create')).toEqual([['pr-create', branch, 'revert: feat(ui): change 81']])
+    // Its description says why it closes no issue, so queue_merge takes it when it is queued again by hand (#2449)
+    expect(closesProblems(gh().prs['600'].body, '#600')).toEqual([])
     const item = queueOnDisk().items.find((i: any) => i.pr === 600)
     expect(item).toMatchObject({ state: 'waiting', owner: 'tester', author: 'writer', title: 'revert: feat(ui): change 81' })
     expect(item.front).toBeTruthy()

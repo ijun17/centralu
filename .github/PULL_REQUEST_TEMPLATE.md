@@ -50,4 +50,4 @@
 
 ## Closes
 
-<!-- Closes #N. Or: no issue, small enough to go straight to a PR (CONTRIBUTING). -->
+<!-- Closes #N, one line per issue. Or: None: why it closes no issue (a sweep, part of #N, small enough to go straight to a PR). -->

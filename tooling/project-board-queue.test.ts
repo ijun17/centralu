@@ -40,6 +40,8 @@ import { REPO_ROOT, R, SHA, SHA2, A, B, C, type Row, check, NOW, PROJECT, LISTS,
  */
 
 const ref = (_repo: string, n: number) => `#${n}`
+// This repository's pull request template, which has a Closes heading
+const CLOSES_TEMPLATE = readFileSync(join(REPO_ROOT, '.github/PULL_REQUEST_TEMPLATE.md'), 'utf8')
 
 // --- The decisions ---------------------------------------------------------------------------------
 
@@ -1421,6 +1423,45 @@ describe('the merge queue keeps the board app running while it has work (#1236)'
     expect(r.text).toContain('Warning: The description says "Closes #1 #2": GitHub closes only #1, not #2.')
     patchGh((st) => (st.prs['77'] = ghPr(77, { body: '## Closes\n\nCloses #1\nCloses #2' })))
     expect((await call('queue_merge', { pr: 77, owner: 'tester' })).text).not.toContain('Warning')
+  })
+
+  // #2449: #2448's Closes section said "2447" with no keyword, and its issue stayed open after it landed
+  it('refuses a pull request whose Closes section closes no issue and gives no reason, and a stack whose top leaves out what a lower closes', async () => {
+    runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11)] }, runs: { [SHA]: [ghRun(null)] }, files: { '.github/PULL_REQUEST_TEMPLATE.md': CLOSES_TEMPLATE } }))
+    for (const body of ['## Why\n\nBecause.', '## Closes\n\n2447', '## Closes\n\nNone:']) {
+      patchGh((st) => (st.prs['77'] = ghPr(77, { body })))
+      const r = await call('queue_merge', { pr: 77, owner: 'tester' })
+      expect(r.isError, body).toBe(true)
+      expect(r.text).toContain('Write "Closes #N", one line per issue, or "None: <why it closes no issue>"')
+    }
+    patchGh((st) => (st.prs['77'] = ghPr(77, { body: '## Closes\n\nNone: part of #2410' })))
+    expect((await call('queue_merge', { pr: 77, owner: 'tester' })).isError).toBe(false)
+    await call('unqueue', { pr: 77 })
+    // A stack lands as its top's squash: a lower's keywords close nothing
+    patchGh((st) => {
+      st.prs['76'] = ghPr(76, { headRefName: 'feat/low', body: '## Closes\n\nCloses #5\nCloses #956' })
+      st.prs['77'] = ghPr(77, { baseRefName: 'feat/low' })
+    })
+    const stack = await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })
+    expect(stack.isError).toBe(true)
+    expect(stack.text).toContain(`#76 closes #5, and lands as #77's squash, whose description does not: add "Closes #5" to #77's Closes section, or take it out of #76's description if it should stay open.`)
+    // GitHub reads a keyword anywhere in the description, and an issue's URL is the same issue
+    patchGh((st) => (st.prs['77'].body = '## Why\n\nFixes https://github.com/ijun17/centralu/issues/5\n\n## Closes\n\nCloses #956'))
+    expect((await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })).isError).toBe(false)
+  })
+
+  // Another repository's template may ask for no Closes section: then none is asked for, but a stack's top still carries what its lowers close
+  it('asks for no Closes section when the template has no Closes heading, and still for what a stack lower closes', async () => {
+    runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11)] }, runs: { [SHA]: [ghRun(null)] }, files: { '.github/PULL_REQUEST_TEMPLATE.md': '## Why\n\n## What changed\n' } }))
+    patchGh((st) => {
+      st.prs['76'] = ghPr(76, { headRefName: 'feat/low', body: '## Why\n\nFixes #5' })
+      st.prs['77'] = ghPr(77, { baseRefName: 'feat/low', body: '## Why\n\nBecause.' })
+    })
+    const stack = await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })
+    expect(stack.isError).toBe(true)
+    expect(stack.text).toBe(`Not queued: #76 closes #5, and lands as #77's squash, whose description does not: add "Closes #5" to #77's description, or take it out of #76's description if it should stay open.`)
+    patchGh((st) => (st.prs['77'].body = '## Why\n\nBecause. Fixes #5'))
+    expect((await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })).isError).toBe(false)
   })
 
   it('holds busy from the moment a pull request is queued until it lands, and releases it then', async () => {
