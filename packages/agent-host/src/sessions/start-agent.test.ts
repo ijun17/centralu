@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PermissionPreset } from '@cc/protocol'
 import { AGENT_TOOLS, runCentraluTool } from './centralu-tools.js'
 import { ANSWER_GROUNDS, ASK_WAIT_MS } from './ask-project.js'
-import { CrossAdapter, crossWorld, type CrossWorld, sendWork } from './cross-project.test-helpers.js'
+import { CrossAdapter, crossWorld, type CrossWorld, sendNote, sendWork } from './cross-project.test-helpers.js'
 import { AGENT_CEILING, agentBranch, agentChoice, agentFrame, canMailParent, distinguishingText, givenAgentName, lowestPreset, presetWithin, remoteAgentFrame } from './start-agent.js'
 import { OWN_WORK_SETTLE_MS } from './child-ownership.js'
 import { SessionManager } from './manager.js'
@@ -516,6 +516,11 @@ describe('starting another agent in the same project', () => {
     const answered = w.mgr.agentSession(second, { sessionId: other, action: 'wait' })
     w.mgr.inputs.respondApproval(second, other, 'allow')
     expect(await answered).toMatchObject({ ok: true, state: 'working', sessionId: childrenOf(second)[0]?.id })
+    // A note by the request's handle reaches the session it started, as work does (#2493)
+    mailOn()
+    const note = await sendNote(w.mgr, second, other, 'fyi')
+    if (!note?.ok) throw new Error(`no note: ${JSON.stringify(note)}`)
+    expect(w.store.mailbox.recipients(note.messageId).map((r) => r.recipient)).toEqual([addr(childrenOf(second)[0]!.id)])
 
     const stopped = await w.mgr.agentSession(s, { sessionId: requestId, action: 'stop' })
     expect(stopped).toMatchObject({ ok: true, state: 'stopped', sessionId: requestId })

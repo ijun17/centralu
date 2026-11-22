@@ -411,16 +411,6 @@ describe("a child's turn and the call waiting on it", () => {
     expect(await flow.actions.sendNote('caller', 'm1.c1', 'fyi')).toEqual({ ok: false, error: 'your project is not trusted' })
     expect(await flow.actions.sendWork('caller', 'm1.c1', 'and the tests')).toEqual({ ok: false, error: 'your project is not trusted' })
   })
-
-  it('reads a started request\'s handle as the session it started, for a note as for work', async () => {
-    meta.set('child', session('child', { name: 'Child', askedBy: 'caller' }))
-    const starts = (children as unknown as { starts: Map<string, unknown> }).starts
-    starts.set('ag-1', { req: { requestId: 'ag-1', callerId: 'caller' }, detached: true, ended: { childId: 'child' }, done: Promise.resolve(), end: () => {} })
-    const noted: string[] = []
-    const flow = flowWith({ mailTask: (_caller, target) => (noted.push(target.id), { state: 'mailed', sessionId: target.id, sessionName: target.name, messageId: 'hub.m_1', note: true }) })
-    expect(await flow.actions.sendNote('caller', 'ag-1', 'fyi')).toEqual({ ok: true, messageId: 'hub.m_1', name: 'Child' })
-    expect(noted).toEqual(['child'])
-  })
 })
 
 // #1948: start_agent, ask_project, a fork and a mail send each gave work by a copy of their own; one way now, at its owner
