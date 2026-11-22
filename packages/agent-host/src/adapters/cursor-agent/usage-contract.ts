@@ -4,11 +4,16 @@
  * person's panel. Names move between chunk files from one version to the next (2026.11.22 put the method paths in
  * `connect-pool-worker.js`), so every file of the version is searched
  */
+export const DASHBOARD_SERVICE = 'aiserver.v1.DashboardService/'
+
+/** The methods `dashboard.ts` calls */
+export const DASHBOARD_METHODS = ['GetCurrentPeriodUsage', 'GetPlanInfo'] as const
+export type DashboardMethod = (typeof DASHBOARD_METHODS)[number]
+
 export const CURSOR_USAGE_CONTRACT = {
   /** Where the token is (`os.ts` `cursorSignInStore`): its credential module's naming and paths */
   signIn: ['domain:"cursor"', '-access-token`', '-user`', '"auth.json"', 'toWindowsTitleCase', 'XDG_CONFIG_HOME', 'find-${'],
-  /** The methods `dashboard.ts` calls */
-  methods: ['aiserver.v1.DashboardService/GetCurrentPeriodUsage', 'aiserver.v1.DashboardService/GetPlanInfo'],
+  methods: DASHBOARD_METHODS.map((m) => DASHBOARD_SERVICE + m),
   /** The answers' descriptors: the field names their JSON is spelled from, and each field's number and type */
   answers: [
     'GetCurrentPeriodUsageResponse|1 billing_cycle_start 3|2 billing_cycle_end 3|3 plan_usage #0',

@@ -1,9 +1,8 @@
+import { DASHBOARD_SERVICE, type DashboardMethod } from './usage-contract.js'
 import { CursorUsageFailure } from './usage-failure.js'
 
 /** The service the CLI's own `/usage` asks (Connect JSON); the token is sent to this origin and nowhere else */
-export const DASHBOARD_URL = 'https://api2.cursor.sh/aiserver.v1.DashboardService/'
-
-export type DashboardMethod = 'GetCurrentPeriodUsage' | 'GetPlanInfo'
+export const DASHBOARD_URL = `https://api2.cursor.sh/${DASHBOARD_SERVICE}`
 
 /** Measured on Windows (Free plan): each method answers in about 0.7 s */
 const ASK_MS = 5_000
