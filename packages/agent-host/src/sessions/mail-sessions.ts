@@ -8,6 +8,7 @@ import type { HandedOverMessage } from '../mail/messages.js'
 import type { StopTold, StopWhy, WaitEnd } from '../mail/stop-notices.js'
 import type { MailToolArgs, MailToolResult, NoteSent } from '../mail/tool.js'
 import type { TurnStart } from '../mail/turns.js'
+import { isQuietNote } from '../mail/rules.js'
 import type { TurnInputs } from '../mail/delivery.js'
 import type { HandOverScope } from '../dev-services/store/mailbox.js'
 import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
@@ -314,9 +315,8 @@ export class MailSessionsView {
    */
   mailTask(callerId: string, target: SessionInfo, origin: SendOrigin, text: string, note = false, depth?: number): Extract<BusyAnswer, { state: 'mailed' }> | { error: string } {
     const hooks = this.hooks
-    // A note to a session the caller started goes only as mail (#2493): one that reads none is not busy, it takes no note
-    const noteOnly = note && origin === 'agent_session'
-    if (!hooks?.sendTask || !this.canReadMail(target.id)) return { error: noteOnly ? `"${target.name}" takes no mail, so a note cannot reach it: send it work instead, with no kind.` : `"${target.name}" is busy and takes no mail: send to it once it is at rest.` }
+    // A quiet note goes only as mail (#2493): a session that reads none is not busy, it takes no note
+    if (!hooks?.sendTask || !this.canReadMail(target.id)) return { error: isQuietNote({ note, origin }) ? `"${target.name}" takes no mail, so a note cannot reach it: send it work instead, with no kind.` : `"${target.name}" is busy and takes no mail: send to it once it is at rest.` }
     try {
       return { state: 'mailed', sessionId: target.id, sessionName: target.name, messageId: hooks.sendTask(callerId, target.id, origin, text, note, depth), ...(note ? { note: true as const } : {}) }
     } catch (e) {

@@ -8,7 +8,7 @@ import type { DelegationForks } from './delegation-forks.js'
 import type { DelegationHost } from './delegation-host.js'
 import type { DelegationWaits } from './delegation-waits.js'
 import type { ObservedTurns } from './observed-turns.js'
-import type { RemoteAgents } from './remote-agents.js'
+import type { RemoteAgent, RemoteAgents } from './remote-agents.js'
 import type { NoteSent } from '../mail/tool.js'
 import { agentState, ownAgents } from './own-agents.js'
 import { aboveCallerError, agentFrame, canMailParent } from './start-agent.js'
@@ -187,47 +187,20 @@ export class AgentSessionActions {
   }
 
   /**
-   * `mail` with `kind: "note"` to a session the caller started, here or on a linked machine (#2493): a message that needs no reply, given quietly at
-   * its next turn (`MessageService.task` with `note`), no task and no report. Null for any other target: the send is plain mail
+   * The caller's own child that `target` names, for work or a note (docs/plans/mailbox.md §10.6.6): one on a linked machine, or one here (a pending
+   * start's handle read as the session it started). Refused as both are: a child a handoff gave away (#693), a start not answered yet (#673), one above
+   * its caller (#1273, here; a linked machine's is checked with its record), and §7.4's gate. Null for a session the caller did not start: plain mail
    */
-  async sendNote(callerId: string, target: string, text: string): Promise<NoteSent | null> {
+  private ownTarget(callerId: string, target: string, text: string): { remote: RemoteAgent } | { caller: SessionInfo; child: SessionInfo } | { ok: false; error: string } | null {
     const remote = target.includes('.') ? this.flow.remote.of(target) : undefined
     if (remote) {
       if (remote.callerId !== callerId) return null
+      // §7.4: asked before anything goes over the link
       const machine = this.host.linkedReader?.machineOf(target)
       const refused = this.host.refusesDelegation(callerId, { sessionId: target, linked: true }, { tool: 'mail', target: `a session on ${machine ?? 'a linked machine'}`, text })
-      return refused ? { ok: false, error: refused } : this.flow.remote.note(callerId, remote, text)
+      return refused ? { ok: false, error: refused } : { remote }
     }
-    // A child a handoff gave away is the heir's: the original is told where it went, as for work (#693)
-    const gone = this.flow.handedOverAnswer(callerId, target)
-    if (gone) return gone
-    const request = this.host.children.agentStarts.get(target)
-    const ended = request?.req.callerId === callerId ? request.ended : undefined
-    if (ended && 'childId' in ended) target = ended.childId
-    const caller = this.host.meta.get(callerId)
-    const child = this.host.meta.get(target)
-    if (!caller || !child || !ownChild(caller, child)) return null
-    // Refused as new work is (§7.4, #1273): a note is words the child reads too
-    const refused = aboveCallerError(child.name, child.permissionPreset, caller.permissionPreset) ?? this.host.refusesDelegation(callerId, { sessionId: child.id, projectId: child.projectId }, { tool: 'mail', target: child.name || child.id, text })
-    if (refused) return { ok: false, error: refused }
-    const mailed = this.host.mailTask(callerId, child, 'agent_session', text, true)
-    return 'error' in mailed ? { ok: false, error: mailed.error } : { ok: true, messageId: mailed.messageId, name: child.name || child.id }
-  }
-
-  /**
-   * `mail` to a session agent_session works on for the caller, its start request or its linked child: new work, answered at once, its end told
-   * (docs/plans/mailbox.md §10.6.6). Null for any other target: the send is plain mail
-   */
-  async sendWork(callerId: string, target: string, text: string, ifBusy?: IfBusy, signal?: AbortSignal): Promise<ChildRunResult | null> {
-    const remote = target.includes('.') ? this.flow.remote.of(target) : undefined
-    if (remote) {
-      if (remote.callerId !== callerId) return null
-      // §7.4: more work for a child on a linked machine is asked before it goes over the link
-      const machine = this.host.linkedReader?.machineOf(target)
-      const refused = this.host.refusesDelegation(callerId, { sessionId: target, linked: true }, { tool: 'mail', target: `a session on ${machine ?? 'a linked machine'}`, text })
-      return refused ? { ok: false, error: refused } : this.flow.remote.send(callerId, remote, text)
-    }
-    // Work a handoff gave away (#693): the original that stayed is told where it went, as agent_session's send told it
+    // A child a handoff gave away is the heir's: the original that stayed is told where it went, as agent_session's send told it
     const gone = this.flow.handedOverAnswer(callerId, target)
     if (gone) return gone
     // A start that answered "pending" (#673): its handle is the request's id until the person answers
@@ -246,7 +219,30 @@ export class AgentSessionActions {
     if (above) return { ok: false, error: above }
     // §7.4: before anything is sent, mailed or forked
     const refused = this.host.refusesDelegation(callerId, { sessionId: child.id, projectId: child.projectId }, { tool: 'mail', target: child.name || child.id, text })
-    if (refused) return { ok: false, error: refused }
+    return refused ? { ok: false, error: refused } : { caller, child }
+  }
+
+  /**
+   * `mail` with `kind: "note"` to a session the caller started, here or on a linked machine (#2493): a message that needs no reply, given quietly at
+   * its next turn (`MessageService.task` with `note`), no task and no report. Null for any other target: the send is plain mail
+   */
+  async sendNote(callerId: string, target: string, text: string): Promise<NoteSent | null> {
+    const own = this.ownTarget(callerId, target, text)
+    if (own === null || 'ok' in own) return own
+    if ('remote' in own) return this.flow.remote.note(callerId, own.remote, text)
+    const mailed = this.host.mailTask(callerId, own.child, 'agent_session', text, true)
+    return 'error' in mailed ? { ok: false, error: mailed.error } : { ok: true, messageId: mailed.messageId, name: own.child.name || own.child.id }
+  }
+
+  /**
+   * `mail` to a session agent_session works on for the caller, its start request or its linked child: new work, answered at once, its end told
+   * (docs/plans/mailbox.md §10.6.6). Null for any other target: the send is plain mail
+   */
+  async sendWork(callerId: string, target: string, text: string, ifBusy?: IfBusy, signal?: AbortSignal): Promise<ChildRunResult | null> {
+    const own = this.ownTarget(callerId, target, text)
+    if (own === null || 'ok' in own) return own
+    if ('remote' in own) return this.flow.remote.send(callerId, own.remote, text)
+    const { caller, child } = own
     // A session that cannot take it now is sent it as mail, which starts a turn of its own once it is free (docs/plans/mailbox.md §10.6.2); a fork if asked
     if (!this.host.takesSendNow(child.id)) {
       if (!ifBusy) {

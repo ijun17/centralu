@@ -243,6 +243,14 @@ export function firstLineOf(text: string, max = Infinity): string {
 }
 
 /**
+ * Whether a note a delegation gives is quiet: one a session gives a session it started (`mail` with kind "note", origin `agent_session`, #2493) wakes
+ * nothing and rides that session's next turn. The Assistant's `send_to_session` note (#2258) is the person's request, and wakes
+ */
+export function isQuietNote(t: { note?: boolean | undefined; origin: string }): boolean {
+  return t.note === true && t.origin === 'agent_session'
+}
+
+/**
  * Whether a message wakes a receiver at rest (D3): unless Centralu or an app marked it `facts.quiet`. Replaces `wakes`, whose rules for an app's
  * notice and an old report the adoption has already folded into `quiet` (§6.3), so the kind needs no word here
  */

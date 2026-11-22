@@ -152,3 +152,33 @@ describe('the delivery of a claimed task and of a note to a started child (#2493
     expect(w.store.mailbox.watchedTo(B).map((r) => r.messageId)).not.toContain(note.id)
   })
 })
+
+describe('what the joined line, a claim and a quiet note take (#2493)', () => {
+  it('gives the joined line to a task only, not to a message that joins the same turn', async () => {
+    const w = started()
+    w.mail.task(A, B, { text: 'start on #12', origin: 'agent_session', delivered: false })
+    await w.advance(2_000)
+    w.states.set('b', inTurn)
+    const m = w.mail.send(C, { to: [B], text: 'which branch?', needsReply: true }).message
+    await w.advance(5_000)
+    const joined = w.to('b').slice(1).map((d) => d.input.text).join('\n')
+    expect(joined).toContain(m.id)
+    expect(joined).not.toContain('joined your running turn')
+  })
+
+  it('claims a task the person let go of after it was held', async () => {
+    const w = started()
+    w.mail.task(A, B, { text: 'start on #12', origin: 'agent_session', delivered: false })
+    await w.advance(2_000)
+    const t = w.mail.task(A, B, { text: 'and review #13', origin: 'agent_session', delivered: false })
+    w.store.mailbox.hold(B, [t.id], 'released')
+    expect(await handled(w, t.id)).toContain('is answered by this turn')
+  })
+
+  it("writes quiet only a session's note to one it started: the Assistant's send_to_session note is the person's request, and wakes", () => {
+    const w = started()
+    expect(w.mail.task(A, B, { text: 'fyi', origin: 'agent_session', delivered: false, note: true }).facts.quiet).toBe(true)
+    expect(w.mail.task(A, B, { text: 'fyi', origin: 'send_to_session', delivered: false, note: true }).facts.quiet).toBeUndefined()
+    expect(w.mail.task(A, B, { text: 'work', origin: 'agent_session', delivered: false }).facts.quiet).toBeUndefined()
+  })
+})

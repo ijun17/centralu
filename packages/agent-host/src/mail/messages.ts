@@ -41,6 +41,7 @@ import {
   firstLineOf,
   flowsDownTo,
   forPersonOf,
+  isQuietNote,
   pickWork,
   quietAnswer,
   refuse,
@@ -446,8 +447,7 @@ export class MessageService {
           facts: {
             ...(input.fromScript ? { fromScript: input.fromScript } : input.across?.forPerson ? { hubAssistant: true } : {}),
             ...(input.depth ? { agentDepth: input.depth } : {}),
-            // A note a session gives one it started (`mail` kind "note", #2493) wakes nothing: it rides that session's next turn
-            ...(input.note && input.origin === 'agent_session' ? { quiet: true } : {}),
+            ...(isQuietNote(input) ? { quiet: true } : {}),
           },
           ...(input.across ? { id: input.across.id } : {}),
         },

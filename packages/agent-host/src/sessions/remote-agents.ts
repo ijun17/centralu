@@ -430,11 +430,11 @@ export class RemoteAgents {
 
   /**
    * A note for the child across the link (the caller's `mail` with `kind: "note"`, #2493): a message that needs no reply, written quiet there, with
-   * no task and no report. Refused as new work is: a child above its caller, or a caller the gate refuses
+   * no task and no report. Refused for a child above its caller, as new work is; the start gate is not read, since a note starts nothing
    */
   async note(callerId: string, rec: RemoteAgent, text: string): Promise<NoteSent> {
-    const refused = aboveCallerError(rec.name, rec.preset ?? 'normal', this.callerPreset(callerId)) ?? this.gateError(callerId)
-    if (refused) return { ok: false, error: refused }
+    const above = aboveCallerError(rec.name, rec.preset ?? 'normal', this.callerPreset(callerId))
+    if (above) return { ok: false, error: above }
     const tasks = this.host.linkedTasks
     const sent = tasks ? await tasks.send(callerId, rec.sessionId, text, { origin: 'agent_session', note: true }) : { ok: false as const, text: NO_MAIL }
     return sent.ok ? { ok: true, messageId: sent.messageId, name: `${rec.name} on ${rec.machine}` } : { ok: false, error: `Could not send to "${rec.name}" on ${rec.machine}: ${bare(sent.text)}.` }

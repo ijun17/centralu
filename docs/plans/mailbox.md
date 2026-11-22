@@ -2273,7 +2273,7 @@ they do not go in.
 `note` from `agent_session`), so it wakes nothing and rides the child's next turn. It is no task, so no turn is reported and no last
 response answers it. Across a link it goes as the task send's note (`TaskAcross.note`, origin `agent_session`), which the machine writes quiet
 by the same rule. A machine from before this writes it as a note that wakes the child. Otherwise a parent had no way to tell its child something
-without giving it a turn and getting a report back. The note is refused as work is: a child above its caller (`aboveCallerError`), S15, or a child a handoff gave away (`handedOverAnswer`). A child whose seat reads no mail is told a note cannot reach it. The
+without giving it a turn and getting a report back. The note is refused as work is: a child above its caller (`aboveCallerError`), S15, or a child a handoff gave away (`handedOverAnswer`). A note to a pending start's handle is refused as work is ("No session yet"): one check decides the caller's own child for both (`ownTarget`). The caller is told a note cannot reach a child whose seat reads no mail. The
 answer: "Sent <id> to <name> as a note: it reaches it at its next turn and wakes nothing."
 Work for one's own child does not meet the mail guards (`repeat`, `rate_limited`, mail/send-guards.ts), as agent_session send did not: it goes
 through `delegate`, not through a message send.

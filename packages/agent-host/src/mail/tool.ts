@@ -67,10 +67,10 @@ export type MailToolResult = { text: string; isError?: boolean }
 /** What the host knows of a session that asked the Assistant (§7.6): the facts the person decides on, which the session cannot write */
 export type AskerFacts = { name: string; project: string | null; trusted: boolean }
 
-/** What the tool reads of the host (§16 M3a; M3b adds the session list and name resolution) */
 /** A note for a session the caller started, as `MailToolHost.note` answers it: written, or refused with why (#2493) */
 export type NoteSent = { ok: true; messageId: string; name: string } | { ok: false; error: string }
 
+/** What the tool reads of the host (§16 M3a; M3b adds the session list and name resolution) */
 export type MailToolHost = {
   /** The calling session: its address, and the session that started it (`parent`, D16) */
   caller(sessionId: string): { address: string; askedBy: string | null; fromHub?: boolean } | undefined
