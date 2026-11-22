@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3'
 import { z } from 'zod'
 import { MailChoices } from '@cc/protocol'
 import { isObj } from '../../json-value.js'
-import { parseAddress } from '../../mail/address.js'
+import { isPerson, parseAddress } from '../../mail/address.js'
 import { parseJson } from './json.js'
 import { MailFacts, RELEASE_WHY, type ReleaseWhy } from './mail-facts.js'
 import { oneRow } from './rows.js'
@@ -182,6 +182,8 @@ const HELD = `r.held IS NOT NULL AND r.held NOT IN ('released', 'dismissed')`
 /** A row the unanswered reminder watches (`awaitingAnswer`, docs/plans/mailbox.md §10.2) */
 const AWAITING = `m.kind = 'message' AND m.needs_reply = 1 AND r.delivered_at IS NOT NULL AND r.settled IS NULL AND r.released_at IS NULL
   AND r.answer_id IS NULL AND (r.held IS NULL OR r.held = 'released')`
+/** Centralu's unanswered reminder (`MessageService.remind`) */
+const REMINDER_NOTICE = `(m.sender = 'centralu' AND m.kind = 'notice' AND json_valid(m.facts) AND json_type(m.facts, '$.reminder') IS NOT NULL)`
 /** A message that waits for a reply: a task, or a message that needs one (the Inbox's Tasks, #1577) */
 const WORK = `(m.kind = 'task' OR (m.kind = 'message' AND m.needs_reply = 1))`
 /**
@@ -1016,7 +1018,7 @@ export class MailboxRecords {
   /**
    * A handoff: `from`'s rows that are watched and not settled, or not read (settled or not: a moved `legacy` row too),
    * go to `to`, in `scope`. A row not read is delivered
-   * afresh, with the holds about `from`'s delivery let go. When `to` already has a row for the message, or sent it, `to`'s
+   * afresh, with the holds about `from`'s delivery let go. Its reminders were `from`'s: their count and clock start again at `to` (docs/plans/mailbox.md §10.11). When `to` already has a row for the message, or sent it, `to`'s
    * side stays as it is: `from`'s row is deleted, or (for `to`'s own message) left. Returns the ids of the messages moved
    */
   moveRows(from: string, to: string, scope: HandOverScope): string[] {
@@ -1024,7 +1026,7 @@ export class MailboxRecords {
       const ids = this.movable(from, to, scope)
       this.db
         .prepare(
-          `UPDATE OR IGNORE mail_recipients SET recipient = @to, turn_seq = NULL,
+          `UPDATE OR IGNORE mail_recipients SET recipient = @to, turn_seq = NULL, reminded = 0, reminded_at = NULL,
              delivered_at = CASE WHEN read_at IS NULL THEN NULL ELSE delivered_at END,
              attempt_at = CASE WHEN read_at IS NULL THEN NULL ELSE attempt_at END,
              attempts = CASE WHEN read_at IS NULL THEN 0 ELSE attempts END,
@@ -1039,7 +1041,10 @@ export class MailboxRecords {
     })
   }
 
-  /** The ids of the messages a handoff would move, in the order sent: what `moveRows` moves, read only (the archive's preview, §7.7) */
+  /**
+   * The ids of the messages a handoff would move, in the order sent: what `moveRows` moves, read only (the archive's preview, §7.7). Not Centralu's
+   * reminders to `from`: they name how long `from` left the messages, and the heir's own come on its own clock
+   */
   movable(from: string, to: string, scope: HandOverScope): string[] {
     const inScope =
       scope === 'all'
@@ -1048,7 +1053,7 @@ export class MailboxRecords {
     return this.db
       .prepare<{ from: string; to: string; senders: string }, { id: string }>(
         `SELECT r.message_id AS id FROM mail_recipients r JOIN mail m ON m.id = r.message_id
-          WHERE r.recipient = @from AND ((r.settled IS NULL AND ${WATCHED}) OR r.read_at IS NULL) AND m.sender <> @to AND ${inScope}
+          WHERE r.recipient = @from AND ((r.settled IS NULL AND ${WATCHED}) OR r.read_at IS NULL) AND m.sender <> @to AND ${inScope} AND NOT ${REMINDER_NOTICE}
           ORDER BY m.created_at, m.id`,
       )
       .all({ from, to, senders: idList(scope === 'all' ? [] : scope.senders) })
@@ -1057,7 +1062,7 @@ export class MailboxRecords {
 
   /**
    * The Assistant's role is `to`'s (§7.7): rows sent to the role (`isRoleVia`) and held by any other session (trashed, deleted, or
-   * replaced), watched and not settled or not delivered, or moved from an older build unread (held or not, §6.3), go to `to` and are delivered afresh, read or not. A row `to` already has stays. Returns the
+   * replaced), watched and not settled or not delivered, or moved from an older build unread (held or not, §6.3), go to `to` and are delivered afresh, read or not, their reminders counted again. A row `to` already has stays. Returns the
    * message ids moved
    */
   moveRole(to: string): string[] {
@@ -1068,7 +1073,7 @@ export class MailboxRecords {
         to,
       )
       const move = this.db.prepare(
-        `UPDATE OR IGNORE mail_recipients SET recipient = ?, delivered_at = NULL, read_at = NULL, attempt_at = NULL, turn_seq = NULL, attempts = 0, last_error = NULL, given_again_at = NULL,
+        `UPDATE OR IGNORE mail_recipients SET recipient = ?, delivered_at = NULL, read_at = NULL, attempt_at = NULL, turn_seq = NULL, attempts = 0, last_error = NULL, given_again_at = NULL, reminded = 0, reminded_at = NULL,
            held = CASE WHEN held IN ${RECIPIENT_HOLDS} THEN NULL ELSE held END
          WHERE message_id = ? AND recipient = ?`,
       )
@@ -1252,18 +1257,20 @@ export class MailboxRecords {
   }
 
   /**
-   * The session's last turn that ended (a canceled delivery is no turn): who started it, when it ended and how it was cut (`ended_how`, null for a turn
-   * that ended as turns do; a word this build does not know reads as `interrupted`, a stop all the same), or null
+   * The session's last turn that ended (a canceled delivery is no turn): who started it (`person` too for a turn the person's mail started: they spoke
+   * through the Inbox), when it ended and how it was cut (`ended_how`, null for a turn that ended as turns do; a word this build does not know reads as
+   * `interrupted`, a stop all the same), or null
    */
   lastTurnEnded(sessionId: string): { startedBy: string; endedAt: number; endedHow: ReleaseWhy | null } | null {
     const row = this.db
-      .prepare<[string], { started_by: string; ended_at: number; ended_how: string | null }>(
-        `SELECT started_by, ended_at, ended_how FROM mail_turns WHERE session_id = ? AND ended_at IS NOT NULL AND COALESCE(outcome, '') <> 'canceled' ORDER BY turn_seq DESC LIMIT 1`,
+      .prepare<[string], { started_by: string; ended_at: number; ended_how: string | null; starter: string | null }>(
+        `SELECT t.started_by, t.ended_at, t.ended_how, s.sender AS starter FROM mail_turns t LEFT JOIN mail s ON s.id = t.starter_id
+          WHERE t.session_id = ? AND t.ended_at IS NOT NULL AND COALESCE(t.outcome, '') <> 'canceled' ORDER BY t.turn_seq DESC LIMIT 1`,
       )
       .get(sessionId)
     if (!row) return null
     const how = row.ended_how === null ? null : (RELEASE_WHY.find((w) => w === row.ended_how) ?? 'interrupted')
-    return { startedBy: row.started_by, endedAt: row.ended_at, endedHow: how }
+    return { startedBy: row.starter !== null && isPerson(row.starter) ? 'person' : row.started_by, endedAt: row.ended_at, endedHow: how }
   }
 
   /** When the turn the row was delivered in ended, or null: still running, or none recorded */

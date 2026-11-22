@@ -1570,7 +1570,7 @@ this order (the first that fails is `why`):
 | 5 | not `limited` | `limited` | `SessionInfo.state` |
 | 6 | its last turn did not end in `error`, and carries no `interruption` | `error`, `interrupted` | `SessionInfo.state`, `SessionInfo.interruption` |
 | 7 | its last turn was not cut by a stop: the person's Stop, an error, a limit, the network, a quit (built so in #2477: the stop hook writes the cause, `StopWhy`, to `mail_turns.ended_how` of the turn it cut) | `stopped`, `error`, `interrupted` | `MailboxRecords.lastTurnEnded(id).endedHow` |
-| 8 | the person is quiet: its last turn was not the person's, or ended at least 10 minutes ago | `person` | `MailTurns.lastEnded(id)` (`by`, `endedAt`) |
+| 8 | the person is quiet: its last turn was not the person's, or ended at least 10 minutes ago. A turn the person's mail started (an Inbox reply) is the person's too | `person` | `MailboxRecords.lastTurnEnded(id)` (`startedBy`, `endedAt`) |
 | 9 | **no own work running**: `workTasks(backgroundTasks).length === 0` (running, not ambient, not a timer, D22), **and** its background work is known: for a tool that reports it (`capabilities.backgroundTasks`), `restartPolicy.backgroundKnown(id)`. A tool that reports none (ACP) counts as known and empty | `own_work`, `own_work_unknown` | protocol `entities/sessions.ts`; `restart-policy.ts:122` |
 
 `since` is the latest of: the last turn's end, the last sweep that found it not at rest (its own work running, say),
@@ -2429,9 +2429,13 @@ M5 was built after #1948 changed what §10 was written against. Where the build 
   is skipped (`restFacts` is null for it), and a linked machine's session has no session on the hub, so it reads as
   gone there. The receiver's host tells the sender by a notice the link carries, and the release crosses back as a
   receipt. A sender's copy is never reminded or released where it was written, so no row is reminded twice.
-- **Handoff.** A moved row keeps `reminded`, `reminded_at` and `released_*` (`moveRows`). A row the predecessor
-  had read keeps its delivery, so its 2-hour clock goes on; a row it had not read is delivered afresh to the heir, whose
-  clock starts at that delivery. The predecessor's trash releases only rows still its own.
+- **Handoff.** A moved row's reminders start again at the heir: `moveRows` (and the role's move, `moveRole`) sets
+  `reminded` to 0 and `reminded_at` to null, and keeps `released_*`. The predecessor's reminders stay with it and are
+  never given to the heir (`movable` leaves them): they say how long the predecessor left the messages. A row the
+  predecessor had read keeps its delivery, so its 2-hour clock goes on; a row it had not read is delivered afresh to
+  the heir, whose clock starts at that delivery. The predecessor's trash releases only rows still its own.
+  Why: a count kept from the predecessor would release the row 20 minutes after a reminder the heir never had, and
+  the predecessor's reminders would name a wait the heir did not make.
 
 ## 11. The agent's tool
 

@@ -357,7 +357,7 @@ describe('MailReminders (docs/plans/mailbox.md §10)', () => {
     expect(h.w.records.followUpsTo(far, 0)).toHaveLength(1)
   })
 
-  it('keeps a handed-over row\'s reminders and clock with the heir, and its archived predecessor tells nobody of it', () => {
+  it('keeps a handed-over read row\'s release clock with the heir, and its archived predecessor tells nobody of it', () => {
     const h = harness()
     const q = h.ask(A, B)
     h.minutes(3)
@@ -366,7 +366,7 @@ describe('MailReminders (docs/plans/mailbox.md §10)', () => {
     h.w.records.markRead(B, [q], h.w.clock.t)
     const deliveredAt = h.w.rowOf(q, B).deliveredAt
     h.w.mail.handOver(B, C, 'all')
-    expect(h.w.rowOf(q, C)).toMatchObject({ reminded: 1, deliveredAt })
+    expect(h.w.rowOf(q, C)).toMatchObject({ reminded: 0, remindedAt: null, deliveredAt })
     h.w.mail.stops.partyGone(B)
     expect(h.followUps(A)).toEqual([])
     expect(h.w.rowOf(q, C).releasedAt).toBeNull()
@@ -455,5 +455,196 @@ describe('MailReminders (docs/plans/mailbox.md §10)', () => {
     h.sweep()
     expect(h.w.rowOf(q, B).releasedWhy).toBe('waited')
     expect(h.followUps(B)).toEqual([])
+  })
+
+  it('starts a handed-over row\'s reminders again at the heir, and gives the heir none of the predecessor\'s reminders', () => {
+    const h = harness()
+    const q = h.ask(A, B)
+    for (const _ of [1, 2]) {
+      h.minutes(21)
+      h.sweep()
+      h.deliverFollowUp(B)
+    }
+    expect(h.w.rowOf(q, B).reminded).toBe(2)
+    h.w.mail.handOver(B, C, 'all')
+    h.w.mail.stops.partyGone(B)
+    expect(h.w.rowOf(q, C)).toMatchObject({ reminded: 0, remindedAt: null, deliveredAt: null })
+    expect(h.followUps(C)).toEqual([])
+    // The heir reads the message afresh; 20 minutes after B's last reminder it is still open, and the heir's first reminder comes on its own clock
+    h.turn(C, q, [q])
+    h.minutes(3)
+    h.sweep()
+    expect(h.followUps(C).map((m) => m.facts)).toMatchObject([{ reminder: 1, of: [q] }])
+    h.deliverFollowUp(C)
+    h.minutes(18)
+    h.sweep()
+    expect(h.w.rowOf(q, C)).toMatchObject({ reminded: 1, releasedAt: null })
+  })
+
+  it('holds a reminder for 10 minutes after a turn the person\'s mail started, as after the person\'s own words', () => {
+    const h = harness()
+    const q = h.w.send(A, { to: [B], text: 'q', needsReply: true }).message.id
+    const said = h.w.send('person', { to: [B], text: 'look at this too', needsReply: false }).message.id
+    h.turn(B, said, [q, said])
+    h.minutes(5)
+    h.sweep()
+    expect(h.followUps(B)).toEqual([])
+    expect(h.lines.at(-1)).toContain('no (person)')
+  })
+
+  it('neither reminds nor releases a live session whose turn mail would join', () => {
+    const working = { receiver: { kind: 'ready', live: true, quiet: true, joins: true } } as const
+    const h = harness()
+    h.ask(A, B)
+    h.over.set(B, working)
+    h.minutes(30)
+    h.sweep()
+    expect(h.followUps(B)).toEqual([])
+    expect(h.lines.at(-1)).toContain('no (turn)')
+
+    const twice = harness()
+    const q = twice.ask(A, B)
+    for (const _ of [1, 2]) {
+      twice.minutes(21)
+      twice.sweep()
+      twice.deliverFollowUp(B)
+    }
+    twice.over.set(B, working)
+    twice.minutes(30)
+    twice.sweep()
+    expect(twice.w.rowOf(q, B).releasedAt).toBeNull()
+  })
+
+  it('reminds nothing after a turn cut by a limit, the network or a quit, nor while mail that wakes the session waits', () => {
+    const h = harness()
+    h.ask(A, B)
+    h.w.records.setTurnEndedHow('b', h.w.records.nextTurnSeq('b') - 1, 'limit')
+    h.minutes(30)
+    h.sweep()
+    expect(h.followUps(B)).toEqual([])
+    expect(h.lines.at(-1)).toContain('no (interrupted)')
+
+    const waiting = harness()
+    waiting.ask(A, B)
+    waiting.over.set(B, { mailWaiting: true })
+    waiting.minutes(30)
+    waiting.sweep()
+    expect(waiting.followUps(B)).toEqual([])
+    expect(waiting.lines.at(-1)).toContain('no (mail_waiting)')
+  })
+
+  it('gives a restarted host its own 2 minutes of grace before it reminds', () => {
+    const h = harness()
+    h.ask(A, B)
+    h.minutes(3)
+    h.restart()
+    h.sweep()
+    expect(h.followUps(B)).toEqual([])
+    expect(h.lines.at(-1)).toContain('no (grace)')
+    h.minutes(2.5)
+    h.sweep()
+    expect(h.followUps(B)).toHaveLength(1)
+  })
+
+  it('leaves a gone session\'s rows to the stop notice, however long they wait', () => {
+    const h = harness()
+    const q = h.ask(A, B)
+    h.over.set(B, { receiver: { kind: 'gone' } })
+    h.minutes(3 * 60)
+    h.sweep()
+    expect(h.w.rowOf(q, B).releasedAt).toBeNull()
+    expect(h.followUps(A)).toEqual([])
+  })
+
+  it('tells a sender asleep past 50 minutes quietly, and one at work so it wakes', () => {
+    const told = (sender: Partial<RestFacts>) => {
+      const h = harness()
+      h.ask(A, B)
+      h.over.set(A, sender)
+      h.over.set(B, { work: 1 })
+      h.minutes(121)
+      h.sweep()
+      return h.followUps(A)[0]?.facts
+    }
+    expect(told({ receiver: { kind: 'ready', live: false, quiet: false } })).toMatchObject({ quiet: true })
+    expect(told({})?.quiet).toBeUndefined()
+  })
+
+  it('names at most 10 messages in one reminder', () => {
+    const h = harness()
+    const ids = Array.from({ length: 11 }, (_, i) => h.w.send(A, { to: [B], text: `question ${i}`, needsReply: true }).message.id)
+    h.turn(B, ids[0] ?? null, ids)
+    h.minutes(3)
+    h.sweep()
+    expect(h.followUps(B)[0]?.facts.of).toHaveLength(REMINDER.rowsAtMost)
+  })
+
+  it('reminds a second time 20 minutes after the first reminder\'s turn ended, however long that turn ran', () => {
+    const h = harness()
+    h.ask(A, B)
+    h.minutes(3)
+    h.sweep()
+    const first = h.followUps(B)[0]?.id ?? ''
+    const t = h.w.startTurn(B, first)
+    h.w.records.markDelivered(B, [first], h.w.clock.t, t.turnSeq)
+    h.minutes(25)
+    h.w.records.endTurn('b', t.turnSeq, h.w.clock.t, 'acted')
+    h.minutes(5)
+    h.sweep()
+    expect(h.followUps(B)).toHaveLength(1)
+    expect(h.lines.at(-1)).toContain('no (again)')
+    h.minutes(16)
+    h.sweep()
+    expect(h.followUps(B)).toHaveLength(2)
+  })
+
+  it('reminds nothing of a message whose answer waits for the person to let it go', () => {
+    const h = harness()
+    const q = h.ask(A, B)
+    h.w.records.answerHeld(q, B, h.w.send(B, { to: [A], text: 'the answer', needsReply: false }).message.id)
+    h.minutes(3)
+    h.sweep()
+    expect(h.followUps(B)).toEqual([])
+  })
+
+  it('reads a canceled delivery as no turn: the person\'s turn before it still holds the reminder', () => {
+    const h = harness()
+    const q = h.w.send(A, { to: [B], text: 'q', needsReply: true }).message.id
+    h.turn(B, null, [q], { person: true })
+    h.minutes(5)
+    const t = h.w.startTurn(B, null)
+    h.w.records.endTurn('b', t.turnSeq, h.w.clock.t, 'canceled')
+    h.minutes(3)
+    h.sweep()
+    expect(h.followUps(B)).toEqual([])
+    expect(h.lines.at(-1)).toContain('no (person)')
+  })
+
+  it('drops a quiet reminder unread when its message was released, or answered by an answer held for the person', () => {
+    const drained = (meanwhile: (h: ReturnType<typeof harness>, q: string) => void) => {
+      const h = harness()
+      const q = h.ask(A, B)
+      h.over.set(B, { receiver: { kind: 'ready', live: false, quiet: false } })
+      h.minutes(55)
+      h.sweep()
+      expect(h.followUps(B)).toHaveLength(1)
+      meanwhile(h, q)
+      h.over.delete(B)
+      h.w.clock.t += 3_000
+      return h.w.mail.drain(B).messageIds
+    }
+    expect(drained((h, q) => h.w.records.markReleased(q, B, h.w.clock.t, 'waited'))).toEqual([])
+    expect(drained((h, q) => h.w.records.answerHeld(q, B, h.w.send(B, { to: [A], text: 'answer', needsReply: false }).message.id))).toEqual([])
+  })
+
+  it('tells a sender only of the rows its own rules released, leaving another rule\'s to that rule', () => {
+    const h = harness()
+    const q1 = h.ask(A, B, 'first')
+    const q2 = h.ask(A, C, 'second')
+    h.w.records.markReleased(q2, C, h.w.clock.t, 'limit')
+    h.over.set(B, { work: 1 })
+    h.minutes(121)
+    h.sweep()
+    expect(h.followUps(A)[0]?.facts.unanswered).toEqual([{ id: q1, recipient: B, why: 'working' }])
   })
 })
