@@ -15,7 +15,7 @@ import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
 import { HOST_FAMILY } from '../os/real.js'
 import { OWN_WORK_SETTLE_MS } from './child-ownership.js'
 import { isNetworkFailure } from './error-kind.js'
-import { RECONNECTING_FLAG_MS, interruptionAfter, stopOf } from './interruptions.js'
+import { RECONNECTING_FLAG_MS, interruptionAfter, interruptionWords, stopOf } from './interruptions.js'
 import { SessionManager } from './manager.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
@@ -397,7 +397,7 @@ describe('a turn a quit stopped (#698)', () => {
     expect(info(b, s.id).lastSeq).toBe(last.seq)
   })
 
-  it('work the person owns (a script started the session, §8.1): the next start gives the person the stop notice, once, and releases the task without a report', async () => {
+  it("work the person owns (a script started the session, §8.1): the next start releases the task without a report, and the session's own Inbox row says the stop (#2360)", async () => {
     const a = host()
     const project = await a.mgr.projectCreation.addProject(root)
     const s = await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })
@@ -410,17 +410,15 @@ describe('a turn a quit stopped (#698)', () => {
     // The next start: its mail's ready step releases what the quit cut and tells the senders
     wireHostMail(host().mgr, store).afterReady()
     const told = () => store.mailbox.feedOf(PERSON, { limit: 50 }).filter((m) => m.sender === 'centralu' && m.kind === 'notice' && m.facts.unanswered !== undefined)
-    await eventually(() => told().length === 1)
-    // The step-1 stop notice, in the person's form: the one path for a stop
-    expect(told()[0]!.facts.unanswered).toEqual([{ id: task.id, recipient: addressOf(s.id), why: 'quit' }])
-    expect(told()[0]!.body).toContain('Centralu quit while')
-    expect(told()[0]!.body).toContain('worked on your message, so it did not answer. Send it a message when you want it to go on.')
-    expect(store.mailbox.reportsOn(task.id)).toEqual([])
+    await eventually(() => store.mailbox.recipient(task.id, addressOf(s.id))?.toldAt != null)
+    // Released and told by the session's stopped row, with its Continue: no notice says it again
     expect(store.mailbox.recipient(task.id, addressOf(s.id))).toMatchObject({ settled: null, releasedWhy: 'quit' })
-    // The start after that finds the session at rest and says nothing more
+    expect(told()).toEqual([])
+    expect(store.mailbox.reportsOn(task.id)).toEqual([])
+    // The start after that finds the session at rest and says nothing
     wireHostMail(host().mgr, store).afterReady()
     await startNoticesRan()
-    expect(told()).toHaveLength(1)
+    expect(told()).toEqual([])
     expect(store.mailbox.reportsOn(task.id)).toEqual([])
   })
 
@@ -584,6 +582,14 @@ describe("the person's own turn a quit cut (#1946)", () => {
  * #1946 (2026-11-03): the notice for a turn a quit cut quoted the turn before's last answer as its "Last response", though the
  * cut turn had written nothing. A cut turn's words are those it said, or none (#1604)
  */
+describe('the words an Assistant reads of a stop (#698)', () => {
+  it('say a stop Centralu gave up continuing, which the conversation has no line of (#2360)', () => {
+    expect(interruptionWords({ reason: 'limit', at: 1, gaveUpAfter: 3 })).toBe('stopped: usage limit (Centralu gave up continuing it after 3 tries)')
+    expect(interruptionWords({ reason: 'network', at: 1, gaveUpAfter: 1 })).toBe('stopped: network error (Centralu gave up continuing it after 1 try)')
+    expect(interruptionWords({ reason: 'limit', at: 1 })).toBe('stopped: usage limit')
+  })
+})
+
 describe('the words of a turn a quit cut (#1946)', () => {
   it("are that turn's own: none, never the turn before's answer", async () => {
     const a = host()

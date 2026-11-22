@@ -1,5 +1,5 @@
 import { prChecks } from '../dev-services/git-pr.js'
-import { errorMessage, type SessionInfo, isAssistantKind } from '@cc/protocol'
+import { errorMessage, type SessionInfo, inboxListing, isAssistantKind, turnStop } from '@cc/protocol'
 import { bytesText } from '../bytes-text.js'
 import { inTurn } from '../idle.js'
 import { heldToContinue, wentWithItsProcess } from '../sessions/interruptions.js'
@@ -198,6 +198,11 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       const party = parseAddress(address)
       const s = party?.kind === 'session' ? sessions.sessionInfo(party.sessionId) : undefined
       return !s ? 'rest' : wentWithItsProcess(s.interruption) ? 'cut' : inTurn(s.state) ? 'turn' : 'rest'
+    },
+    stopShown: (address) => {
+      const party = parseAddress(address)
+      const s = party?.kind === 'session' && party.host === hostId ? sessions.sessionInfo(party.sessionId) : undefined
+      return !!s && turnStop(s) !== null && inboxListing(s) !== 'never'
     },
     stoppedWords: (address) => {
       const party = parseAddress(address)

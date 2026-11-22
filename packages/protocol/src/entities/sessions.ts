@@ -53,6 +53,8 @@ export const Interruption = z.object({
    * `tries`: continues made in this run of stops. Absent: nothing continues it by itself, or an older host
    */
   autoContinue: z.object({ at: z.number().optional(), tries: z.number().int().min(0) }).optional(),
+  /** The continues Centralu made before it left the stop to the person (`MAX_TRIES`, #2360). Absent: none, or an older host */
+  gaveUpAfter: z.number().int().min(1).optional(),
   /** A `limit` stop's reset (ms), kept when the wait goes (#1415). Absent: not known, or an older host */
   resetAt: z.number().optional(),
 })

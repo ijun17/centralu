@@ -17,7 +17,15 @@ function stopWorld() {
   const w = world()
   const busy = new Set<string>()
   const cut = new Set<string>()
-  const service = new MessageService(w.store.mailbox, w.reach, { hostId: HOST, now: () => w.clock.t, turn: (a) => w.turns.get(a) ?? null, standing: (a) => (cut.has(a) ? 'cut' : busy.has(a) ? 'turn' : 'rest') })
+  /** The sessions whose stop stands in the person's Inbox */
+  const shown = new Set<string>()
+  const service = new MessageService(w.store.mailbox, w.reach, {
+    hostId: HOST,
+    now: () => w.clock.t,
+    turn: (a) => w.turns.get(a) ?? null,
+    standing: (a) => (cut.has(a) ? 'cut' : busy.has(a) ? 'turn' : 'rest'),
+    stopShown: (a) => shown.has(a),
+  })
   const stops = {
     sessionStopped: (who: string, why: StopWhy, o: Omit<SessionStop, 'address' | 'why' | 'turnSeq'> & { turnSeq?: number | null } = {}) => service.stops.sessionStopped(who, why, { turnSeq: 1, ...o }),
     sessionsStopped: service.stops.sessionsStopped.bind(service.stops),
@@ -32,7 +40,7 @@ function stopWorld() {
   const noticesTo = (who: string) => w.records.pendingFor(who, w.clock.t + 60_000).filter((p) => p.message.kind === 'notice' && p.message.facts.unanswered)
   /** What Centralu told `who` of a stop of a session it started and is owed nothing by */
   const startersNotices = (who: string) => w.records.pendingFor(who, w.clock.t + 60_000).filter((p) => p.message.kind === 'notice' && p.message.facts.about && p.message.facts.reason)
-  return { ...w, busy, cut, service, stops, ask, noticesTo, startersNotices }
+  return { ...w, busy, cut, shown, service, stops, ask, noticesTo, startersNotices }
 }
 
 const CAUSES: { why: StopWhy; says: string }[] = [
@@ -180,6 +188,26 @@ describe('a session stops without answering a question', () => {
     // Once
     expect(w.stops.sessionStopped(B, 'error')).toBe(0)
     expect(w.noticesTo(PERSON)).toHaveLength(1)
+  })
+
+  it("leaves out of the person's notice a stop their Inbox shows on the session's own row; a session asker is told as ever (#2360)", () => {
+    const w = stopWorld()
+    w.shown.add(B)
+    const mine = w.ask(PERSON, B, 'are you done?')
+    const theirs = w.ask(A, B)
+    expect(w.stops.sessionStopped(B, 'error')).toBe(2)
+    expect(w.noticesTo(PERSON)).toEqual([])
+    // Told by the row: a later notice does not list it
+    expect(w.rowOf(mine.id, B)).toMatchObject({ releasedWhy: 'error', toldAt: w.clock.t })
+    expect(w.noticesTo(A).map((n) => n.message.facts.unanswered)).toEqual([[{ id: theirs.id, recipient: B, why: 'error' }]])
+    // One quit, two sessions: the notice keeps the one whose stop no row shows, as its sentence alone
+    const other = w.ask(PERSON, C, 'and you?')
+    w.ask(PERSON, B, 'once more')
+    w.stops.sessionsStopped([{ address: B, why: 'quit', turnSeq: 1 }, { address: C, why: 'quit', turnSeq: 1 }])
+    const [told, ...rest] = w.noticesTo(PERSON)
+    expect(rest).toEqual([])
+    expect(told?.message.facts.unanswered).toEqual([{ id: other.id, recipient: C, why: 'quit' }])
+    expect(told?.message.body).toBe('Centralu quit while gamma worked on your message, so it did not answer. Send it a message when you want it to go on.')
   })
 
   it('a sender a call waiting on the session already told of the same stop gets its rows released and marked told, and no second notice', () => {

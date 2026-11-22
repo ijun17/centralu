@@ -1,6 +1,6 @@
-import { isAssistantKind } from '@cc/protocol/client'
+import { isAssistantKind, type TurnStop } from '@cc/protocol/client'
 import type { DragEvent, ReactNode } from 'react'
-import type { SessionSummary, TurnStop } from '@cc/core'
+import type { SessionSummary } from '@cc/core'
 import { formatWhen } from '../../app/format.js'
 import { useStore } from '../../store/store.js'
 import { CrownIcon, RestartIcon } from '../../components/icons.jsx'

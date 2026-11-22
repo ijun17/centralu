@@ -122,9 +122,11 @@ describe('a turn the network stopped (#2238)', () => {
       expect(handle.sent).toHaveLength(i)
       handle.emit({ type: 'error', sessionId: id, error: { code: 'internal', message: NO_DNS, retryable: true } })
     }
-    expect(a.session(id).interruption).toMatchObject({ reason: 'network' })
+    // The stop says Centralu gave up, for its note to say it; the conversation's last line is the last continue's (#2360)
+    expect(a.session(id).interruption).toMatchObject({ reason: 'network', gaveUpAfter: MAX_TRIES.network })
     expect(a.session(id).interruption?.autoContinue).toBeUndefined()
-    expect(lines(id, 'continue').at(-1)?.text).toMatch(/continued this turn 5 times and the network failed again/)
+    expect(events.filter((e) => e.type === 'interruption' && e.sessionId === id).at(-1)).toMatchObject({ interruption: { gaveUpAfter: MAX_TRIES.network } })
+    expect(lines(id, 'continue').at(-1)?.text).toBe('The network is back, so Centralu continued this turn.')
     await vi.advanceTimersByTimeAsync(PROBE_STEPS_MS[4] * 2)
     expect(handle.sent).toHaveLength(MAX_TRIES.network)
   })
@@ -221,6 +223,26 @@ describe('a turn a usage limit stopped (#1415)', () => {
     expect(lines(id, 'continue').at(-1)?.text).toBe('The usage limit reset, so Centralu continued this turn.')
     // A limit never touches the network: nothing was probed
     expect(probes).toBe(0)
+  })
+
+  it(`after ${MAX_TRIES.limit} continues that hit the limit again, the stop keeps its reset and says Centralu gave up (#2360)`, async () => {
+    const hour = 60 * 60_000
+    const { a, id, handle } = await limited(hour)
+    for (let i = 1; i <= MAX_TRIES.limit; i++) {
+      await vi.advanceTimersByTimeAsync(hour + RESET_MARGIN_MS)
+      expect(handle.sent).toHaveLength(i)
+      handle.emit({ type: 'limit_reached', sessionId: id, resumeAt: new Date(Date.now() + hour).toISOString(), windowMins: 300 })
+      handle.emit({ type: 'error', sessionId: id, error: { code: 'internal', message: "You've hit your session limit · resets 1:20am", retryable: true } })
+    }
+    const reset = Date.now() + hour
+    expect(a.session(id).interruption).toMatchObject({ reason: 'limit', resetAt: reset, gaveUpAfter: MAX_TRIES.limit })
+    expect(a.session(id).interruption?.autoContinue).toBeUndefined()
+    expect(lines(id, 'continue').at(-1)?.text).toBe('The usage limit reset, so Centralu continued this turn.')
+    // A later report at rest moves the reset; the stop still says it was given up
+    handle.emit({ type: 'limit_reached', sessionId: id, resumeAt: new Date(reset + hour).toISOString(), windowMins: 300 })
+    expect(a.session(id).interruption).toMatchObject({ resetAt: reset + hour, gaveUpAfter: MAX_TRIES.limit })
+    await vi.advanceTimersByTimeAsync(3 * hour)
+    expect(handle.sent).toHaveLength(MAX_TRIES.limit)
   })
 
   it("a Codex 429 with no reset in its data continues at the time its words say, not 30 minutes on", async () => {

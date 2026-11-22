@@ -1,6 +1,5 @@
 import { useMemo } from 'react'
-import { CONTINUE_WORDS, type Interruption, type SessionState } from '@cc/protocol/client'
-import { turnStop, type TurnStop } from '@cc/core'
+import { CONTINUE_WORDS, turnStop, type Interruption, type SessionState, type TurnStop } from '@cc/protocol/client'
 import { lastTurnRefusedModel, useStore } from '../../store/store.js'
 import { useMachineName } from '../../store/selectors.js'
 import { turnStopLabel } from '../../components/primitives.jsx'

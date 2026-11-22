@@ -23,7 +23,9 @@ by itself" for these two causes only); #1693 (2026-10-28) the overload retry sta
 the API answered, so a sixth failure in a row says the turn itself fails there, not the network. Limit: one reset can be
 followed by the weekly window, or a reset time that was not one (the 30-minute retry of a limit with no time); a fourth stop
 on the limit says the account will not run it now. The count starts over when a turn finishes or the person acts. When the
-tries are spent the stop is left as it is, with a `continue` notice saying how often Centralu continued it.
+tries are spent the stop is left as it is, and its interruption says how often Centralu continued it (`gaveUpAfter`): the stop
+note reads "Stopped: usage limit · resets at 17:02 · Centralu gave up after 3 tries" with Continue, and the conversation draws
+no line of it (owner, #2360: one event, one message).
 
 **Never continued**: a turn the person or an Assistant stopped (no interruption is set); `refused`, `other`, auth and model
 errors (they set no `network` or `limit` reason); a Codex credits or spend limit (`limit_reached.credits`: they do not reset
@@ -66,7 +68,7 @@ the same place (`usePresence`, `cc-fade` / `cc-fade-out`, design-system.md §9),
 fades out as a whole when the stop is gone (Continue now, a message, the continue itself). The wait is one
 line where it fits; where it does not, the buttons go under the words together, each whole, and the words wrap instead
 of being cut. The header shows nothing of it: there it competed with the session's name and the limit badge for the
-width, and a narrow window cut both to an ellipsis (#1415). Which case the note shows is one selector's (`turnStop`, `waitStands`, `packages/core/src/session/turn-stop.ts`).
+width, and a narrow window cut both to an ellipsis (#1415). Which case the note shows is one selector's (`turnStop`, `waitStands`, `packages/protocol/src/turn-stop.ts`).
 A limit's reset is one function's on the host (`limitReset`, `sessions/interruptions.ts`): the tool's data first, else the
 time its words name; it sets both `Interruption.resetAt` and the wait's time (the reset and a margin). A limit report at
 rest while a limit stop stands (Codex's `account/rateLimits/updated` after a failed turn that named no time) gives the stop

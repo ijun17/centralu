@@ -1,5 +1,4 @@
-import { CONTINUE_WORDS } from '@cc/protocol/client'
-import type { TurnStop } from '@cc/core'
+import { CONTINUE_WORDS, type TurnStop } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
 import { turnStopLabel } from '../../components/primitives.jsx'
 import { useNowUntil } from '../../app/useLabelNow.js'

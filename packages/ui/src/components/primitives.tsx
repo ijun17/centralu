@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { SHUTDOWN_WORDS, type Interruption, type SessionState } from '@cc/protocol/client'
-import type { TurnStop } from '@cc/core'
+import { SHUTDOWN_WORDS, type Interruption, type SessionState, type TurnStop } from '@cc/protocol/client'
 import { useCapability } from '../app/PlatformProvider.jsx'
 import { formatDuration, formatWhen } from '../app/format.js'
 import { useAnchoredPlacement } from './anchored.js'
@@ -51,8 +50,12 @@ export function turnStopLabel(stop: TurnStop, now: number): string {
       const at = stop.interruption.autoContinue?.at
       return at === undefined ? 'Network lost · continues when the network is back' : `Usage limit · continues ${waitedFor(at, now)}`
     }
-    case 'stopped':
-      return `${interruptionLabel(stop)}${stop.resetAt !== undefined ? ` · resets ${waitedFor(stop.resetAt, now)}` : ''}`
+    case 'stopped': {
+      const reset = stop.resetAt !== undefined ? ` · resets ${waitedFor(stop.resetAt, now)}` : ''
+      // The conversation draws no line of its own for it (#2360): this is where the person reads that Centralu stopped trying
+      const gaveUp = stop.gaveUpAfter !== undefined ? ` · Centralu gave up after ${stop.gaveUpAfter} ${stop.gaveUpAfter === 1 ? 'try' : 'tries'}` : ''
+      return `${interruptionLabel(stop)}${reset}${gaveUp}`
+    }
     case 'error':
       return 'Stopped: error'
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { turnStop } from '@cc/core'
+import { turnStop } from '@cc/protocol/client'
 import { inboxStateLabel } from './inboxLabel.js'
 import { stateLabel, turnStopLabel } from '../../components/primitives.jsx'
 
@@ -57,5 +57,11 @@ describe('turnStopLabel: one wording for the note, the inbox and the tooltip (#1
     expect(label({ state: 'error', interruption: { reason: 'limit', at: 1 } })).toBe('Stopped: usage limit')
     expect(label({ state: 'idle', interruption: { reason: 'quit', at: 1 } })).toBe('Stopped: Centralu quit or restarted')
     expect(label({ state: 'error' })).toBe('Stopped: error')
+  })
+
+  it('says Centralu gave up continuing a stop, after its reset (#2360)', () => {
+    const today = new Date(2026, 10, 20, 17, 2).getTime()
+    expect(label({ state: 'error', interruption: { reason: 'limit', at: 1, resetAt: today, gaveUpAfter: 3 } })).toBe('Stopped: usage limit · resets at 17:02 · Centralu gave up after 3 tries')
+    expect(label({ state: 'error', interruption: { reason: 'network', at: 1, gaveUpAfter: 1 } })).toBe('Stopped: network · Centralu gave up after 1 try')
   })
 })

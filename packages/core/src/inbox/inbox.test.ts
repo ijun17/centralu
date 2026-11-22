@@ -130,6 +130,13 @@ describe('stopped turns in the inbox (#698)', () => {
     expect(buildInbox([s('idle', 'idle', { waitingSince: null })], NOW)).toEqual([])
   })
 
+  it('a usage limit that stopped the turn is listed the same way while it rests `limited` (#2360)', () => {
+    const limit = { reason: 'limit' as const, at: NOW - 30_000 }
+    expect(buildInbox([s('l', 'limited', { waitingSince: null, interruption: limit })], NOW).map((i) => i.id)).toEqual(['l'])
+    expect(countWaiting([s('l', 'limited', { waitingSince: null, interruption: limit })])).toEqual({ approval: 0, error: 1, input: 0 })
+    expect(buildInbox([s('l', 'limited', { waitingSince: null, interruption: limit, lastSeq: 4, lastReadSeq: 4 })], NOW)).toEqual([])
+  })
+
   it('a tool reconnecting for too long is listed though it works, read or not', () => {
     const r = { reason: 'reconnecting' as const, at: NOW - 6 * 60_000 }
     expect(buildInbox([s('r', 'working', { waitingSince: null, interruption: r, lastSeq: 3, lastReadSeq: 3 })], NOW).map((i) => i.id)).toEqual(['r'])

@@ -105,13 +105,17 @@ export function stopOf(e: NormalizedEvent, interruption: Interruption | null | u
   }
 }
 
-/** One line for an Assistant's list and agent_session (#698), in the words the model reads */
+/**
+ * One line for an Assistant's list and agent_session (#698), in the words the model reads. A stop Centralu gave up continuing
+ * says so here, as the conversation has no line of it (#2360)
+ */
 export function interruptionWords(i: Interruption): string {
+  const gaveUp = i.gaveUpAfter !== undefined ? ` (Centralu gave up continuing it after ${i.gaveUpAfter} ${i.gaveUpAfter === 1 ? 'try' : 'tries'})` : ''
   switch (i.reason) {
     case 'network':
-      return 'stopped: network error'
+      return `stopped: network error${gaveUp}`
     case 'limit':
-      return 'stopped: usage limit'
+      return `stopped: usage limit${gaveUp}`
     case 'quit':
       return 'stopped: Centralu quit during its turn'
     case 'shutdown':

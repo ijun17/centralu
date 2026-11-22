@@ -1,4 +1,5 @@
-import type { InboxItem, TurnStop } from '@cc/core'
+import type { InboxItem } from '@cc/core'
+import type { TurnStop } from '@cc/protocol/client'
 import { interruptionLabel, stateLabel, turnStopLabel } from '../../components/primitives.jsx'
 
 /**
