@@ -44,6 +44,7 @@ import { hubUpdatesMachines, realUpdateService } from './updates.js'
 import { copyFollowsHost, installsByDefault, updateSwitches } from './update-switches.js'
 import { copySwapMayPrompt, familyOf, installedCopyPath } from './os.js'
 import { AgentVersionService } from './agent-versions.js'
+import { ToolSignIns } from './tool-sign-ins.js'
 import { parseSleepSetting, SessionSleeper, sleepOverrideFrom, storedSleepSetting } from './sessions/sleep.js'
 import { acquireInstanceLock, lockConflictMessage } from './dev-services/instance-lock.js'
 import { markOwnChildren } from './dev-services/strays.js'
@@ -361,6 +362,8 @@ const events = new Gate<NormalizedEvent>()
 const versionsRef: { current?: AgentVersionService } = {}
 // Putting idle sessions to sleep (#568) hears every session event too: a session that said anything is not quiet
 const sleeperRef: { current?: SessionSleeper } = {}
+// A turn that found its tool signed out tells every window's tool line at once (tool-sign-ins.ts); the manager it asks is made below
+const signIns = new ToolSignIns((e) => events.push(e), (sessionId) => mgr.sessionInfo(sessionId)?.tool)
 /*
  * The manager is told the host's own address as a function: the bridge of an adapter that cannot
  * attach a tool in-process connects back through it, and the port is only known after listen().
@@ -373,6 +376,7 @@ const mgr = new SessionManager(
     events.push(e)
     versionsRef.current?.observe(e)
     sleeperRef.current?.observe(e)
+    signIns.observe(e)
   },
   (sessionId) => bridgeAddress(launch.frontDoor, port, token, sessionId),
   {
@@ -793,6 +797,7 @@ const usedCredentialsFile = launch.serveState ? new UsedCredentialsFile(usedCred
 usedCredentialsFile?.load()
 const router: Router = new Router({
   local: createRpcHandler(mgr, adapters, {
+    signIns,
     // A deleted project gives back the user-folder app it had become, once the session archive cannot restore it (#1204)
     settleDeletedProjects: () => userAppAdoption.settle(),
     // And what a delete may do to the folder, for the dialog that asks (#1301)

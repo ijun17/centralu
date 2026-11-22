@@ -88,8 +88,8 @@ export type AcpToolShape = {
    * Antigravity 1.4.3): the core folds the new call into the asked one, so its card ends as the edit did
    */
   readonly editRunsAsNewCall?: boolean
-  /** The error for a conversation the tool refused as not signed in (`-32000`); the profile also notes the tool signed out */
-  signedOut?(label: string): Error
+  /** The error for a conversation the tool refused as not signed in (`-32000`), for a tool Centralu signs in; the profile also notes the tool signed out */
+  signedOut?(): Error
   /** A line the tool wrote to stderr as it may reach host.log and a crash message: changed, or null to leave it out */
   stderrLine?(line: string): string | null
   /**

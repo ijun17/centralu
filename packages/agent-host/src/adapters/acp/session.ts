@@ -1,5 +1,5 @@
 import { isAbsolute, join } from 'node:path'
-import type { ApprovalDecision, ApprovalDetail, NormalizedEvent, PermissionPreset, QuestionAnswer } from '@cc/protocol'
+import { notSignedIn, type ApprovalDecision, type ApprovalDetail, type NormalizedEvent, type PermissionPreset, type QuestionAnswer } from '@cc/protocol'
 import { CENTRALU_MCP_NAME } from '../../apps/contract.js'
 import { rpcError } from '../../rpc-error.js'
 import { asObj } from '../../json-value.js'
@@ -43,6 +43,8 @@ export type AcpSessionDeps = {
   label: string
   /** How to install the tool (`AcpProfile.descriptor.install`) */
   install?: string
+  /** How to sign in from a terminal (`AcpProfile.descriptor.login`) */
+  login: string
   /** The agent's process: what to start (`AcpProfile.launch`), and from where (the keeper's source, or this host's spawn) */
   spec: AgentSpawnSpec
   start: Omit<ToolStart, 'sessionId'>
@@ -225,7 +227,7 @@ class AcpWire implements ToolWire {
   private signInWanted(): void {
     const conn = this.conn as AcpConnection | undefined
     if (!conn || conn.isClosed) return
-    const error = this.deps.shape?.signedOut?.(this.label) ?? rpcError(`${this.label} is not logged in. Log in, then try again.`, 'not_logged_in')
+    const error = this.signedOut()
     conn.failPending(error)
     if (this.opened) void conn.dispose(500)
   }
@@ -334,11 +336,14 @@ class AcpWire implements ToolWire {
     return err
   }
 
+  /** Not signed in, in the tool line's words; the tool's own error when Centralu signs it in */
+  private signedOut(): Error {
+    return this.deps.shape?.signedOut?.() ?? rpcError(notSignedIn({ label: this.label, login: this.deps.login }), 'not_logged_in')
+  }
+
   private openError(err: unknown): Error {
     if (err instanceof RpcError && err.code === AUTH_REQUIRED) {
-      const signedOut = this.deps.shape?.signedOut?.(this.label)
-      if (signedOut) return signedOut
-      return rpcError(`${this.label} is not logged in. Log in from a terminal, then try again.`, 'not_logged_in')
+      return this.signedOut()
     }
     if (err instanceof RpcError) return rpcError(`${this.label}: ${err.message}`, 'internal')
     return err instanceof Error ? err : new Error(String(err))

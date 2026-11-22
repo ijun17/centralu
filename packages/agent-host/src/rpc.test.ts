@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { RpcMethods } from '@cc/protocol'
 import { createRpcHandler } from './rpc.js'
+import { ToolSignIns } from './tool-sign-ins.js'
 import { Drain, DrainCut } from './drain.js'
 import { createStopGate } from './lifecycle/stop-gate.js'
 import type { SessionManager } from './sessions/manager.js'
@@ -177,6 +178,16 @@ describe('agents.detect and the setup actions', () => {
       ['t3', 'not_installed', 'terminal'],
     ])
     expect(found.every((t) => RpcMethods['agents.detect'].result.safeParse([t]).success)).toBe(true)
+  })
+
+  it('tells the windows a tool a turn found signed out is signed in again, once its detect says so', async () => {
+    const told: unknown[] = []
+    const signIns = new ToolSignIns((e) => told.push(e), () => 't1')
+    signIns.detected('t1', { state: 'ready', install: 'terminal', signIn: 'terminal' })
+    signIns.observe({ type: 'error', sessionId: 's1', error: { code: 'not_logged_in', message: '', retryable: false } })
+    const rpc = createRpcHandler({} as SessionManager, new Map([['t1', adapter('t1', { installed: true, loggedIn: true })]]), { signIns })
+    await rpc('agents.detect', {})
+    expect(told.at(-1)).toEqual({ type: 'tool_setup', tool: 't1', setup: { state: 'ready', install: 'terminal', signIn: 'terminal' } })
   })
 
   it("passes the install and sign-in to the tool's own setup, and refuses them for a tool that has none", async () => {

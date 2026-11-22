@@ -1,4 +1,4 @@
-import type { AdapterCapabilities, ToolDescriptor } from '@cc/protocol'
+import { notSignedIn, type AdapterCapabilities, type ToolDescriptor } from '@cc/protocol'
 import { dataRoot } from '../../data-dir.js'
 import type { Platform } from '../../os.js'
 import { rpcError } from '../../rpc-error.js'
@@ -116,9 +116,9 @@ export function antigravityProfile(deps: AgyProfileDeps = {}): AgyProfile {
       isQuestion: isAgyQuestion,
       editRunsAsNewCall: true,
       stderrLine: agyStderrLine,
-      signedOut(label) {
+      signedOut() {
         setup.noteSignedOut()
-        return rpcError(`${label} is not signed in. Sign in with Google from its line in Centralu, then try again.`, 'not_logged_in')
+        return rpcError(notSignedIn(DESCRIPTOR, 'centralu'), 'not_logged_in')
       },
     },
   }

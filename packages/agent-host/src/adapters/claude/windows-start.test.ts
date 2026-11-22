@@ -488,6 +488,34 @@ const raceTurn = (cli: Started) => {
   cli.push({ type: 'result', subtype: 'success', is_error: true, result: RACE, modelUsage: {} })
 }
 
+// What a signed-out CLI (2.1.296, an empty config folder) writes for a turn: not the race's words, and an error the SDK names
+const signedOutTurn = (cli: Started) => {
+  cli.push({ type: 'assistant', parent_tool_use_id: null, error: 'authentication_failed', is_api_error_message: true, message: { id: 'm1', role: 'assistant', model: '<synthetic>', content: [{ type: 'text', text: 'Not logged in · Please run /login' }] } })
+  cli.push({ type: 'result', subtype: 'success', is_error: true, result: 'Not logged in · Please run /login', terminal_reason: 'api_error', modelUsage: {} })
+}
+
+describe('a turn of a signed-out Claude Code', () => {
+  it('ends signed out, in the words of the tool line, with nothing sent again; another authentication error keeps the CLI words', async () => {
+    const { handle, events, cli } = await session(adapter({ retryDelay: () => 0 }))
+    handle.send('fix the build')
+    expect(text(await cli.input.next())).toBe('fix the build')
+    signedOutTurn(cli)
+    await tick()
+    expect(events.filter((e) => e.type === 'error')).toEqual([
+      { type: 'error', sessionId: expect.any(String), error: { code: 'not_logged_in', message: 'Claude Code is not signed in. Run claude auth login in a terminal.', retryable: false } },
+    ])
+    expect(events.filter((e) => e.type === 'notice')).toEqual([])
+    handle.send('and the tests')
+    expect(text(await cli.input.next())).toBe('and the tests')
+    const words = 'Invalid API key · Fix external API key'
+    cli.push({ type: 'assistant', parent_tool_use_id: null, error: 'authentication_failed', message: { id: 'm2', role: 'assistant', model: '<synthetic>', content: [{ type: 'text', text: words }] } })
+    cli.push({ type: 'result', subtype: 'success', is_error: true, result: words, modelUsage: {} })
+    await tick()
+    expect(events.filter((e) => e.type === 'error').at(-1)).toEqual({ type: 'error', sessionId: expect.any(String), error: { code: 'internal', message: words, retryable: true } })
+    await handle.dispose()
+  })
+})
+
 describe('a turn that lost the sign-in refresh race (#353)', () => {
   it('goes again once after the delay, says so in the conversation, and does not fail the turn', async () => {
     const { handle, events, cli } = await session(adapter({ retryDelay: () => 30 }))
@@ -497,7 +525,7 @@ describe('a turn that lost the sign-in refresh race (#353)', () => {
     await tick()
 
     expect(events.filter((e) => e.type === 'error')).toEqual([])
-    expect(events.find((e) => e.type === 'notice')).toMatchObject({ level: 'warning', from: 'Claude Code', label: 'sign-in', text: RACE })
+    expect(events.find((e) => e.type === 'notice')).toMatchObject({ level: 'info', from: 'Claude Code', label: 'sign-in refresh', text: RACE, summary: expect.stringMatching(/^Nothing to do: /) })
     expect(events.find((e) => e.type === 'turn_complete')).toBeUndefined()
 
     // The same message reaches the CLI again

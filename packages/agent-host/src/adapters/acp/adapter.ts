@@ -67,6 +67,7 @@ export abstract class AcpAdapter implements AgentAdapter {
       spec,
       start: { spawn: this.spawn, ...(source ? { source } : {}), ...(shape?.stderrLine ? { stderrLine: (l: string) => shape.stderrLine?.(l) ?? null } : {}) },
       install: this.profile.descriptor.install,
+      login: this.profile.descriptor.login,
       version: () => this.profile.installedVersion(),
       stopConfirmMs: this.stopConfirmMs,
       ...(this.profile.centraluToolOf ? { centraluToolOf: (call: ToolCallFields) => this.profile.centraluToolOf?.(call) ?? null } : {}),

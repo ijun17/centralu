@@ -1,7 +1,7 @@
 import { LEAVE_MS, usePresence } from '../../components/presence.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useDismiss } from '../../components/useDismiss.js'
-import { errorMessage, type CacheStats, type MachineInfo, type ToolName, type ToolStatus, type UsageSnapshot } from '@cc/protocol/client'
+import { errorMessage, notSignedIn, type CacheStats, type MachineInfo, type ToolName, type ToolStatus, type UsageSnapshot } from '@cc/protocol/client'
 import { cacheTooltipLine } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useWhileVisible } from '../../app/useWhileVisible.js'
@@ -611,7 +611,7 @@ function SignedOutPanel({ tool, machine, group, redetect }: { tool: ToolName; ma
         login={meta.login}
         machine={machine}
         shown
-        terminal={{ login: (label, command) => `${label} is not signed in. Run ${command} in a terminal.`, missing: (label) => `${label} is not installed` }}
+        terminal={{ login: (label, command) => notSignedIn({ label, login: command }), missing: (label) => `${label} is not installed` }}
         redetect={redetect}
         testId="usage-signed-out-line"
         className="text-sm leading-body text-ink-muted"

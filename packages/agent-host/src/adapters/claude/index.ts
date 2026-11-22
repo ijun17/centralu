@@ -25,6 +25,7 @@ import { CLAUDE_SUBAGENT_TOOL } from './centralu-mcp.js'
 import { STOP_CONFIRM_MS } from '../core/ledger.js'
 import { execText } from '../../os/exec.js'
 import { realOs } from '../../os/real.js'
+import { CLAUDE_DESCRIPTOR } from './descriptor.js'
 
 export { personsDefaultMode }
 
@@ -183,13 +184,7 @@ export class ClaudeAdapter implements AgentAdapter {
     }
   }
 
-  readonly descriptor: ToolDescriptor = {
-    name: 'claude',
-    label: 'Claude Code',
-    mark: 'C',
-    install: 'npm i -g @anthropic-ai/claude-code',
-    login: 'claude auth login',
-  }
+  readonly descriptor: ToolDescriptor = CLAUDE_DESCRIPTOR
   /** The live queries, probes and their sessions (claude/live-queries.ts), kept here for the adapter's callers */
   static readonly liveQueries = liveQueries
   static readonly probeIds = probeIds

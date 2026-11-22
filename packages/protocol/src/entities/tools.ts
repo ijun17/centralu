@@ -67,6 +67,11 @@ export function setupOfDetection(installed: boolean, loggedIn: boolean | null): 
   return { state, install: 'terminal', signIn: 'terminal' }
 }
 
+/** A tool whose sign-in is gone, in its tool line's words: its `login` command run in a terminal, or the step Centralu's line offers */
+export function notSignedIn(d: Pick<ToolDescriptor, 'label' | 'login'>, from: 'terminal' | 'centralu' = 'terminal'): string {
+  return `${d.label} is not signed in. ${from === 'terminal' ? `Run ${d.login} in a terminal.` : d.login}`
+}
+
 /** A descriptor and whether the tool is usable here now: one type, since a join done in a component can be done wrong */
 export const ToolStatus = ToolDescriptor.extend({
   installed: z.boolean(),
