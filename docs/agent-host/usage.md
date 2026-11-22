@@ -1,6 +1,6 @@
 # Usage and limits (FR-9)
 
-**We ask the tool, we do not read its files.** `agents.usage` → `ToolQueries.usageFor(tool)`
+**We ask the tool, we do not read its files** (one exception: Cursor, below). `agents.usage` → `ToolQueries.usageFor(tool)`
 → the adapter's optional `listUsage()`, which calls the tool's own API (the Claude SDK for one,
 `app-server` for the other). An adapter that cannot answer throws, and the manager degrades
 with the reason attached rather than showing a confident wrong number.
@@ -11,10 +11,34 @@ purpose: a read that failed (not logged in, a timeout) is also `supported: false
 predates the mark, so only the mark tells "never" from "not now"; without it the window draws the dashed, unknown ring. The
 window keeps the last answer through a call that fails (a host swap, a busy tool) and only learns why the ask failed.
 
+**Cursor's limits, read with its own sign-in (#2459).** Cursor has no public usage API and no command that prints usage outside
+its interactive screen (#1623). The owner decided on 2026-11-22 to read cursor-agent's own login token and ask Cursor's
+dashboard service what the CLI's `/usage` asks, on one condition: nothing Cursor changes may break the panel or a session. The
+reasoning: widely used usage readers do the same, their recorded breakages (token encryption, a cookie rename, a 403) are all
+failures a reason can stand in for, and the plan alone told the person nothing they could use. What is read, when, and what never
+happens with the token: [security-boundaries/credentials.md](../security-boundaries/credentials.md#cursors-sign-in-read-for-its-usage).
+- *The read.* `listUsage()` (`adapters/cursor-agent/plan-usage.ts`) reads the token (`sign-in-token.ts`), then asks
+  `GetCurrentPeriodUsage` and `GetPlanInfo` at once (`dashboard.ts`; about 0.7 s each, measured). The windows are the CLI's:
+  Included (the total), Auto and API, each resetting at the billing cycle's end; a bucket the answer does not carry is left out,
+  never drawn as 0. The plan is `planInfo.planName`, or none when only that call fails.
+- *No limit, no percent.* Measured on a Free plan in the same minute: a prompt refused "You've hit your usage limit", the answer
+  `totalPercentUsed: 0` with no `limit` (proto3 leaves out a 0), `GetSandUsageStatus.includedLimitZero: true`. The percent is of a
+  limit of 0; whatever refused the prompt is not in this answer. So a `limit` of 0, or no `planUsage`, is the reason "Cursor does
+  not report a limit for this plan", never 0%. A paid plan's answer is not measured yet (its test input is made by hand, and says so).
+- *Every failure is a reason.* Token not found or unreadable, expired (its JWT `exp`) or answered 401, another 4xx, a 5xx or
+  timeout, an answer of another shape: each is one kind with one reason (`usage-failure.ts`) and one host.log line the first time
+  in a process, with the status or exit code and never the token or the answer. A failed read keeps the last good answer when
+  there is one, else the plan `agent about` says (`localUsage`, below), so the plan stays on screen. The token read is bounded
+  at 3 s and each call at 5 s, under `usageFor`'s 15 s; the only cache is `usageFor`'s minute.
+- *Drift.* `pnpm drift:cursor-usage` (the weekly drift run) goes red when the installed CLI's bundle no longer carries the
+  token's naming and paths, the two methods, or the answers' descriptors (`usage-contract.ts`), searching every file of the
+  version, since names move between chunks. A test holds the fields the parser reads to those descriptors.
+
 **What a tool with no limits still says (#1623).** "Reports no limits" has one definition: the adapter has no `listUsage()`
-(`usageFor` derives `notReported` from that and nowhere else). Cursor and OpenCode have no usage API, but their adapters have
-an optional `localUsage()`, read from the tool's own command and never its credential or state files: Cursor's plan from
-`agent about --format json` (`subscriptionTier`; the account's email in that output is never read out), OpenCode's local totals
+(`usageFor` derives `notReported` from that and nowhere else). OpenCode has no usage API, but its adapter has an optional
+`localUsage()`, read from the tool's own command and never its credential or state files, as Cursor's has for its plan:
+Cursor's plan from `agent about --format json` (`subscriptionTier`; the account's email in that output is never read out), what
+stands when its limits cannot be read; OpenCode's local totals
 from `opencode stats` (boxed tables read by their labels: sessions, messages, tokens, cost; no JSON form). `usageFor` answers
 `supported: false, notReported: true` with a plain reason ("<tool> does not report usage limits") and a `usage` that carries
 `plan` and `totals { scope, asOf, rows }` (additive); the donut is the dimmed one (design-system.md §10). A failed read also answers
