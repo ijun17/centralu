@@ -4,12 +4,10 @@ import type { StopWhy } from '../mail/stop-notices.js'
 import { failureSentence, isNetworkFailure, isPlanLimit, planLimitResetAt } from './error-kind.js'
 
 /**
- * How an event changes a session's interruption, or `undefined` when it does not. Live state stays with the event's
- * own state hint (`applyStateHint`); this reads only the reason.
+ * How an event changes a session's interruption, or `undefined` when it does not (only the reason: live state is `applyStateHint`'s):
  *
  *   a new turn (working)                       cleared
- *   an error the network caused that ended a   network, with the tool's words
- *   running turn (`endedTurn`)
+ *   a network error that ended a running turn  network, with the tool's words
  *   a usage limit that ended a running turn    limit (#1415): the tool's limit event, or an error its words call one;
  *                                              with its reset when known (`limitReset`)
  *   a limit report at rest while a limit       the same stop with the report's reset: the host keeps one current

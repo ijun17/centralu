@@ -1,13 +1,7 @@
 /**
- * What differs between operating systems, for host code that is not a platform module itself.
- *
- * Code outside the platform modules does not ask which OS it is on (`local/platform-checks` in
- * eslint.config.js): it asks one of the questions below, named for what differs, and the answer for
- * each OS is written once, here. The other platform modules own a whole subject instead: finding and
- * starting tools (`env-path.ts`, `tool-launch.ts`), ending process trees (`os/kill-tree.ts`),
- * shells (`dev-services/terminal.ts`) and Claude Code's Windows start (`adapters/claude/exe-link.ts`).
- *
- * Each takes the platform as a parameter, defaulting to this host's, so tests can ask about another.
+ * What differs between operating systems, as questions named for it, each OS's answer written once, for host code that is not a platform
+ * module (docs/architecture.md "Which OS this is is asked in platform modules only" names the others and the subject each owns).
+ * Each takes the platform, defaulting to this host's, so tests can ask about another.
  */
 
 import { homedir } from 'node:os'
@@ -28,18 +22,12 @@ export function traitsFor(platform: Platform = HOST_PLATFORM): OsTraits {
   return { ...traitsOf(familyOf(platform)), clonesFiles: clonesFiles(platform) }
 }
 
-/**
- * `ps` and `lsof` ask about another process (start time, working folder); Windows has neither and reuses pids quickly, so a pid
- * alone says little there
- */
+/** `ps` and `lsof` ask about another process (start time, working folder); Windows has neither and reuses pids quickly, so a pid alone says little there */
 export function hasPs(platform: Platform = HOST_PLATFORM): boolean {
   return traitsOf(familyOf(platform)).hasPs
 }
 
-/**
- * A Windows system program by its full path under `%SystemRoot%System32` (taskkill, PowerShell, cmd), never looked up by name
- * (`systemTool` in `os/rules.ts`, #428)
- */
+/** A Windows system program by its full path under `%SystemRoot%System32` (taskkill, PowerShell, cmd), never looked up by name (`os/rules.ts`, #428) */
 export function systemTool(segments: readonly string[], env: Record<string, string | undefined> = process.env): string {
   return rulesSystemTool(segments, env)
 }
@@ -64,10 +52,7 @@ export function installsCliAsVersionFolders(platform: Platform = HOST_PLATFORM):
   return platform === 'win32'
 }
 
-/**
- * A pty runs on the ConPTY node-pty ships (`useConptyDll`) rather than the OS's (Windows, #849): the OS's left a `conhost.exe`
- * per terminal tab and command until the host exited
- */
+/** A pty runs on the ConPTY node-pty ships (`useConptyDll`; Windows, #849): the OS's left a `conhost.exe` per terminal tab and command until the host exited */
 export function usesShippedConpty(platform: Platform = HOST_PLATFORM): boolean {
   return platform === 'win32'
 }
@@ -81,10 +66,7 @@ export function systemSettingsFolder(app: string, env: Readonly<Record<string, s
   return platform === 'darwin' ? `/Library/Application Support/${app}` : `/etc/${app}`
 }
 
-/**
- * OpenCode matches a permission's name and pattern in any case on Windows only (1.19.4's `Wildcard.match` has flags `si` in its
- * Windows build, `s` elsewhere; #1565)
- */
+/** OpenCode matches a permission's name and pattern in any case on Windows only (1.19.4's `Wildcard.match`: flags `si` there, `s` elsewhere; #1565) */
 export function openCodeMatchesAnyCase(platform: Platform = HOST_PLATFORM): boolean {
   return platform === 'win32'
 }
@@ -137,10 +119,8 @@ export function installedCopyPath(
   return posix.join(home, '.local/share/applications', `${APP_SLUG}.desktop`)
 }
 
-/**
- * Whether a background process replacing the installed copy may raise an OS prompt (#1736): on macOS, changing a signed bundle
- * in /Applications can ask for App Management, which is never raised unasked
- */
+/** Whether replacing the installed copy in the background may raise an OS prompt, never raised unasked (#1736): on macOS, changing a signed
+ * bundle in /Applications can ask for App Management */
 export function copySwapMayPrompt(platform: Platform = HOST_PLATFORM): boolean {
   return platform === 'darwin'
 }
@@ -176,10 +156,7 @@ export function availableMemorySource(
   return { kind: 'freemem' }
 }
 
-/**
- * A process's children outlive it unless a job object ends them (Windows, #1067): the host joins one at start
- * (`lifecycle/work-job.ts`); macOS and Linux end a tree by process groups
- */
+/** A process's children outlive it unless a job object ends them (Windows, #1067; the host joins one, `lifecycle/work-job.ts`); elsewhere process groups do */
 export function endsWorkWithJob(platform: Platform = HOST_PLATFORM): boolean {
   return platform === 'win32'
 }

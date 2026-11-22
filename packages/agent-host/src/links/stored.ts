@@ -51,8 +51,8 @@ export function hubSelfId(store: Store): string {
 
 /**
  * The tunnel each linked machine's link opens (main.ts's `tunnelFor`): ssh, pairing there under this hub's own key,
- * drawn from its id in the store (`hubSelfId`, #1405 review). Here rather than inline in main.ts so a test holds the
- * key to the id: a key from the data folder's path gave two hubs of one computer name and one path a single label
+ * drawn from its id in the store (`hubSelfId`, #1405). Here rather than inline in main.ts so a test holds the
+ * key to the id: a key from the data folder's path would give two hubs of one computer name and one path a single label
  */
 export function tunnelsFor(store: Store, log: (line: string) => void): (record: MachineRecord) => SshTunnel {
   return (record) => new SshTunnel({ target: record.sshTarget, remote: record.remote, hubKey: hubKeyOf(hubSelfId(store)), log })
@@ -61,9 +61,8 @@ export function tunnelsFor(store: Store, log: (line: string) => void): (record: 
 /**
  * What `new Links(...)` is given (main.ts), with everything the hub's own store decides made here: the registry, the
  * headers mirror, the tunnel (`tunnelsFor`) and the deletes owed to machines that were away (`storeProjectDeletes`).
- * main.ts cannot hand any of them in (the type leaves them out), so
- * the key a tunnel pairs under cannot be drawn from anything but the store's id again, and a test drives this very
- * function (#1405 review)
+ * main.ts cannot hand any of them in (the type leaves them out), so the key a tunnel pairs under is always drawn from the
+ * store's id, and a test drives this very function (#1405)
  */
 export function linkDepsFor(store: Store, rest: Omit<LinkDeps, 'mirror' | 'registry' | 'tunnelFor' | 'projectDeletes'>): LinkDeps {
   const log = rest.log ?? (() => {})
@@ -91,9 +90,8 @@ export function storeMirror(store: Store): HeadersMirror {
 }
 
 /**
- * The project order across machines (#734) in the hub's own store, as one setting: a key the previous build never
- * reads, so a host swap needs no migration. A value that cannot be read is no order at all, and the next drag writes
- * a new one.
+ * The project order across machines (#734) in the hub's own store, as one setting: a key the previous build never reads,
+ * so a host swap needs no migration. A value that cannot be read is no order at all, and the next drag writes a new one.
  */
 const PROJECT_ORDER_KEY = 'hub.projectOrder'
 
@@ -105,10 +103,9 @@ export function storeProjectOrder(store: Store): ProjectOrder {
 }
 
 /**
- * The deletes of projects the hub owes machines that were away (#2330, pending-project-deletes.ts), as one setting: a
- * key the previous build never reads, so a host swap needs no migration, and a delete kept by this build waits there
- * until a build that knows it runs again. An entry this build cannot read is not applied and stays in the row
- * (`listSetting`).
+ * The deletes of projects the hub owes machines that were away (#2330, pending-project-deletes.ts), as one setting: a key
+ * the previous build never reads, so a host swap needs no migration, and a delete kept by this build waits there until a
+ * build that knows it runs again. An entry this build cannot read is not applied and stays in the row (`listSetting`).
  */
 const PENDING_PROJECT_DELETES_KEY = 'hub.pendingProjectDeletes'
 

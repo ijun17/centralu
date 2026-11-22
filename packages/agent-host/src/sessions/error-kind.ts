@@ -1,9 +1,7 @@
 /**
- * What kind of failure an error's text describes, the only part of it that reaches another session's model (#1186
- * review). An error a turn ended with is its tool's text, and its tool's text can carry what a repository put there (a
- * hook's output, a CLI's result) or what a linked machine chose to send, so its words stay in the stored notice and
- * the session's own record, which read_session shows as data. The kinds are the ones a caller acts on differently: wait
- * and retry, wait for the limit, wait for the network, change what was asked, or read it.
+ * What kind of failure an error's text describes, the only part of it that reaches another session's model (#1186): its words can carry a
+ * hook's output or what a linked machine sent, so they stay in the stored notice and the session's record (docs/security-boundaries/inter-agent-content.md).
+ * The kinds are the ones a caller acts on differently: wait and retry, wait for the limit, wait for the network, change what was asked, or read it.
  */
 export type ErrorKind = 'overloaded' | 'usage limit' | 'network' | 'refused' | 'other'
 
@@ -13,9 +11,8 @@ const REFUSED = /refus|denied|not allowed|forbidden|\b403\b|permission/i
 
 /**
  * A turn ended on the account's own five-hour or weekly limit, in the words Claude Code and Codex end such a turn with ("You've hit your session
- * limit · resets 1am", "Claude AI usage limit reached", Codex's "You've hit your usage limit"; #1415). Narrower than the `usage limit` kind,
- * which also names a per-minute 429 of an API key, a gateway's quota or another tool's plan: those are no limit that resets for the account,
- * so Centralu does not wait for one and continue
+ * limit · resets 1am", "Claude AI usage limit reached", Codex's "You've hit your usage limit"; #1415). Narrower than the `usage limit` kind: its
+ * per-minute 429 of an API key, a gateway's quota or another tool's plan is no limit that resets for the account, so Centralu does not wait and continue
  */
 export function isPlanLimit(message: string): boolean {
   return PLAN_LIMIT.test(message)
@@ -24,10 +21,10 @@ export function isPlanLimit(message: string): boolean {
 const PLAN_LIMIT = /hit your (?:\w+ ){0,2}limit\b|Claude AI usage limit reached/i
 
 /**
- * When a limit's own words say it resets (#1415), for a stop that came with no reset in the tool's data: Codex's 429 ends a turn with "You've hit your
- * usage limit. … try again at 6:17 PM." (or "… try again at Oct 27th, 2026 6:17 PM." for a later day; measured on Codex 0.160.0, which sent no
- * `account/rateLimits/updated` before it), Claude Code's with "You've hit your session limit · resets 7:50pm". The time is the computer's own clock's,
- * as the CLI printed it on the same computer; one without a day is the next such time from `now`, the current minute included. Undefined when the words name none
+ * When a limit's own words say it resets (#1415), for a stop that came with no reset in the tool's data: Codex's 429 ends a turn with "You've hit
+ * your usage limit. … try again at 6:17 PM." (or "… try again at Oct 27th, 2026 6:17 PM." for a later day; measured on Codex 0.160.0, which sent
+ * no `account/rateLimits/updated` before it), Claude Code's with "You've hit your session limit · resets 7:50pm". The time is the computer's own
+ * clock's, as the CLI printed it on the same computer; one without a day is the next such time from `now`, the current minute included.
  */
 export function planLimitResetAt(message: string, now: number): number | undefined {
   const m = RESET_WORDS.exec(message)
@@ -67,34 +64,12 @@ export function errorKindWord(message: string): string {
 }
 
 /**
- * Which errors the network caused (#698), for why a turn did not run to its end (interruptions.ts). Tool-neutral: both adapters hand the
- * tool's own sentence on in `error.message`, so the words below are matched there rather than each adapter growing
- * its own field.
- *
- * Measured, the sentences a turn failed with after the tool's own retries:
- *
- *   Claude Code   "API Error: Connection refused — a firewall or proxy may be blocking it (ECONNREFUSED)"
- *                 "API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)"
- *                 "API Error: No response from API (waited 3m). If a proxy or gateway …"
- *                 "API Error: Connection lost while your computer was asleep"
- *                 "API Error: Your computer went to sleep mid-response. The response above may be incomplete."
- *                 (the real store, 2026-10-14/15; the CLI retried `api_retry` ten times, about three minutes, first)
- *   Codex         "stream disconnected before completion: failed to lookup address information: nodename nor servname
- *                 provided, or not known", "… Transport error: network error: error decoding response body",
- *                 "… Transport error: timeout", "Connection failed: error sending request"
- *                 (host.log, the reasons of `Reconnecting... n/5`; a turn that gives up ends with the last one)
- *
- * Read in the CLI itself (claude-agent-sdk 0.3.263's bundled CLI, the function that words a connection failure): after
- * "API Error: " it says "Connection lost while your computer was asleep", "No response from API", "Request timed out.
- * Check your internet connection and proxy settings", "Unable to connect to API. Check your internet connection",
- * "Connection dropped (ECONNRESET | EPIPE | ConnectionClosed | …)", "Connection refused — …", "Can't reach the API
- * server — …", "No internet route — …", "Unable to connect to API (<code>)"; and an error it does not recognise goes
- * out as its own message, so a bare "API Error: fetch failed" is the API call itself failing. "Unable to connect to
- * API: SSL …" is a certificate or proxy setting, not the network, and is left out.
- *
- * A 401, a 400 for a model, a usage limit and the like are not here: continuing would only fail again the same way.
- * The words are the API's own sentences, so a generic phrase ("connection closed", "network error") is matched only
- * inside one: a tool's own failure can say it about something else (an MCP server, a dev server it ran).
+ * Which errors the network caused (#698), for why a turn did not run to its end (interruptions.ts); the words and their sources are the
+ * `network` row of docs/agent-host/lifecycle/turn-endings-and-mail.md. Tool-neutral: both adapters hand the tool's sentence on in `error.message`.
+ * Claude Code's were measured in the real store (2026-10-14/15, after the CLI's ten `api_retry`s, about three minutes) and read in
+ * claude-agent-sdk 0.3.263's bundled CLI, which sends an error it does not recognise as its own message ("API Error: fetch failed" is the API
+ * call failing). Codex's are the reasons of `Reconnecting... n/5` in host.log; a turn that gives up ends with the last one. A 401, a model's
+ * 400 or a usage limit is left out (continuing would fail again the same way), and a generic phrase counts only inside the API's own sentences.
  */
 const NETWORK_WORDS = [
   /\b(ECONNREFUSED|ENOTFOUND|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|ENETDOWN)\b/,
@@ -106,10 +81,7 @@ const NETWORK_WORDS = [
   /waiting for network/i,
 ]
 
-/**
- * The tool's own sentence, without the end of the CLI's stderr a crash carries (`. stderr: …`, the SDK's and
- * `withStderrTail`'s): that tail is whatever the process printed last, and a word in it says nothing of this turn.
- */
+/** The tool's sentence without a crash's stderr tail (`. stderr: …`, the SDK's and `withStderrTail`'s): what the process printed last is not this turn */
 export function failureSentence(message: string): string {
   return (message.split(/(?:^|[.\s])stderr:/)[0] ?? '').trim()
 }

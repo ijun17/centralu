@@ -522,7 +522,7 @@ describe('a turn a quit stopped (#698)', () => {
 })
 
 /*
- * #1618 (owner, 2026-10-26): a linked hub's update no longer waits for the turns on a machine. The host it stops lists the
+ * #1618 (owner, 2026-10-26): a linked hub's update does not wait for the turns on a machine. The host it stops lists the
  * sessions in a turn as it lets them go (`host.stop { forUpdate }`), and the host it starts continues each of those turns
  * once, as the person's Continue would, through Centralu's channel. On 2026-10-26 the hub updated a linked Windows machine
  * at once with two children in a turn: both turns ended, and their parent had to send each a note by hand to carry on
@@ -633,7 +633,7 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     // A hub reading the machine before the note went in sees a turn running, not one that ended
     expect(info(b, child)).toMatchObject({ state: 'working' })
     expect(info(b, child).interruption ?? null).toBeNull()
-    // And a hub whose link is back before the note went in is told the turn goes on: named from the start (#1626 review)
+    // And a hub whose link is back before the note went in is told the turn goes on: named from the start (#1626)
     expect(sentTo(b, child)).toHaveLength(0)
     expect(b.mgr.tenure.updateContinued().map((c) => c.sessionId)).toEqual([child])
     // The mail turn of the cut turn is read back, not closed lost (mailbox §8.2 step 6, Q-M3a-3)
@@ -643,7 +643,7 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     expect(sentTo(b, child)[0]).toContain('Continue where you stopped. Check what already happened before repeating a step.')
     // Sent: its list goes
     await eventually(() => f.ids() === null)
-    // And the conversation is past the listed row: a list left behind could name no later turn (#1626 review 1b)
+    // And the conversation is past the listed row: a list left behind could name no later turn (#1626)
     expect(store.messages.nextSeq(child) - 1).toBeGreaterThan(listedAt)
     expect(b.mgr.tenure.updateContinued().map((c) => c.sessionId)).toEqual([child])
     // Not the person's message: no user row, and the line says what happened
@@ -700,7 +700,7 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     }
     const b = host({ updateResume: f })
     await eventually(() => sentTo(b, child).length === 1)
-    // Written empty instead (#2264 re-check): the entry dealt with is gone from the disk all the same
+    // Written empty instead (#2264): the entry dealt with is gone from the disk all the same
     expect(f.ids()).toEqual([])
     b.claude.handles.get(child)!.answer('Sidebar indent fixed.')
     await eventually(() => info(b, child).state !== 'working')
@@ -921,7 +921,7 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     expect(info(c, cut)).toMatchObject({ state: 'idle', interruption: { reason: 'quit' } })
   })
 
-  // #1966 review: a turn that ends before the Continue's send has returned still carries the cut line, and the mark does not outlive it
+  // #1966: a turn that ends before the Continue's send has returned still carries the cut line, and the mark does not outlive it
   it('a continued turn that ends at once carries the cut line on that turn, not on a later one', async () => {
     const f = folder()
     const a = host({ updateResume: f })
@@ -1072,9 +1072,9 @@ describe("a turn a linked hub's update cut (#1618)", () => {
     expect(stopNoticesTo(parent)[0]!.body).toContain('Centralu could not continue')
     expect(answersTo(parent, child)).toEqual([])
     expect(f.ids()).toBeNull()
-    // The stopped mark is a row too: past the listed one (#1626 review 1b)
+    // The stopped mark is a row too: past the listed one (#1626)
     expect(store.messages.nextSeq(child) - 1).toBeGreaterThan(listedAt)
-    // No longer named to a hub as going on
+    // Not named to a hub as going on
     expect(b.mgr.tenure.updateContinued()).toEqual([])
   })
 })

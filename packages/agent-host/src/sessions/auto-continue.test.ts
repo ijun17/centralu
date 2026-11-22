@@ -111,7 +111,8 @@ describe('a turn the network stopped (#2238)', () => {
 
   it(`is left for the person after ${MAX_TRIES.network} continues that the network ended again, each try waiting longer than the one before`, async () => {
     const { a, id, handle } = await cutByNetwork()
-    // The probe answers, but the turn fails again (#1415 review: a gateway that answers HEAD and drops the API's requests spent the tries in 75 s)
+    // The probe answers, but the turn fails again (#1415: a gateway that answers HEAD and drops the API's requests;
+    // with waits that do not grow, it spends the tries in 75 s)
     online = true
     for (let i = 1; i <= MAX_TRIES.network; i++) {
       const step = PROBE_STEPS_MS[Math.min(i - 1, PROBE_STEPS_MS.length - 1)] ?? PROBE_STEPS_MS[0]
