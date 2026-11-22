@@ -18,21 +18,24 @@ import { removeTree, removeWithin } from './remove-tree.js'
  *
  * A run that was killed outright leaves its folder (no teardown ran); the next run removes the ones older than a day.
  *
- * Short names (`cr-`, `ct-`, `data`): macOS limits a socket path to 103 characters, and the keeper tests make theirs in here.
+ * Short names (`cr-`, `ct-`, `data`), and on macOS `/tmp` rather than its per-user temporary folder (49 characters):
+ * macOS limits a socket path to 103 characters, and the keeper tests make theirs in here; the Antigravity tests that act as
+ * Windows make paths in here that Windows limits to 118 (`WINDOWS_TEMP_MAX` in adapters/antigravity/agent-files.ts).
  */
 export default async function setup(): Promise<() => Promise<void>> {
+  const base = process.platform === 'darwin' ? '/tmp' : tmpdir()
   const old = Date.now() - 24 * 3600_000
-  const names = await readdir(tmpdir()).catch(() => [])
+  const names = await readdir(base).catch(() => [])
   await Promise.all(
     names
       .filter((n) => /^cr-[A-Za-z0-9]{6}$/.test(n))
       .map(async (n) => {
-        const path = join(tmpdir(), n)
+        const path = join(base, n)
         const made = (await stat(path).catch(() => null))?.mtimeMs
         if (made !== undefined && made < old) await removeWithin(path, 3000).catch(() => {})
       }),
   )
-  const root = mkdtempSync(join(tmpdir(), 'cr-'))
+  const root = mkdtempSync(join(base, 'cr-'))
   process.env.CC_TEST_RUN_TMP = root
   // Before any worker needs a fake program: the compile is slow on a cold runner and must not run inside a test's hook
   buildLauncherEarly()
