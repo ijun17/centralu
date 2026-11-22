@@ -72,19 +72,24 @@ describe('what the ACP tools keep alike', () => {
 })
 
 describe('what an ACP tool says about its usage (#1623)', () => {
-  it('never has listUsage, the one definition of a tool that reports no limits; localUsage is only what its profile gives', () => {
+  it('has listUsage and localUsage only as its profile gives them: listUsage absent is the one definition of a tool that reports no limits', async () => {
     expect('listUsage' in new FakeAdapter(profile)).toBe(false)
     expect(new FakeAdapter(profile).localUsage).toBeUndefined()
-    const given = new FakeAdapter({ ...profile, localUsage: async () => ({ plan: 'Free' }) })
-    expect('listUsage' in given).toBe(false)
-    expect(given.localUsage).toBeTypeOf('function')
+    const local = new FakeAdapter({ ...profile, localUsage: async () => ({ plan: 'Free' }) })
+    expect('listUsage' in local).toBe(false)
+    expect(local.localUsage).toBeTypeOf('function')
+    const limits = new FakeAdapter({ ...profile, listUsage: async () => ({ plan: null, windows: [], daily: [] }) })
+    await expect(limits.listUsage?.()).resolves.toEqual({ plan: null, windows: [], daily: [] })
   })
 
-  it("is Cursor's and OpenCode's own: a local usage and no limits", () => {
+  it("is Cursor's and OpenCode's own: a local usage and no limits; Antigravity's agent says its limits", () => {
     for (const p of [cursorProfile(), openCodeProfile()]) {
       const a = new FakeAdapter(p)
       expect('listUsage' in a).toBe(false)
       expect(a.localUsage).toBeTypeOf('function')
     }
+    const agy = new FakeAdapter(antigravityProfile())
+    expect(agy.listUsage).toBeTypeOf('function')
+    expect(agy.localUsage).toBeUndefined()
   })
 })
