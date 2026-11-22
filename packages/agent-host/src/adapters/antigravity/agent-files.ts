@@ -49,9 +49,22 @@ export function agyPlatformKey(platform: Platform = HOST_PLATFORM, arch: string 
  *     .sign-in-<owner>-<random>/  one process's browser helper, its address and its TEMP if not a session's (removed when
  *                            it ends; in `spareFolder` where the data folder's path cannot be put in `BROWSER`)
  *     tmp/<session>/         a session's TEMP (`sessionTemp`), until the session is deleted for good
+ *     usage/                 the folder the usage read runs in (`readAgyUsage`): what the agent writes at `session/new` stays out of projects
+ *     usage-session.json     the conversation that read keeps, opened again by the next one
  *
  * `<owner>` names the host process that made the folder (`ownerTag`), so another host never removes it while that one runs
  */
+/** Where the usage read runs (`usage/`), and the conversation it keeps for the next read (`usage-session.json`), if any */
+export async function usagePlace(home: AgyHome): Promise<{ cwd: string; kept: string | null; keep(sessionId: string): Promise<void> }> {
+  const cwd = resolve(join(home.root, 'usage'))
+  await mkdir(cwd, { recursive: true })
+  const file = join(home.root, 'usage-session.json')
+  const kept = await readFile(file, 'utf8')
+    .then((text) => asObj(JSON.parse(text)).sessionId)
+    .catch(() => null)
+  return { cwd, kept: typeof kept === 'string' && kept !== '' ? kept : null, keep: (sessionId) => writeFile(file, `${JSON.stringify({ sessionId })}\n`) }
+}
+
 export type AgyHome = {
   root: string
   /** The installed version's folder */

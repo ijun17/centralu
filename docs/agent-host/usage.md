@@ -82,6 +82,25 @@ from `opencode stats` (boxed tables read by their labels: sessions, messages, to
 - Measured on Windows (agent 2026.10.22, opencode 1.19.4): `agent about` 1.6 to 2.3 s, `opencode stats` 0.8 to 1.3 s; the recorded
   outputs (email replaced) are the parsers' test input.
 
+**Antigravity's limits (#2442).** The one ACP tool with `listUsage()`: a profile gives it (`AcpProfile.listUsage`) when its
+agent says the account's limits, and Cursor's and OpenCode's do not. Antigravity's agent answers "/usage" with one markdown
+message and no model turn (measured on 1.4.3, macOS: no tool call, no thought, `end_turn`, and the quota still 100% after). Its
+"Quota Limits" section lists model groups, each with its weekly and five-hour limits as "<n>% remaining (resets <date> UTC)";
+each limit is a window scoped to its group, labelled without "Limit Remaining" ("Weekly", "Five Hour"). The parser
+(`adapters/antigravity/usage.ts`) refuses the whole answer on any line of a form not measured, saying which kind of line,
+never its text; the plan is the one the sign-in said, not read again.
+- *Where it runs.* A process of its own, never a session's: "/usage" in a session would be a turn in the person's conversation.
+  It runs in the tool's `usage/` folder, so what the agent writes at `session/new` (#2320) stays out of projects and its
+  conversation out of every project's `session/list`. Its sign-in is the agent's, under Centralu's `GEMINI_HOME`; one that is
+  gone turns the line signed out, as a session's does. One read at a time, bounded at 12 s, which ends the process it started.
+- *What it leaves.* The read keeps its conversation (`usage-session.json`) and opens it again with `session/resume`; a resume
+  that fails falls back to `session/new` in the same process and keeps the new one. Measured on 1.4.3 (macOS, twelve reads over
+  six processes, 0.4 to 0.9 s each): resume needs no `authenticate`, replays nothing, and the conversation's files did not grow,
+  so "/usage" is not kept as a turn. A conversation is four files under `GEMINI_HOME`; a new one is left only when a resume
+  fails. The host asks at most once a minute (`ToolQueries.usageFor` keeps an answer 60 s), and only while a window shows the usage.
+- *Which account.* No `account()`: Antigravity's sign-in is the machine's own Centralu's (plan §0), so a linked machine's usage
+  is read there.
+
 Usage is an **account** property, not a session or directory one, which is why `listUsage()`
 takes no arguments — the answer is the same whichever folder you ask from. Only subscription
 limits are in scope; metered credits are not.

@@ -82,12 +82,15 @@ describe('what an ACP tool says about its usage (#1623, #2459)', () => {
     await expect(given.localUsage?.()).resolves.toEqual({ plan: 'Free' })
   })
 
-  it("is Cursor's limits read with its own sign-in and its plan from its own command; OpenCode's local totals and no limits", () => {
+  it("is Cursor's limits read with its own sign-in and its plan from its own command; OpenCode's local totals and no limits; Antigravity's agent says its limits", () => {
     const cursor = new FakeAdapter(cursorProfile())
     expect(cursor.listUsage).toBeTypeOf('function')
     expect(cursor.localUsage).toBeTypeOf('function')
     const openCode = new FakeAdapter(openCodeProfile())
     expect(openCode.listUsage).toBeUndefined()
     expect(openCode.localUsage).toBeTypeOf('function')
+    const agy = new FakeAdapter(antigravityProfile())
+    expect(agy.listUsage).toBeTypeOf('function')
+    expect(agy.localUsage).toBeUndefined()
   })
 })
