@@ -19,6 +19,7 @@ import { autoNotice, bare, carriedPreset, remotePreset, remoteWorktreeLine, show
 import { ASK_THE_PERSON, START_AGENT_CALL_MS, START_AGENT_SETUP_MS } from './start-agent-terms.js'
 import { labelOf } from './transcript-view.js'
 import { raceTimeout } from '../timing.js'
+import type { NoteSent } from '../mail/tool.js'
 
 /**
  * A child start_agent started on a linked machine (#1038), as the hub keeps it: the machine's session (its qualified
@@ -431,7 +432,7 @@ export class RemoteAgents {
    * A note for the child across the link (the caller's `mail` with `kind: "note"`, #2493): a message that needs no reply, written quiet there, with
    * no task and no report. Refused as new work is: a child above its caller, or a caller the gate refuses
    */
-  async note(callerId: string, rec: RemoteAgent, text: string): Promise<{ ok: true; messageId: string; name: string } | { ok: false; error: string }> {
+  async note(callerId: string, rec: RemoteAgent, text: string): Promise<NoteSent> {
     const refused = aboveCallerError(rec.name, rec.preset ?? 'normal', this.callerPreset(callerId)) ?? this.gateError(callerId)
     if (refused) return { ok: false, error: refused }
     const tasks = this.host.linkedTasks

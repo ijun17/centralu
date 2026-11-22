@@ -560,7 +560,10 @@ export class MessageService {
     })
   }
 
-  /** `mail done` (D8): as a recipient, no answer is needed; as the sender, the message is withdrawn for every unsettled recipient */
+  /**
+   * `mail done` (D8): as a recipient, no answer is needed; as the sender, the message is withdrawn for every unsettled recipient. A task's receiver
+   * settles nothing: `task` says the tool claims it for the running turn (`MailDelivery.claim`, #2493)
+   */
   done(by: string, id: string): { settled: number; how: 'done' | 'withdrawn' | 'none' | 'unwatched' | 'task' } {
     return this.run(() => {
       const m = this.records.message(id)

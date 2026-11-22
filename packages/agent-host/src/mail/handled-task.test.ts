@@ -114,3 +114,41 @@ describe('a task marked handled by its receiver (#2493)', () => {
     expect(w.store.mailbox.reportsOn(a.id)).toEqual([])
   })
 })
+
+describe('the delivery of a claimed task and of a note to a started child (#2493)', () => {
+  it('leaves a claimed task its turn did not take queued for the turn after, which answers it', async () => {
+    const w = started()
+    w.mail.task(A, B, { text: 'start on #12', origin: 'agent_session', delivered: false })
+    await w.advance(2_000)
+    w.states.set('b', inTurn)
+    const a = w.mail.task(A, B, { text: 'and review #13', origin: 'agent_session', delivered: false })
+    await w.advance(5_000)
+    expect(await handled(w, a.id)).toContain('is answered by this turn')
+    // The tool did not fold it in: it waits there for a turn after, and this turn's end does not answer it
+    w.delivery.turnInputs(B, { took: [], finished: true })
+    w.endTurn('b')
+    w.mail.lastResponse(B, { body: () => 'The session ended its turn.', released: false, answers: () => true, queued: w.delivery.queuedFor(B) })
+    expect(w.row(a.id, B)?.settled).toBeNull()
+    expect(w.delivery.queuedFor(B).has(a.id)).toBe(true)
+  })
+
+  it('gives a task that wakes a session no line about joining a running turn, and a quiet note no wake of its own', async () => {
+    const w = started()
+    const t = w.mail.task(A, B, { text: 'start on #12', origin: 'agent_session', delivered: false })
+    await w.advance(2_000)
+    const wake = w.to('b')[0]?.input.text ?? ''
+    expect(wake).toContain(t.id)
+    expect(wake).not.toContain('joined your running turn')
+    endAtRest(w)
+    const given = w.to('b').length
+    const note = w.mail.task(A, B, { text: 'fyi: rebase before review', origin: 'agent_session', delivered: false, note: true })
+    await w.advance(60_000)
+    expect(w.to('b')).toHaveLength(given)
+    expect(w.row(note.id, B)?.deliveredAt).toBeNull()
+    // It rides the next wake, and asks for no report
+    w.mail.send(C, { to: [B], text: 'which branch?', needsReply: true })
+    await w.advance(60_000)
+    expect(w.to('b').at(-1)?.input.text).toContain(note.id)
+    expect(w.store.mailbox.watchedTo(B).map((r) => r.messageId)).not.toContain(note.id)
+  })
+})

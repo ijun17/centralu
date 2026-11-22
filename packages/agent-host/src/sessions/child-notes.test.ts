@@ -34,4 +34,12 @@ describe('a note for a session the caller started (#2493)', () => {
     expect(await sendNote(w.mgr, caller, await session('auto', caller), 'x')).toMatchObject({ ok: false, error: expect.stringContaining('more permissions') })
     expect(await sendNote(w.mgr, caller, await session('normal'), 'x')).toBeNull()
   })
+
+  it('to a child whose seat reads no mail says a note cannot reach it, not that it is busy', async () => {
+    wireHostMail(w.mgr, w.store)
+    const caller = await session('normal')
+    const child = await session('normal', caller)
+    vi.spyOn(w.mgr.mail, 'canReadMail').mockImplementation((id) => id !== child)
+    expect(await sendNote(w.mgr, caller, child, 'fyi')).toMatchObject({ ok: false, error: expect.stringContaining('takes no mail, so a note cannot reach it: send it work instead') })
+  })
 })

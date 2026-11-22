@@ -68,6 +68,9 @@ export type MailToolResult = { text: string; isError?: boolean }
 export type AskerFacts = { name: string; project: string | null; trusted: boolean }
 
 /** What the tool reads of the host (§16 M3a; M3b adds the session list and name resolution) */
+/** A note for a session the caller started, as `MailToolHost.note` answers it: written, or refused with why (#2493) */
+export type NoteSent = { ok: true; messageId: string; name: string } | { ok: false; error: string }
+
 export type MailToolHost = {
   /** The calling session: its address, and the session that started it (`parent`, D16) */
   caller(sessionId: string): { address: string; askedBy: string | null; fromHub?: boolean } | undefined
@@ -89,7 +92,7 @@ export type MailToolHost = {
   /** A send that is work for a session the caller started (`AgentSessionActions.sendWork`, #1948), or null for plain mail */
   work?(callerId: string, target: string, text: string, ifBusy: IfBusy | undefined, signal?: AbortSignal): Promise<MailToolResult | null>
   /** A note for a session the caller started (`AgentSessionActions.sendNote`, #2493), or null for plain mail */
-  note?(callerId: string, target: string, text: string): Promise<{ ok: true; messageId: string; name: string } | { ok: false; error: string } | null>
+  note?(callerId: string, target: string, text: string): Promise<NoteSent | null>
   /** The receiver's running turn does task `id` (`MailDelivery.claim`, #2493) */
   claim?(address: string, id: string): boolean
   /** The watches the caller keeps (docs/plans/mailbox.md §18.2): `watch` sets one, `close` with its id cancels it, `inbox` lists them */

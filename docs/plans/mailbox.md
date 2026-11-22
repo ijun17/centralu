@@ -1995,7 +1995,7 @@ A task a turn took in while it ran came after the work that turn was doing began
 session says that turn does it. The frame that gives a task into a running turn says how, in one line per task: `<id> joined your running
 turn: if this turn does it, <handled call> lets this turn's report answer it.` That line is 84 characters around the id and the call (about 30 more for a plain `mail(action="handled", thread=...)`). The
 receiver's `handled` on a task it holds claims it for the running turn (`MailDelivery.claim`, #2493). The claim lives with the turn's joined
-inputs, in memory. A task given again and waiting is delivered into that turn. At the turn's end the claimed task is not given again, and the
+inputs, in memory; a claimed input the turn did not take stays queued in the tool, and the turn after answers it. A task given again and waiting is delivered into that turn. At the turn's end the claimed task is not given again, and the
 last response answers it, in the one report per giver. `handled` with no turn running, or on a task queued in the tool for a turn after,
 claims nothing, and says the task is answered by the report of the turn it runs in. Otherwise, when the turn
 ends as a turn does (not stopped, and not cut to be continued), the task is undelivered and given again at rest (`MailboxRecords.undeliver`
@@ -2273,7 +2273,7 @@ they do not go in.
 `note` from `agent_session`), so it wakes nothing and rides the child's next turn. It is no task, so no turn is reported and no last
 response answers it. Across a link it goes as the task send's note (`TaskAcross.note`, origin `agent_session`), which the machine writes quiet
 by the same rule. A machine from before this writes it as a note that wakes the child. Otherwise a parent had no way to tell its child something
-without giving it a turn and getting a report back. The note is refused as work is: a child above its caller (`aboveCallerError`), or S15. The
+without giving it a turn and getting a report back. The note is refused as work is: a child above its caller (`aboveCallerError`), S15, or a child a handoff gave away (`handedOverAnswer`). A child whose seat reads no mail is told a note cannot reach it. The
 answer: "Sent <id> to <name> as a note: it reaches it at its next turn and wakes nothing."
 Work for one's own child does not meet the mail guards (`repeat`, `rate_limited`, mail/send-guards.ts), as agent_session send did not: it goes
 through `delegate`, not through a message send.

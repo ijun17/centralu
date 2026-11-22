@@ -83,10 +83,12 @@ describe('what a handoff gave away', () => {
   })
 
   // #1948: agent_session's send told it too; a mail send to that child must, rather than mail a session it no longer follows
-  it('a mail send by the original that stayed hears where the work went, as agent_session did', async () => {
+  it('a mail send or note by the original that stayed hears where the work went, as agent_session did', async () => {
     children.recordHandedOver('child', 'caller', 'heir')
     const flow = new DelegationFlow(hostWith({ meta, children }))
     expect(await flow.actions.sendWork('caller', 'child', 'and the docs')).toMatchObject({ ok: false, error: expect.stringContaining('A handoff gave "Child" [child] to the session that took over from this one, "Heir" [heir].') })
+    // A note too (#2493): plain mail would reach a child the original no longer follows
+    expect(await flow.actions.sendNote('caller', 'child', 'fyi')).toMatchObject({ ok: false, error: expect.stringContaining('A handoff gave "Child" [child]') })
   })
 
   it('a wait the move ended always has an answer, even once the record is gone', () => {

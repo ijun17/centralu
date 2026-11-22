@@ -9,6 +9,7 @@ import type { DelegationHost } from './delegation-host.js'
 import type { DelegationWaits } from './delegation-waits.js'
 import type { ObservedTurns } from './observed-turns.js'
 import type { RemoteAgents } from './remote-agents.js'
+import type { NoteSent } from '../mail/tool.js'
 import { agentState, ownAgents } from './own-agents.js'
 import { aboveCallerError, agentFrame, canMailParent } from './start-agent.js'
 import { agentStartPending, agentStartPersonText, type AgentStartFlow, type StartAgentDelegations } from './start-agent-flow.js'
@@ -189,7 +190,7 @@ export class AgentSessionActions {
    * `mail` with `kind: "note"` to a session the caller started, here or on a linked machine (#2493): a message that needs no reply, given quietly at
    * its next turn (`MessageService.task` with `note`), no task and no report. Null for any other target: the send is plain mail
    */
-  async sendNote(callerId: string, target: string, text: string): Promise<{ ok: true; messageId: string; name: string } | { ok: false; error: string } | null> {
+  async sendNote(callerId: string, target: string, text: string): Promise<NoteSent | null> {
     const remote = target.includes('.') ? this.flow.remote.of(target) : undefined
     if (remote) {
       if (remote.callerId !== callerId) return null
@@ -197,6 +198,9 @@ export class AgentSessionActions {
       const refused = this.host.refusesDelegation(callerId, { sessionId: target, linked: true }, { tool: 'mail', target: `a session on ${machine ?? 'a linked machine'}`, text })
       return refused ? { ok: false, error: refused } : this.flow.remote.note(callerId, remote, text)
     }
+    // A child a handoff gave away is the heir's: the original is told where it went, as for work (#693)
+    const gone = this.flow.handedOverAnswer(callerId, target)
+    if (gone) return gone
     const request = this.host.children.agentStarts.get(target)
     const ended = request?.req.callerId === callerId ? request.ended : undefined
     if (ended && 'childId' in ended) target = ended.childId
