@@ -135,12 +135,11 @@ describe('a script starts a session with a first message', () => {
     expect(read.tasks(PERSON, s.id)).toHaveLength(1)
   })
 
-  it('a stop is the step-1 stop notice: no report, the task released and open, and the thread open', async () => {
+  it("a stop is told by the session's own Inbox row, with no notice besides (#2360): no report, the task released and open, and the thread open", async () => {
     const s = await start({ initialPrompt: 'Run the export' }, 'limited')
     handleOf(s.id)!.event({ type: 'state_change', sessionId: s.id, state: 'waiting_input', reason: INTERRUPTED_BY_TOOL })
-    await w.until(() => stopNotices().length === 1)
-    expect(stopNotices()[0]!.body).toBe("New session's tool interrupted its turn before it answered your message. Send it a message to go on.")
-    expect(stopNotices()[0]!.facts.unanswered).toEqual([{ id: taskOf(s.id)!.id, recipient: addressOf(s.id), why: 'interrupted' }])
+    await w.until(() => read.taskRow(taskOf(s.id)!.id, s.id)?.toldAt != null)
+    expect(stopNotices()).toEqual([])
     expect(reportsOf(s.id)).toEqual([])
     expect(read.taskRow(taskOf(s.id)!.id, s.id)).toMatchObject({ settled: null, releasedWhy: 'interrupted' })
     expect(threadState(s.id)).toBe('open')
