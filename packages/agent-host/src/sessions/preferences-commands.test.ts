@@ -177,11 +177,11 @@ describe('get_preferences', () => {
 describe('auto compact (#1376)', () => {
   it('get_preferences says where agents compact, and set_preferences changes the share and the control, no card', async () => {
     const orc = await mgr.assistant()
-    expect((await run(orc.id, 'get_preferences')).text).toContain("- agents compact at 60% of the model's window, set by Centralu")
+    expect((await run(orc.id, 'get_preferences')).text).toContain("- agents compact at 65% of the model's window, set by Centralu")
 
     const share = await run(orc.id, 'set_preferences', { autoCompact: { share: 0.5 } })
     expect(share.isError).toBeFalsy()
-    expect(share.text).toBe("Now: agents compact at 50% of the model's window, set by Centralu; a session at rest is compacted over 30%; a session is told quietly to call compact_self at 30% and 40%. It reaches a running session when its process next starts.")
+    expect(share.text).toBe("Now: agents compact at 50% of the model's window, set by Centralu; a session at rest is compacted over 40%; a session is told quietly to call compact_self at 35% and 40%. It reaches a running session when its process next starts.")
     expect(await prefs()).toMatchObject({ autoCompact: { controlled: true, share: 0.5 } })
 
     const off = await run(orc.id, 'set_preferences', { autoCompact: { controlled: false } })
@@ -193,17 +193,17 @@ describe('auto compact (#1376)', () => {
 
   it('sets the notices that tell a growing session to call compact_self, and refuses a second share at or above the share agents compact at (#1492)', async () => {
     const orc = await mgr.assistant()
-    expect((await run(orc.id, 'get_preferences')).text).toContain('a session is told quietly to call compact_self at 30% and 50%')
+    expect((await run(orc.id, 'get_preferences')).text).toContain('a session is told quietly to call compact_self at 45% and 55%')
     const set = await run(orc.id, 'set_preferences', { autoCompact: { nudgeFirst: 0.4, nudgeSecond: 0.55 } })
     expect(set.isError).toBeFalsy()
     expect(set.text).toContain('at 40% and 55%')
     expect(await prefs()).toMatchObject({ autoCompact: { nudge: true, nudgeFirst: 0.4, nudgeSecond: 0.55 } })
-    for (const second of [0.6, 0.8]) {
+    for (const second of [0.65, 0.8]) {
       const refused = await run(orc.id, 'set_preferences', { autoCompact: { nudgeSecond: second } })
-      expect(refused.text).toMatch(/Auto compact: .*must be at least 5 points below the share agents compact at \(60%\)/)
+      expect(refused.text).toMatch(/Auto compact: .*must be at least 5 points below the share agents compact at \(65%\)/)
     }
     expect(await prefs()).toMatchObject({ autoCompact: { nudgeSecond: 0.55 } })
-    expect((await run(orc.id, 'set_preferences', { autoCompact: { nudgeSecond: null } })).text).toContain('at 40% and 50%')
+    expect((await run(orc.id, 'set_preferences', { autoCompact: { nudgeSecond: null } })).text).toContain('at 40% and 55%')
     expect((await run(orc.id, 'set_preferences', { autoCompact: { nudge: false } })).text).toContain('a session is not told to call compact_self')
   })
 

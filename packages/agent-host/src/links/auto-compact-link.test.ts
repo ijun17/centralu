@@ -83,17 +83,17 @@ describe('when agents compact on a linked machine (#1376)', () => {
     const hub = await hubHost(machine.port)
     await eventually(() => hub.machine().status === 'connected')
     await eventually(() => machine.mgr.prefs.uiPreferences().autoCompact?.share === 0.5)
-    expect(machine.mgr.prefs.uiPreferences().autoCompact).toEqual({ controlled: true, share: 0.5, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
+    expect(machine.mgr.prefs.uiPreferences().autoCompact).toEqual({ controlled: true, share: 0.5, idleShare: 0.4, nudge: true, nudgeFirst: 0.35, nudgeSecond: null })
 
     // The person turns Centralu's control off on the hub: the machine hands control back too
     await hub.router.handle('prefs.set', { patch: { autoCompact: { controlled: false } } })
     await eventually(() => machine.mgr.prefs.uiPreferences().autoCompact?.controlled === false)
-    expect(machine.mgr.prefs.uiPreferences().autoCompact).toEqual({ controlled: false, share: 0.5, idleShare: 0.3, nudge: true, nudgeFirst: 0.3, nudgeSecond: null })
+    expect(machine.mgr.prefs.uiPreferences().autoCompact).toEqual({ controlled: false, share: 0.5, idleShare: 0.4, nudge: true, nudgeFirst: 0.35, nudgeSecond: null })
 
     // The notices' settings are the hub's too (#1492), also the one that follows the share
     await hub.router.handle('prefs.set', { patch: { autoCompact: { nudge: false, nudgeFirst: 0.4, nudgeSecond: 0.45 } } })
     await eventually(() => machine.mgr.prefs.uiPreferences().autoCompact?.nudgeFirst === 0.4)
-    expect(machine.mgr.prefs.uiPreferences().autoCompact).toEqual({ controlled: false, share: 0.5, idleShare: 0.3, nudge: false, nudgeFirst: 0.4, nudgeSecond: 0.45 })
+    expect(machine.mgr.prefs.uiPreferences().autoCompact).toEqual({ controlled: false, share: 0.5, idleShare: 0.4, nudge: false, nudgeFirst: 0.4, nudgeSecond: 0.45 })
     await hub.router.handle('prefs.set', { patch: { autoCompact: { nudgeSecond: null } } })
     await eventually(() => machine.mgr.prefs.uiPreferences().autoCompact?.nudgeSecond === null)
   })
@@ -107,7 +107,7 @@ describe('when agents compact on a linked machine (#1376)', () => {
     // The share alone moves under the second one: the hub takes the second down with it, and the machine takes all of it
     await hub.router.handle('prefs.set', { patch: { autoCompact: { share: 0.4 } } })
     await eventually(() => machine.mgr.prefs.uiPreferences().autoCompact?.share === 0.4)
-    expect(machine.mgr.prefs.uiPreferences().autoCompact).toEqual({ controlled: true, share: 0.4, idleShare: 0.3, nudge: true, nudgeFirst: 0.2, nudgeSecond: 0.35 })
+    expect(machine.mgr.prefs.uiPreferences().autoCompact).toEqual({ controlled: true, share: 0.4, idleShare: 0.4, nudge: true, nudgeFirst: 0.2, nudgeSecond: 0.35 })
     expect(hub.mgr.prefs.uiPreferences().autoCompact).toEqual(machine.mgr.prefs.uiPreferences().autoCompact)
   })
 

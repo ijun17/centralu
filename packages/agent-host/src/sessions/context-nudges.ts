@@ -3,7 +3,7 @@ import { COMPACT_FLOOR_TOKENS, COMPACT_LABELS } from './self-compaction.js'
 
 /**
  * Telling a session its context is growing (#1492, docs/agent-host/context-compaction.md). An agent cannot see how full its
- * context is (`compact_self`, #1478, only works when the agent thinks of it), so when the context passes a first share (30% of
+ * context is (`compact_self`, #1478, only works when the agent thinks of it), so when the context passes a first share (45% of
  * the model's window by default) Centralu tells it, once, its size and to call `compact_self` with `then` set to what it does
  * next when this step is done (#2024), and once more at a second share below the share the tool compacts at by itself
  * (`nudgeShares`: 10 points below it by default, never at or above it), where that compaction would come in the middle of work.
