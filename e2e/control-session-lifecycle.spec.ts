@@ -355,11 +355,26 @@ test('handoff: the note starts a new session and the old one moves to the sessio
     m.emit({ type: 'state_change', sessionId: sid, state: 'waiting_input' })
   }, id)
 
+  // The five tools a real host lists, as the picker is wider than the dialog only with them (#2473)
+  await page.evaluate(() => {
+    const st = (window as any).__store
+    const first = st.getState().tools[0]
+    const more = [['cursor', 'Cursor'], ['opencode', 'OpenCode'], ['antigravity', 'Antigravity']].map(([name, label]) => ({ ...first, name, label }))
+    st.setState({ tools: [...st.getState().tools, ...more] })
+  })
   await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`handoff-session-${id}`).click()
   // The receiving agent defaults to the current tool. The note comes from the record by default, for a live session
   // too (#694), and the original is archived by default (#1477): asking the agent is chosen, and so is keeping the original
   await expect(page.getByTestId('handoff-tool-claude')).toHaveAttribute('aria-checked', 'true')
+  // Every tool stays inside the dialog and keeps its label on one line, however many rows the picker takes (#2473)
+  const panel = await page.getByRole('radiogroup', { name: 'Hand off to' }).locator('..').boundingBox()
+  const boxes = await page.locator('[data-testid^="handoff-tool-"]').evaluateAll((els) => els.map((el) => el.getBoundingClientRect()))
+  expect(boxes.length).toBeGreaterThan(1)
+  for (const b of boxes) {
+    expect(b.right).toBeLessThanOrEqual(panel!.x + panel!.width)
+    expect(b.height).toBe(boxes[0]!.height)
+  }
   await expect(page.getByTestId('handoff-mode-record')).toHaveAttribute('aria-checked', 'true')
   await expect(page.getByTestId('handoff-delete-toggle').locator('input')).toBeChecked()
   await expect(page.getByTestId('handoff-warning')).toContainText('is archived')

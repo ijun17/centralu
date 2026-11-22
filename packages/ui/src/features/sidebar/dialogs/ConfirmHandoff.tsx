@@ -84,6 +84,7 @@ export function ConfirmHandoff({
         </Badge>
         <Segmented
           label="Hand off to"
+          layout="wrap"
           value={heirTool}
           onChange={setHeirTool}
           className="mt-1"
