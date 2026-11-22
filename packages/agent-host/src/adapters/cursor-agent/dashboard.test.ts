@@ -1,25 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { askDashboard, DASHBOARD_URL } from './dashboard.js'
 import { PERIOD_FREE_RECORDED } from './recordings/dashboard.test-helpers.js'
-import { CursorUsageFailure } from './usage-failure.js'
+import { failureOf } from './usage-failure.test-helpers.js'
 
 const TOKEN = 'header.payload-that-is-secret.signature'
 
 function answering(status: number, body: string, calls: { url: string; init: RequestInit }[] = []): typeof fetch {
   return async (input, init) => {
-    calls.push({ url: String(input), init: init ?? {} })
+    calls.push({ url: input instanceof Request ? input.url : input.toString(), init: init ?? {} })
     return new Response(body, { status })
   }
-}
-
-async function failureOf(p: Promise<unknown>): Promise<CursorUsageFailure> {
-  try {
-    await p
-  } catch (e) {
-    if (e instanceof CursorUsageFailure) return e
-    throw e
-  }
-  throw new Error('did not fail')
 }
 
 describe("asking Cursor's dashboard with the person's token (#2459)", () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { cursorPlanUsage, PERIOD, PLAN, planUsageSnapshot, type PlanUsageDeps } from './plan-usage.js'
 import { PERIOD_FREE_RECORDED, PERIOD_PAID_HAND_MADE, PLAN_FREE_RECORDED, PLAN_PAID_HAND_MADE } from './recordings/dashboard.test-helpers.js'
 import { CursorUsageFailure } from './usage-failure.js'
+import { failureOf } from './usage-failure.test-helpers.js'
 import { CURSOR_USAGE_CONTRACT } from './usage-contract.js'
 
 const json = (text: string): unknown => JSON.parse(text)
@@ -12,16 +13,6 @@ function jwt(claims: object): string {
   return `eyJhbGciOiJIUzI1NiJ9.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.signature`
 }
 const TOKEN = jwt({ sub: 'person', exp: NOW / 1000 + 3600 })
-
-function failureOf(f: () => unknown): CursorUsageFailure {
-  try {
-    f()
-  } catch (e) {
-    if (e instanceof CursorUsageFailure) return e
-    throw e
-  }
-  throw new Error('did not fail')
-}
 
 describe("Cursor's plan usage from its dashboard's answers (#2459)", () => {
   it('reads a paid plan as the CLI shows it: Included, Auto and API, each resetting at the cycle end, the plan by name', () => {
@@ -36,14 +27,14 @@ describe("Cursor's plan usage from its dashboard's answers (#2459)", () => {
     })
   })
 
-  it('says the recorded Free plan reports no limit, never 0%: its limit is 0 while prompts are refused as over it', () => {
-    const f = failureOf(() => planUsageSnapshot(json(PERIOD_FREE_RECORDED), json(PLAN_FREE_RECORDED)))
+  it('says the recorded Free plan reports no limit, never 0%: its limit is 0 while prompts are refused as over it', async () => {
+    const f = await failureOf(() => planUsageSnapshot(json(PERIOD_FREE_RECORDED), json(PLAN_FREE_RECORDED)))
     expect(f.kind).toBe('no-limit')
     expect(f.message).toBe('Cursor does not report a limit for this plan')
   })
 
-  it('says no limit when the answer has no planUsage at all', () => {
-    expect(failureOf(() => planUsageSnapshot({ billingCycleEnd: '1' }, null)).kind).toBe('no-limit')
+  it('says no limit when the answer has no planUsage at all', async () => {
+    expect((await failureOf(() => planUsageSnapshot({ billingCycleEnd: '1' }, null))).kind).toBe('no-limit')
   })
 
   it('takes the included spend of the limit when the total percent is absent, as the CLI does', () => {
@@ -80,9 +71,9 @@ describe("Cursor's plan usage from its dashboard's answers (#2459)", () => {
     expect(plan({ planInfo: { planName: ' Pro ' } })).toBe('Pro')
   })
 
-  it('says the answer could not be read when its shape changed', () => {
+  it('says the answer could not be read when its shape changed', async () => {
     for (const period of [null, 'text', { planUsage: 'x' }, { planUsage: { limit: '2000' } }, { billingCycleEnd: 'soon', planUsage: { limit: 1 } }]) {
-      expect(failureOf(() => planUsageSnapshot(period, null)).kind).toBe('unreadable')
+      expect((await failureOf(() => planUsageSnapshot(period, null))).kind).toBe('unreadable')
     }
   })
 
