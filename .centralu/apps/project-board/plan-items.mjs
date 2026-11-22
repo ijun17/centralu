@@ -12,19 +12,26 @@ const TABLE_ROW = /^\s*\|/
 const TABLE_RULE = /^\s*\|[\s:|-]+\|\s*$/
 // A table of work: its first column is the step, unit or pull request ("| # | Area | What | Issue |", "| Step | What | Lands |")
 const WORK_TABLE = /^(?:#|no\.?|steps?|units?|prs?|pull requests?|items?|phases?|parts?)$/i
-// Numbered lines here are how to see a bug, not work planned
-const NOT_PLANS = /reproduc|how to get there/i
-// In a plan, numbered lines are as often rules, facts or the steps of an algorithm: only those under a heading of work count
-const PLAN_WORK = /pull requests?|\bPRs?\b|\bsteps\b|work units?|follow-?ups?|\blater\b|\bphases\b|what is left/i
+// Numbered lines are as often facts, causes, options, a bug's steps or a plan's rules: only those under a heading of work are planned
+const WORK = /pull requests?|\bPRs?\b|\bsteps\b|work units?|follow-?ups?|\blater\b|\bphases\b|what is left|\bproposals?\b|\bto ?do\b|\bfix(?:es)?\b|\bplan\b|\bchanges\b|\bscope\b|what to do/i
+// …but not alternatives to pick from: one is built, the rest are not left over
+const CHOICE = /pick one|\boptions?\b|alternatives|\beither\b/i
 
 const firstCell = (row) => row.replace(TABLE_ROW, '').split('|')[0].replace(/[*_`]/g, '').trim()
 
+/** The fenced block open after `line` (its marker, or null), given the one open before it. */
+function fenceAfter(fence, line) {
+  const f = FENCE.exec(line)
+  if (!f || (fence && (f[1][0] !== fence[0] || f[1].length < fence.length))) return fence
+  return fence ? null : f[1]
+}
+
 /**
- * The items a Markdown text plans, in order: task-list boxes; numbered lines (in an issue's body, but under a heading on how to
- * reproduce; in a plan's section, only under a heading of work); and the numbered rows of a table of work. Each is
- * `{ text, state, where }`; `text` takes the item's indented continuation lines. Fenced code and HTML comments are not read.
+ * The items a Markdown text plans, in order: task-list boxes, and under a heading of work its numbered lines and the numbered rows
+ * of a table of work. Each is `{ text, state, where }`; `text` takes the item's indented continuation lines. Fenced code and HTML
+ * comments are not read.
  */
-export function planItems(markdown, source = 'the body', { plan = false } = {}) {
+export function planItems(markdown, source = 'the body') {
   const items = []
   let heading = ''
   let fence = null
@@ -33,13 +40,12 @@ export function planItems(markdown, source = 'the body', { plan = false } = {}) 
   let workTable = false
   const lines = String(markdown ?? '').replace(/\r\n?/g, '\n').replace(/<!--[\s\S]*?-->/g, '').split('\n')
   for (const line of lines) {
-    const f = FENCE.exec(line)
-    if (f && (!fence || (f[1][0] === fence[0] && f[1].length >= fence.length))) {
-      fence = fence ? null : f[1]
+    const next = fenceAfter(fence, line)
+    if (fence || next) {
+      fence = next
       last = null
       continue
     }
-    if (fence) continue
     const h = HEADING.exec(line)
     if (h) {
       heading = h[2]
@@ -50,9 +56,9 @@ export function planItems(markdown, source = 'the body', { plan = false } = {}) 
     else if (TABLE_RULE.test(line) && TABLE_ROW.test(prev)) workTable = WORK_TABLE.test(firstCell(prev))
     prev = line
     const task = TASK.exec(line)
-    const numbers = plan ? PLAN_WORK.test(heading) : !NOT_PLANS.test(heading)
-    const numbered = !task && numbers ? NUMBERED.exec(line) : null
-    const row = !task && !numbered && workTable && /^\d/.test(firstCell(line)) ? line : null
+    const work = WORK.test(heading) && !CHOICE.test(heading)
+    const numbered = !task && work ? NUMBERED.exec(line) : null
+    const row = !task && !numbered && work && workTable && /^\d/.test(firstCell(line)) ? line : null
     if (task || numbered || row) {
       last = { text: (task?.[2] ?? numbered?.[0] ?? row).trim(), ticked: task ? task[1] !== ' ' : false, where: heading ? `${source}, "${heading}"` : source }
       items.push(last)
@@ -62,17 +68,23 @@ export function planItems(markdown, source = 'the body', { plan = false } = {}) 
   return items.map(({ ticked, ...i }) => ({ ...i, state: itemState(i.text, ticked) }))
 }
 
-// A plan's section cited in an issue: docs/plans/<name>.md §n, …#anchor or … "Heading", one section per citation
-const CITED = new RegExp(String.raw`(?:^|[^\w.-])(?:[\w.-]+/)*${PLANS.split('/').at(-1)}/([\w.-]+\.md)(?:#([\w-]+)|\s*§\s*(\d+(?:\.\d+)*)|\s+"([^"\n]+)")`, 'g')
+// A plan named in an issue (docs/plans/<name>.md, a link or an address of it), and the section it cites, if any: §n, #anchor or
+// "Heading", one section per citation
+const NAMED = new RegExp(String.raw`(?:^|[^\w.-])(?:[\w.-]+/)*${PLANS.split('/').at(-1)}/([\w.-]+\.md)(?:#([\w-]+)|\s*§\s*(\d+(?:\.\d+)*)|\s+"([^"\n]+)")?`, 'g')
 
-/** The plan sections a text cites, once each: `{ file, section }`, where `section` is `§n`, `#anchor` or `"Heading"`. */
+/** The plan sections a text cites, once each (`{ file, section }`, where `section` is `§n`, `#anchor` or `"Heading"`), and the plans it names with no section cited. */
 export function citedPlans(text) {
-  const out = new Map()
-  for (const m of String(text ?? '').matchAll(CITED)) {
-    const section = m[2] ? `#${m[2]}` : m[3] ? `§${m[3]}` : `"${m[4]}"`
-    out.set(`${m[1]} ${section}`, { file: m[1], section })
+  const cited = new Map()
+  const named = new Set()
+  for (const m of String(text ?? '').matchAll(NAMED)) {
+    if (!m[2] && !m[3] && !m[4]) named.add(m[1])
+    else {
+      const section = m[2] ? `#${m[2]}` : m[3] ? `§${m[3]}` : `"${m[4]}"`
+      cited.set(`${m[1]} ${section}`, { file: m[1], section })
+    }
   }
-  return [...out.values()]
+  const sections = [...cited.values()]
+  return { sections, bare: [...named].filter((f) => !sections.some((c) => c.file === f)) }
 }
 
 // GitHub's anchor for a heading: lower case, punctuation but hyphens out, spaces to hyphens
@@ -93,9 +105,9 @@ export function planSection(markdown, section) {
   let level = 0
   let start = -1
   for (const [i, line] of lines.entries()) {
-    const f = FENCE.exec(line)
-    if (f && (!fence || (f[1][0] === fence[0] && f[1].length >= fence.length))) fence = fence ? null : f[1]
-    const h = fence || f ? null : HEADING.exec(line)
+    const next = fenceAfter(fence, line)
+    const h = fence || next ? null : HEADING.exec(line)
+    fence = next
     if (!h) continue
     if (start >= 0 && h[1].length <= level) return lines.slice(start, i).join('\n')
     if (start < 0 && named(h[2])) [start, level] = [i, h[1].length]

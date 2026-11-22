@@ -270,8 +270,8 @@ export const multiClosingWarnings = (text, what = 'The description') =>
 const PLACEHOLDER = /^(?:n\/?a|-+|tbd|todo|none\??|\?+|\.+|…)$/i
 
 // --- Planned items (#2488) -------------------------------------------------------------------------
-// Not inside a path (plans/x.md#13-heading is an anchor) or an HTML entity (&#35;)
-const CARRIER = new RegExp(String.raw`(?<![\w&/.-])${ISSUE_REF}\b|https?://github\.com/[\w.-]+/[\w.-]+/pull/\d+`, 'i')
+// Not a file's anchor (plans/x.md#13-heading, docs/plans/x.md#13) nor an HTML entity (&#35;)
+const CARRIER = new RegExp(String.raw`(?<![\w&/.-])(?![\w.-]+\.md#)${ISSUE_REF}(?![\w-])|https?://github\.com/[\w.-]+/[\w.-]+/pull/\d+`, 'i')
 const DROPPED = /\bdropped:\s*\S/i
 
 /** Where a planned item went, by its own text: ticked, an issue or pull request named, or dropped with a reason; null while it is open. */
@@ -283,7 +283,7 @@ export function itemState(text, ticked = false) {
 
 /** What "Planned, not built" may say: "None" (a plan's last pull request: "Plan items left: none"), or lines that each name the issue carrying an item or say "dropped: <why>". */
 export function plannedProblems(text, heading) {
-  if (/^(?:plan items left:\s*)?none\.?$/i.test(text)) return []
+  if (/^(?:plan items left:\s*)?none(?:\.|:[^\n]*)?$/i.test(text)) return []
   if (!text) return [`"${heading}" is empty. Name each planned item this change does not build with the issue that carries it (#N), or "dropped: <why>"; or "None" when it builds all of it.`]
   const bad = text.split('\n').filter((l) => l.trim() && !itemState(l))
   return bad.length ? [`"${heading}" has ${bad.length === 1 ? 'a line' : 'lines'} naming no issue (#N) and not saying "dropped: <why>": ${bad.map((l) => `"${l.trim().slice(0, 80)}"`).join(', ')}.`] : []

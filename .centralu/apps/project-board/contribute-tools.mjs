@@ -191,7 +191,9 @@ export async function openPr({ title, head, base, draft, repo, sections, dryRun,
   const template = await templateOf(r, target)
   if (template === null) throw new GitHubError('setup', `${r} has no pull request template on ${target} to fill (looked for ${RULES.prTemplates.join(', ')}). Nothing was opened.`)
   const given = { ...sections }
-  for (const [k, heading] of Object.entries(PR_SECTIONS)) if (named[k] !== undefined) given[heading] = named[k]
+  // A base cut before the template had "Planned, not built" (a stack's) has no such heading: plannedNotBuilt is left out there, not refused
+  const heads = templateSections(template).map((h) => headingKey(h.heading))
+  for (const [k, heading] of Object.entries(PR_SECTIONS)) if (named[k] !== undefined && (k !== 'plannedNotBuilt' || heads.includes(headingKey(heading)))) given[heading] = named[k]
   // Without a Closes heading the template asks for none; a closes given anyway is refused as any heading it lacks
   const closes = named.closes !== undefined || hasClosesHeading(template) ? closesOf(named.closes, r) : { issues: [] }
   const handWritten = Object.keys(sections ?? {}).some((k) => headingKey(k) === headingKey(CLOSES_HEADING))

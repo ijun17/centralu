@@ -55,7 +55,7 @@ function pushTo(repo: ReturnType<typeof integrateRepo>, branch: string, files: R
 
 const TEMPLATE = readFileSync(join(REPO_ROOT, '.github/PULL_REQUEST_TEMPLATE.md'), 'utf8')
 /** What a session hands over: the branch and the record's text */
-const handOver = (branch: string, extra: Record<string, unknown> = {}) => ({ branch, title: 'docs(guide): say how the guide is read', why: 'The guide did not say it.', notExercised: 'Nothing', plannedNotBuilt: 'None', closes: { none: 'a guide change with no issue of its own' }, owner: 'writer', ...extra })
+const handOver = (branch: string, extra: Record<string, unknown> = {}) => ({ branch, title: 'docs(guide): say how the guide is read', why: 'The guide did not say it.', notExercised: 'Nothing', closes: { none: 'a guide change with no issue of its own' }, owner: 'writer', ...extra })
 const integrateQuick = () => [ghCheck('full tier', 'skipped', 10), ghCheck('verify', 'success', 11), ghCheck('windows tests', 'success', 12)]
 const integrateBatch = (suite: number) => [suiteCheck('full tier', 'skipped', suite * 10, suite), suiteCheck('verify', 'success', suite * 10 + 1, suite), suiteCheck('windows tests', 'success', suite * 10 + 2, suite)]
 
@@ -97,6 +97,8 @@ describe('the integrator lands an auto-tier branch without a pull request from i
     expect(body).toContain('## Why\n\nThe guide did not say it.')
     expect(body).toMatch(/## Verified\n\nTier: auto, from `docs\/guide\.md` \(docs\), `docs\/new\.md` \(docs\)\. Judged by the integrator \(#1259 step 3\) from the diff of docs\/guide at [0-9a-f]{7} against main at [0-9a-f]{7}/)
     expect(body).toContain('## Not exercised\n\nNothing')
+    // Not given, it is "None": an auto-tier change rarely builds part of a plan
+    expect(body).toContain('## Planned, not built\n\nNone')
     expect(itemsOnDisk()).toMatchObject([{ pr: 600, owner: 'writer', author: 'writer', auto: { branch: 'docs/guide', head: repo.heads['docs/guide'], main: repo.main } }])
     // A draft, which GitHub and every version of the queue refuse to merge: only this queue lands it
     expect(gh().prs['600']).toMatchObject({ isDraft: true, mergeStateStatus: 'DRAFT' })

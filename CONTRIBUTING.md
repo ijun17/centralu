@@ -568,9 +568,9 @@ pull request carries its own record in **Verified**; neither is repeated in pull
   merge. `open_pr` writes the keywords from `closes`, and `queue_merge` refuses a section that
   does neither, and a stack whose top does not close what its lower pull requests do: they close as
   landed, so only the top's keywords close anything. It also refuses to close an open issue whose
-  planned items (task-list boxes, numbered steps, numbered table rows, in its body or a plan section it
-  cites) are not each ticked, carried by an issue or pull request (`#N`), or `dropped: <why>`: GitHub
-  closes it on merge whatever it still plans. Account for them in the issue, or write `None: part of #N`
+  planned items (task-list boxes, and numbered steps or table rows under a heading of work such as
+  Proposal or To do, in its body or a plan section it cites) are not each ticked, carried by an issue
+  or pull request (`#N`), or `dropped: <why>`: GitHub closes it on merge whatever it still plans. Account for them in the issue, or write `None: part of #N`
   and close it later with `close_issue`.
 - **A move-only refactor lands when nothing is in its way.** A pull request that relocates or
   splits files (moving a module, splitting a test file) conflicts with every open pull request that

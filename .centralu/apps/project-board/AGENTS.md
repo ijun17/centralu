@@ -1082,32 +1082,37 @@ and refuses with every reason at once, sending nothing.
 - **`file_issue`** (`title`, `body`, `labels?`, `repo?`, `dryRun?`) files through `gh api … /issues`.
 - **`close_issue`** (`item`, `comment`, `reason?`, `items?`, `dryRun?`; `close-tools.mjs`, the reading in `plan-items.mjs`, #2488):
   the one way agents close an issue. Umbrella issues closed by hand left planned items that no pull request built and no issue
-  carried, and nobody owned them after. The items an issue plans are, in its body: task-list boxes, numbered lines (not under a
-  heading on how to reproduce: a bug's steps), and the numbered rows of a table whose first column is `#`, Step, Unit, PR, Item or
-  Phase (a table of measurements is not work). Then, in each plan section the body cites (`docs/plans/<name>.md §n`, `…#anchor` or
-  `… "Heading"`, one section per citation; `PLANS` in plan-items.mjs), read from the default branch: its boxes, and the numbered
-  lines and rows under a heading of work (pull requests, steps, follow-ups, later, phases). A plan's other numbered lists are rules,
-  facts or the steps of an algorithm, and a section an issue cites as background would never close otherwise. A plan named without a
-  section is not read: an issue may name a plan in passing, and every step of mailbox.md would then hold it open. `§n` names a
-  heading by its number, compared whole (`§1` is not `1.2`); a numbered list item is no section here. An item went somewhere when it
-  is ticked, names an issue or pull request (`#N`, `owner/repo#N`, an address) or says `dropped: <why>`, or when `items` gives it one
-  of the last two by the number the refusal lists. Refused, with nothing sent, while one went nowhere, while a cited section does not
-  read (the issue's citation is corrected first, else its plan would close unchecked), on an empty or non-English comment, on a pull
-  request, or on a closed issue. The comment, posted before the close, lists every item and where it went, so a closed issue always
-  carries its record; a close that fails after it leaves the issue open, and closing again posts the record a second time.
-  `reason: "not planned"` closes with the items left dropped with the issue, said so in the comment. The check is textual: it does
-  not ask whether a `#N` is open, on the same subject or not the issue itself. Declares no risk: it always asks.
+  carried, and nobody owned them after. The items an issue plans are its task-list boxes, and, under a heading of work (proposal,
+  to do, steps, fix, plan, changes, scope, pull requests, follow-ups, later, phases; not one of options to pick from), its numbered
+  lines and the numbered rows of a table whose first column is `#`, Step, Unit, PR, Item or Phase. Elsewhere numbered lines are
+  facts, causes, observations, a bug's steps or a plan's rules: counted everywhere, the last 200 issues closed as completed would
+  have refused 45 of their fixes (9 under this rule, each a to-do or proposal a later pull request could have left half done).
+  They are read in the body, then in each plan section the body cites (`docs/plans/<name>.md §n`, `…#anchor` or `… "Heading"`,
+  one section per citation; `PLANS` in plan-items.mjs), read from the default branch. A plan named without a section is not read
+  (an issue may name a plan in passing, and every step of mailbox.md would then hold it open), and the answer warns of it. `§n`
+  names a heading by its number, compared whole (`§1` is not `1.2`); a numbered list item is no section here. An item went
+  somewhere when it is ticked, names an issue or pull request (`#N`, `owner/repo#N`, an address; not a file's anchor such as
+  `plans/x.md#13-…`) or says `dropped: <why>`, or when `items` gives it one of the last two by the number the refusal lists. Refused,
+  with nothing sent, while one went nowhere, also when closing as not planned (an item is dropped with its own reason, or switching
+  the reason would get past the rule), while a cited section does not read (the issue's citation is corrected first, else its plan
+  would close unchecked), on an empty or non-English comment, on a pull request, or on a closed issue. The comment, posted before
+  the close, lists every item and where it went, so a closed issue always carries its record; a close that fails after it leaves
+  the issue open, and closing again posts the record a second time. The check is textual: it does not ask whether a `#N` is open,
+  on the same subject or not the issue itself. Declares no risk: it always asks.
 - **A pull request that closes such an issue** (#2488): GitHub closes an issue its merge names after a keyword, whatever the issue
   still plans. `queue_merge` (and `integrate`, for its record) refuses to queue a top that closes an open issue with an item gone
   nowhere, naming the items and the two ways out: account for them in the issue (this pull request's number for what it builds), or
   write `None: part of #N` and close the issue with `close_issue` later. The queue, not `open_pr`: it reads the description and the
   issue when the change is queued (both can be edited after `open_pr`), and every landing of this board is queued. Not checked: a
-  description or an issue edited after it was queued, and a merge by hand. An issue or a cited plan section that cannot be read is a
-  warning there, not a refusal; an outage fails the call as any read does.
+  description or an issue edited after it was queued, an issue linked by hand in GitHub's Development panel (GitHub closes it on
+  merge too, and the description does not name it), and a merge by hand. An issue or a cited plan section that cannot be read, and
+  a plan named without a section, are warnings there, not refusals; an outage fails the call as any read does.
 - **`open_pr`** fills the template's `## ` headings from `why`, `whatChanged`, `verified`,
   `situationsChecked`, `usability`, `notExercised` or `sections` (any heading by name, any spelling), drops a
   heading left out (the template says so) and refuses a name the template does not have. **Planned, not built** (`plannedNotBuilt`,
-  #2488) must be `None` or lines that each name the issue carrying an item (`#N`) or say `dropped: <why>`. **Closes** is written from `closes`
+  #2488) must be `None` (`None: <note>` and `Plan items left: none` too) or lines that each name the issue carrying an item (`#N`) or say
+  `dropped: <why>`. Against a base whose template has no such heading yet (a stack on a branch cut before it), `plannedNotBuilt` is
+  left out rather than refused; `integrate` takes `None` when none is given, as an auto-tier change rarely builds part of a plan. **Closes** is written from `closes`
   (#2449: #2448 wrote "2447" under Closes, GitHub links an issue only after a keyword, and the issue stayed open): the issue
   merging it closes, or a list of them (`2447`, `"#2448"`, `owner/repo#N`, an issue's URL), each written `Closes #N` on a line of its
   own, since GitHub links a keyword to the one reference after it (#2194); or `{ none: "<why>" }`, written `None: <why>` (a

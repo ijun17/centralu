@@ -309,6 +309,8 @@ const DROPPED = /\bEOF\b|connection (?:reset|closed)|broken pipe/i
  * and counts.
  */
 export const isOutage = (e) => e instanceof GitHubError && (FATAL.has(e.kind) || e.status >= 500 || (e.lost === true && e.status === 0 && DROPPED.test(e.message)))
+/** A failure that is the item's own (not there, not visible, refused), not GitHub's or the machine's: answered about the item, where an outage is thrown */
+export const ownFailure = (e) => e instanceof GitHubError && !isOutage(e)
 
 /**
  * Whether an outage counts toward the item's own limit (`OUTAGE_LIMIT`): a 5xx or a dropped answer that one item meets poll after
@@ -553,7 +555,7 @@ export async function readIssue(repo, number) {
   try {
     j = await issueView(repo, number, 'title,body,state,url')
   } catch (e) {
-    if (e instanceof GitHubError && !FATAL.has(e.kind) && !isOutage(e)) throw new GitHubError('not-found', `${repo}#${number} is not an issue or pull request this GitHub login can see (${firstLine(e)}).`, { status: httpStatus(e) })
+    if (ownFailure(e)) throw new GitHubError('not-found', `${repo}#${number} is not an issue or pull request this GitHub login can see (${firstLine(e)}).`, { status: httpStatus(e) })
     throw e
   }
   return { title: j.title ?? '', body: j.body ?? '', state: j.state ?? null, pull: /\/pull\/\d+$/.test(j.url ?? '') }

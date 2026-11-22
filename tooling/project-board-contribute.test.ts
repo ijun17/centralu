@@ -203,7 +203,7 @@ describe('the rules for public text', () => {
 
 // #2488: umbrella issues were closed by hand with planned items left, and about 40 such items had no owner
 describe('the items an issue plans, and where each went', () => {
-  it('reads task boxes, numbered lines and numbered table rows, but not a bug report\'s steps, code or comments', () => {
+  it('reads task boxes anywhere, and numbered lines and rows of a table of work only under a heading of work', () => {
     const body = [
       '## Proposal',
       '',
@@ -211,15 +211,25 @@ describe('the items an issue plans, and where each went', () => {
       '2. **Doc guard**: later,',
       '   once the rest is in.',
       '3. Templates: dropped: folded into 1.',
-      '4. Read docs/plans/acp-adapter.md#13-the-pull-requests and &#35;5 first.',
+      '4. Read docs/plans/acp-adapter.md#13-the-pull-requests, plans/acp-adapter.md#13-the-pull-requests and &#35;5 first.',
       '',
       '- [x] ticked',
       '- [ ] an open box',
       '- a plain bullet, no item',
       '',
-      '## How to get there',
+      '## What happened',
+      '',
+      '1. The queue refused it',
+      '',
+      '## Repro',
       '',
       '1. Open the app',
+      '',
+      '## Options (pick one)',
+      '',
+      '1. Read it as an id',
+      '',
+      '## Work units',
       '',
       '```',
       '1. in code',
@@ -242,23 +252,30 @@ describe('the items an issue plans, and where each went', () => {
       ['1. **Close rule**: built in #2495.', 'carried'],
       ['2. **Doc guard**: later, once the rest is in.', null],
       ['3. Templates: dropped: folded into 1.', 'dropped'],
-      ['4. Read docs/plans/acp-adapter.md#13-the-pull-requests and &#35;5 first.', null],
+      ['4. Read docs/plans/acp-adapter.md#13-the-pull-requests, plans/acp-adapter.md#13-the-pull-requests and &#35;5 first.', null],
       ['ticked', 'ticked'],
       ['an open box', null],
       ['| 1 | Factories | #2384 |', 'carried'],
       ['| 4 | Layout | new |', null],
     ])
     expect(planItems(body)[1].where).toBe('the body, "Proposal"')
-    expect(planItems('https://github.com/ijun17/centralu/pull/7\n\n1. Built by https://github.com/ijun17/centralu/pull/7')[0].state).toBe('carried')
+    expect(planItems('## To do\n\n1. Built by https://github.com/ijun17/centralu/pull/7')[0].state).toBe('carried')
+    // Facts, causes and observations are not work: without a heading of work no numbered line is an item
+    expect(planItems('1. The cache is stale\n2. The read races the write')).toEqual([])
   })
 
-  it('reads the plan sections an issue cites, in the forms guard/doc-refs reads, and not a plan named without a section', () => {
+  it('reads the plan sections an issue cites, in the forms guard/doc-refs reads, and names the plans it cites with no section', () => {
     const body = 'Steps in docs/plans/acp-adapter.md §13, see [the plan](../docs/plans/assistant-rename.md#3-steps) and plans/mailbox.md "Words". A bare docs/plans/thin-shell.md is not read.'
-    expect(citedPlans(body)).toEqual([
-      { file: 'acp-adapter.md', section: '§13' },
-      { file: 'assistant-rename.md', section: '#3-steps' },
-      { file: 'mailbox.md', section: '"Words"' },
-    ])
+    expect(citedPlans(body)).toEqual({
+      sections: [
+        { file: 'acp-adapter.md', section: '§13' },
+        { file: 'assistant-rename.md', section: '#3-steps' },
+        { file: 'mailbox.md', section: '"Words"' },
+      ],
+      bare: ['thin-shell.md'],
+    })
+    // A plan cited with a section somewhere is not bare where it is named again
+    expect(citedPlans('docs/plans/acp-adapter.md §13, and later docs/plans/acp-adapter.md').bare).toEqual([])
     const plan = ['# Plan', '## 3. Steps', 'intro', '### 3.1 Detail', '1. one', '## 13. The pull requests', '1. **PR 1** (#2400)', '2. The rest', '## 14. Open questions', '1. A question'].join('\n')
     const pulls = '## 13. The pull requests\n1. **PR 1** (#2400)\n2. The rest'
     expect(planSection(plan, '§13')).toBe(pulls)
@@ -285,19 +302,17 @@ describe('the items an issue plans, and where each went', () => {
       '|---|---|',
       '| 5. Contract | not started |',
     ].join('\n')
-    expect(planItems(section, 'docs/plans/thin-shell.md §3', { plan: true }).map((i: { text: string; state: string | null }) => [i.text, i.state])).toEqual([
+    expect(planItems(section, 'docs/plans/thin-shell.md §3').map((i: { text: string; state: string | null }) => [i.text, i.state])).toEqual([
       ['a box', null],
       ['1. PR 1 (#2400)', 'carried'],
       ['2. The rest', null],
       ['| 5. Contract | not started |', null],
     ])
-    // In an issue's body every numbered line is planned work
-    expect(planItems(section)).toHaveLength(6)
   })
 
   it('takes "None" for Planned, not built, or lines that each name an issue or say dropped, and nothing else', () => {
     const planned = (text: string) => fillTemplate(TEMPLATE, { 'Not exercised': 'Nothing', 'Situations checked': 'n/a', Usability: 'n/a', 'Planned, not built': text }).problems
-    for (const ok of ['None', 'none.', 'Plan items left: none', 'Plan items left: #2490, #2491', "- The doc guard: #2490\n- The brief: dropped: Centralu's, not this repository's"]) expect(planned(ok), ok).toEqual([])
+    for (const ok of ['None', 'none.', 'None: all of it is built here.', 'Plan items left: none', 'Plan items left: #2490, #2491', "- The doc guard: #2490\n- The brief: dropped: Centralu's, not this repository's"]) expect(planned(ok), ok).toEqual([])
     expect(planned('')).toEqual(['"Planned, not built" is empty. Name each planned item this change does not build with the issue that carries it (#N), or "dropped: <why>"; or "None" when it builds all of it.'])
     expect(planned('- #2490\n- the rest, later\n- n/a')).toEqual(['"Planned, not built" has lines naming no issue (#N) and not saying "dropped: <why>": "- the rest, later", "- n/a".'])
   })
@@ -635,6 +650,15 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
     expect((await call('open_pr', { ...PR, dryRun: true })).text).toContain('The template has no heading "Closes".')
   })
 
+  // A stack on a branch cut before the template had "Planned, not built" fills that branch's template: the field is left out there
+  it('leaves plannedNotBuilt out, rather than refusing it, against a template without the heading', async () => {
+    patchState((s) => (s.files['.github/PULL_REQUEST_TEMPLATE.md'] = TEMPLATE.replace(/## Planned, not built[\s\S]*?(?=## Closes)/, '')))
+    runtime()
+    const dry = await call('open_pr', { ...PR, dryRun: true })
+    expect(dry.isError, dry.text).toBe(false)
+    expect(dry.data.body).not.toContain('Planned, not built')
+  })
+
   // #2488: #59 and #2133 were closed by hand with planned items left, which then had no owner
   const UMBRELLA = '## Proposal\n\n1. Close rule (#2495)\n2. Doc guard, later\n3. Templates\n\nIts steps: docs/plans/acp-adapter.md §2'
   const PLAN = '# X\n\n## 1. Why\n\n1. not cited, not read\n\n## 2. Steps\n\n- [x] step one\n- [ ] step two\n'
@@ -690,18 +714,28 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
     expect(writes()).toHaveLength(2)
   })
 
-  it('closes as not planned with the items left dropped with the issue, and refuses a pull request, an issue nobody can see and a comment not in English', async () => {
-    patchState((s) => (s.issues = { '7': { body: '- [ ] a box' }, '8': { url: 'https://github.com/ijun17/centralu/pull/8' }, '9': { body: 'No plan here.' } }))
+  it('asks a reason for each item left when closing as not planned too, warns of a plan named without a section, and refuses a pull request, an issue nobody can see and a comment not in English', async () => {
+    patchState((s) => (s.issues = { '7': { body: '- [ ] a box' }, '8': { url: 'https://github.com/ijun17/centralu/pull/8' }, '9': { body: 'No plan here; the background is docs/plans/thin-shell.md.' } }))
     runtime()
-    const notPlanned = await call('close_issue', { item: 7, comment: 'Superseded by #10.', reason: 'not planned' })
+    // Switching the reason does not get past the rule: the item is dropped with its own reason
+    const switched = await call('close_issue', { item: 7, comment: 'Superseded by #10.', reason: 'not planned' })
+    expect(switched.isError).toBe(true)
+    expect(switched.data.open).toEqual([{ n: 1, text: 'a box', where: 'the body' }])
+    const notPlanned = await call('close_issue', { item: 7, comment: 'Superseded by #10.', reason: 'not planned', items: { 1: 'dropped: #10 does it another way' } })
     expect(notPlanned.isError, notPlanned.text).toBe(false)
-    expect(writes().map((w) => JSON.parse(w.stdin!))).toEqual([{ body: 'Superseded by #10.\n\nPlanned items (1):\n- Item 1, "a box": dropped with the issue' }, { state: 'closed', state_reason: 'not_planned' }])
+    expect(writes().map((w) => JSON.parse(w.stdin!))).toEqual([{ body: 'Superseded by #10.\n\nPlanned items (1):\n- Item 1, "a box": dropped: #10 does it another way' }, { state: 'closed', state_reason: 'not_planned' }])
     expect((await call('close_issue', { item: 8, comment: 'Done.' })).text).toBe('Not closed: #8 is a pull request; close_issue closes issues (a pull request closes when it lands, or with gh pr close).')
     expect((await call('close_issue', { item: 404, comment: 'Done.' })).text).toMatch(/^Not closed: ijun17\/centralu#404 is not an issue or pull request this GitHub login can see/)
     expect((await call('close_issue', { item: 9, comment: '끝났습니다.' })).data.problems.join()).toMatch(/not in English/)
     expect(writes()).toHaveLength(2)
-    // An issue that plans nothing closes with the comment alone
-    expect((await call('close_issue', { item: 9, comment: 'Done in #11.' })).text).toBe('Closed #9 as completed: https://github.com/ijun17/centralu/issues/9#issuecomment-1')
+    // An issue that plans nothing closes with the comment alone; a plan it names with no section is not read, and it says so
+    expect((await call('close_issue', { item: 9, comment: 'Done in #11.' })).text).toBe(
+      [
+        'Closed #9 as completed: https://github.com/ijun17/centralu/issues/9#issuecomment-1',
+        'Warnings:',
+        'docs/plans/thin-shell.md, which the issue names without a section, was not read: cite the section that lists its work (thin-shell.md §n) to have it checked.',
+      ].join('\n'),
+    )
     expect(JSON.parse(writes()[2]!.stdin!)).toEqual({ body: 'Done in #11.' })
   })
 

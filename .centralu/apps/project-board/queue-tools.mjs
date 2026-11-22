@@ -331,7 +331,7 @@ const AUTO_NA = 'n/a: an auto-tier change (docs, fixture data or UI assets), in 
  * writes, one at a time with the board's other writes. An open pull request from the branch (an earlier hand-over, or
  * one the session opened) is the record, not a second one.
  */
-async function integrate({ branch, title, why, whatChanged, verified, notExercised, plannedNotBuilt, closes, owner }) {
+async function integrate({ branch, title, why, whatChanged, verified, notExercised, plannedNotBuilt = 'None', closes, owner }) {
   const repo = config.repository
   const name = String(branch ?? '').trim().replace(/^refs\/heads\//, '')
   if (!name) return refused('give the branch you pushed.', { kind: 'input' })
@@ -490,7 +490,7 @@ export const tools = {
         whatChanged: z.string().max(20000).optional(),
         verified: z.string().max(20000).optional().describe('What you ran; the integrator adds its Tier line'),
         notExercised: z.string().max(20000).describe('Surfaces this change touches that were not run ("Nothing" when true); required'),
-        plannedNotBuilt: z.string().max(20000).optional().describe(PLANNED_HELP),
+        plannedNotBuilt: z.string().max(20000).optional().describe(`${PLANNED_HELP}; default "None"`),
         closes: closesInput.optional(),
         owner: z.string().max(80).optional().describe("Your session's name: the queue's news and a conflict come back to it; default a new id"),
       }),
