@@ -17,6 +17,11 @@ export type StopNoticeOptions = {
    * for the person's Continue and a wake would start a turn with nobody there. At rest when absent
    */
   standing?: (sessionAddress: string) => 'turn' | 'rest' | 'cut'
+  /**
+   * Whether the session's stop stands where the person sees it (`turnStop`: its Inbox row and its note, with Continue and Done). The
+   * person's notice leaves such a stop out, as that row says it (#2360); none is left out when absent
+   */
+  stopShown?: (sessionAddress: string) => boolean
   /** The words of the turn a session's stop cut, which its stop notice to a session quotes as that session's own text; none quoted when absent */
   stoppedWords?: (sessionAddress: string) => string | null
   /**
@@ -261,9 +266,13 @@ export class StopNotices {
   private tellUnanswered(sender: string, since: number): void {
     const kind = senderKind(sender)
     // The person is not told what they did themselves (their own Stop, deleting a session), nor the rows older builds released without telling them
-    const rows = this.d.records
+    const released = this.d.records
       .releasedUntold(sender)
       .filter((r) => kind !== 'person' || ((r.releasedAt ?? 0) >= since && r.releasedWhy !== 'stopped' && r.releasedWhy !== 'gone'))
+    // Nor a stop the session's own row in their Inbox says: it is told there, once (#2360)
+    const shown = kind === 'person' ? released.filter((r) => isStop(r.releasedWhy) && !!this.d.stopShown?.(r.recipient)) : []
+    if (shown.length > 0) this.d.records.markTold(shown, this.d.now())
+    const rows = released.filter((r) => !shown.includes(r))
     if (rows.length === 0 || (kind !== 'session' && kind !== 'person')) return
     const unanswered = rows.map((r) => ({ id: r.messageId, recipient: r.recipient, why: r.releasedWhy ?? ('gone' as const) }))
     // A session reads what the stopped session last said in the cut turn when `quotes` allows it, as that session's words; the person reads it in the conversation itself

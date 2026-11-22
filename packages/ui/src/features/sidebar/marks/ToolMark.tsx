@@ -1,5 +1,4 @@
-import type { BackgroundTask, Interruption, SessionState, ToolName } from '@cc/protocol/client'
-import { turnStop } from '@cc/core'
+import { turnStop, type BackgroundTask, type Interruption, type SessionState, type ToolName } from '@cc/protocol/client'
 import { useToolMeta } from '../../../store/selectors.js'
 import { Tooltip, interruptionLabel, stateLabel, turnStopLabel } from '../../../components/primitives.jsx'
 import { lookOf } from '../../session/look.js'

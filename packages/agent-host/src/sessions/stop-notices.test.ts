@@ -204,9 +204,10 @@ describe('a turn ends without finishing', () => {
     w.store.mailbox.markDelivered(addr(second.child), [q.id], Date.now(), m.turns.latest(second.child)!.seq)
     says(second.child, 'Rebased onto main, as you asked.')
     handleOf(second.child).event({ type: 'limit_reached', sessionId: second.child })
-    await w.until(() => stopNotices(second.asker).length === 1 && stopNoticesToPerson().length === 1)
+    await w.until(() => stopNotices(second.asker).length === 1)
     expect(stopNotices(second.asker)[0]!.message.body).not.toContain('Rebased onto main')
-    expect(stopNoticesToPerson()[0]!.message.body).not.toContain('Rebased onto main')
+    // The person reads that stop on the session's Inbox row (#2360)
+    expect(stopNoticesToPerson()).toEqual([])
 
     // The asker's own turn, into which the person typed
     const third = await askedOwnTurn()
@@ -329,18 +330,15 @@ describe('a turn ends without finishing', () => {
     expect(wakesMessage(message)).toBe(true)
   })
 
-  it('the person who asked is told in the Inbox, in plain words with no id or address', async () => {
+  it("the person who asked reads the stop on the session's Inbox row, with its Continue and Done, and no notice besides (#2360)", async () => {
     const child = await w.callerSession()
     working(child)
     const q = m.service.send('person', { to: [addr(child)], text: 'are you done?', needsReply: true }).message
     w.store.mailbox.markDelivered(addr(child), [q.id], Date.now(), m.turns.latest(child)!.seq)
     handleOf(child).event({ type: 'error', sessionId: child, error: { code: 'internal', message: 'x', retryable: false } })
-    await w.until(() => stopNoticesToPerson().length === 1)
-    const notice = stopNoticesToPerson()[0]!.message
-    expect(notice.facts.unanswered).toEqual([{ id: q.id, recipient: addr(child), why: 'error' }])
-    expect(notice.body).toContain('stopped with an error before it answered your message')
-    expect(notice.body).not.toContain(q.id)
-    expect(notice.body).not.toContain(addr(child))
+    await w.until(() => read.row(q.id, addr(child))?.toldAt != null)
+    expect(read.row(q.id, addr(child))).toMatchObject({ releasedWhy: 'error', settled: null })
+    expect(stopNoticesToPerson()).toEqual([])
   })
 
   it("the person's own Stop writes nothing to their Inbox", async () => {
@@ -686,16 +684,18 @@ describe('a stop found at the next start, or a cut turn that could not be contin
     m.delivery.stop()
   })
 
-  it('a quit that cut two sessions the person asked tells them in one Inbox row', async () => {
-    const one = await asked()
-    const two = await asked()
-    for (const c of [one.child, two.child]) {
-      const q = m.service.send('person', { to: [addr(c)], text: 'are you done?', needsReply: true }).message
-      w.store.mailbox.markDelivered(addr(c), [q.id], Date.now(), m.turns.latest(c)!.seq)
-      inside().meta.get(c)!.interruption = { reason: 'quit', at: Date.now() }
+  it('a quit that cut two sessions the person asked: their own Inbox rows say it, and no notice besides (#2360)', async () => {
+    const rows: { id: string; to: string }[] = []
+    for (const { child } of [await asked(), await asked()]) {
+      const q = m.service.send('person', { to: [addr(child)], text: 'are you done?', needsReply: true }).message
+      w.store.mailbox.markDelivered(addr(child), [q.id], Date.now(), m.turns.latest(child)!.seq)
+      // As a restart finds it: at rest, cut by the quit
+      Object.assign(inside().meta.get(child)!, { state: 'idle', interruption: { reason: 'quit', at: Date.now() } })
+      rows.push({ id: q.id, to: addr(child) })
     }
     m.afterReady()
-    expect(stopNoticesToPerson()).toHaveLength(1)
+    for (const r of rows) expect(read.row(r.id, r.to)).toMatchObject({ releasedWhy: 'quit', toldAt: expect.any(Number) })
+    expect(stopNoticesToPerson()).toEqual([])
     m.delivery.stop()
   })
 

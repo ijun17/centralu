@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Interruption, SessionState } from '@cc/protocol/client'
+import type { Interruption, SessionState } from './entities.js'
 import { turnStop } from './turn-stop.js'
 
 const stop = (state: SessionState, interruption?: Interruption | null) => turnStop({ state, interruption })
@@ -29,6 +29,11 @@ describe('turnStop: why the last turn stopped, from what the host said (#698, #1
     expect(stop('idle', { reason: 'quit', at: 1 })).toEqual({ kind: 'stopped', reason: 'quit', error: false })
     // A reset belongs to a limit only
     expect(stop('error', { reason: 'network', at: 1, resetAt: 5 })).toEqual({ kind: 'stopped', reason: 'network', error: true })
+  })
+
+  it('says how often Centralu continued a stop it then left to the person (#2360)', () => {
+    expect(stop('error', { reason: 'limit', at: 1, resetAt: 5, gaveUpAfter: 3 })).toEqual({ kind: 'stopped', reason: 'limit', resetAt: 5, gaveUpAfter: 3, error: true })
+    expect(stop('error', { reason: 'network', at: 1, gaveUpAfter: 5 })).toEqual({ kind: 'stopped', reason: 'network', gaveUpAfter: 5, error: true })
   })
 
   it('is an error when the state is error and no interruption says the turn was cut short', () => {

@@ -237,6 +237,26 @@ export function interruptedSessionTests() {
     await expect.poll(buttons).toEqual(['Done'])
   })
 
+  test('a stop Centralu gave up continuing says so in the note and the inbox row, with Continue; the conversation has no line of it (#2360)', async ({ page }) => {
+    await setup(page, ['/tmp/alpha'])
+    const s = await newSession(page, 'alpha')
+    const limit = "You've hit your session limit · resets 5:02pm"
+    await emit(page, [
+      { type: 'state_change', sessionId: s, state: 'working' },
+      { type: 'error', sessionId: s, error: { code: 'internal', message: limit, retryable: true } },
+      { type: 'interruption', sessionId: s, interruption: { reason: 'limit', at: Date.now(), detail: limit, resetAt: new Date(2030, 10, 23, 17, 2).getTime(), gaveUpAfter: 3 } },
+    ])
+    const note = page.getByTestId('stop-note')
+    const said = 'Stopped: usage limit · resets at Nov 23, 2030, 17:02 · Centralu gave up after 3 tries'
+    await expect(note.getByTestId('stop-note-words')).toHaveText(said)
+    await expect.poll(() => note.getByRole('button').allTextContents()).toEqual(['Continue', 'Done'])
+    await expect(page.getByTestId('chat-stream')).not.toContainText('Centralu gave up')
+    // Another session in front: this one is listed, in the note's words
+    await newSession(page, 'alpha')
+    await openInbox(page)
+    await expect(item(page, s)).toContainText(said)
+  })
+
   test('the wait above the composer reads whole at a narrow window and a large text size, both buttons in full (#1415)', async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 720 })
     await setup(page, ['/tmp/alpha'])

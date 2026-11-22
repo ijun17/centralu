@@ -1753,7 +1753,7 @@ does not settle a released task as reported.
 
 | Party | Told | Woken |
 |---|---|---|
-| The person, for their own messages | at once, in the Inbox (not for their own Stop or a deletion) | nothing |
+| The person, for their own messages | at once, in the Inbox (not for their own Stop or a deletion, nor a stop the session's own Inbox row says, with its Continue and Done: `stopShown`, owner #2360) | nothing |
 | A session owed a reply (it sent a released row) | at once, one notice per stop listing its rows | yes: at rest at once; in a turn when that turn ends; one a quit cut itself reads it at its next turn (`standing: 'cut'`) |
 | The session that started the stopped one (`askedBy`, or the delegation that gave the turn), owed nothing | once per stop: "`<name>`, which you started, stopped: `<cause>`. It owed you no answer. …" (`facts.about`, `facts.reason`) | only from a turn; asleep, it reads it at its next wake |
 | Anyone else | nothing | nothing |
@@ -2038,7 +2038,7 @@ rule and stopped by the same notice; its own report path (`reportToPersonIfOwed`
 |---|---|---|---|
 | Finished: the turn ended and the session is at rest | "[Centralu] The session you started finished its turn." | the last response answers the task, one report replying to it, settled `reported`, with the response as `facts.answer` and Centralu's one line "[Centralu] The session you started ended its turn. Its last response says whether the work is done." (`PERSON_TURN_ENDED`, the person form of `TURN_ENDED`; the update's line after it when an update cut the turn and Centralu continued it; no read_session line, no `personSince`). A turn that wrote nothing still says the line, with no answer | In review |
 | Paused: its turn ended while its own background work runs | "[Centralu] The session you started paused: its turn ended while its own background work is still running (1 task).", then a settled report | nothing while the work runs; the turn its end starts answers, or, when none follows, the 60 s settle (`settleAtRest`) does, with the Finished line | Running, then In review |
-| Stopped: an error, a usage limit, the network, its tool's interrupt, a quit or shutdown, a cut turn not continued | "[Centralu] The session you started stopped before finishing: …", one line per cause, settled `reported` | the stop notice (§10.6.1) in its person form, e.g. "Parser's tool interrupted its turn before it answered your message. Send it a message to go on."; no report; the task is released and stays open, so the next turn's last response answers it | Open |
+| Stopped: an error, a usage limit, the network, its tool's interrupt, a quit or shutdown, a cut turn not continued | "[Centralu] The session you started stopped before finishing: …", one line per cause, settled `reported` | the session's own Inbox row while its stop stands (#2360); else the stop notice (§10.6.1) in its person form, e.g. "Parser's tool interrupted its turn before it answered your message. Send it a message to go on."; no report; the task is released and stays open, so the next turn's last response answers it | Open |
 
 Why: one rule for every request (a report attaches to a request, the owner's rule of 2026-11-05), and one path for a stop (§10.6.1). Centralu does
 not say "finished" for a turn (#1902): only the session's last response says whether the work is done. A stopped task was not answered, so its thread is

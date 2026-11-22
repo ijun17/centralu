@@ -204,7 +204,8 @@ export class TurnContinue {
     const tries = run?.cause === cause ? run.n : 0
     if (tries >= MAX_TRIES[cause]) {
       this.stopTries.delete(m.id)
-      this.host.note({ type: 'notice', sessionId: m.id, level: 'warning', from: 'Centralu', label: 'continue', text: giveUpWords(cause, tries) })
+      // Said by the stop note, with the stop it belongs to; the conversation draws no line of it (#2360)
+      i.gaveUpAfter = tries
       return
     }
     const now = Date.now()
@@ -610,9 +611,4 @@ function failure(sessionId: string, message: string): NormalizedEvent {
 
 function spentWords(tries: number): string {
   return `Centralu retried this turn ${tries} ${tries === 1 ? 'time' : 'times'} and the servers stayed at capacity. This is not a usage limit: try again later or pick another model.`
-}
-
-function giveUpWords(cause: StopCause, tries: number): string {
-  const what = cause === 'network' ? 'the network failed again' : 'it reached the usage limit again'
-  return `Centralu continued this turn ${tries} ${tries === 1 ? 'time' : 'times'} and ${what}, so it does not continue it by itself any more. Send a message to go on.`
 }

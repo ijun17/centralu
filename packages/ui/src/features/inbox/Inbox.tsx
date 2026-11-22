@@ -1,5 +1,5 @@
 import { usePresence } from '../../components/presence.js'
-import { groupTasks, openTaskCount, shownTasks, taskKey, turnStop, type InboxItem } from '@cc/core'
+import { groupTasks, openTaskCount, shownTasks, taskKey, type InboxItem } from '@cc/core'
 import { useLabelNow } from '../../app/useLabelNow.js'
 import { nextWaitingTick } from '../../app/labelClock.js'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -12,7 +12,7 @@ import { appCanLines } from '../../store/uses-lines.js'
 import { inboxCovered, inboxKeyAction } from './inboxKeys.js'
 import { inboxStateLabel } from './inboxLabel.js'
 import { useFocusReturn } from '../../components/focusReturn.js'
-import { CONTINUE_WORDS, type MailTaskRow } from '@cc/protocol/client'
+import { CONTINUE_WORDS, turnStop, type MailTaskRow } from '@cc/protocol/client'
 import {
   Kbd,
   StateDot,
