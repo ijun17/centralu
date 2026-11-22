@@ -530,12 +530,13 @@ describe('resets, notices and switches the tool made (#304)', () => {
       { type: 'compaction', sessionId: 'n-6', failed: false },
       // A failed compaction is a failure, though its words would not say "could not finish"
       { type: 'compaction', sessionId: 'n-6', failed: true, reason: 'the tool timed out' },
+      // The successor's first message is a handoff's record: no line (#2360)
       { type: 'handoff', sessionId: 'n-6', from: 'Earlier', note: 'n' },
       { type: 'conversation_reset', sessionId: 'n-6', trigger: 'clear' },
       { type: 'notice', sessionId: 'n-6', level: 'warning', text: 'The agent could not finish this turn' },
       { type: 'error', sessionId: 'n-6', error: { code: 'internal', message: 'compacted', retryable: false } },
     ]
-    const kinds = ['compaction', 'failed', 'handoff', 'reset', 'notice', 'failed']
+    const kinds = ['compaction', 'failed', 'reset', 'notice', 'failed']
     const mock = new MockPlatform()
     mock.sessions.set('n-6', sessionInfo('n-6'))
     await useStore.getState().attach(mock)

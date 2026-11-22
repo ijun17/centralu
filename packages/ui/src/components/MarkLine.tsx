@@ -10,7 +10,7 @@ const WIDE = 'max-w-[34rem]'
 /**
  * A line of the conversation that is not a message: a capsule between two rules, or a dashed box for a failure
  * (docs/design-system.md §7). With `folded`, the capsule is a button that opens it as a `Fold`; `open` is how it
- * starts, `onOpen` hears each opening (the mail line reads what it shows then), `after` stands beside the capsule.
+ * starts, `onOpen` hears each opening (the mail line reads what it shows then).
  */
 export function MarkLine({
   icon,
@@ -19,7 +19,6 @@ export function MarkLine({
   folded,
   open: startOpen = false,
   onOpen,
-  after,
   ...data
 }: {
   icon: ReactNode
@@ -28,7 +27,6 @@ export function MarkLine({
   folded?: ReactNode
   open?: boolean
   onOpen?: () => void
-  after?: ReactNode
 } & Record<`data-${string}`, string>) {
   const [open, setOpen] = useState(startOpen)
   const id = useId()
@@ -60,7 +58,6 @@ export function MarkLine({
             {words}
           </Pill>
         )}
-        {after}
         <Rule />
       </div>
       {folded && (

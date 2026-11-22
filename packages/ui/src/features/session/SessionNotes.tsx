@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { CONTINUE_WORDS, type Interruption, type SessionState } from '@cc/protocol/client'
 import { turnStop, type TurnStop } from '@cc/core'
-import { useStore } from '../../store/store.js'
+import { lastTurnRefusedModel, useStore } from '../../store/store.js'
 import { useMachineName } from '../../store/selectors.js'
 import { turnStopLabel } from '../../components/primitives.jsx'
 import { useNowUntil } from '../../app/useLabelNow.js'
@@ -70,7 +70,11 @@ export function StopNote({ sessionId, stop: current }: { sessionId: string; stop
   // The plain line's stop, kept while it fades out under a wait that came
   const said = useHeld(stop?.kind === 'wait' ? null : stop)
   const now = useNowUntil(said?.kind === 'stopped' ? said.resetAt : undefined)
+  const refused = useStore((s) => lastTurnRefusedModel(s.chat[sessionId]))
   if (!note.shown || !stop) return null
+  const failed = said?.kind === 'error' || !!(said?.kind === 'stopped' && said.error)
+  // Trying again cannot help a refused model; another model can (#1369)
+  const pickModel = failed && refused
   return (
     <div
       className={`${note.leaving ? 'cc-fade-out pointer-events-none' : 'cc-fade'} grid grid-cols-1 border-t border-line-chrome px-conversation py-1.5 text-xs leading-body text-ink-muted`}
@@ -85,6 +89,7 @@ export function StopNote({ sessionId, stop: current }: { sessionId: string; stop
         >
           <span className="min-w-0 flex-[1_1_auto] break-words text-ink" data-testid="stop-note-words">
             {turnStopLabel(said, now)}
+            {pickModel && ' · pick another model'}
           </span>
           <span className="flex min-w-0 flex-wrap items-center gap-2">
             {said.kind === 'stopped' && (
@@ -99,7 +104,18 @@ export function StopNote({ sessionId, stop: current }: { sessionId: string; stop
                 Continue
               </Button>
             )}
-            {(said.kind === 'error' || said.error) && (
+            {pickModel && (
+              <Button
+                variant="secondary"
+                size="sm"
+                className="shrink-0"
+                onClick={() => useStore.getState().requestSettingsMenu(sessionId)}
+                data-testid="stop-note-pick-model"
+              >
+                Pick another model
+              </Button>
+            )}
+            {failed && (
               <Button
                 variant="secondary"
                 size="sm"
