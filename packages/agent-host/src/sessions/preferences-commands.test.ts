@@ -179,9 +179,9 @@ describe('auto compact (#1376)', () => {
     const orc = await mgr.assistant()
     expect((await run(orc.id, 'get_preferences')).text).toContain("- agents compact at 65% of the model's window, set by Centralu")
 
-    const share = await run(orc.id, 'set_preferences', { autoCompact: { share: 0.5, nudgeFirst: 0.3 } })
+    const share = await run(orc.id, 'set_preferences', { autoCompact: { share: 0.5 } })
     expect(share.isError).toBeFalsy()
-    expect(share.text).toBe("Now: agents compact at 50% of the model's window, set by Centralu; a session at rest is compacted over 40%; a session is told quietly to call compact_self at 30% and 40%. It reaches a running session when its process next starts.")
+    expect(share.text).toBe("Now: agents compact at 50% of the model's window, set by Centralu; a session at rest is compacted over 40%; a session is told quietly to call compact_self at 35% and 40%. It reaches a running session when its process next starts.")
     expect(await prefs()).toMatchObject({ autoCompact: { controlled: true, share: 0.5 } })
 
     const off = await run(orc.id, 'set_preferences', { autoCompact: { controlled: false } })

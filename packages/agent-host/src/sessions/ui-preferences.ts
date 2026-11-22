@@ -1,5 +1,5 @@
 import type { AutoCompact, UiPreferences, UiPreferencesPatch } from '@cc/protocol'
-import { NUDGE_MARGIN, parseUiPreferences, readAutoCompact, readNotifyPolicy } from '@cc/protocol'
+import { NUDGE_MARGIN, parseUiPreferences, readAutoCompact, readAutoCompactChosen, readNotifyPolicy } from '@cc/protocol'
 import { parseJson } from '../dev-services/store/json.js'
 import { isObj } from '../json-value.js'
 import { rpcError, type RpcError } from '../rpc-error.js'
@@ -112,18 +112,24 @@ export class UiPreferenceStore {
     const base = current.notifyPolicy ?? readNotifyPolicy(this.loadWorkspace()?.notifyPolicy)
     const notifyPolicy = switches ? { ...base, ...switches } : undefined
     // The auto-compact setting is merged one field at a time too (#1376), over what is stored, field by field read
-    const before = readAutoCompact(current.autoCompact)
-    const asked: AutoCompact | undefined = compact ? { ...before, ...withoutUndefined(compact) } : undefined
+    // over what was chosen, not over what is in force: a first share held under the second comes back when the second moves up
+    const row = this.storedUiPreferences()
+    const chosen = readAutoCompactChosen({ ...(isObj(row.autoCompact) ? row.autoCompact : {}), ...Object.fromEntries(COMPACT_BESIDE_FIELDS.filter((f) => COMPACT_BESIDE[f] in row).map((f) => [f, row[COMPACT_BESIDE[f]]])) })
+    const before = readAutoCompact(chosen)
+    const asked: AutoCompact | undefined = compact ? { ...chosen, ...withoutUndefined(compact) } : undefined
     // The whole setting that would result is judged, not the patch (#1504): the two notice shares sit in order, below the
     // tool's own compaction share, and a patch that moves both is judged on the new share. A person's choice that does not fit
-    // is refused; a share moved under a second share chosen before is not a choice, and takes it down (`settledSecond`).
+    // is refused; a share moved under a second share chosen before is not a choice, and takes it down, and a first share the person
+    // never chose is not judged: it is held under the second (`settledAutoCompact`).
+    const storedFirst = row.autoCompactNudgeFirst
+    const chosenFirst = compact?.nudgeFirst ?? (typeof storedFirst === 'number' ? storedFirst : undefined)
     if (compact && asked && asked.nudgeSecond !== null && (compact.nudgeSecond != null || compact.nudgeFirst !== undefined)) {
       const second = Math.round(asked.nudgeSecond * 100)
       if (asked.nudgeSecond > asked.share - NUDGE_MARGIN + 1e-9) {
         throw refusal(`The second reminder (${second}%) must be at least ${Math.round(NUDGE_MARGIN * 100)} points below the share agents compact at (${Math.round(asked.share * 100)}%): the tool's own compaction would come first.`)
       }
-      if (asked.nudgeSecond <= asked.nudgeFirst + 1e-9) {
-        throw refusal(`The second reminder (${second}%) must be above the first (${Math.round(asked.nudgeFirst * 100)}%).`)
+      if (chosenFirst !== undefined && asked.nudgeSecond <= chosenFirst + 1e-9) {
+        throw refusal(`The second reminder (${second}%) must be above the first (${Math.round(chosenFirst * 100)}%).`)
       }
     }
     const merged = asked ? readAutoCompact(asked) : undefined
@@ -132,7 +138,7 @@ export class UiPreferenceStore {
     const autoCompact = merged && compactKeys.some((k) => !(k in COMPACT_BESIDE)) ? { controlled: merged.controlled, share: merged.share } : undefined
     const besides: Record<string, unknown> = {}
     // A field the patch sets, and the second share when it was held to a share that moved
-    if (compact && merged) for (const field of COMPACT_BESIDE_FIELDS) if (compact[field] !== undefined || merged[field] !== before[field]) besides[COMPACT_BESIDE[field]] = merged[field]
+    if (compact && merged) for (const field of COMPACT_BESIDE_FIELDS) if (compact[field] !== undefined || (field !== 'nudgeFirst' && merged[field] !== before[field])) besides[COMPACT_BESIDE[field]] = merged[field]
     const written = {
       ...rest,
       ...(notifyPolicy ? { notifyPolicy } : {}),

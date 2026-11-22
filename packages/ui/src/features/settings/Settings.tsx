@@ -830,7 +830,7 @@ function AutoCompactSetting({ setPrefs }: { setPrefs: (patch: UiPreferencesPatch
             compact on for Claude if you turned it off in your own Claude settings. A running session takes a change when
             its process next starts; a model Centralu has not read a window from yet takes it from its second start.
             Claude never compacts before 67,000 tokens. Separately, Centralu compacts a session that has been at rest for 10
-            minutes once it is over the second share and over 100,000 tokens (never one waiting for you or running
+            minutes once it is over the resting share below and over 100,000 tokens (never one waiting for you or running
             background work), so the next turn starts small. Linked computers are told this setting when they connect and when
             it changes; one from before it applies nothing.
           </>
@@ -908,8 +908,8 @@ function AutoCompactSetting({ setPrefs }: { setPrefs: (patch: UiPreferencesPatch
                 id="settings-auto-compact-nudge-first"
                 type="range"
                 min={Math.round(MIN_NUDGE_SHARE * 100)}
-                // Under a second share the person chose: the host refuses a first one that is not below it
-                max={setting.nudgeSecond === null ? Math.round(MAX_NUDGE_SHARE * 100) : Math.max(Math.round(MIN_NUDGE_SHARE * 100), secondPercent - Math.round(NUDGE_MARGIN * 100))}
+                // Below the second share in force, chosen or following the share: a first one above it is held there
+                max={Math.max(Math.round(MIN_NUDGE_SHARE * 100), secondPercent - Math.round(NUDGE_MARGIN * 100))}
                 step={5}
                 className="w-32 accent-ink-muted"
                 data-testid="settings-auto-compact-nudge-first"

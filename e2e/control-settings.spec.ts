@@ -156,6 +156,26 @@ test("Settings: when agents compact starts on at 65%, moves in steps of 5, and t
   await expect(share).toHaveValue('70')
 })
 
+test('Settings: under a low share the first reminder shows the one in force, 5 points under the second, and its slider cannot go past it', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
+  await page.getByTestId('settings-tab-agents').click()
+  const share = page.getByTestId('settings-auto-compact-share')
+  const first = page.getByTestId('settings-auto-compact-nudge-first')
+  const second = page.getByTestId('settings-auto-compact-nudge-second')
+  // The defaults: 45% and 55%, under a share of 65%
+  await expect(first).toHaveValue('45')
+  await expect(second).toHaveValue('55')
+  // A share of 50% leaves the second at 40%, and the first, never chosen, is held 5 points under it
+  await share.focus()
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowLeft')
+  await expect(share).toHaveValue('50')
+  await expect(second).toHaveValue('40')
+  await expect(first).toHaveValue('35')
+  await expect(first).toHaveAttribute('max', '35')
+  await expect(page.getByTestId('settings-auto-compact-nudge-first-value')).toHaveText('35% of the window')
+})
+
 test('Settings: running agents per project supports preset defaults and a remembered ceiling', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   const open = async () => {

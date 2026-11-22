@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
 import type { AgentAdapter } from '../adapters/contract.js'
 import { SessionManager } from './manager.js'
-import { DEFAULT_AUTO_COMPACT, nudgeShares } from '@cc/protocol'
+import { DEFAULT_AUTO_COMPACT, nudgeShares, readAutoCompact } from '@cc/protocol'
 import { managerWorld, projectDirs } from './manager.test-helpers.js'
 import { ContextNudges, type ContextNudgesHost } from './context-nudges.js'
 
@@ -94,11 +94,14 @@ describe('telling a growing session to call compact_self (#1492)', () => {
     expect(w.told[0]).not.toMatch(/compacts it by itself/)
   })
 
-  it('tells no first share at or above the share of the setting while the process has said no point (the old rule)', () => {
-    // First share 70%, share 60%: the tool compacts before 70% is reached
+  it('holds a first share chosen above the share under the second, so it is told before the tool compacts, while the process has said no point', () => {
+    // First share 70%, share 60%: the first in force is 45%, 5 points under the second (50%)
     const w = world({ point: null, setting: { nudgeFirst: 0.7 } })
-    w.request(750_000)
+    w.request(440_000)
     expect(w.told).toEqual([])
+    w.request(460_000)
+    expect(w.told).toHaveLength(1)
+    expect(w.told[0]).not.toMatch(/compacts it by itself/)
   })
 
   it('tells it once past 30% in the middle of a turn, with its size, and again at 10 points below the share the tool compacts at', () => {
@@ -161,9 +164,9 @@ describe('telling a growing session to call compact_self (#1492)', () => {
   })
 
   it('never tells a share at or above the share the tool compacts at, and keeps the second below it', () => {
-    // The tool compacts at 25%: the first share (30%) is never told, the tool compacts first; the second follows it, 10 points below
+    // The tool compacts at 25%: the second follows it, 10 points below (15%), and the first (30%) is held 5 points under that, at the floor of 10%
     const w = world({ window: 500_000, setting: { share: 0.25 } })
-    expect(nudgeShares({ share: 0.25, nudgeFirst: 0.3, nudgeSecond: null })).toEqual({ first: 0.3, second: 0.15 })
+    expect(nudgeShares({ share: 0.25, nudgeFirst: 0.3, nudgeSecond: null })).toEqual({ first: 0.1, second: 0.15 })
     w.request(90_000)
     expect(w.told).toEqual([])
     w.request(105_000)
@@ -176,6 +179,29 @@ describe('telling a growing session to call compact_self (#1492)', () => {
     expect(nudgeShares({ share: 0.5, nudgeFirst: 0.3, nudgeSecond: 0.8 }).second).toBe(0.45)
     expect(nudgeShares({ share: 0.6, nudgeFirst: 0.3, nudgeSecond: null }).second).toBe(0.5)
     expect(nudgeShares({ share: 0.95, nudgeFirst: 0.3, nudgeSecond: null }).second).toBe(0.85)
+  })
+
+  it('keeps the first share in force at least 5 points under the second, at every share, chosen or not', () => {
+    const points = Array.from({ length: 16 }, (_, i) => Math.round((0.2 + i * 0.05) * 100) / 100)
+    for (const share of points) {
+      for (const nudgeFirst of [DEFAULT_AUTO_COMPACT.nudgeFirst, 0.1, 0.3, 0.5, 0.9]) {
+        for (const nudgeSecond of [null, 0.2, 0.4, 0.6, 0.9]) {
+          const read = readAutoCompact({ share, nudgeFirst, nudgeSecond })
+          const { first, second } = nudgeShares(read)
+          const label = JSON.stringify({ share, nudgeFirst, nudgeSecond })
+          // Both under the share the tool compacts at, the first under the second, none under the floor
+          expect(second, label).toBeLessThanOrEqual(Math.round((share - 0.05) * 100) / 100)
+          expect(first, label).toBeGreaterThanOrEqual(0.1)
+          if (second >= 0.15) expect(first, label).toBeLessThanOrEqual(Math.round((second - 0.05) * 100) / 100)
+          // A first share that fits is the one chosen; a second chosen under the share is the one in force
+          if (nudgeFirst <= second - 0.05) expect(first, label).toBe(nudgeFirst)
+          if (nudgeSecond !== null && nudgeSecond <= share - 0.05) expect(second, label).toBe(nudgeSecond)
+          // The setting as read says what is in force, so it can be sent back whole
+          expect(read.nudgeFirst, label).toBe(first)
+          expect(readAutoCompact(read), label).toEqual(read)
+        }
+      }
+    }
   })
 
   it('follows a chosen first share and second share', () => {

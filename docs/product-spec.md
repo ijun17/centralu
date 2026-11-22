@@ -386,7 +386,7 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 
 - A context gauge in the session header: tokens used / **the model's full context window** (%), the same for every tool (#1553):
   100% is the whole window (a 1M model: 1,000k), whatever window the tool reports under Centralu's compaction setting. The
-  point where the tool compacts by itself is in the tooltip ("compacts at 600k tokens (60%)"), not a mark on the bar (#1572), as the tool says it
+  point where the tool compacts by itself is in the tooltip ("compacts at 650k tokens (65%)"), not a mark on the bar (#1572), as the tool says it
   (not as asked for: the CLI clamps what it is given). When the
   model's full window is not known yet the gauge says so ("≤N%", the tooltip names why) instead of passing a smaller window
   off as the full one. Updated from streaming usage events.

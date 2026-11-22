@@ -95,18 +95,28 @@ export const DEFAULT_AUTO_COMPACT: AutoCompact = {
 
 const hundredths = (n: number): number => Math.round(n * 100) / 100
 
-/** The two shares a session is told at, as in force (docs/agent-host/context-compaction.md) */
+/**
+ * The two shares a session is told at, as in force (docs/agent-host/context-compaction.md). The first is held at least
+ * `NUDGE_MARGIN` under the second, chosen or not: the one rule for a first reminder that does not fit, read by the host, the
+ * setting as read (`readAutoCompact`) and Settings alike.
+ */
 export function nudgeShares(c: Pick<AutoCompact, 'share' | 'nudgeFirst' | 'nudgeSecond'>): {
   first: number
   second: number
 } {
   const ceiling = hundredths(c.share - NUDGE_MARGIN)
   const second = hundredths(c.nudgeSecond ?? c.share - NUDGE_SECOND_GAP)
-  return { first: c.nudgeFirst, second: Math.min(ceiling, Math.max(MIN_NUDGE_SHARE, second)) }
+  const held = Math.min(ceiling, Math.max(MIN_NUDGE_SHARE, second))
+  return { first: Math.max(MIN_NUDGE_SHARE, Math.min(c.nudgeFirst, hundredths(held - NUDGE_MARGIN))), second: held }
 }
 
-/** Reads the setting field by field (docs/stored-shapes.md "The rules"); a share lands inside its range */
+/** Reads the setting field by field (docs/stored-shapes.md "The rules"); a share lands inside its range, and it reads as in force */
 export function readAutoCompact(raw: unknown): AutoCompact {
+  return settledAutoCompact(readAutoCompactChosen(raw))
+}
+
+/** The same read, before the first share is held under the second: what was chosen or defaulted, to merge a change over */
+export function readAutoCompactChosen(raw: unknown): AutoCompact {
   const out = { ...DEFAULT_AUTO_COMPACT }
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return out
   if ('controlled' in raw && typeof raw.controlled === 'boolean') out.controlled = raw.controlled
@@ -119,18 +129,18 @@ export function readAutoCompact(raw: unknown): AutoCompact {
     out.nudgeFirst = Math.min(MAX_NUDGE_SHARE, Math.max(MIN_NUDGE_SHARE, raw.nudgeFirst))
   if ('nudgeSecond' in raw && typeof raw.nudgeSecond === 'number' && Number.isFinite(raw.nudgeSecond))
     out.nudgeSecond = Math.min(MAX_NUDGE_SHARE, Math.max(MIN_NUDGE_SHARE, raw.nudgeSecond))
-  return settledSecond(out)
+  return out
 }
 
 /**
- * Holds a chosen second share the share moved under, so the setting as read can be saved again whole
- * (docs/agent-host/context-compaction.md). A misfit choice the person makes is refused in `setUiPreferences`.
+ * The setting as read, so it can be saved again whole (docs/agent-host/context-compaction.md): a chosen second share the share
+ * moved under is held 5 points below it, and the first share is the one in force (`nudgeShares`), never at or above the
+ * second. A misfit choice the person makes is refused in `setUiPreferences`.
  */
-export function settledSecond(c: AutoCompact): AutoCompact {
-  if (c.nudgeSecond === null) return c
-  const held = Math.min(c.nudgeSecond, hundredths(c.share - NUDGE_MARGIN))
-  const nudgeSecond = held > c.nudgeFirst ? held : null
-  return nudgeSecond === c.nudgeSecond ? c : { ...c, nudgeSecond }
+export function settledAutoCompact(c: AutoCompact): AutoCompact {
+  const nudgeSecond = c.nudgeSecond === null ? null : Math.min(c.nudgeSecond, hundredths(c.share - NUDGE_MARGIN))
+  const next = { ...c, nudgeSecond }
+  return { ...next, nudgeFirst: nudgeShares(next).first }
 }
 
 /** A factor on the body and code line heights; `normal` is the base */

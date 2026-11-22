@@ -928,9 +928,9 @@ describe.each([
   describe('the auto-compact setting (#1376)', () => {
     it('is not in the record until chosen, then a patch changes only the fields it names, in the mock and on the host alike', async () => {
       expect((await h.platform.prefs.load()).autoCompact).toBeUndefined()
-      expect((await h.platform.prefs.save({ autoCompact: { share: 0.5 } })).autoCompact).toEqual({ controlled: true, share: 0.5, idleShare: 0.4, nudge: true, nudgeFirst: 0.45, nudgeSecond: null })
-      expect((await h.platform.prefs.save({ autoCompact: { controlled: false } })).autoCompact).toEqual({ controlled: false, share: 0.5, idleShare: 0.4, nudge: true, nudgeFirst: 0.45, nudgeSecond: null })
-      expect((await h.platform.prefs.load()).autoCompact).toEqual({ controlled: false, share: 0.5, idleShare: 0.4, nudge: true, nudgeFirst: 0.45, nudgeSecond: null })
+      expect((await h.platform.prefs.save({ autoCompact: { share: 0.5 } })).autoCompact).toEqual({ controlled: true, share: 0.5, idleShare: 0.4, nudge: true, nudgeFirst: 0.35, nudgeSecond: null })
+      expect((await h.platform.prefs.save({ autoCompact: { controlled: false } })).autoCompact).toEqual({ controlled: false, share: 0.5, idleShare: 0.4, nudge: true, nudgeFirst: 0.35, nudgeSecond: null })
+      expect((await h.platform.prefs.load()).autoCompact).toEqual({ controlled: false, share: 0.5, idleShare: 0.4, nudge: true, nudgeFirst: 0.35, nudgeSecond: null })
     })
   })
 

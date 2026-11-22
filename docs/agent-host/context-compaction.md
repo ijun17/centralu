@@ -40,7 +40,7 @@
   share with `contextShare` (protocol) and divides by nothing else. The nudges and the rest rule take the model's window from `ModelWindows.of`: the record kept for this tool and model, which a floor is never written to (a capped reading drops it). **A stored reading is never one**, because `capped`
   is not stored: after a restart of the host, or a switch to a model nobody has read, they say and do nothing until a reading gives that model's window. The nudges also state the process's point
   (`context.compactAt`), not the setting as it is now (the setting reaches a process at its next start); without one known (just after a start, or a process
-  Centralu did not start to compact) only the first share is told, and only when it is under the share of the setting (the old rule), and no compaction point is named.
+  Centralu did not start to compact) only the first share is told (always under the share of the setting, see below), and no compaction point is named.
   What is shown for an unknown full window: the gauge reads "≤N%" (an upper bound) with a tooltip that says the model's full window is not known yet and the real
   share is at most this, until the tool's next reading under a process with no ceiling teaches it (usually the next start). The stored `context_window` is the
   share window; `capped` and `compactAt` are not stored and come back with the next reading (a record from before may still hold the tool's smaller window until then).
@@ -138,7 +138,7 @@
     window) Centralu tells it **once**, quietly, its size and share and "when this step of the work is done, call `compact_self` with `then` set to what you do next, and end your turn", and tells it
     **once more** at a second share (`nudgeSecond`: default 10 points below the share the tool compacts at, so 55% when that is 65%; **never at or
     above it**, held at least 5 points below, `nudgeShares` in `@cc/protocol`), where the tool's own compaction would otherwise come in the middle
-    of work (`sessions/context-nudges.ts`, `ContextNudges`). **Quiet:** the note goes in as `SessionHandle.nudge`, which never starts a turn and never
+    of work (`sessions/context-nudges.ts`, `ContextNudges`). **The first share is held at least 5 points under the second, chosen or not** (`nudgeShares`, one rule for the host, `prefs.get` and Settings): a first share chosen above that, or left at its default under a low share (a share of 55% or less), is told there, never after the second, and a chosen second is never given up for the first. **Quiet:** the note goes in as `SessionHandle.nudge`, which never starts a turn and never
     interrupts one: Claude takes it as quiet input (`shouldQuery: false`, stamped as Centralu's channel), read with the session's next input or at the
     running turn's next tool round; Codex steers it into the regular turn that is running with `turn/steer`, which names the turn (`expectedTurnId`) and is refused by Codex
     for one that has ended, so a note for the last request of a turn (Codex sends its token count just before `turn/completed`) starts no turn of its own,
@@ -154,12 +154,12 @@
     `/clear` starts here. Accepted limits: a share whose note was still waiting when the host before stopped counts as told; a Codex
     compaction reports no size after it, so a stop between it and its next request seeds from the reading before it. **Only where it can be acted on:** a session that has `compact_self` (an ordinary session and the Assistant,
     `toolProfileOf`), with Centralu's control on (`autoCompact.controlled`) and the notices on (`autoCompact.nudge`), over the 100,000-token floor (a smaller
-    context would be refused), and a share under the tool's own (a first share at or above it is never told). The window's conversation says each one as a
+    context would be refused), and a share under the tool's own. The window's conversation says each one as a
     line from Centralu ("Centralu told it its context is 33% full: call compact_self with then set to its next step"). Settings (Compaction) and `set_preferences`
     take `nudge`, `nudgeFirst` and `nudgeSecond` (`null` is back to following the tool's share); a second share at or above the tool's own, or less than
-    5 points below it, is refused by the host with the reason, a first share not below a chosen second one is refused too (`refused`, `data.reason` `bad_value`, not `internal`), a patch that moves
+    5 points below it, is refused by the host with the reason, a first share the person chose that is not below a chosen second one is refused too (`refused`, `data.reason` `bad_value`, not `internal`), a patch that moves
     several is judged as the whole setting that results, and a tool's share lowered under a second share chosen before **takes it down** (to 5 points below the
-    share; back to the default, null, when it could not then stay above the first), in what is stored and in what `prefs.get` reads (`settledSecond`), so the setting
+    share), in what is stored and in what `prefs.get` reads (`settledAutoCompact`), so the setting
     as read can always be sent back whole: it is what a hub pushes to every linked machine, and a refusal there would have kept the machine from taking the
     share too. All three are **stored beside the record** like `idleShare`
     (`autoCompactNudge`, `autoCompactNudgeFirst`, `autoCompactNudgeSecond`), so an older build's save of `autoCompact` cannot erase them; a linked machine
