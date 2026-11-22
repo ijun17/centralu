@@ -26,15 +26,17 @@ function temp() {
   return t
 }
 
+/** The agent's answers to a session's calls */
+const script: PeerScript = async (method) => {
+  if (method === 'initialize') return { result: { protocolVersion: 1, agentCapabilities: { loadSession: true } } }
+  if (method === 'session/new') return { result: { sessionId: 'ses-t' } }
+  if (method === 'session/load') return { result: {} }
+  if (method === 'session/prompt') return { result: { stopReason: 'end_turn' } }
+  return { result: null }
+}
+
 /** A process that unpacks itself into its TEMP, as 1.4.3's does on start, and answers a session's calls; never outside `root` */
 function unpacking(root: string, specs: AgentSpawnSpec[], peers: FakeAcpPeer[]) {
-  const script: PeerScript = async (method) => {
-    if (method === 'initialize') return { result: { protocolVersion: 1, agentCapabilities: { loadSession: true } } }
-    if (method === 'session/new') return { result: { sessionId: 'ses-t' } }
-    if (method === 'session/load') return { result: {} }
-    if (method === 'session/prompt') return { result: { stopReason: 'end_turn' } }
-    return { result: null }
-  }
   return (spec: AgentSpawnSpec) => {
     specs.push(spec)
     if (!String(spec.env?.TEMP).startsWith(root)) throw new Error(`TEMP is not under the test's data folder: ${spec.env?.TEMP}`)
@@ -126,7 +128,7 @@ describe("the agent's TEMP", () => {
     fakeSignIn(t.home)
     const specs: AgentSpawnSpec[] = []
     const profile = antigravityProfile({ dataDir: t.dir, platform: HOST_TEST_PLATFORM, arch: 'x64' })
-    const adapter = new AntigravityAdapter(profile, (spec) => (specs.push(spec), new FakeAcpPeer(async (m) => ({ result: m === 'session/new' ? { sessionId: 'ses-t' } : {} }))))
+    const adapter = new AntigravityAdapter(profile, (spec) => (specs.push(spec), new FakeAcpPeer(script)))
     const handle = await adapter.createSession(sessionOpts('agy-t2'), driven().emit)
     expect(specs[0]!.env?.TMPDIR).toBe(process.env.TMPDIR)
     expect(leftovers(t.home, '.sign-in-').flatMap((n) => inFolder(pathIn(t.home.root, n)))).not.toContain('tmp')

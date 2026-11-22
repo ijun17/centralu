@@ -233,8 +233,10 @@ agent (review of #1685, follow-up 8).
     user name on a default profile (98 for a 20-character name).
   - On macOS and Linux the system's TEMP stays. The leak there is one 137 KB `cacerts` file for each killed process
     (one that exits by itself removes it), and a TMPDIR under the data folder would put a socket made there (Python's
-    `multiprocessing`) past macOS's 104-character limit. A stop closes stdin and waits 2 s before the kill; an idle
-    1.4.3 on macOS exited well within that and left no file (one sample; a session ended mid-turn is not measured).
+    `multiprocessing`) past macOS's 104-character limit. A stop closes stdin and waits 2 s before the kill. Measured on
+    macOS (1.4.3, signed in, one run each): an idle process exits about 25 ms after stdin closes and leaves no file;
+    one within a turn is still alive 10 s after, also after a `session/cancel` the turn answered, so its kill leaves
+    the file ([#2467](https://github.com/ijun17/centralu/issues/2467)).
 - **The host opens it outside its work.** On Windows the terminal broker (`dev-services/broker-pty.ts`), which the host
   starts before it joins the job, starts it (`{op:'open', url}`, `rundll32 url.dll,FileProtocolHandler`, detached, so
   in no job of the broker's either); with no broker there is no job, or the host opens it itself. On macOS and Linux
