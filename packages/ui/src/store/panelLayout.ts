@@ -1,6 +1,7 @@
 // The right panel's tab arrangement (#20), pure so it is testable without a browser. At most
 // two stacked groups (the split's drop zone is "the bottom half"), each with ordered tabs and an
 // active one. Global and persisted (#20): per project, the panel would rearrange on every switch.
+import { isRecord } from '@cc/protocol/client'
 import { moveTo } from '../features/sidebar/reorder.js'
 
 /** Dragged tabs must not land in the sidebar's lists, nor sessions in the tab strip */
@@ -73,6 +74,8 @@ export function splitTab(groups: PanelGroup[], dragged: PanelTab): PanelGroup[] 
   return [...without(groups, dragged), { tabs: [dragged], active: dragged }]
 }
 
+const isPanelTab = (t: unknown): t is PanelTab => PANEL_TABS.some((tab) => tab === t)
+
 /**
  * The snapshot is untrusted; the result holds every tab once, at most two groups, a valid active.
  * Unrecognizable falls back to the default (half-restored reads as misremembering); a tab the
@@ -83,19 +86,20 @@ export function sanitizeLayout(raw: unknown): PanelGroup[] {
   const seen = new Set<PanelTab>()
   const groups: PanelGroup[] = []
   for (const g of raw.slice(0, 2)) {
-    const tabsRaw = (g as { tabs?: unknown } | null)?.tabs
+    const group = isRecord(g) ? g : {}
+    const tabsRaw = group.tabs
     if (!Array.isArray(tabsRaw)) return defaultLayout()
     // Adding to `seen` while filtering also catches a duplicate within one group
     const tabs: PanelTab[] = []
     for (const t of tabsRaw) {
-      if ((PANEL_TABS as readonly unknown[]).includes(t) && !seen.has(t as PanelTab)) {
-        seen.add(t as PanelTab)
-        tabs.push(t as PanelTab)
+      if (isPanelTab(t) && !seen.has(t)) {
+        seen.add(t)
+        tabs.push(t)
       }
     }
     if (tabs.length === 0) continue
-    const active = (g as { active?: unknown }).active
-    groups.push({ tabs, active: tabs.includes(active as PanelTab) ? (active as PanelTab) : tabs[0]! })
+    const active = group.active
+    groups.push({ tabs, active: isPanelTab(active) && tabs.includes(active) ? active : tabs[0]! })
   }
   if (groups.length === 0) return defaultLayout()
   const missing = PANEL_TABS.filter((t) => !seen.has(t))

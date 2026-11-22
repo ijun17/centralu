@@ -1,3 +1,5 @@
+import { isRecord } from '@cc/protocol/client'
+
 /** A window listener passes the `KeyboardEvent` itself, a React handler `e.nativeEvent` */
 export type ImeKey = { key: string; isComposing: boolean; keyCode: number }
 
@@ -32,22 +34,19 @@ export function letterOf(e: Pick<KeyboardEvent, 'key' | 'code'>): string | null 
   return spot ? spot[1]!.toLowerCase() : null
 }
 
-/** The element a key event landed on, read as one: its fields are checked before use (tests hand in plain objects) */
-const elementOf = (target: EventTarget | null) => target as HTMLElement | null
-
 /** Arrow keys and Enter inside a field that accepts text belong to the field (#181) */
 export function isTextEntry(target: EventTarget | null): boolean {
-  const el = elementOf(target)
-  if (!el || typeof el.tagName !== 'string') return false
-  if (el.isContentEditable || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') return true
-  if (el.tagName !== 'INPUT') return false
-  const type = ((el as HTMLInputElement).type || 'text').toLowerCase()
+  // The fields are read unchecked: tests hand in plain objects, and a window's own target has none of them
+  if (!isRecord(target) || typeof target.tagName !== 'string') return false
+  const tag = target.tagName
+  if (target.isContentEditable === true || tag === 'TEXTAREA' || tag === 'SELECT') return true
+  if (tag !== 'INPUT') return false
+  const type = (typeof target.type === 'string' && target.type ? target.type : 'text').toLowerCase()
   return !['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color', 'file'].includes(type)
 }
 
 export function pressesItself(target: EventTarget | null): boolean {
-  const el = elementOf(target)
-  return !!el && typeof el.closest === 'function' && el.closest('button, a[href], [role="button"]') !== null
+  return isRecord(target) && typeof target.closest === 'function' && target.closest.call(target, 'button, a[href], [role="button"]') !== null
 }
 
 /**

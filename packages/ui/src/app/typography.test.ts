@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { DEFAULT_SANS, familyList, fontStack, typographyOf, typographyProperties } from './typography.js'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { DEFAULT_SANS, applyCachedTypography, familyList, fontStack, typographyOf, typographyProperties } from './typography.js'
 
 const DEFAULTS = typographyOf({})
 
@@ -29,6 +29,33 @@ describe('what a choice writes on the root', () => {
 
   it('reads an older host’s record, missing the text fields, as the defaults', () => {
     expect(typographyOf({ sendWithModifierEnter: true })).toEqual(DEFAULTS)
-    expect(typographyOf({ textSize: 1.2, lineHeight: 'airy' as never })).toMatchObject({ textSize: 1.25, lineHeight: 'normal' })
+    expect(typographyOf({ textSize: 1.2, lineHeight: 'airy' })).toMatchObject({ textSize: 1.25, lineHeight: 'normal' })
+  })
+})
+
+describe('the cached typography before first paint', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  const page = (stored: unknown) => {
+    const style = { setProperty: vi.fn(), removeProperty: vi.fn(), zoom: '' }
+    vi.stubGlobal('document', { documentElement: { style } })
+    vi.stubGlobal('window', { dispatchEvent: vi.fn() })
+    vi.stubGlobal('CustomEvent', class {})
+    vi.stubGlobal('localStorage', { getItem: () => JSON.stringify(stored) })
+    return style
+  }
+
+  it('applies what it holds, each field on its own', () => {
+    const style = page({ textSize: 1.25, lineHeight: 'airy', bodyFont: 7 })
+    applyCachedTypography()
+    expect(style.zoom).toBe('1.25')
+  })
+
+  it('applies nothing from a cache that is not an object', () => {
+    for (const stored of [3, 'x', [1.25], null]) {
+      const style = page(stored)
+      applyCachedTypography()
+      expect(style.zoom).toBe('')
+    }
   })
 })

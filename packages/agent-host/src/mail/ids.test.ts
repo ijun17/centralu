@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { CENTRALU, PERSON, appAddress, parseAddress, sessionAddress } from './address.js'
 import { UlidMaker, messageIdOf, parseMailId, threadIdOf } from './ids.js'
 
-describe('ids (§11.4)', () => {
+describe('ids (§5.2)', () => {
   it('a thread id is <hostId>.t_<ulid> and a message id <hostId>.m_<ulid>, and each parses back', () => {
     const ulid = new UlidMaker().next(1_800_000_000_000)
     expect(ulid).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/)
@@ -61,7 +61,7 @@ describe('ids (§11.4)', () => {
   })
 })
 
-describe('addresses (§2, §11.4)', () => {
+describe('addresses (§4, §5.1)', () => {
   it('a session, an app, the person and Centralu parse; the first two carry the host', () => {
     expect(parseAddress(sessionAddress('hub-1a2b3c4d', '9f2c'))).toEqual({ kind: 'session', host: 'hub-1a2b3c4d', sessionId: '9f2c' })
     expect(parseAddress(appAddress('hub-1a2b3c4d', 'p1', 'project-board'))).toEqual({ kind: 'app', host: 'hub-1a2b3c4d', projectId: 'p1', appId: 'project-board' })

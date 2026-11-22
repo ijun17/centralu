@@ -197,7 +197,6 @@ packages/agent-host/src/apps/external/visibility.ts @typescript-eslint/no-unsafe
 packages/agent-host/src/cli-version.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/dev-services/store-subagent-trash.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/drain.ts @typescript-eslint/prefer-promise-reject-errors 1
-packages/agent-host/src/env-path.ts @typescript-eslint/consistent-type-assertions 1
 packages/agent-host/src/inline-views.ts @typescript-eslint/no-base-to-string 1
 packages/agent-host/src/inline-views.ts @typescript-eslint/no-non-null-assertion 4
 packages/agent-host/src/inline-views.ts @typescript-eslint/no-unnecessary-type-assertion 1
