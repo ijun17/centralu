@@ -323,7 +323,8 @@ describe('bundle regression (decision C-3: no editor engine in the viewer)', () 
     const required = Boolean(process.env.CC_BUNDLE_BASE) || (Boolean(process.env.CI) && !elsewhere)
     const verdict = judgeBundle({ bytes: jsBytes, base, declarations, required })
     for (const note of verdict.notes) console.info(note)
-    expect(verdict.problems).toEqual([])
+    // The problems as its message: pre-pr shows a failure's message, where the bytes to declare are
+    expect(verdict.problems, verdict.problems.join(' ')).toEqual([])
   })
 })
 

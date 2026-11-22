@@ -171,6 +171,26 @@ describe('the repository\'s tier rules', () => {
     expect(classify(['a/x.test.ts', 'b/x.test.ts'], rules).files.map((f: { tier: string }) => f.tier)).toEqual(['auto', 'light'])
   })
 
+  it('takes a new declaration of bundle growth as light, and an edited or deleted one, or anything else new there, as deep (#1524)', () => {
+    const entry = (path: string, oldMode: string, newMode: string) => [path, { path, oldMode, newMode }] as const
+    const added = (path: string) => entry(path, '000000', '100644')
+    const judge = (entries: (readonly [string, object])[], rules = RULES) => classify(entries.map(([p]) => p), rules, new Map(entries))
+    const decl = 'tooling/bundle-growth/ui-fix.json'
+    // A UI change that declares its growth keeps the UI's tier
+    expect(judge([added(decl), entry('packages/ui/src/a.tsx', '100644', '100644')]).tier).toBe('light')
+    expect(judge([added(decl)]).files[0]).toEqual({ path: decl, tier: 'light', rules: ['bundle-growth'] })
+    expect(judge([entry(decl, '100644', '100644')]).tier).toBe('deep')
+    expect(judge([entry(decl, '100644', '000000')]).tier).toBe('deep')
+    expect(judge([added('tooling/bundle-growth/x.mjs'), added('tooling/bundle-growth/a/x.json'), added('tooling/x.json')]).counts).toEqual({ deep: 3 })
+    // A bare path says nothing of being new
+    expect(tierOf([decl]).tier).toBe('deep')
+    // Each part stands on its own: without the exception guards holds it, and without the rule only a light fallback would
+    const noException = { ...RULES, rules: RULES.rules.map((r) => (r.id === 'guards' ? { ...r, exceptAdded: [] } : r)) }
+    expect(judge([added(decl)], noException).tier).toBe('deep')
+    expect(judge([added(decl)], { ...RULES, fallback: 'deep' }).tier).toBe('light')
+    expect(judge([added(decl)], { ...without('bundle-growth'), fallback: 'deep' }).tier).toBe('deep')
+  })
+
   it('takes the lint allowlists as light, and what keeps them shrinking as deep (#1339)', () => {
     // Every conversion edits a list; the comparison with main's lists is what guards them
     expect(tierOf(['tooling/lint-allowlist/packages-core.txt']).tier).toBe('light')
@@ -195,9 +215,9 @@ describe('the repository\'s tier rules', () => {
 
   it('matches every glob, and every name of its {a,b} lists, against a file in the repository, so a rename cannot drop a path silently', () => {
     const files = execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' }).split('\n').filter(Boolean)
-    const raw = JSON.parse(readFileSync(join(ROOT, RULES_FILE), 'utf8')) as { rules: { id: string; paths: string[]; except?: string[] }[] }
+    const raw = JSON.parse(readFileSync(join(ROOT, RULES_FILE), 'utf8')) as { rules: { id: string; paths: string[]; except?: string[]; exceptAdded?: string[] }[] }
     const dead = raw.rules.flatMap((r) =>
-      [...r.paths, ...(r.except ?? [])]
+      [...r.paths, ...(r.except ?? []), ...(r.exceptAdded ?? [])]
         .flatMap((g): string[] => globNames(g))
         .filter((g) => !files.some((f) => globToRegExp(g).test(f)))
         .map((g) => `${r.id}: ${g}`),
@@ -233,6 +253,7 @@ describe('the rules file and its globs', () => {
     const rules = parseRules(file([{ id: 'docs', tier: 'auto', paths: ['docs/**'], except: ['docs/secret.md'], why: 'documents' }]))
     expect(classify(['docs/a.md'], rules).tier).toBe('auto')
     expect(classify(['docs/secret.md'], rules).tier).toBe('light')
+    expect(() => parseRules(file([{ id: 'x', tier: 'deep', paths: ['a'], exceptAdded: 'a', why: 'w' }]))).toThrow('exceptAdded must be a list of globs')
   })
 
   it('matches a rule with ignoreCase whatever the case, and only that rule', () => {
@@ -303,6 +324,25 @@ describe('pnpm tier on a git repository', () => {
     write('src/b.ts', 'b\n')
     commit('main moves on')
     expect(tierOfChange({ root: repo, base: 'main', head: 'top' }).files.map((f: { path: string }) => f.path)).toEqual(['src/a.ts'])
+  })
+
+  it('leaves a file out of a rule by exceptAdded only when the head adds it, renamed or not', () => {
+    const growth = { id: 'growth', tier: 'light', paths: ['tooling/growth/*.json'], why: 'new data' }
+    write(RULES_FILE, JSON.stringify({ tiers: ['auto', 'light', 'deep', 'person'], fallback: 'light', rules: [growth, { id: 'guards', tier: 'deep', paths: ['tooling/**'], exceptAdded: ['tooling/growth/*.json'], why: 'guards' }] }))
+    write('tooling/growth/old.json', '{"bytes":1}\n')
+    commit('rules and a declaration')
+    git('branch', '-q', '-f', 'main')
+    const tierAt = () => tierOfChange({ root: repo, base: 'main', head: 'HEAD' }).tier
+    write('tooling/growth/new.json', '{"bytes":2}\n')
+    commit('a new one')
+    expect(tierAt()).toBe('light')
+    write('tooling/growth/old.json', '{"bytes":3}\n')
+    commit('and an edited one')
+    expect(tierAt()).toBe('deep')
+    git('reset', '-q', '--hard', 'main')
+    git('mv', 'tooling/growth/old.json', 'tooling/growth/moved.json')
+    commit('renamed')
+    expect(tierAt()).toBe('deep')
   })
 
   it('takes the head\'s rules when the base has none, and answers deep when neither has', () => {

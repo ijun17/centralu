@@ -293,9 +293,12 @@ anything, and the whole may not pass the ceiling in `tooling/bundle-budget.mjs`,
 each step. Over either, find out what grew first; if the growth is meant, add a file of its own,
 `tooling/bundle-growth/<your-branch>.json`, `{ "bytes": <n>, "reason": "<what grew and why>" }`, in
 the same pull request (the test's message gives the number). It counts once against main, until
-main's record lists it, and raises the ceiling for good. In CI a missing or unreadable record of
+main's record lists it, and raises the ceiling for good, so CI fails new declarations that add more
+than the change grew, rounded up to whole KB. In CI a missing or unreadable record of
 main fails the test with the reason; rerun once main's record exists. A local run checks the ceiling
-only, and says it did not compare with main.
+only, and says it did not compare with main; `pnpm pre-pr` runs it too (`tooling/guards.ts`), so the
+number shows before the merge queue. A new declaration is light (`.centralu/tiers.json`
+"bundle-growth"), so it leaves a UI change's tier as it was; editing or deleting one is deep.
 
 **Lint reads types, and what predates that only shrinks** (#1339). `pnpm lint` runs typescript-eslint's
 type-aware rules on everything the root `tsconfig.json` compiles: no `any` flowing on from `JSON.parse`
@@ -409,7 +412,7 @@ not run; it prints each step's time as it goes. In that order:
   so it must build on its own;
 - dependency-cruiser's orphans as errors (`orphans`; `pnpm verify` fails on them too), and every other rule it fails `pnpm depcruise` on (`deps`: a
   cycle, a layer rule);
-- `repo-guards`: the repository-wide guards `tooling/guards.ts` declares (the document references, the OS allowlist, the old name,
+- `repo-guards`: the repository-wide guards `tooling/guards.ts` declares (the document references, the OS allowlist, the old name, the app's JS ceiling,
   the tiers' globs and more), at your head: they fail on a file your branch did not touch. A guard is declared there with the files
   it reads, and the names of its tests (its describes', when all of the file's are the guard), which every run of it passes to vitest. Every test under `tooling/` is named there once:
   a guard holds the files of a folder, or of the repository, to a rule, and any other test is listed in `NOT_GUARDS` under why it

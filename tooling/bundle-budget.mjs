@@ -96,6 +96,8 @@ export function writeBundleRecord(dir, record) {
 
 const kb = (n) => `${(n / 1000).toFixed(1)} KB`
 const sum = (list) => list.reduce((n, d) => n + d.bytes, 0)
+/** Bytes rounded up to whole kilobytes: what a declaration says */
+const wholeKb = (n) => Math.ceil(n / 1000) * 1000
 
 /**
  * The verdict on `bytes`: `{ ok, notes, problems }`. `base` is `{ record }` or `{ missing }` from
@@ -107,10 +109,11 @@ export function judgeBundle({ bytes, base, declarations, required, allowance = B
   const notes = []
   const howTo = (need) =>
     `Find out what grew first (a heavy dependency, a feature larger than it should be). If the growth is meant, ` +
-    `add ${GROWTH_DIR}/<your-branch>.json in this pull request: { "bytes": ${need}, "reason": "<what grew, and why it has to>" }.`
+    `add ${GROWTH_DIR}/<your-branch>.json in this pull request: { "bytes": ${need}, "reason": "<what grew, and why it has to>" }. ` +
+    `A new file there does not raise the pull request's tier (.centralu/tiers.json "bundle-growth").`
   const roof = ceiling + sum(declarations)
   if (bytes > roof) {
-    problems.push(`The app's JS is ${bytes} B, over the ceiling of ${roof} B (${ceiling} B and ${declarations.length} declaration(s) in ${GROWTH_DIR}). ${howTo(Math.ceil((bytes - roof) / 1000) * 1000)}`)
+    problems.push(`The app's JS is ${bytes} B, over the ceiling of ${roof} B (${ceiling} B and ${declarations.length} declaration(s) in ${GROWTH_DIR}). ${howTo(wholeKb(bytes - roof))}`)
   }
   const record = base?.record
   if (!record) {
@@ -126,7 +129,17 @@ export function judgeBundle({ bytes, base, declarations, required, allowance = B
   const against = `main's ${record.bytes} B${record.sha ? ` (${record.sha.slice(0, 8)}${record.measured ? ', measured here' : ''})` : ''}`
   const allowed = `${kb(allowance)}${fresh.length ? ` plus ${kb(sum(fresh))} declared (${fresh.map((d) => d.name).join(', ')})` : ''}`
   const change = `${grew >= 0 ? '+' : ''}${grew} B against ${against}`
-  if (bytes > limit) problems.push(`The app's JS is ${bytes} B, ${change}: more than the ${allowed} a change may add. ${howTo(Math.ceil((bytes - limit) / 1000) * 1000)}`)
+  if (bytes > limit) problems.push(`The app's JS is ${bytes} B, ${change}: more than the ${allowed} a change may add. ${howTo(wholeKb(bytes - limit))}`)
   else notes.push(`The app's JS is ${bytes} B, ${change}; ${allowed} allowed.`)
+  // A new declaration raises the ceiling for good, so it covers only growth this change made: each rounded up to whole KB,
+  // with a kilobyte of room each, as a batch's declarations are rounded one by one and its growth measured together
+  const covered = wholeKb(Math.max(0, grew)) + 1000 * fresh.length
+  if (sum(fresh) > covered) {
+    problems.push(
+      `The new declaration(s) ${fresh.map((d) => d.name).join(', ')} add ${sum(fresh)} B, more than this change grew (${change}) ` +
+        `rounded up to whole KB, with 1 KB of room each. A declaration raises the ceiling for good, so it says what the change grew: ` +
+        (grew > 0 ? `{ "bytes": ${wholeKb(grew)} } at most here.` : 'This change did not grow it, so it needs none.'),
+    )
+  }
   return { ok: problems.length === 0, notes, problems }
 }

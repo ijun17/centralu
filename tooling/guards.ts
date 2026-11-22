@@ -4,6 +4,8 @@
  */
 import { losesTargets } from './doc-refs.js'
 import { OS_ALLOWLIST } from './os-layer.js'
+// @ts-expect-error — plain .mjs, shared with the workflow's script (.github/scripts/bundle-base.mjs)
+import { GROWTH_DIR } from './bundle-budget.mjs'
 // @ts-expect-error — a plain .mjs script, so pre-pr and the board can run it with Node alone
 import { RULES_FILE as TIER_RULES } from '../scripts/tier.mjs'
 
@@ -56,7 +58,13 @@ export const GUARDS: readonly Guard[] = [
     // The merge queue's lists of mechanical conflicts, and how a file is matched against them
     reads: ['.centralu/apps/project-board/project.json', '.centralu/apps/project-board/queue-conflict.mjs'],
   },
-  { test: 'tooling/styles.test.ts', tests: 'borders are solid tokens|our own classes are actually used', reads: [] },
+  {
+    test: 'tooling/styles.test.ts',
+    tests: 'borders are solid tokens|our own classes are actually used|bundle regression',
+    // The app's JS against its ceiling (#1524): its limits, and a declaration edited or deleted, which lowers it for every open pull request
+    reads: ['tooling/bundle-budget.mjs'],
+    readsPart: { path: new RegExp(`^${GROWTH_DIR}/[^/]+\\.json$`), changed: (_, before) => before() !== null },
+  },
   { test: 'tooling/tier.test.ts', tests: 'matches every glob', reads: [TIER_RULES, 'scripts/tier.mjs'] },
   { test: 'tooling/actions-pinned.test.ts', tests: 'workflow dependencies are immutable', reads: [] },
   { test: 'tooling/e2e-webkit-twins.test.ts', tests: 'e2e WebKit twins repeat their base spec', reads: [] },

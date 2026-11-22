@@ -47,6 +47,22 @@ describe('the repository-wide guards', () => {
     expect(changedGuards([change('tooling/heavy-store.test.ts', 'a', 'b'), change('packages/ui/src/a.ts', null, 'b'), change('docs/notes.txt', '## 1. One\n', null)])).toEqual([])
   })
 
+  it('runs the bundle\'s size and contents with the style guards, and counts a declaration only when one that was there changes (#1524)', () => {
+    const styles = GUARDS.find((g) => g.test === 'tooling/styles.test.ts')!
+    const source = readFileSync(join(ROOT, styles.test), 'utf8')
+    // The size test's name, as vitest gives it to the guard's pattern: its describe's title, then its own
+    expect(source).toContain("describe('bundle regression (decision C-3: no editor engine in the viewer)'")
+    expect(source).toContain("it('the app\\'s total JS, lazy chunks included")
+    expect(new RegExp(styles.tests).test("bundle regression (decision C-3: no editor engine in the viewer) the app's total JS, lazy chunks included")).toBe(true)
+    const STYLES = ['tooling/styles.test.ts']
+    expect(changedGuards([change('tooling/bundle-budget.mjs', 'a', 'b')])).toEqual(STYLES)
+    // A new declaration only raises the ceiling; an edited or deleted one lowers it for every open pull request
+    expect(changedGuards([change('tooling/bundle-growth/new.json', null, '{}')])).toEqual([])
+    expect(changedGuards([change('tooling/bundle-growth/old.json', '{"bytes":2}', '{"bytes":1}')])).toEqual(STYLES)
+    expect(changedGuards([change('tooling/bundle-growth/old.json', '{}', null)])).toEqual(STYLES)
+    expect(changedGuards([change('tooling/bundle-growth/a/old.json', '{}', null), change('tooling/bundle-growth/old.txt', '{}', null)])).toEqual([])
+  })
+
   it('counts a document only when it loses something a reference may cite', () => {
     const doc = readFileSync(join(ROOT, 'docs', 'architecture.md'), 'utf8').replace(/\r\n/g, '\n')
     const docs = (before: string | null, after: string | null, path = 'docs/architecture.md') => changedGuards([change(path, before, after)])

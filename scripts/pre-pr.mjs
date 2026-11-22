@@ -214,7 +214,8 @@ export const realRunners = {
     try {
       const pattern = namesOnly ? '(?!)' : testNamePattern
       const args = ['run', '--reporter=json', `--outputFile=${out}`, ...(pattern ? ['-t', pattern] : [])]
-      const runEnv = { ...env, CC_DATA_DIR: data }
+      // No run here compares the app's JS with main's (tooling/styles.test.ts): CI's verify job does, also where CI is set
+      const runEnv = { CC_BUNDLE_COMPARED_BY: 'build.yml verify', ...env, CC_DATA_DIR: data }
       if (known) {
         runEnv.CC_PRE_PR_KNOWN = join(tmp, 'known.json')
         writeFileSync(runEnv.CC_PRE_PR_KNOWN, JSON.stringify(known.map((t) => testKey(t.file, t.name))))

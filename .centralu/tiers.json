@@ -1,5 +1,5 @@
 {
-  "about": "Risk tiers by path (#1259 step 2), read by scripts/tier.mjs (pnpm tier). The auto rules list the harmless extensions they cover, so a file of any other kind falls to light. A file takes the highest tier of the rules whose paths match it (and whose except does not), light when none does; a test (x.test.ts, x.test-helpers.ts, a folder's tests.rs) also takes the tier of the file it tests (x.ts, the folder's mod.rs), so the guard of a deep file is deep. A change takes the highest tier of its files. Without these rules, or when they cannot be read, a change is deep. person is never given by path: it is the label tier:person, set by hand. Globs are matched against the whole path from the repository root: ** any number of folders, * and ? within one name, {a,b} either; a rule with ignoreCase matches whatever the case.",
+  "about": "Risk tiers by path (#1259 step 2), read by scripts/tier.mjs (pnpm tier). The auto rules list the harmless extensions they cover, so a file of any other kind falls to light. A file takes the highest tier of the rules whose paths match it (and whose except does not, nor exceptAdded when the change adds the file), light when none does; a test (x.test.ts, x.test-helpers.ts, a folder's tests.rs) also takes the tier of the file it tests (x.ts, the folder's mod.rs), so the guard of a deep file is deep. A change takes the highest tier of its files. Without these rules, or when they cannot be read, a change is deep. person is never given by path: it is the label tier:person, set by hand. Globs are matched against the whole path from the repository root: ** any number of folders, * and ? within one name, {a,b} either; a rule with ignoreCase matches whatever the case.",
   "tiers": ["auto", "light", "deep", "person"],
   "fallback": "light",
   "rules": [
@@ -142,10 +142,17 @@
       "why": "the type-aware lint's lists of findings that predate it (#1339): every conversion edits them, and what keeps them shrinking is deep (tooling/lint-allowlist.ts, tooling/type-aware-lint.test.ts, which compares them with main's). When the last list goes, this rule and the except in guards go with it: tooling/tier.test.ts fails on a glob that matches nothing"
     },
     {
+      "id": "bundle-growth",
+      "tier": "light",
+      "paths": ["tooling/bundle-growth/*.json"],
+      "why": "a new declaration of the app's JS growth (#1524): data with its reason, so a UI change that declares keeps its tier; CI holds its bytes to the growth the change made (tooling/bundle-budget.mjs). Only a new one: editing one changes, and deleting one lowers, the ceiling every open pull request is measured against, with no growth to hold it to, so it stays deep under guards (its exceptAdded)"
+    },
+    {
       "id": "guards",
       "tier": "deep",
       "paths": ["tooling/**"],
       "except": ["tooling/lint-allowlist/*.txt"],
+      "exceptAdded": ["tooling/bundle-growth/*.json"],
       "why": "the repository-wide guards and the test, lint and type setup every change is checked by: a weakened guard lets every later change through"
     },
     {
