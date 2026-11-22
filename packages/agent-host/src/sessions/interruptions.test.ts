@@ -15,7 +15,7 @@ import { memoryUpdateFolder } from '../lifecycle/update-resume.test-helpers.js'
 import { HOST_FAMILY } from '../os/real.js'
 import { OWN_WORK_SETTLE_MS } from './child-ownership.js'
 import { isNetworkFailure } from './error-kind.js'
-import { RECONNECTING_FLAG_MS, interruptionAfter, stopOf } from './interruptions.js'
+import { RECONNECTING_FLAG_MS, interruptionAfter, interruptionWords, stopOf } from './interruptions.js'
 import { SessionManager } from './manager.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 
@@ -582,6 +582,14 @@ describe("the person's own turn a quit cut (#1946)", () => {
  * #1946 (2026-11-03): the notice for a turn a quit cut quoted the turn before's last answer as its "Last response", though the
  * cut turn had written nothing. A cut turn's words are those it said, or none (#1604)
  */
+describe('the words an Assistant reads of a stop (#698)', () => {
+  it('say a stop Centralu gave up continuing, which the conversation has no line of (#2360)', () => {
+    expect(interruptionWords({ reason: 'limit', at: 1, gaveUpAfter: 3 })).toBe('stopped: usage limit (Centralu gave up continuing it after 3 tries)')
+    expect(interruptionWords({ reason: 'network', at: 1, gaveUpAfter: 1 })).toBe('stopped: network error (Centralu gave up continuing it after 1 try)')
+    expect(interruptionWords({ reason: 'limit', at: 1 })).toBe('stopped: usage limit')
+  })
+})
+
 describe('the words of a turn a quit cut (#1946)', () => {
   it("are that turn's own: none, never the turn before's answer", async () => {
     const a = host()

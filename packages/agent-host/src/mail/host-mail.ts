@@ -202,7 +202,8 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     stopShown: (address) => {
       const party = parseAddress(address)
       const s = party?.kind === 'session' && party.host === hostId ? sessions.sessionInfo(party.sessionId) : undefined
-      return !!s && turnStop(s) !== null
+      // A session resting `limited` is not listed in the Inbox (`isListedWaiting`): its notice stays
+      return !!s && s.state !== 'limited' && turnStop(s) !== null
     },
     stoppedWords: (address) => {
       const party = parseAddress(address)

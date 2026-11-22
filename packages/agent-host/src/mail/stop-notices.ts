@@ -18,8 +18,8 @@ export type StopNoticeOptions = {
    */
   standing?: (sessionAddress: string) => 'turn' | 'rest' | 'cut'
   /**
-   * Whether the session's stop stands where the person sees it (`turnStop`: its Inbox row and its note, with Continue and Done). The
-   * person's notice leaves such a stop out, as that row says it (#2360); none is left out when absent
+   * Whether the session's stop stands on its Inbox row (`turnStop`, with Continue and Done; a session the person has read shows it
+   * in the note in front of them). The person's notice leaves such a stop out, as that row says it (#2360); none when absent
    */
   stopShown?: (sessionAddress: string) => boolean
   /** The words of the turn a session's stop cut, which its stop notice to a session quotes as that session's own text; none quoted when absent */
@@ -76,7 +76,7 @@ export class StopNotices {
    * its next turn). `starter`, the session that started the stopped one, is told too when it is owed nothing and the turn was
    * not the person's, woken only from a turn. The rows stay open, so a reply or a last response after the person continues the
    * session still answers them. A question delivered in an earlier turn is not this stop's: it was read, and the session may
-   * have answered it in conversation. The person's notice goes to the Inbox and wakes nothing. `told`: the senders a call still
+   * have answered it in conversation. The person's notice goes to the Inbox, without a stop the session's own row says (`stopShown`), and wakes nothing. `told`: the senders a call still
    * waiting on the session already told, whose rows are released and marked told. Returns how many rows were released
    */
   sessionStopped(address: string, why: StopWhy, opts: Omit<SessionStop, 'address' | 'why' | 'turnSeq'> & { turnSeq?: number | null } = {}): number {

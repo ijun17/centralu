@@ -204,10 +204,9 @@ describe('a turn ends without finishing', () => {
     w.store.mailbox.markDelivered(addr(second.child), [q.id], Date.now(), m.turns.latest(second.child)!.seq)
     says(second.child, 'Rebased onto main, as you asked.')
     handleOf(second.child).event({ type: 'limit_reached', sessionId: second.child })
-    await w.until(() => stopNotices(second.asker).length === 1)
+    await w.until(() => stopNotices(second.asker).length === 1 && stopNoticesToPerson().length === 1)
     expect(stopNotices(second.asker)[0]!.message.body).not.toContain('Rebased onto main')
-    // The person reads that stop on the session's Inbox row (#2360)
-    expect(stopNoticesToPerson()).toEqual([])
+    expect(stopNoticesToPerson()[0]!.message.body).not.toContain('Rebased onto main')
 
     // The asker's own turn, into which the person typed
     const third = await askedOwnTurn()
@@ -339,6 +338,21 @@ describe('a turn ends without finishing', () => {
     await w.until(() => read.row(q.id, addr(child))?.toldAt != null)
     expect(read.row(q.id, addr(child))).toMatchObject({ releasedWhy: 'error', settled: null })
     expect(stopNoticesToPerson()).toEqual([])
+  })
+
+  it('a stop that rests `limited`, which the Inbox does not list, still tells the person in plain words', async () => {
+    w.mgr.prefs.setUiPreferences({ continueAfterLimit: false })
+    const child = await w.callerSession()
+    working(child)
+    const q = m.service.send('person', { to: [addr(child)], text: 'are you done?', needsReply: true }).message
+    w.store.mailbox.markDelivered(addr(child), [q.id], Date.now(), m.turns.latest(child)!.seq)
+    handleOf(child).event({ type: 'limit_reached', sessionId: child })
+    await w.until(() => stopNoticesToPerson().length === 1)
+    expect(w.mgr.sessionInfo(child)?.state).toBe('limited')
+    const notice = stopNoticesToPerson()[0]!.message
+    expect(notice.facts.unanswered).toEqual([{ id: q.id, recipient: addr(child), why: 'limit' }])
+    expect(notice.body).toContain('reached its usage limit before it answered your message. It can go on after the limit resets; send it a message then.')
+    expect(notice.body).not.toContain(addr(child))
   })
 
   it("the person's own Stop writes nothing to their Inbox", async () => {
