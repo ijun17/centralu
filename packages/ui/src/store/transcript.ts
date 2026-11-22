@@ -425,14 +425,9 @@ function markerParts(e: Marker): {
  * decides: a failure after the refusal is the one the note is about.
  */
 export function lastTurnRefusedModel(items: readonly ChatItem[] | undefined): boolean {
-  if (!items) return false
-  for (let i = items.length - 1; i >= 0; i--) {
-    const it = items[i]
-    // A message still being sent has not started a turn: the note stands until the session works
-    if (it?.kind === 'user' && !it.pending) return false
-    if (it?.kind === 'mark' && it.mark === 'failed') return !!it.pickModel
-  }
-  return false
+  // A message still being sent has not started a turn: the note stands until the session works
+  const it = items?.findLast((x) => (x.kind === 'user' && !x.pending) || (x.kind === 'mark' && x.mark === 'failed'))
+  return it?.kind === 'mark' && !!it.pickModel
 }
 
 /** The host marks a refused model in `error.data` (#1369) */

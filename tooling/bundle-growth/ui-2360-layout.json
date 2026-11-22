@@ -1,0 +1,4 @@
+{
+  "bytes": 100,
+  "reason": "One message per stop (#2360, rows 3, 5 and 8): the stop note's Pick another model button and words, the refused-model check (lastTurnRefusedModel) and the header's limit-badge rule, less the handoff line and the conversation line's button they replace. Measured 1,963,492 B against main's 1,963,410 B (0bd1cc5d8, Windows production build), +82 B after trimming, all in the main chunk. Plain code with no dependency; lazy loading would not lower the total, which counts every chunk."
+}

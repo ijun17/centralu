@@ -48,8 +48,8 @@ export function SessionHeader({
   // A credits or spend limit has no reset: a resumeAt beside it is the primary window's
   const limitResets = session.limit?.resumeAt && !session.limit.credits && !noteSaysTime ? session.limit.resumeAt : null
   // The note says the limit stop (#2360): a badge with no percentage and no reset of its own would say it again
-  const noteSaysLimit = stop?.kind === 'wait' ? stop.interruption.reason === 'limit' : stop?.kind === 'stopped' && stop.reason === 'limit'
-  const limitBadge = !!session.limit && (session.limit.usedPercent != null || !!limitResets || !noteSaysLimit)
+  const noteSaysLimit = (stop?.kind === 'wait' ? stop.interruption.reason : stop?.kind === 'stopped' && stop.reason) === 'limit'
+  const limit = session.limit?.usedPercent != null || limitResets || !noteSaysLimit ? session.limit : null
 
   /*
    * The header's height is written as **an explicit height** (40px), not padding (2026-09-13).
@@ -86,9 +86,9 @@ export function SessionHeader({
       {/* Started from a linked computer (#1273): the preset it runs under, on both computers */}
       <PresetTag preset={session.permissionPreset} startedFromHub={session.startedFromHub} testId="session-preset" />
 
-      {limitBadge && session.limit && (
+      {limit && (
         <span className="readout text-xs text-ink-muted" data-testid="limit-badge">
-          Limit {session.limit.usedPercent != null ? `${session.limit.usedPercent}%` : 'reached'}
+          Limit {limit.usedPercent != null ? `${limit.usedPercent}%` : 'reached'}
           {limitResets ? ` · resets ${formatWhen(new Date(limitResets))}` : ''}
         </span>
       )}
