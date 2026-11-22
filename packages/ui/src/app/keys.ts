@@ -1,3 +1,5 @@
+import { isRecord } from '@cc/protocol/client'
+
 /** A window listener passes the `KeyboardEvent` itself, a React handler `e.nativeEvent` */
 export type ImeKey = { key: string; isComposing: boolean; keyCode: number }
 
@@ -32,23 +34,19 @@ export function letterOf(e: Pick<KeyboardEvent, 'key' | 'code'>): string | null 
   return spot ? spot[1]!.toLowerCase() : null
 }
 
-/** A field of the element a key event landed on, whatever the target is (tests hand in plain objects, a window's own target has no such field) */
-const fieldOf = (target: EventTarget | null, name: string): unknown => (target ? Reflect.get(target, name) : undefined)
-
 /** Arrow keys and Enter inside a field that accepts text belong to the field (#181) */
 export function isTextEntry(target: EventTarget | null): boolean {
-  const tag = fieldOf(target, 'tagName')
-  if (typeof tag !== 'string') return false
-  if (fieldOf(target, 'isContentEditable') === true || tag === 'TEXTAREA' || tag === 'SELECT') return true
+  // The fields are read unchecked: tests hand in plain objects, and a window's own target has none of them
+  if (!isRecord(target) || typeof target.tagName !== 'string') return false
+  const tag = target.tagName
+  if (target.isContentEditable === true || tag === 'TEXTAREA' || tag === 'SELECT') return true
   if (tag !== 'INPUT') return false
-  const kind = fieldOf(target, 'type')
-  const type = (typeof kind === 'string' && kind ? kind : 'text').toLowerCase()
+  const type = (typeof target.type === 'string' && target.type ? target.type : 'text').toLowerCase()
   return !['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color', 'file'].includes(type)
 }
 
 export function pressesItself(target: EventTarget | null): boolean {
-  const closest = fieldOf(target, 'closest')
-  return typeof closest === 'function' && closest.call(target, 'button, a[href], [role="button"]') !== null
+  return isRecord(target) && typeof target.closest === 'function' && target.closest.call(target, 'button, a[href], [role="button"]') !== null
 }
 
 /**

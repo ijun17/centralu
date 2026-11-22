@@ -190,8 +190,14 @@ describe('the cached theme before first paint', () => {
     expect(root.style.setProperty).toHaveBeenCalledWith('--color-surface-floor', '#fafafa')
   })
 
-  it('paints nothing from a cache that is not a theme choice: no mode, a side missing or a side with no base', () => {
-    for (const stored of [{ mode: 'sepia', dark, light }, { mode: 'dark', dark }, { mode: 'dark', dark, light: { ...light, base: 'blue' } }, 'dark', [dark, light]]) {
+  it('reads an unknown mode as Dark, and needs only the side it paints', () => {
+    const root = page({ mode: 'sepia', dark, light: 'broken' })
+    applyCachedTheme()
+    expect(root.dataset).toMatchObject({ theme: 'dark', themeBase: 'dark' })
+  })
+
+  it('paints nothing from a cache that is not a theme choice: no side, a side with no base or preset, a value that is no object', () => {
+    for (const stored of [{ mode: 'dark', light }, { mode: 'dark', dark: { ...dark, base: 'blue' } }, { mode: 'light', light: { ...light, preset: 3 } }, 'dark', [dark, light]]) {
       const root = page(stored)
       applyCachedTheme()
       expect(root.dataset).toEqual({})

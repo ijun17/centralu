@@ -91,7 +91,7 @@ export function pickTheme(choice: ThemeChoice): ResolvedTheme {
 /** What this module last wrote inline, so a switch removes exactly those and nothing else on `<html>` */
 let written: string[] = []
 
-export function applyTheme(theme: ResolvedTheme, root: HTMLElement = document.documentElement): void {
+export function applyTheme(theme: Pick<ResolvedTheme, 'base' | 'preset' | 'tokens'>, root: HTMLElement = document.documentElement): void {
   for (const name of written) root.style.removeProperty(name)
   // The first-paint script's inline values (#340) would outrank the stylesheet: docs/themes.md "How it is applied"
   root.style.removeProperty('background-color')
@@ -113,32 +113,22 @@ export function cacheChoice(choice: ThemeChoice): void {
 /** One field of a stored value, whatever it is */
 const field = (value: unknown, key: string): unknown => (typeof value === 'object' && value !== null ? Reflect.get(value, key) : undefined)
 
-/** A theme as `resolveChoice` wrote it, checked field by field; undefined when the cache holds something else */
-function cachedTheme(value: unknown): ResolvedTheme | undefined {
-  const [id, name, base, preset] = [field(value, 'id'), field(value, 'name'), field(value, 'base'), field(value, 'preset')]
-  if (typeof id !== 'string' || typeof name !== 'string' || typeof preset !== 'string' || (base !== 'dark' && base !== 'light')) return undefined
-  const stored = field(value, 'tokens')
-  const tokens = Object.fromEntries(Object.entries(isRecord(stored) ? stored : {}).filter((e): e is [string, string] => typeof e[1] === 'string'))
-  return { id, name, base, preset, tokens }
-}
-
 /** The last run's theme before React draws: docs/themes.md "How it is applied". Unreadable: the stylesheet's Dark */
 export function applyCachedTheme(): void {
   try {
     const stored = readStored(CACHE_KEY)
-    const mode = field(stored, 'mode')
-    const dark = cachedTheme(field(stored, 'dark'))
-    const light = cachedTheme(field(stored, 'light'))
-    if (!dark || !light || (mode !== 'dark' && mode !== 'light' && mode !== 'system')) return
-    const theme = pickTheme({ mode, dark, light })
+    const theme = isRecord(stored) ? stored[stored.mode === 'light' ? 'light' : 'dark'] : undefined
+    if (!isRecord(theme)) return
+    const { base, preset } = theme
+    if (typeof preset !== 'string' || (base !== 'dark' && base !== 'light')) return
     // The cache is the page's own writing, but it is re-checked like anything stored
     const tokens: Record<string, string> = {}
     const keyOf = new Map(THEME_TOKENS.map((token) => [token.cssVar, token.key]))
-    for (const [name, value] of Object.entries(theme.tokens)) {
+    for (const [name, value] of Object.entries(isRecord(theme.tokens) ? theme.tokens : {})) {
       const key = keyOf.get(name)
       if (key && typeof value === 'string' && isValidTokenValue(key, value)) tokens[name] = value
     }
-    applyTheme({ ...theme, tokens })
+    applyTheme({ base, preset, tokens })
   } catch {
     /* a broken cache is the same as none */
   }
