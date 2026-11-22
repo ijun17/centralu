@@ -160,7 +160,7 @@ describe("a machine session's ask_project of a hub's project (#1948 step 6)", { 
     expect(asks).not.toHaveBeenCalled()
   })
 
-  it('from a machine that takes no tasks and keeps no copy (an older build), answers past the bound when it asks again', async () => {
+  it('from a machine that keeps no copy (an older build), answers past the bound when it asks again', async () => {
     const { machine, hub, at, busy, taskTo, pairApproved } = await asksRig({ machineMail: false })
     pairApproved()
     const free = await busy(hub.mgr, 'h1')
