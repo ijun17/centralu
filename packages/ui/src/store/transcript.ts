@@ -399,7 +399,10 @@ export function audienceShown(n: Pick<NoticeLine, 'audience' | 'from'>): 'you' |
   return n.audience === 'centralu' && n.from === 'Centralu' ? null : n.audience
 }
 
-/** For the icon (#2338): `failed` draws a dashed box, every other kind a capsule; the window adds `notice` lines too */
+/**
+ * The line's look (#2338), never taken from its words: its icon (`MarkIcon`), and `failed` draws a dashed box, every
+ * other kind a capsule; the window adds `notice` lines too
+ */
 export type MarkKind = 'compaction' | 'reset' | 'notice' | 'failed'
 
 function markKind(e: Marker): MarkKind {
