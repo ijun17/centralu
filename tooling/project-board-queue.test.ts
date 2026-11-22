@@ -1442,8 +1442,9 @@ describe('the merge queue keeps the board app running while it has work (#1236)'
     })
     const stack = await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })
     expect(stack.isError).toBe(true)
-    expect(stack.text).toContain(`#76 closes #5, and lands as #77's squash, whose Closes section does not: add "Closes #5" to #77's.`)
-    patchGh((st) => (st.prs['77'].body = '## Closes\n\nCloses #956\nCloses #5'))
+    expect(stack.text).toContain(`#76 closes #5, and lands as #77's squash, whose description does not: add "Closes #5" to #77's Closes section.`)
+    // GitHub reads a keyword anywhere in the description, and an issue's URL is the same issue
+    patchGh((st) => (st.prs['77'].body = '## Why\n\nFixes https://github.com/ijun17/centralu/issues/5\n\n## Closes\n\nCloses #956'))
     expect((await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })).isError).toBe(false)
   })
 

@@ -11,7 +11,7 @@ import { renderMarkdown } from './markdown.mjs'
 import { noteOpened } from './opened.mjs'
 import { postPrePr, prePrDescription, readPrePr, runPrePr } from './pre-pr.mjs'
 import { answer, asError, linesAnswer } from './reply.mjs'
-import { CLOSES_FORM, CLOSES_HEADING, commitProblems, DEFAULT_CONVENTIONS, fillTemplate, foreignBareIssueWarnings, headingKey, parseConventions, publicTextProblems, subjectProblems } from './rules.mjs'
+import { closedIssues, CLOSES_FORM, CLOSES_HEADING, commitProblems, DEFAULT_CONVENTIONS, fillTemplate, foreignBareIssueWarnings, headingKey, parseConventions, publicTextProblems, subjectProblems } from './rules.mjs'
 import { rebaseStack, StackRefusal } from './stack.mjs'
 import { forgetThread } from './threads.mjs'
 import { privateWords } from './words-tools.mjs'
@@ -125,20 +125,20 @@ const PR_SECTIONS = { why: 'Why', whatChanged: 'What changed', verified: 'Verifi
 
 /** What a pull request closes, as open_pr and integrate take it (#2449): the tool writes one keyword per issue, so none is left out */
 export const closesInput = z
-  .union([z.array(itemRef).min(1).max(20), z.object({ none: z.string().max(2000) }), z.string().max(2000)])
-  .describe(`The issues merging it closes, each ${REF_HELP} ("Closes #N" is written for each); or { none: "<why it closes no issue>" } (a sweep, part of #N); required`)
+  .union([itemRef, z.array(itemRef).max(20), z.object({ none: z.string().max(2000) })])
+  .describe(`The issue merging it closes, or a list of them, each ${REF_HELP} ("Closes #N" is written for each); or { none: "<why it closes no issue>" } (a sweep, part of #N); required`)
 
-/** The Closes section written from `closes` (`issues`: what it names), or what is wrong with it. */
-function closesOf(closes) {
+/** The Closes section written from `closes` for a pull request of `repo` (`issues`: what it closes, as closedIssues names them), or what is wrong with it. */
+function closesOf(closes, repo) {
   if (closes === undefined) return { problem: `closes is missing: give the issues merging it closes, or { none: "<why>" }. ${CLOSES_FORM}` }
-  // Not text: "2447" alone closes nothing on GitHub, and a list says what it closes, so the keywords are written from it
-  if (typeof closes === 'string') return { problem: `closes takes the issues as a list ([2447, "#2448"]) or { none: "<why>" }, not text ("${closes.slice(0, 60)}").` }
-  if (!Array.isArray(closes)) {
+  if (closes !== null && typeof closes === 'object' && !Array.isArray(closes)) {
     const why = String(closes.none ?? '').trim()
     return why ? { text: `None: ${why}`, issues: [] } : { problem: 'closes.none needs the reason it closes no issue (a sweep, part of #N).' }
   }
+  const list = Array.isArray(closes) ? closes : [closes]
+  if (!list.length) return { problem: 'closes names no issue: give one, or { none: "<why>" }.' }
   try {
-    const issues = [...new Set(closes.map((c) => itemOf(c).ref))]
+    const issues = closedIssues(list.map((c) => itemOf(c, repo)).map((w) => `Closes ${w.repo}#${w.number}`).join('\n'), repo)
     return { text: issues.map((i) => `Closes ${i}`).join('\n'), issues }
   } catch (e) {
     return { problem: `closes: ${e.message}` }
@@ -149,7 +149,7 @@ function closesOf(closes) {
 async function closingLinks(repo, number, issues, warnings) {
   try {
     const linked = (await readPr(repo, number, 'closingIssuesReferences')).closingIssuesReferences ?? []
-    const names = linked.map((i) => refOf(`${i.repository?.owner?.login}/${i.repository?.name}`, i.number))
+    const names = closedIssues(linked.map((i) => `Closes ${i.repository?.owner?.login}/${i.repository?.name}#${i.number}`).join('\n'), repo)
     const missed = issues.filter((i) => !names.includes(i))
     if (missed.length) warnings.push(`GitHub links ${names.length ? `only ${names.join(', ')}` : 'no issue'} to close on merge, not ${missed.join(', ')}: check that each is an open issue it can see.`)
     return names.length ? ` Closes ${names.join(', ')} on merge.` : ''
@@ -168,7 +168,7 @@ export async function openPr({ title, head, base, draft, repo, sections, dryRun,
   if (template === null) throw new GitHubError('setup', `${r} has no pull request template on ${target} to fill (looked for ${RULES.prTemplates.join(', ')}). Nothing was opened.`)
   const given = { ...sections }
   for (const [k, heading] of Object.entries(PR_SECTIONS)) if (named[k] !== undefined) given[heading] = named[k]
-  const closes = closesOf(named.closes)
+  const closes = closesOf(named.closes, r)
   const handWritten = Object.keys(sections ?? {}).some((k) => headingKey(k) === headingKey(CLOSES_HEADING))
   if (closes.text !== undefined) given[CLOSES_HEADING] = closes.text
   // What pnpm pre-pr said (or why it did not run) goes under Verified, where a reviewer reads what was run

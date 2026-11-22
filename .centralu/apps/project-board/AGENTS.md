@@ -174,8 +174,9 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   Refuses at once, without maintain or admin, for a draft or a closed pull
   request, for a top based on a branch none of its lowers has, for a top whose head has no `pre-pr` status (below,
   "pre-pr's status"), for a top whose Closes section neither closes an issue with a keyword nor says `None: <why>`
-  (`closesProblems`, rules.mjs, #2449; the fix is an edit of the description), for a stack whose top's Closes section leaves out
-  an issue that a lower's closes (the lowers close as landed, so only the top's keywords close anything), and for a top whose squash subject (`Title (#N)`,
+  (`closesProblems`, rules.mjs, #2449; the fix is an edit of the description), for a stack whose top's description does not
+  close an issue that a lower's does (the lowers close as landed, so only the top's keywords close anything; read anywhere in the
+  descriptions, as GitHub reads them), and for a top whose squash subject (`Title (#N)`,
   the stack lands through its top) is over 72 characters (`kind: 'subject'`, "Shorten the title", nothing
   queued: #1593, as `integrate` does, #1222). A keyword before several references (`Closes #a #b`, which closes #a only,
   #2194) is a warning (`multiClosingWarnings`). A pull request is in one item only.
@@ -1082,10 +1083,10 @@ and refuses with every reason at once, sending nothing.
 - **`open_pr`** fills the template's `## ` headings from `why`, `whatChanged`, `verified`,
   `situationsChecked`, `usability`, `notExercised` or `sections` (any heading by name, any spelling), drops a
   heading left out (the template says so) and refuses a name the template does not have. **Closes** is written from `closes`
-  (#2449: #2448 wrote "2447" under Closes, GitHub links an issue only after a keyword, and the issue stayed open): a list of
-  the issues merging it closes (`2447`, `"#2448"`, `owner/repo#N`, an issue's URL), each written `Closes #N` on a line of its
+  (#2449: #2448 wrote "2447" under Closes, GitHub links an issue only after a keyword, and the issue stayed open): the issue
+  merging it closes, or a list of them (`2447`, `"#2448"`, `owner/repo#N`, an issue's URL), each written `Closes #N` on a line of its
   own, since GitHub links a keyword to the one reference after it (#2194); or `{ none: "<why>" }`, written `None: <why>` (a
-  sweep, part of #N). Text, no `closes`, an empty reason or a Closes given in `sections` is refused. Opened into the default
+  sweep, part of #N). What is not an issue, no `closes`, an empty list or reason, or a Closes given in `sections` is refused. Opened into the default
   branch, it reads GitHub's `closingIssuesReferences` back and says what the merge closes, with a warning for an issue GitHub
   does not link (one it cannot see, or a pull request); a stacked one links nothing until its top lands (`queue_merge`). **Not
   exercised** must name something ("Nothing" is a real answer; empty, "N/A", "TBD" are not); a

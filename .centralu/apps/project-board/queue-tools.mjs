@@ -15,7 +15,7 @@ import { answering, serially } from './handlers.mjs'
 import { BATCH_ACTIVE, batchLine } from './batch.mjs'
 import { ACTIVE, dequeue, enqueue, findItem, itemLine, longSubject, longSubjectText, prePrAsk, queueOrder, SUBJECT_MAX } from './queue.mjs'
 import { readPrePr } from './pre-pr.mjs'
-import { closedIssues, closesProblems, closesSection, multiClosingWarnings } from './rules.mjs'
+import { closedIssues, closesProblems, multiClosingWarnings } from './rules.mjs'
 import { becauseLines, judgeBranch, labelTier, notAutoText, recordVerified } from './queue-integrate.mjs'
 import { codeAge, staleWarning } from './code-age.mjs'
 import { guardStatus, STEP_ON_READ, WORKING, queueBusy, queueRef, readLease, readQueue, startDriver, updateQueue } from './queue-driver.mjs'
@@ -245,14 +245,14 @@ async function queueMerge({ pr, lowers = [], owner, author, deleteBranch = true 
   const long = longSubject(p)
   if (long) problems.push(longSubjectText(long))
   // The top's Closes section closes with a keyword or says why not (#2449). A stack lands as its top's squash and its lowers
-  // close as landed, so only the top's keywords close anything
+  // close as landed, so only the top's keywords close anything, wherever in its description GitHub reads them
   problems.push(...closesProblems(p.body, top.ref))
-  const carried = new Set(closedIssues(closesSection(p.body), top.repo))
+  const carried = new Set(closedIssues(p.body, top.repo))
   for (const [i, lp] of lowerPrs.entries()) {
-    const left = closedIssues(closesSection(lp.body), top.repo).filter((n) => !carried.has(n))
-    if (left.length) problems.push(`${under[i].ref} closes ${left.join(', ')}, and lands as ${top.ref}'s squash, whose Closes section does not: add ${left.map((n) => `"Closes ${n}"`).join(', ')} to ${top.ref}'s.`)
+    const left = closedIssues(lp.body, top.repo).filter((n) => !carried.has(n))
+    if (left.length) problems.push(`${under[i].ref} closes ${left.join(', ')}, and lands as ${top.ref}'s squash, whose description does not: add ${left.map((n) => `"Closes ${n}"`).join(', ')} to ${top.ref}'s Closes section.`)
   }
-  // "Closes #a #b" closes #a only (#2194). open_pr rewrites its Closes section to one keyword per issue; a description edited by hand, or a list in another section, still has it
+  // "Closes #a #b" closes #a only (#2194): open_pr writes one keyword per issue, but a description edited by hand can have it
   const multiClosing = multiClosingWarnings(p.body)
   // `kind` is 'subject' only when that is the one reason; with others it is 'refused', and `subject` says the title is among them
   if (problems.length) return asError(answer(`Not queued: ${problems.join(' ')}`, { queued: false, kind: long && problems.length === 1 ? 'subject' : 'refused', subject: Boolean(long) }))

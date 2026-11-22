@@ -150,6 +150,10 @@ describe('the rules for public text', () => {
     expect(closedIssues('Refs #1, part of #2\n```\nCloses #3\n```\n`Closes #4`', 'ijun17/centralu')).toEqual([])
     expect(closesSection(described('Closes #1'))).toBe('Closes #1')
     expect(closesSection('## Why\n\nCloses #1')).toBeNull()
+    // Its heading as the template's are matched, CRLF as GitHub's editor writes it, and no heading read inside a code block
+    expect(closesSection('## Closes:\r\n\r\nCloses #1\r\n## Next')).toBe('Closes #1')
+    expect(closesSection('## Why\n\n```\n## Closes\n\nCloses #1\n```\n\n## Closes\n\nNone: a sweep\n```\n# not a heading\n```')).toBe('None: a sweep\n```\n# not a heading\n```')
+    expect(closesProblems('## Closes\n\n<!-- Closes #N -->\n', '#9')).toEqual(['#9 has an empty Closes section. Write "Closes #N", one line per issue, or "None: <why it closes no issue>" (a sweep, part of #N).'])
   })
 
   it('refuses a Closes section that closes no issue with a keyword and gives no reason, and says how to write it', () => {
@@ -479,13 +483,21 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
     const sent = writes().length
     for (const [closes, said] of [
       [undefined, 'closes is missing'],
-      ['2447', 'closes takes the issues as a list ([2447, "#2448"]) or { none: "<why>" }, not text ("2447").'],
+      ['Refs #2386 (no issue of its own)', 'closes: "Refs #2386 (no issue of its own)" is not an issue or pull request.'],
+      [[], 'closes names no issue'],
       [{ none: '  ' }, 'closes.none needs the reason it closes no issue'],
     ] as const) {
       const refused = await call('open_pr', { ...PR, closes, dryRun: true })
       expect(refused.isError, JSON.stringify(closes)).toBe(true)
       expect(refused.text).toContain(said)
     }
+    // One issue alone is a list of one; an issue of another repository is written with its name
+    const closed = async (closes: unknown) => ((await call('open_pr', { ...PR, closes, dryRun: true })).data.body as string).split('## Closes\n\n')[1]
+    expect(await closed('2447')).toBe('Closes #2447')
+    expect(await closed(['someone/else#5', 6, 'https://github.com/ijun17/centralu/issues/6'])).toBe('Closes someone/else#5\nCloses #6')
+    // A bare number is the pull request's own repository's issue, as GitHub reads it there
+    const other = await call('open_pr', { ...PR, repo: 'someone/else', closes: [5, 'ijun17/centralu#6'], dryRun: true })
+    expect((other.data.body as string).split('## Closes\n\n')[1]).toBe('Closes #5\nCloses ijun17/centralu#6')
     const hand = await call('open_pr', { ...PR, sections: { Closes: 'Closes #1' }, dryRun: true })
     expect(hand.text).toContain('Give what it closes as closes, not as sections.Closes')
     expect(writes()).toHaveLength(sent)

@@ -221,13 +221,20 @@ const CLOSING = new RegExp(String.raw`${FENCE}|${INLINE_CODE}|\b(?:close[sd]?|fi
 const NONE = /^none[ \t]*:[ \t]*\S/i
 export const CLOSES_FORM = 'Write "Closes #N", one line per issue, or "None: <why it closes no issue>" (a sweep, part of #N).'
 
-/** The text under a description's "## Closes" heading, to the next heading; null when it has none. */
+/** The text under a description's Closes heading (any spelling, as the template's are matched), to the next heading; null when it has none. Code blocks are not read for headings. */
 export function closesSection(body) {
-  const m = new RegExp(String.raw`^##[ \t]+${CLOSES_HEADING}[ \t]*$`, 'im').exec(String(body ?? ''))
-  if (!m) return null
-  const rest = String(body).slice(m.index + m[0].length)
-  const next = rest.search(/^#{1,2}[ \t]/m)
-  return (next < 0 ? rest : rest.slice(0, next)).replace(/<!--[\s\S]*?-->/g, '').trim()
+  const lines = String(body ?? '').split('\n')
+  const text = (from, to) => lines.slice(from, to).join('\n').replace(/<!--[\s\S]*?-->/g, '').trim()
+  let fenced = false
+  let start = -1
+  for (const [i, line] of lines.entries()) {
+    if (/^[ \t]*(?:```|~~~)/.test(line)) fenced = !fenced
+    else if (!fenced && /^#{1,2}[ \t]/.test(line)) {
+      if (start >= 0) return text(start, i)
+      if (/^##[ \t]/.test(line) && headingKey(line.slice(2)) === headingKey(CLOSES_HEADING)) start = i + 1
+    }
+  }
+  return start >= 0 ? text(start) : null
 }
 
 /** The issues a text closes with a keyword, once each: "#N" in `repository`, else "owner/name#N". */
@@ -244,7 +251,7 @@ export function closedIssues(text, repository) {
 /** A description whose Closes section neither closes an issue with a keyword nor says "None: <why>": `what` and the fix. */
 export function closesProblems(body, what) {
   const text = closesSection(body)
-  if (!text) return [`${what} has no Closes section. ${CLOSES_FORM}`]
+  if (!text) return [`${what} has ${text === null ? 'no' : 'an empty'} Closes section. ${CLOSES_FORM}`]
   if (NONE.test(text) || closedIssues(text).length) return []
   return [`${what}'s Closes section ("${text.split('\n')[0].slice(0, 80)}") closes no issue: GitHub closes one only after a keyword. ${CLOSES_FORM}`]
 }
