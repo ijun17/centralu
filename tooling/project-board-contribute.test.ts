@@ -484,12 +484,11 @@ describe('the board app carries the contribution procedure', { timeout: 60_000 *
     const sent = writes().length
     for (const [closes, said] of [
       [undefined, 'closes is missing'],
-      ['Refs #2386 (no issue of its own)', 'closes: "Refs #2386 (no issue of its own)" is not an issue or pull request.'],
-      ['Refs #2386 (no issue of its own)', 'When it closes no issue, give { none: "<why>" }.'],
+      ['Refs #2386 (no issue of its own)', `closes takes issues, and "Refs #2386 (no issue of its own)" is not one: give 8, "#8", "owner/repo#8" or an issue's URL, or { none: "<why>" } when it closes no issue.`],
       [[], 'closes names no issue'],
       [{ none: '  ' }, 'closes.none needs the reason it closes no issue'],
       [{ none: 'a sweep; Closes #2449 later' }, 'closes.none says it closes #2449, and GitHub would close it on merge'],
-      [[5, 'https://github.com/ijun17/centralu/pull/2448'], 'closes takes issues, not pull requests (https://github.com/ijun17/centralu/pull/2448).'],
+      [[5, 'https://github.com/ijun17/centralu/pull/2448'], 'closes takes issues, and "https://github.com/ijun17/centralu/pull/2448" is not one: give 8'],
     ] as const) {
       const refused = await call('open_pr', { ...PR, closes, dryRun: true })
       expect(refused.isError, JSON.stringify(closes)).toBe(true)

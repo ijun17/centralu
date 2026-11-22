@@ -246,11 +246,12 @@ async function queueMerge({ pr, lowers = [], owner, author, deleteBranch = true 
   if (long) problems.push(longSubjectText(long))
   // The top's Closes section, when the template has one, closes with a keyword or says why not (#2449). A stack lands as its top's squash and its lowers
   // close as landed, so only the top's keywords close anything, wherever in its description GitHub reads them
-  if (await asksCloses(top.repo, defaultBranch)) problems.push(...closesProblems(p.body, top.ref))
+  const asks = await asksCloses(top.repo, defaultBranch)
+  if (asks) problems.push(...closesProblems(p.body, top.ref))
   const carried = new Set(closedIssues(p.body, top.repo))
   for (const [i, lp] of lowerPrs.entries()) {
     const left = closedIssues(lp.body, top.repo).filter((n) => !carried.has(n))
-    if (left.length) problems.push(`${under[i].ref} closes ${left.join(', ')}, and lands as ${top.ref}'s squash, whose description does not: add ${left.map((n) => `"Closes ${n}"`).join(', ')} to ${top.ref}'s Closes section, or take it out of ${under[i].ref}'s description if it should stay open.`)
+    if (left.length) problems.push(`${under[i].ref} closes ${left.join(', ')}, and lands as ${top.ref}'s squash, whose description does not: add ${left.map((n) => `"Closes ${n}"`).join(', ')} to ${top.ref}'s ${asks ? 'Closes section' : 'description'}, or take it out of ${under[i].ref}'s description if it should stay open.`)
   }
   // "Closes #a #b" closes #a only (#2194): open_pr writes one keyword per issue, but a description edited by hand can have it
   const multiClosing = multiClosingWarnings(p.body)

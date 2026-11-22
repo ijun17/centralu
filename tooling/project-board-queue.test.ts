@@ -1459,7 +1459,7 @@ describe('the merge queue keeps the board app running while it has work (#1236)'
     })
     const stack = await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })
     expect(stack.isError).toBe(true)
-    expect(stack.text).toBe(`Not queued: #76 closes #5, and lands as #77's squash, whose description does not: add "Closes #5" to #77's Closes section, or take it out of #76's description if it should stay open.`)
+    expect(stack.text).toBe(`Not queued: #76 closes #5, and lands as #77's squash, whose description does not: add "Closes #5" to #77's description, or take it out of #76's description if it should stay open.`)
     patchGh((st) => (st.prs['77'].body = '## Why\n\nBecause. Fixes #5'))
     expect((await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })).isError).toBe(false)
   })

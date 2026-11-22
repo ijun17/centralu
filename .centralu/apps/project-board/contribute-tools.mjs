@@ -154,14 +154,17 @@ function closesOf(closes, repo) {
   }
   const list = Array.isArray(closes) ? closes : [closes]
   if (!list.length) return { problem: 'closes names no issue: give one, or { none: "<why>" }.' }
-  const pulls = list.filter((c) => /\/pull\/\d/i.test(String(c)))
-  if (pulls.length) return { problem: `closes takes issues, not pull requests (${pulls.join(', ')}).` }
-  try {
-    const issues = closedIssues(list.map((c) => itemOf(c, repo)).map((w) => `Closes ${w.repo}#${w.number}`).join('\n'), repo)
-    return { text: issues.map((i) => `Closes ${i}`).join('\n'), issues }
-  } catch (e) {
-    return { problem: `closes: ${e.message} When it closes no issue, give { none: "<why>" }.` }
-  }
+  const refs = list.map((c) => {
+    try {
+      return /\/pull\/\d/i.test(String(c)) ? null : itemOf(c, repo)
+    } catch {
+      return null
+    }
+  })
+  const bad = list.filter((_, i) => !refs[i]).map((c) => `"${String(c).trim()}"`)
+  if (bad.length) return { problem: `closes takes issues, and ${bad.join(', ')} ${bad.length > 1 ? 'are' : 'is'} not one: give 8, "#8", "owner/repo#8" or an issue's URL, or { none: "<why>" } when it closes no issue.` }
+  const issues = closedIssues(refs.map((w) => `Closes ${w.repo}#${w.number}`).join('\n'), repo)
+  return { text: issues.map((i) => `Closes ${i}`).join('\n'), issues }
 }
 
 /** What GitHub will close when it merges (its links, read back), and a warning for an issue it does not link. */
