@@ -21,28 +21,45 @@ export function InboxPill({ counts, onOpen, title }: { counts: WaitingCounts; on
   const mailWaiting = useStore((s) => mailAttention(s.mail))
   const mailAsks = useStore((s) => mailAsksYou(s.mail))
   const total = counts.approval + counts.input + counts.error + mailWaiting
-  // Brightness says what kind of wait: an approval or an error is the signal, plain waiting stays quiet
-  const tone = counts.approval + counts.error > 0 ? 'signal' : total > 0 ? 'text-ink-muted' : 'text-ink-faint'
-  // The edge follows docs/design-system.md §6 (the inbox capsule's row, #2227), fading with `transition-colors` (§9)
+  // An approval card, a question card or a mail question waits on the person's answer: the whole capsule is the signal and hops (§6, §9)
   const answers = counts.approval > 0 || mailAsks > 0
+  // Brightness says what kind of wait: an answer or an error is the signal, plain waiting stays quiet
+  const tone = answers || counts.error > 0 ? 'signal' : total > 0 ? 'text-ink-muted' : 'text-ink-faint'
+  // The edge follows docs/design-system.md §6 (the inbox capsule's row, #2227), fading with `transition-colors` (§9)
   const edge = counts.error > 0 ? 'border-dashed border-ink-signal' : answers ? 'border-solid border-ink-signal' : 'border-solid border-line'
+  const fill = answers ? 'bg-ink-signal/12' : 'bg-surface-hover/30 group-hover:bg-surface-hover/60'
+  // The capsule hops while an answer waits, except while a notice is written out of it (the line would hop with it). It stops at the
+  // end of the hop it is in, not mid-air: a jump back is a change of state without a fade (§9)
+  const hops = answers && !peek
+  const [hopping, setHopping] = useState(hops)
+  if (hops && !hopping) setHopping(true)
   return (
+    // The button stays where it is; only the capsule inside it hops, so the press area never moves
     <button
       type="button"
-      className={`group flex h-7 items-center justify-center rounded-full border ${edge} bg-surface-hover/30 px-2.5 transition-colors hover:bg-surface-hover/60 ${tone}`}
+      className="group flex h-7 items-center justify-center rounded-full"
       onClick={onOpen}
       data-testid="counter"
       title={title}
       data-edge={counts.error > 0 ? 'error' : counts.approval > 0 ? 'approval' : mailAsks > 0 ? 'question' : undefined}
+      data-hop={answers || undefined}
       aria-label={`${total} waiting`}
     >
-      {/* 20px, the size of the settings gear and the usage donuts in the same bar */}
-      <MailIcon size={20} />
-      {/* One pixel down: the digits sit high in the readout font's line box (measured: their middle 1.25px above the icon's) */}
-      <span className="readout ml-1.5 translate-y-px text-sm leading-none" data-testid="count-waiting">
-        {total}
+      <span
+        data-testid="counter-capsule"
+        className={`flex h-7 items-center justify-center rounded-full border ${edge} ${fill} px-2.5 transition-colors ${tone} ${hopping ? 'cc-hop' : ''}`}
+        onAnimationIteration={(e) => {
+          if (e.target === e.currentTarget && !hops) setHopping(false)
+        }}
+      >
+        {/* 20px, the size of the settings gear and the usage donuts in the same bar */}
+        <MailIcon size={20} />
+        {/* One pixel down: the digits sit high in the readout font's line box (measured: their middle 1.25px above the icon's) */}
+        <span className="readout ml-1.5 translate-y-px text-sm leading-none" data-testid="count-waiting">
+          {total}
+        </span>
+        <PeekLine text={peek ? peekText(peek.notice) + (peek.more > 0 ? ` · ${peek.more} more` : '') : null} />
       </span>
-      <PeekLine text={peek ? peekText(peek.notice) + (peek.more > 0 ? ` · ${peek.more} more` : '') : null} />
     </button>
   )
 }

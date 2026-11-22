@@ -116,9 +116,9 @@ test('The global counter counts everything waiting as one, and brightness signal
   await expect(page.getByTestId('count-waiting')).toHaveText('2')
   // Pure white if even one approval is pending — pure white is reserved for what is blocking the person — and a white
   // solid edge says an approval is what waits
-  const capsule = page.getByTestId('counter')
+  const capsule = page.getByTestId('counter-capsule')
   await expect(capsule).toHaveClass(/(^|\s)signal(\s|$)/)
-  await expect(capsule).toHaveAttribute('data-edge', 'approval')
+  await expect(page.getByTestId('counter')).toHaveAttribute('data-edge', 'approval')
 })
 
 test('Control loop: clearing five waiting items using only the keyboard (T5-5 core scenario)', async ({
@@ -164,7 +164,7 @@ test('Control loop: clearing five waiting items using only the keyboard (T5-5 co
    * immediately starts waiting for the next reply, it gets counted again, and that is not the
    * fact this test is checking (whether anything urgent remains).
    */
-  await expect(page.getByTestId('counter')).not.toHaveClass(/(^|\s)signal(\s|$)/)
+  await expect(page.getByTestId('counter-capsule')).not.toHaveClass(/(^|\s)signal(\s|$)/)
 
   /*
     Clear the remaining 3 items waiting for a reply by **actually replying**.
@@ -347,7 +347,7 @@ test('Top bar: the count is the signal, not a shortcut chip (#33)', async ({ pag
 
   // Lighting up remains the count's job (an approval waiting = pure white)
   await expect(page.getByTestId('count-waiting')).toHaveText('1')
-  await expect(capsule).toHaveClass(/(^|\s)signal(\s|$)/)
+  await expect(page.getByTestId('counter-capsule')).toHaveClass(/(^|\s)signal(\s|$)/)
 
   // The keys themselves still work (FR-17 was left untouched)
   await page.keyboard.press('Meta+i')
@@ -365,4 +365,17 @@ test('Top bar: the count is the signal, not a shortcut chip (#33)', async ({ pag
   // Someone who does not know the key can run it right from here
   await actions.filter({ hasText: 'Waiting list' }).click()
   await expect(page.getByTestId('inbox')).toBeVisible()
+})
+
+test('The capsule does not hop while a notice is written out of it, and hops again after', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'A')
+  await newSession(page, 'alpha', 'B')
+  const motion = () => page.getByTestId('counter-capsule').evaluate((el) => getComputedStyle(el).animationName)
+  await injectApproval(page, 0, { kind: 'command', command: 'x', cwd: '/tmp' })
+  // The notice is written out of the capsule for a few seconds: it stands still for them (after the hop it is in)
+  await expect(page.getByTestId('inbox-peek')).toHaveAttribute('data-open', 'true')
+  await expect.poll(motion, { timeout: 4000 }).toBe('none')
+  await expect(page.getByTestId('inbox-peek')).not.toHaveAttribute('data-open', 'true', { timeout: 10_000 })
+  await expect.poll(motion, { timeout: 4000 }).toBe('cc-hop')
 })
