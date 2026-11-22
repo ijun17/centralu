@@ -182,7 +182,8 @@ describe('agents.detect and the setup actions', () => {
 
   it('tells the windows a tool a turn found signed out is signed in again, once its detect says so', async () => {
     const told: unknown[] = []
-    const signIns = new ToolSignIns((e) => told.push(e), () => 't1', () => false)
+    const signIns = new ToolSignIns((e) => told.push(e), () => 't1')
+    signIns.detected('t1', { state: 'ready', install: 'terminal', signIn: 'terminal' })
     signIns.observe({ type: 'error', sessionId: 's1', error: { code: 'not_logged_in', message: '', retryable: false } })
     const rpc = createRpcHandler({} as SessionManager, new Map([['t1', adapter('t1', { installed: true, loggedIn: true })]]), { signIns })
     await rpc('agents.detect', {})

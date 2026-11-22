@@ -841,12 +841,16 @@ export function centraluToolsFor(
     attachApp: async () => ({ ok: false, error: 'Only a session in a project attaches apps this way' }),
     detachApp: async () => ({ ok: false, error: 'Only a session in a project attaches apps this way' }),
   }
-  // Reading a child is how its parent learns what became of the work it gave: the reports about that child count as read
+  /*
+   * Reading a child's end at rest is how its parent learns what became of the work it gave: the reports about that child count as read.
+   * A read of an earlier part shows none of that, and a child still in a turn has not ended it: its report must still wake the parent
+   */
   return {
     ...tools,
     readSession: async (sessionId, limit, opts) => {
       const r = await tools.readSession(sessionId, limit, opts)
-      if (r.ok && assistantId) host.children.answered(assistantId, sessionId)
+      const end = opts?.around == null && opts?.before == null && opts?.from == null && opts?.offset == null
+      if (r.ok && assistantId && end && r.state !== undefined && !isInTurn(r.state)) host.children.answered(assistantId, sessionId)
       return r
     },
   }

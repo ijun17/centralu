@@ -363,11 +363,7 @@ const versionsRef: { current?: AgentVersionService } = {}
 // Putting idle sessions to sleep (#568) hears every session event too: a session that said anything is not quiet
 const sleeperRef: { current?: SessionSleeper } = {}
 // A turn that found its tool signed out tells every window's tool line at once (tool-sign-ins.ts); the manager it asks is made below
-const signIns = new ToolSignIns(
-  (e) => events.push(e),
-  (sessionId) => mgr.sessionInfo(sessionId)?.tool,
-  (tool) => adapters.get(tool)?.setup !== undefined,
-)
+const signIns = new ToolSignIns((e) => events.push(e), (sessionId) => mgr.sessionInfo(sessionId)?.tool)
 /*
  * The manager is told the host's own address as a function: the bridge of an adapter that cannot
  * attach a tool in-process connects back through it, and the port is only known after listen().

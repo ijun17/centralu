@@ -509,6 +509,18 @@ describe('a turn of a signed-out Claude Code', () => {
     expect(text(await cli.input.next())).toBe('and the tests')
     await handle.dispose()
   })
+
+  it('keeps the CLI words of an authentication error that is not signed out', async () => {
+    const { handle, events, cli } = await session(adapter({ retryDelay: () => 0 }))
+    handle.send('fix the build')
+    await cli.input.next()
+    const words = 'Invalid API key · Fix external API key'
+    cli.push({ type: 'assistant', parent_tool_use_id: null, error: 'authentication_failed', message: { id: 'm1', role: 'assistant', model: '<synthetic>', content: [{ type: 'text', text: words }] } })
+    cli.push({ type: 'result', subtype: 'success', is_error: true, result: words, modelUsage: {} })
+    await tick()
+    expect(events.filter((e) => e.type === 'error')).toEqual([{ type: 'error', sessionId: expect.any(String), error: { code: 'internal', message: words, retryable: true } }])
+    await handle.dispose()
+  })
 })
 
 describe('a turn that lost the sign-in refresh race (#353)', () => {

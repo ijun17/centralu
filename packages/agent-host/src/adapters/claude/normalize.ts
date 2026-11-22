@@ -22,8 +22,11 @@ export { ClaudeBackgroundTracker, ClaudeGoalTracker, approvalDetail, toolSummary
 /*
  * A turn of a signed-out CLI (measured on 2.1.296 with an empty config folder): one assistant message, "Not logged in · Please run
  * /login" with `error: "authentication_failed"`, then a failed result with the same words. Not the sign-in refresh race's
- * (refresh-race.ts), and nothing a retry mends: the turn ends as the header's tool line says it, with the command that signs in
+ * (refresh-race.ts), and nothing a retry mends: the turn ends as the header's tool line says it, with the command that signs in.
+ * The CLI gives the same `error` to a bad API key, a cloud provider's credentials and a passing network fault, whose own words
+ * say what to do: only these words are signed out
  */
+const NOT_LOGGED_IN = /^Not logged in\b/
 const SIGNED_OUT = {
   code: 'not_logged_in' as const,
   message: `${CLAUDE_DESCRIPTOR.label} is not signed in. Run ${CLAUDE_DESCRIPTOR.login} in a terminal.`,
@@ -456,7 +459,7 @@ export class ClaudeStreamNormalizer {
     if (msg.type === 'assistant' && msg.error) {
       const text = events.flatMap((e) => (e.type === 'message_delta' ? [e.text] : [])).join('')
       events = events.filter((e) => e.type !== 'message_delta')
-      if (text) this.held = { text, label: 'api-error', ...(msg.error === 'authentication_failed' ? { signedOut: true as const } : {}) }
+      if (text) this.held = { text, label: 'api-error', ...(msg.error === 'authentication_failed' && NOT_LOGGED_IN.test(text) ? { signedOut: true as const } : {}) }
     }
     if (type === 'result' && this.held !== null) {
       const { text, label, signedOut } = this.held
