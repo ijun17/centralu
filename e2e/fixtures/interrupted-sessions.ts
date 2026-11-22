@@ -97,12 +97,14 @@ export function interruptedSessionTests() {
   test('a usage limit that stopped the turn is listed the same way while it rests limited, with Continue and Done (#2360)', async ({ page }) => {
     await setup(page, ['/tmp/alpha'])
     const s = await newSession(page, 'alpha')
+    // Another session in front, so the stop's turn stays unread
+    await newSession(page, 'alpha')
     await emit(page, [
       { type: 'state_change', sessionId: s, state: 'working' },
+      { type: 'message_delta', sessionId: s, role: 'assistant', text: 'Working on it.' },
       { type: 'limit_reached', sessionId: s },
       { type: 'interruption', sessionId: s, interruption: { reason: 'limit', at: Date.now() } },
     ])
-    await newSession(page, 'alpha')
     await openInbox(page)
     await expect(item(page, s)).toContainText('Stopped: usage limit')
     await expect(page.getByTestId(`inbox-continue-${s}`)).toBeVisible()
