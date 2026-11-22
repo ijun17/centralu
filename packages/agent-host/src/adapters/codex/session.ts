@@ -11,6 +11,7 @@ import { launchedThreads } from './child-tracker.js'
 import { CODEX_KNOWN_NOTIFICATIONS } from './known-notifications.js'
 import { CompactionMarks, goalFromCodex, normalizeNotification } from './normalize.js'
 import { ReasoningParts } from './reasoning-parts.js'
+import { StreamedMessages } from './streamed-messages.js'
 import { turnError } from './model-rejected.js'
 import { reconcileOpenedThread, threadSettingsChanged, threadSettingsOf, type CodexThreadSettings } from './thread-settings.js'
 import { CodexRequestInputs } from './token-readings.js'
@@ -92,6 +93,7 @@ export class CodexSession implements SessionHandle {
 
   /** Which reasoning item the open reasoning row last grew from, so a second item's summary does not run into the first's (#1464) */
   private readonly reasoningParts = new ReasoningParts()
+  private readonly streamedMessages = new StreamedMessages()
 
   setPermissionPreset(preset: PermissionPreset): void {
     this.livePreset = preset
@@ -364,7 +366,7 @@ export class CodexSession implements SessionHandle {
 
   /** A notification of this thread's own, as the events it maps to (`normalizeNotification`), each the way it goes out */
   private emitNotification(n: { method: string; params?: unknown }): void {
-    for (const said of this.reasoningParts.join(n, normalizeNotification(this.sessionId, n))) {
+    for (const said of this.reasoningParts.join(n, this.streamedMessages.join(n, normalizeNotification(this.sessionId, n)))) {
       /*
        * Codex does not say why it compacted. A compaction inside the compact turn this session started (`/compact`, Centralu's
        * own compaction or the person's) is manual; any other is the tool's own, in the middle of a turn (#1500): the host does not

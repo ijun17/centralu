@@ -370,3 +370,41 @@ describe('codex reasoning summaries stay apart (#1464)', () => {
     expect(reasoning()).toBe('**One**\n\n**Two****Three****Four**')
   })
 })
+
+/** An agentMessage that comes only as `item/completed`, with no delta before it, keeps its text (#2447) */
+describe('codex agent messages that come whole', () => {
+  const live = async () => {
+    state.failInitialize = false
+    state.instances.length = 0
+    const events: { type: string; text?: string; messageId?: string }[] = []
+    await new CodexAdapter().createSession({ sessionId: 's1', cwd: '/tmp', permissionPreset: 'normal' }, (e) => events.push(e))
+    const client = state.instances[0]!
+    const say = (method: string, params: Record<string, unknown>) => client.notifyFrom({ method, params: { threadId: 'thread-1', turnId: 't1', ...params } })
+    const completed = (id: string, text: string) => say('item/completed', { item: { type: 'agentMessage', id, text, phase: 'commentary' } })
+    const said = () => events.filter((e) => e.type === 'message_delta').map((e) => [e.messageId, e.text])
+    return { say, completed, said }
+  }
+
+  it('a completed item with no delta before it says its text', async () => {
+    const { completed, said } = await live()
+    completed('msg_1', 'Running the tests now.')
+    expect(said()).toEqual([['msg_1', 'Running the tests now.']])
+  })
+
+  it('a completed item whose deltas carried the text says it once; one in a later turn with none says its own', async () => {
+    const { say, completed, said } = await live()
+    say('item/agentMessage/delta', { itemId: 'msg_1', delta: 'Done.' })
+    completed('msg_1', 'Done.')
+    say('item/agentMessage/delta', { itemId: 'msg_2', delta: 'Half' })
+    say('turn/completed', { turn: { id: 't1', status: 'interrupted', items: [], error: null } })
+    completed('msg_3', 'Next turn.')
+    expect(said()).toEqual([['msg_1', 'Done.'], ['msg_1', ''], ['msg_2', 'Half'], ['msg_3', 'Next turn.']])
+  })
+
+  it('after a delta that names no item, no completed item of that turn repeats the text', async () => {
+    const { say, completed, said } = await live()
+    say('item/agentMessage/delta', { delta: 'Old CLI.' })
+    completed('msg_1', 'Old CLI.')
+    expect(said()).toEqual([[undefined, 'Old CLI.'], ['msg_1', '']])
+  })
+})

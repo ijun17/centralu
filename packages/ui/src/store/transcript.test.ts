@@ -69,6 +69,23 @@ describe('appendChat — live events', () => {
     expect(items).toBe(restored)
   })
 
+  it('an empty chunk after a tool starts no bubble; one that continues an open bubble leaves it as it was (#2447)', () => {
+    const items = feed([
+      { type: 'message_delta', role: 'assistant', text: 'Checking the tests.' },
+      { type: 'tool_call', callId: 'exec-1', seq: 4, summary: { tool: 'Bash', title: 'pnpm test', paths: [] } },
+      { type: 'message_delta', role: 'assistant', text: '', messageId: 'msg_1' },
+      { type: 'reasoning_delta', text: '**Reading the results**', seq: 5 },
+      { type: 'message_delta', role: 'assistant', text: 'All green.', seq: 6, messageId: 'msg_2' },
+      { type: 'message_delta', role: 'assistant', text: '', seq: 6, messageId: 'msg_2' },
+    ])
+    expect(items.map((i) => [i.kind, i.storedSeq, i.kind === 'tool' ? i.tool : (i as { text: string }).text])).toEqual([
+      ['assistant', undefined, 'Checking the tests.'],
+      ['tool', 4, 'Bash'],
+      ['reasoning', 5, '**Reading the results**'],
+      ['assistant', 6, 'All green.'],
+    ])
+  })
+
   it('a live key is always above every key brought in from the store', () => {
     bumpChatKeysAbove([{ seq: 100_000 }])
     const [item] = feed([{ type: 'message_delta', role: 'assistant', text: 'hi' }])
