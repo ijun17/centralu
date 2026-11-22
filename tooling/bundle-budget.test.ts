@@ -44,6 +44,21 @@ describe('the app\'s JS is judged against main\'s plus an allowance, and under a
     expect(judge(at + 1, record(), [decl('viewer.json', 13_000)]).ok).toBe(false)
   })
 
+  // A declaration raises the ceiling for good: one larger than the growth would bank room for every change after it
+  it('refuses new declarations that add more than the change grew, rounded up to whole KB with 1 KB each', () => {
+    expect(judge(MAIN + 1_192, record(), [decl('ui.json', 2_000)]).ok).toBe(true)
+    expect(judge(MAIN + 1_192, record(), [decl('ui.json', 3_000)]).ok).toBe(true)
+    const over = judge(MAIN + 1_192, record(), [decl('ui.json', 3_001)])
+    expect(over.problems).toEqual([expect.stringContaining('The new declaration(s) ui.json add 3001 B, more than this change grew (+1192 B against')])
+    expect(over.problems[0]).toContain('{ "bytes": 2000 } at most here.')
+    expect(judge(MAIN, record(), [decl('huge.json', 99_999_999)]).problems).toEqual([expect.stringContaining('did not grow it, so it needs none')])
+    expect(judge(MAIN - 5_000, record(), [decl('ui.json', 1_001)]).ok).toBe(false)
+    // A batch: each rounded up on its own (1,001 and 1,001 B grew; 2,000 B each), measured together
+    expect(judge(MAIN + 2_002, record(), [decl('a.json', 2_000), decl('b.json', 2_000)]).ok).toBe(true)
+    // Declarations main's record lists are in its bytes already, and only the new ones are held to the growth
+    expect(judge(MAIN, record(['old.json']), [decl('old.json', 50_000)]).ok).toBe(true)
+  })
+
   it('counts a declaration once: main\'s record that lists it already holds its bytes', () => {
     const declared = [decl('viewer.json', 13_000)]
     expect(judge(MAIN + BUNDLE_ALLOWANCE + 1, record(['viewer.json']), declared).ok).toBe(false)

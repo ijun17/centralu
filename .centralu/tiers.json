@@ -145,7 +145,7 @@
       "id": "bundle-growth",
       "tier": "light",
       "paths": ["tooling/bundle-growth/*.json"],
-      "why": "a new declaration of the app's JS growth (#1524): data with its reason, of any size, which the review weighs, so a UI change that declares keeps its tier. Only a new one: editing or deleting one lowers the ceiling every open pull request is measured against, and stays deep under guards (its exceptAdded)"
+      "why": "a new declaration of the app's JS growth (#1524): data with its reason, so a UI change that declares keeps its tier; CI holds its bytes to the growth the change made (tooling/bundle-budget.mjs). Only a new one: editing one changes, and deleting one lowers, the ceiling every open pull request is measured against, with no growth to hold it to, so it stays deep under guards (its exceptAdded)"
     },
     {
       "id": "guards",

@@ -293,7 +293,8 @@ anything, and the whole may not pass the ceiling in `tooling/bundle-budget.mjs`,
 each step. Over either, find out what grew first; if the growth is meant, add a file of its own,
 `tooling/bundle-growth/<your-branch>.json`, `{ "bytes": <n>, "reason": "<what grew and why>" }`, in
 the same pull request (the test's message gives the number). It counts once against main, until
-main's record lists it, and raises the ceiling for good. In CI a missing or unreadable record of
+main's record lists it, and raises the ceiling for good, so CI fails new declarations that add more
+than the change grew, rounded up to whole KB. In CI a missing or unreadable record of
 main fails the test with the reason; rerun once main's record exists. A local run checks the ceiling
 only, and says it did not compare with main; `pnpm pre-pr` runs it too (`tooling/guards.ts`), so the
 number shows before the merge queue. A new declaration is light (`.centralu/tiers.json`
