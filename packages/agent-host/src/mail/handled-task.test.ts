@@ -160,10 +160,12 @@ describe('what the joined line, a claim and a quiet note take (#2493)', () => {
     await w.advance(2_000)
     w.states.set('b', inTurn)
     const m = w.mail.send(C, { to: [B], text: 'which branch?', needsReply: true }).message
+    const t = w.mail.task(A, B, { text: 'and review #13', origin: 'agent_session', delivered: false })
     await w.advance(5_000)
     const joined = w.to('b').slice(1).map((d) => d.input.text).join('\n')
     expect(joined).toContain(m.id)
-    expect(joined).not.toContain('joined your running turn')
+    expect(joined).toContain(`${t.id} joined your running turn`)
+    expect(joined).not.toContain(`${m.id} joined your running turn`)
   })
 
   it('claims a task the person let go of after it was held', async () => {
