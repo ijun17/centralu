@@ -418,9 +418,6 @@ export class SessionManager {
     // Recovery folders a purge moved aside and never finished with (#647): back for an entry still in the session archive, gone otherwise
     // Not awaited here; a purge or restore waits for it, so neither reads the folder while it is still aside
     this.recoveryRepair = repairWorktreeRecoveryRemovals((id) => store.trash.isTrashed(id)).catch((e) => console.error(`[archive] recovery folders left by an interrupted purge were not repaired: ${(e as Error).message}`))
-    // "Always allow" rules ending in `*` (#838): since #908 none allows anything, and an older build read them as prefixes
-    const wildcards = store.permissions.dropWildcardApprovalRules()
-    if (wildcards > 0) console.error(`[permissions] removed ${wildcards} "always allow" rule(s) ending in * (#838): their commands are asked again`)
     /*
      * Merge detection also runs once at startup (#69) — a merge could have happened in a terminal
      * while the app was off. A failure here is no reason to block session restore, so it is not

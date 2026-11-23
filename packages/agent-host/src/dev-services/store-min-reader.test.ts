@@ -220,14 +220,14 @@ describe('which builds can still read the store (#292)', () => {
    * The classification is part of the record: changing a step's flag after it shipped changes what older hosts are
    * told. A new breaking or heavy step adds itself here, where a reviewer sees it.
    */
-  it('every step declares whether it breaks older readers; v13, v28, v32, v56, v69, v74, v75 and v76 do, and v3, v11, v21 and v40 are heavy', () => {
+  it('every step declares whether it breaks older readers; v13, v28, v32, v56, v69, v74, v75, v76 and v78 do, and v3, v11, v21 and v40 are heavy', () => {
     type Step = { to: number; breaksOlderReaders: boolean; heavy?: true; minReader?: number }
     const steps = (new Store() as unknown as { migrationSteps(): Step[] }).migrationSteps()
     expect(steps.map((s) => s.to)).toEqual(Array.from({ length: KNOWN - 1 }, (_, i) => i + 2))
     expect(steps.every((s) => typeof s.breaksOlderReaders === 'boolean')).toBe(true)
-    expect(steps.filter((s) => s.breaksOlderReaders).map((s) => s.to)).toEqual([13, 28, 32, 56, 69, 74, 75, 76])
+    expect(steps.filter((s) => s.breaksOlderReaders).map((s) => s.to)).toEqual([13, 28, 32, 56, 69, 74, 75, 76, 78])
     // Only v69, v74, v75 and v76 name a floor below their own version
-    expect(steps.filter((s) => s.minReader !== undefined).map((s) => [s.to, s.minReader])).toEqual([[69, 68], [74, 70], [75, 74], [76, 75]])
+    expect(steps.filter((s) => s.minReader !== undefined).map((s) => [s.to, s.minReader])).toEqual([[69, 68], [74, 70], [75, 74], [76, 75], [78, 75]])
     expect(steps.filter((s) => s.heavy).map((s) => s.to)).toEqual([3, 11, 21, 40])
   })
 

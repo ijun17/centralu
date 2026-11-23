@@ -192,14 +192,4 @@ describe('approval rules persist (C-2)', () => {
     await mgr.createSession({ projectId: null, cwd: process.cwd(), tool: 'claude', permissionPreset: 'normal', kind: 'orchestrator' })
     expect(f.applied[0]).not.toContain('git push')
   })
-
-  // A rule ending in * allows nothing since #838, and an older build reads it as a prefix: it goes at startup
-  it('drops saved rules ending in * when the host starts, and keeps the rest', async () => {
-    const store = new Store()
-    store.permissions.addApprovalRule({ scope: 'project', projectId: 'p', matcher: 'npm test*', decision: 'allow' })
-    store.permissions.addApprovalRule({ scope: 'project', projectId: 'p', matcher: 'git status', decision: 'allow' })
-    store.permissions.addApprovalRule({ scope: 'project', projectId: 'p', matcher: 'git * origin', decision: 'allow' })
-    const mgr = new SessionManager(store, new Map([['claude', fakeAdapter(fake())]]), () => {})
-    expect(mgr.approvalRules.listApprovalRules().map((r) => r.matcher).sort()).toEqual(['git * origin', 'git status'])
-  })
 })

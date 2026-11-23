@@ -62,7 +62,7 @@ describe('store step v55: old cross-project askers are cleared (#844)', () => {
       session(db, 'started', 'api', 'sibling')
     })
     const { out, ran } = askers(file)
-    expect(ran).toBe(23) // v55, then v56 (#423), v57 (#378), v58 (#418), v59 (#1134), v60 (#550), v61 (#1347), v62 (#1452), v63 (#1492), v64 (#1623), v65 (#1684), v66 (#1899), v67 (M3a-person), v68 and v69 (#2133), v70 (#1630), v71 (#2229), v72 (#2243), v73 (#1324), v74, v75 and v76 (#2258), v77 (#2369)
+    expect(ran).toBe(24) // v55, then v56 (#423), v57 (#378), v58 (#418), v59 (#1134), v60 (#550), v61 (#1347), v62 (#1452), v63 (#1492), v64 (#1623), v65 (#1684), v66 (#1899), v67 (M3a-person), v68 and v69 (#2133), v70 (#1630), v71 (#2229), v72 (#2243), v73 (#1324), v74, v75 and v76 (#2258), v77 (#2369), v78 (#2481)
     expect(out).toMatchObject({ asked: null, 'asked-by-trashed': null, started: 'sibling' })
   })
 
