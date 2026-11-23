@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { isNoAnswer } from './away.js'
+import { sshFailure } from './tunnel.js'
 
 /**
  * What ssh says when the machine gave no answer at all (#1398). The lines are ssh's own, as OpenSSH prints them on macOS, Linux
@@ -46,5 +47,32 @@ describe('a machine that does not answer', () => {
     '',
   ])('stays an error: %s', (line) => {
     expect(isNoAnswer(line)).toBe(false)
+  })
+})
+
+/**
+ * ssh's whole stderr through a jump host (ProxyJump, #1426): it ends with `Connection closed by UNKNOWN port 65535` whatever
+ * failed, so the line before it says whether the target answered. Shaped from OpenSSH's messages, not captured from a real jump host.
+ */
+describe('a machine behind a jump host', () => {
+  const closed = 'Connection closed by UNKNOWN port 65535'
+  it.each([
+    `channel 0: open failed: connect failed: No route to host\r\nstdio forwarding failed\r\n${closed}\r\n`,
+    `channel 0: open failed: connect failed: Network is unreachable\nstdio forwarding failed\n${closed}\n`,
+    `channel 0: open failed: connect failed: Host is down\nstdio forwarding failed\n${closed}\n`,
+    `channel 0: open failed: connect failed: Connection timed out\nstdio forwarding failed\n${closed}\n`,
+    // The jump host itself does not answer
+    `ssh: connect to host jump.example port 22: No route to host\r\n${closed}\r\n`,
+  ])('is away when the line before the close says nothing answered: %j', (stderr) => {
+    expect(isNoAnswer(sshFailure('box', stderr))).toBe(true)
+  })
+
+  it.each([
+    `me@jump.example: Permission denied (publickey).\r\n${closed}\r\n`,
+    `channel 0: open failed: administratively prohibited: open failed\nstdio forwarding failed\n${closed}\n`,
+    `channel 0: open failed: connect failed: Connection refused\nstdio forwarding failed\n${closed}\n`,
+    `${closed}\n`,
+  ])('stays an error otherwise: %j', (stderr) => {
+    expect(isNoAnswer(sshFailure('box', stderr))).toBe(false)
   })
 })
