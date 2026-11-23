@@ -423,6 +423,9 @@ not run; it prints each step's time as it goes. In that order:
   with `gh pr list` and `gh pr diff`, leaves out your stack's own, and names the one it clashes with.
   The numbers themselves come from the brief that gave you the work; a session whose brief names
   none and that finds it needs a step stops and asks (this check is only the backstop);
+- `readers`: the test files your branch did not change that quote, word for word, a sentence it took out of a file that is not
+  a test (a quoted string of 24 characters or more on a removed line, no longer in that file), run at the head: a test in another
+  folder that asserts on a tool definition's old sentence otherwise fails only in CI (#2495).
 - `revert`: each new or changed test file, run with every other change of the pull request reverted to its
   base: a new test that passes there protects nothing, and is reported. The run stops at the first such test (one more
   may finish with it). A test the base's file had skipped (`skip`, `todo`, `skipIf`) counts as there, so un-skipping one is not reported.
