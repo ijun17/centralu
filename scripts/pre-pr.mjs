@@ -383,6 +383,9 @@ export function revertedChanges(changed, read) {
 /** A quoted string this long is a sentence a test may quote; shorter ones (a key, a word) match tests that never read the file */
 export const SENTENCE_MIN = 24
 
+/** Where a sentence that moved goes on being said: not a recording (.jsonl) or a document, which keep old words */
+const CODE_FILE = /\.(?:[cm]?[jt]sx?|rs)$/
+
 /**
  * The sentences a branch takes out of files that are not tests (#2495): each quoted string on a removed line of `diff` (git's,
  * with its `diff --git` headers), and each sentence of it, of at least SENTENCE_MIN characters and with a space in it (an import
@@ -421,9 +424,9 @@ export function removedSentences(diff) {
 
 /**
  * The tests that read what the branch took out (#2495, removedSentences), run at the head before the revert step puts it back:
- * a vitest file the branch did not change, holding word for word a removed sentence that no file at the head other than a test
- * holds (moved code keeps it). One that fails is a finding. One git grep, its patterns from a file: on Windows a command line
- * stops at 32,767 characters, which a large branch's sentences pass.
+ * a vitest file the branch did not change, holding word for word a removed sentence that no code file at the head other than a
+ * test holds (moved code keeps it; a recording or a document that still holds it does not). One that fails is a finding. One git
+ * grep, its patterns from a file: on Windows a command line stops at 32,767 characters, which a large branch's sentences pass.
  */
 function readersStep(c) {
   const sentences = removedSentences(git(c.root, ['diff', '--no-renames', '-U0', c.fork, c.at.head]))
@@ -449,7 +452,7 @@ function readersStep(c) {
     const [name, text] = l.split('\0')
     return { path: name.slice(name.indexOf(':') + 1), text }
   })
-  const kept = hits.filter((h) => !isTestFile(h.path)).map((h) => h.text)
+  const kept = hits.filter((h) => CODE_FILE.test(h.path) && !isTestFile(h.path)).map((h) => h.text)
   const gone = new Set(sentences.filter((x) => !kept.some((t) => t.includes(x))))
   const changed = new Set(c.changed.map((x) => x.path))
   const files = [...new Set(hits.filter((h) => isVitestFile(h.path) && !changed.has(h.path) && [...gone].some((x) => h.text.includes(x))).map((h) => h.path))]

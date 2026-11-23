@@ -256,6 +256,10 @@ describe('pre-pr on a stack of two pull requests', () => {
     write('src/defs.mjs', "export const all = ['Ask the person before you delete anything']\n")
     commit('move: the sentences go')
     expect(run({ head: 'move', main: 'main' }).calls.vitest).toEqual([['src/far.test.mjs']])
+    // A recording that still holds it does not keep it
+    write('src/recordings/old.jsonl', '{"description":"0007 is a sentence a tool once described"}\n')
+    commit('move: a recording keeps the old words')
+    expect(run({ head: 'move', main: 'main' }).calls.vitest).toEqual([['src/far.test.mjs']])
     // Moved, not removed: the head holds it in a file that is not a test
     write('src/moved.mjs', "export const one = '0007 is a sentence a tool once described'\n")
     commit('move: one lands elsewhere')
