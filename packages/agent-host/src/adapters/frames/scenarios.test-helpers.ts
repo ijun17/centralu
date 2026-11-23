@@ -563,6 +563,31 @@ export const SCENARIOS: readonly Scenario[] = [
     },
   },
   {
+    // Cursor's own requests to the client (#2480): what it sends for a question, a plan and a todo list
+    name: 'ask-question',
+    tools: ['cursor-agent'],
+    preset: 'auto',
+    async run(d) {
+      await turn(d, 'Use your question tool to ask me which colour to use, with exactly two options: red and blue. Then tell me which one I chose.')
+    },
+  },
+  {
+    name: 'todos',
+    tools: ['cursor-agent'],
+    preset: 'auto',
+    async run(d) {
+      await turn(d, 'Use your todo tool to add two todos: "write the intro" and "write the outro". Then mark the first one completed. Then say done.')
+    },
+  },
+  {
+    name: 'create-plan',
+    tools: ['cursor-agent'],
+    preset: 'auto',
+    async run(d) {
+      await turn(d, 'Use your plan tool to propose a plan for adding a file named plan-done.txt containing the word ok. Do not write the file. Then say done.')
+    },
+  },
+  {
     // Writes, then a delete: what a tool asks about each, and how it names the call it asks about (#1562)
     name: 'files',
     tools: ANY_TOOL,
