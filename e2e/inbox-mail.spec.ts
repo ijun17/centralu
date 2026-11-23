@@ -1050,3 +1050,79 @@ test('A mail line keeps the bubble of a long unbroken word inside its column, at
   // Not past the left edge, where it ran to. (The column's right edge itself sits past a 360 px window, the sidebar taking its share: not this line's)
   expect(box.left).toBeGreaterThanOrEqual(0)
 })
+
+test('Inbox: while a question waits on the person the whole capsule is the signal and hops, the press area stays put, and it settles when none remains', async ({ page }) => {
+  await setup(page)
+  const button = page.getByTestId('counter')
+  const capsule = page.getByTestId('counter-capsule')
+  const look = () =>
+    capsule.evaluate((el) => {
+      const s = getComputedStyle(el)
+      return { animation: s.animationName, color: s.color, fill: s.backgroundColor, edge: s.borderTopColor }
+    })
+  const quiet = await look()
+  expect(quiet.animation).toBe('none')
+
+  const id = await seed(page, { subject: 'Settings file format', from: PARSER, body: 'How should I handle that?', choices: ['Keep the old format', 'Switch now'] })
+  await expect(button).toHaveAttribute('data-hop', 'true')
+  // The text and the icon take the edge's ink (once the colour fade has run), and the fill is a faint tint of it, not the quiet capsule's
+  await expect.poll(async () => (await look()).animation).toBe('cc-hop')
+  await expect.poll(async () => {
+    const l = await look()
+    return l.color === l.edge
+  }).toBe(true)
+  expect((await look()).fill).not.toBe(quiet.fill)
+  // The capsule moves, the button under the pointer does not
+  const still = (await button.boundingBox())!
+  const tops = new Set<number>()
+  await expect
+    .poll(async () => {
+      tops.add(Math.round((await capsule.boundingBox())!.y * 10))
+      expect((await button.boundingBox())!.y).toBe(still.y)
+      return tops.size
+    })
+    .toBeGreaterThan(1)
+  // A press lands while it hops
+  await button.click()
+  await expect(page.getByTestId('inbox')).toBeVisible()
+  await page.getByTestId(`mail-ask-choices-${id}-2`).click()
+  await expect(button).not.toHaveAttribute('data-hop', 'true')
+  // It finishes the hop it is in, and then stands still
+  await expect.poll(async () => (await look()).animation, { timeout: 5000 }).toBe('none')
+})
+
+test('Inbox: with reduced motion a waiting question keeps the signal colours and the capsule does not move', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await setup(page)
+  await seed(page, { subject: 'Settings file format', from: PARSER, body: 'How should I handle that?', choices: ['Keep the old format', 'Switch now'] })
+  const capsule = page.getByTestId('counter-capsule')
+  await expect(page.getByTestId('counter')).toHaveAttribute('data-hop', 'true')
+  await expect.poll(() => capsule.evaluate((el) => getComputedStyle(el).animationName)).toBe('none')
+  await expect.poll(() => capsule.evaluate((el) => getComputedStyle(el).color === getComputedStyle(el).borderTopColor)).toBe(true)
+})
+
+test('Inbox: the capsule finishes the hop it is in when the last answer is given, instead of dropping back at once', async ({ page }) => {
+  await setup(page)
+  const id = await seed(page, { subject: 'Settings file format', from: PARSER, body: 'How should I handle that?', choices: ['Keep the old format', 'Switch now'] })
+  await expect(page.getByTestId('counter')).toHaveAttribute('data-hop', 'true')
+  await page.getByTestId('counter').click()
+  await page.getByTestId(`mail-ask-choices-${id}-2`).click()
+  // Sampled every frame for two turns: some frame has no waiting answer and the hop still running, and it ends still
+  const seen = await page.evaluate(
+    () =>
+      new Promise<{ finishing: boolean; stopped: boolean }>((resolve) => {
+        const el = document.querySelector('[data-testid=counter-capsule]')!
+        const btn = document.querySelector('[data-testid=counter]')!
+        let finishing = false
+        const start = performance.now()
+        const tick = () => {
+          const running = getComputedStyle(el).animationName === 'cc-hop'
+          if (running && !btn.hasAttribute('data-hop')) finishing = true
+          if (performance.now() - start > 3400) return resolve({ finishing, stopped: !running })
+          requestAnimationFrame(tick)
+        }
+        tick()
+      }),
+  )
+  expect(seen).toEqual({ finishing: true, stopped: true })
+})

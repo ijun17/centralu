@@ -145,10 +145,9 @@ export const EXCEPTIONS = {
       },
     },
     'packages/ui/src/features/inbox/InboxPill.tsx': {
-      counts: { button: 1, capsule: 1 },
+      counts: { capsule: 1 },
       reason: {
-        button: "the inbox capsule: its peek line grows out of it with no flex gap and its own line heights (measured offsets), which Pill's bar size sets",
-        capsule: "the inbox capsule, as above",
+        capsule: "the inbox capsule: its peek line grows out of it with no flex gap and its own line heights (measured offsets), which Pill's bar size sets",
       },
     },
     'packages/ui/src/features/session/BackgroundTasks.tsx': {

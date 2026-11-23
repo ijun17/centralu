@@ -662,6 +662,31 @@
   }
 }
 
+/* A small hop, then a rest: the inbox capsule while something waits on the person's answer. Transform only */
+@keyframes cc-hop {
+  0%,
+  14%,
+  28%,
+  100% {
+    transform: translateY(0);
+  }
+  7% {
+    transform: translateY(-4px);
+  }
+  21% {
+    transform: translateY(-2px);
+  }
+}
+.cc-hop {
+  animation: cc-hop 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-hop {
+    animation: none;
+  }
+}
+
 /* A skeleton waits 150ms before fading in, so a read that answers at once never flashes one (components/Skeleton.tsx) */
 @keyframes cc-skeleton-in {
   from {
