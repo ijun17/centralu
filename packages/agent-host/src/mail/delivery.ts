@@ -626,7 +626,7 @@ export class MailDelivery {
         else inputs.delete(recipient)
       }
     }
-    if (inputId) this.joined.set(recipient, [...(this.joined.get(recipient) ?? []), { id: inputId, ids: drained.messageIds, take: () => taken() }])
+    if (inputId) this.joined.set(recipient, [...(this.joined.get(recipient) ?? []), { id: inputId, ids: drained.messageIds, take: taken }])
     try {
       await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line, listed: drained.listed, wanted: () => drained.messageIds.some((id) => this.records.recipient(id, recipient)?.settled !== 'withdrawn'), ...(joins ? { joins, id: inputId } : {}), ...(shown ? { shown } : {}), ...(depth ? { depth } : {}), taken }, (e) => {
         cancelTurn()

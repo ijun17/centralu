@@ -404,6 +404,21 @@ describe('an input given into a turn that ends without it (#2499)', () => {
     expect(w.to('b').filter((d) => d.input.text.includes(task.id))).toHaveLength(2)
   })
 
+  it('one a stopped turn folded in, named before the tool says it took it, stays in that turn, whose stop its giver is told of', async () => {
+    const w = started()
+    w.send(A, { to: [B], text: 'start on #12' })
+    await w.advance(2_000)
+    w.states.set('b', inTurn)
+    const seq = w.turns.current('b')?.turnSeq
+    const take = holdDelivery(w)
+    const task = w.mail.task(A, B, { text: 'and the docs', origin: 'agent_session', delivered: false })
+    await w.advance(5_000)
+    const input = w.to('b').at(-1)!.input.id!
+    w.delivery.turnInputs(B, { took: [input], finished: false })
+    expect(w.rowOf(task.id, B)).toMatchObject({ turnSeq: seq, deliveredAt: expect.any(Number), givenAgainAt: null })
+    take()
+  })
+
   it('one whose delivery fails after the turn ended without it leaves nothing queued: the wake that tries it again answers it', async () => {
     const w = started()
     w.send(A, { to: [B], text: 'start on #12' })
