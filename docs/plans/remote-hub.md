@@ -1470,9 +1470,15 @@ that existed on a linked machine and listed only this computer's.
   machine's sessions were read again after the card and nothing was sent into a turn the person started there meanwhile,
   and a link that dropped after the task was sent ended the wait with a sentence; as mail, a busy session's task is held
   there, and the report a dropped link holds back comes at the next connect.
-- **Not built**: `ifBusy` (a busy session there gets the task as mail, held until it can take it, #1948 step 6), the caller answering the machine's cards
-  (`asking`; they stand in the hub's window and the call reports the wait), and stopping the machine's turn when the
-  call is cancelled.
+- **Cards and cancel (#2485).** A card the machine shows the caller as its task's giver (`host.cards`, that machine's rule,
+  mailbox.md §10.6.4) ends the call's wait as `asking`, as one here does: read before the wait, and again when the
+  machine's relayed `question_request` or `approval_request` for that session arrives or the bound passes. The caller
+  reads and answers it with `agent_session` (`status`, `answer`) while its task there is open, as that machine's rule lets
+  it; an approval stays the person's there. A cancelled call withdraws its task and asks the machine to stop the
+  session's turn (`host.stopTask`), which it does only when that task alone started the turn (`StopNotices.alone`): a
+  turn of the person's, one the task joined, or none yet runs on, and the call says which. A hub that is quitting
+  stops nothing, and a machine from before `host.stopTask` is named as needing an update, its turn left running.
+- **Not built**: `ifBusy` (a busy session there gets the task as mail, held until it can take it, #1948 step 6).
 - **`find_apps` is unchanged.** It lists apps another project shares, and attaching one needs the app process and the
   session on one machine (§6, Attaching a hub app to a remote session). §13 (#1938) changes this: it reaches across,
   with host-to-host calls of its own.
@@ -1480,8 +1486,9 @@ that existed on a linked machine and listed only this computer's.
 Tested: `links/links.test.ts` (two real hosts: by bare name, `machine/name`, the machine's name, qualified id; the
 card naming the machine and "always" read as once; the same name on two machines; the machine down, from the
 mirror and unseen; a session waiting on an approval there, then asked again), `sessions/ask-project.test.ts`
-(`matchProjects`), `core/approval/approval.test.ts` and `e2e/fixtures/ask-project.ts` (the card). No live model, no real
-ssh link, no Windows machine.
+(`matchProjects`), `core/approval/approval.test.ts` and `e2e/fixtures/ask-project.ts` (the card),
+`links/linked-asks-mail.test.ts` (#2485: a question there answered as `asking` and through `agent_session`; a cancel that
+stops the task's turn, and one that leaves the person's turn running). No live model, no real ssh link, no Windows machine.
 
 ### 12.7 Step 4, the reverse direction, as built (#550)
 

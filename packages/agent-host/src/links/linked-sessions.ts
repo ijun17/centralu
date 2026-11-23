@@ -466,6 +466,15 @@ export function linkedSessions(
       })
     },
 
+    stopTask(sessionId, callerId, taskId) {
+      return viaSession(sessionId, async (m) => {
+        const r: unknown = await m.call('host.stopTask', { sessionId: m.q.strip(sessionId, 'The session'), caller: callerId, task: taskId }).catch((e: unknown) => {
+          throw /Unknown method/i.test(errorMessage(e)) ? new Error(`${m.name} runs an older Centralu, which cannot stop work from this computer. Update Centralu on ${m.name}`) : e
+        })
+        return { stopped: isObj(r) && r.stopped === true }
+      })
+    },
+
     machineLinked(machineId) {
       return !!machineById(machineId)
     },

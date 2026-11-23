@@ -4,14 +4,14 @@ import { ASK_WAIT_MS, answerAt, askFrame, awayFor, clipAnswer, matchProjects, pa
 import { awayRefusal } from '../links/machine-reach.js'
 import { labelOf, lastActiveOf, progressOf } from './transcript-view.js'
 import type { HubAskParams, HubAskResult } from '@cc/protocol'
-import type { AskProjectResult, LinkedProject, LinkedSessions } from '../adapters/contract.js'
+import type { AskProjectResult, LinkedProject, LinkedSessions, RoutedCard } from '../adapters/contract.js'
 import { frameField, liveBackgroundTasks } from '@cc/protocol'
 import type { DelegationFlow, DelegationHost } from './delegation-flow.js'
 import { agentDepthRefusal, depthOf } from './agent-depth.js'
 import { isOrdinary } from './tool-profiles.js'
 import { parseAddress, sessionAddress } from '../mail/address.js'
 import { heldLine } from '../mail/across-core.js'
-import { linkedWords } from './remote-agents.js'
+import { linkedWords, type RemoteAgents } from './remote-agents.js'
 import { unfinished } from '../mail/delegation.js'
 
 /**
@@ -31,9 +31,9 @@ export type HubsReader = {
  * and the delegation flow's members both flows share. The manager builds it with getters for its fields, so each is
  * read when used, never kept.
  */
-export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'hostCards' | 'restartPolicy' | 'autoBoundaryOpen' | 'trustGate' | 'projectTrusted' | 'takesSendNow' | 'mailTask' | 'linkedTasks' | 'linkedReports' | 'ownTasksRunning' | 'children' | 'deliver' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'readGrants' | 'refusesDelegation' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
+export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'closing' | 'hostCards' | 'restartPolicy' | 'autoBoundaryOpen' | 'trustGate' | 'projectTrusted' | 'takesSendNow' | 'mailTask' | 'linkedTasks' | 'linkedReports' | 'ownTasksRunning' | 'children' | 'deliver' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'readGrants' | 'refusesDelegation' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
   {
-    readonly delegationFlow: Pick<DelegationFlow, 'awaitTurn' | 'grantReads' | 'handedOverReply' | 'delegate'>
+    readonly delegationFlow: Pick<DelegationFlow, 'awaitTurn' | 'grantReads' | 'handedOverReply' | 'delegate'> & { readonly remote: Pick<RemoteAgents, 'untilCard'> }
   }
 
 /**
@@ -268,9 +268,8 @@ export class AskProjectFlow {
    * is, at the depth this caller's work makes it, and its engine reports it. The call waits for that report as start_agent
    * does for a child there; the answer is the session's words there, and the paths it names are that machine's files,
    * listed and none opened to the caller. A call with no task waits again on the caller's task still open there.
-   *
-   * Not here: cards of the machine's session answered by the caller (the person answers them in the hub's window), and
-   * stopping the machine's turn when the call is cancelled.
+   * A card there that machine shows the caller ends the wait as one here does, and the caller answers it with agent_session as that machine's rule
+   * lets it (#2485); a cancelled call stops the turn its task alone started there (`cancelAsk`).
    */
   private async askLinkedProject(
     callerId: string,
@@ -412,11 +411,28 @@ export class AskProjectFlow {
   private async awaitAsk(callerId: string, ask: AskAcross, reader: LinkedSessions | null, signal?: AbortSignal): Promise<AskProjectResult> {
     const tasks = this.host.linkedTasks!
     const base = { project: ask.project, sessionId: ask.sessionId, sessionName: ask.sessionName }
-    const r = await tasks.settled(ask.taskId, ASK_WAIT_MS, { signal })
-    // The turn runs there and this host cannot stop it from here: the call stops waiting and says so
-    if (r === 'aborted') return { ok: false, error: `The call was cancelled; ${ask.project}'s session "${ask.sessionName}" was left running.` }
+    const remote = this.host.delegationFlow.remote
+    // A machine's cards the caller may read (#2485): standing ones come first, and one raised during the wait ends it. A hub shows none
+    const cardsThere = async (): Promise<RoutedCard[]> => {
+      const r = reader ? await reader.cards(ask.sessionId, callerId) : null
+      return r?.ok ? r.cards : []
+    }
+    const asking = (cards: RoutedCard[]): AskProjectResult => ({ ok: true, state: 'asking', ...base, cards })
+    const standing = await cardsThere()
+    if (standing.length) return asking(standing)
+    const card = reader ? remote.untilCard(ask.sessionId) : undefined
+    let r: 'settled' | 'bound' | 'aborted'
+    try {
+      r = await tasks.settled(ask.taskId, ASK_WAIT_MS, { signal, ...(card ? { until: card.raised } : {}) })
+    } finally {
+      card?.done()
+    }
+    if (r === 'aborted') return reader ? this.cancelAsk(callerId, ask, reader) : { ok: false, error: `The call was cancelled; ${ask.project}'s session "${ask.sessionName}" was left running.` }
     const s = tasks.standing(ask.taskId)
-    if (r === 'bound' || s.state === 'open') return { ok: true, state: 'working', ...base }
+    if (r === 'bound' || s.state === 'open') {
+      const cards = s.state === 'open' ? await cardsThere() : []
+      return cards.length ? asking(cards) : { ok: true, state: 'working', ...base }
+    }
     // The call gives the caller the report: it does not wake it again
     this.host.children.answered(callerId, ask.child)
     const failed = unfinished(s)
@@ -430,6 +446,21 @@ export class AskProjectFlow {
       readable: [], outside: pathsIn(answer),
       ...(paused ? { paused: pausedWords(paused, ask.sessionId, ' there') } : {}),
     }
+  }
+
+  /**
+   * A cancelled call to a machine's session stops its task's turn there, as a cancelled ask here does (#2485): the task is withdrawn (the withdrawal crosses
+   * by the receipts) and the machine stops the session's turn only when that task alone started it (`host.stopTask`): a turn of the person's, or one the
+   * task joined or has not started, runs on. A host that is quitting does neither: its calls end with it, and the work there goes on
+   */
+  private async cancelAsk(callerId: string, ask: AskAcross, reader: LinkedSessions): Promise<AskProjectResult> {
+    const where = `${ask.project}'s session "${ask.sessionName}"`
+    if (this.host.closing || !reader.stopTask) return { ok: false, error: `The call was cancelled; ${where} was left running.` }
+    this.host.linkedTasks!.withdraw(callerId, ask.sessionId, ask.taskId)
+    const r = await reader.stopTask(ask.sessionId, callerId, ask.taskId)
+    if (!r.ok) return { ok: false, error: `The call was cancelled and its task withdrawn, but ${where} could not be stopped: ${r.error}.` }
+    if (r.stopped) return { ok: false, error: `The call was cancelled, so ${where} was stopped.` }
+    return { ok: false, error: `The call was cancelled and its task withdrawn. ${where} was not stopped: no turn there is that task's alone (not started yet, or the person or other work had a part in it).` }
   }
 
   /** Waits for a delegation up to the bound (`awaitTurn`), and turns its outcome into what the caller reads */

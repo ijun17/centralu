@@ -299,6 +299,11 @@ export type LinkedSessions = {
   cards(sessionId: string, callerId: string): Promise<Outcome<{ cards: RoutedCard[] }>>
   /** Answers a card of a machine's session by the handle `callerId` read (`host.answerCard`): refused there unless that machine's rule lets that giver */
   answerCard(sessionId: string, callerId: string, card: string, text: string): Promise<Outcome>
+  /**
+   * The call of `callerId` that gave task `taskId` to a machine's session was cancelled (`host.stopTask`, #2485): that machine stops the session's turn
+   * only when the task alone started it. Optional, as `agentInstructions` is: a stand-in has none
+   */
+  stopTask?(sessionId: string, callerId: string, taskId: string): Promise<Outcome<{ stopped: boolean }>>
   /** A linked machine by its id or the name the person gave it, case aside */
   machineNamed(ref: string): { id: string; name: string } | null
   /** Whether the machine with this id is still linked: a removed machine is not (#723) */

@@ -8,6 +8,8 @@ import type { HandoffFlowHost } from './handoff-flow.js'
 import { HUB_SENDER } from './hub-sender.js'
 import type { LinkedEvent, LinkedReports } from './linked-reports.js'
 import type { TurnContinue } from './turn-continue.js'
+import type { TurnInputs } from './turn-inputs.js'
+import type { MailSessionsView } from './mail-sessions.js'
 import type { SessionTrashHost } from './session-trash.js'
 import type { SessionToolsHost } from './session-tools.js'
 import { lastResponse, lastResponseSeq } from './turn-answer.js'
@@ -34,6 +36,8 @@ export type LinkedHostHost = Pick<DelegationHost, 'meta' | 'store' | 'children' 
     readonly linkedReports: LinkedReports
     /** A turn the provider ended for want of capacity, kept waiting to be continued (turn-continue.ts) */
     readonly turnContinue: Pick<TurnContinue, 'stands'>
+    readonly mail: Pick<MailSessionsView, 'taskTurnAlone'>
+    readonly inputs: Pick<TurnInputs, 'interrupt'>
   }
 
 /**
@@ -88,6 +92,18 @@ export class LinkedHost {
     const r = await this.host.answerRoutedCard(giver, sessionId, card, text)
     if (!r.ok) throw rpcError(r.error)
     return { ok: true }
+  }
+
+  /**
+   * A hub's session's call that gave this task was cancelled (`host.stopTask`, #2485): the session's running turn is stopped when that task alone
+   * started it and nothing else had a part in it (`StopNotices.alone`), as a cancelled ask_project stops its turn here. A turn of the person's, or
+   * one the task only joined, runs on. The hub withdraws the task itself; whether the turn was stopped
+   */
+  hubStopTask(sessionId: string, giver: string, taskId: string): { stopped: boolean } {
+    this.directedFromHub(sessionId)
+    if (!this.host.mail.taskTurnAlone(sessionId, giver, taskId)) return { stopped: false }
+    this.host.inputs.interrupt(sessionId)
+    return { stopped: true }
   }
 
   /**

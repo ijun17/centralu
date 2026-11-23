@@ -78,6 +78,10 @@ export class AgentSessionActions {
     // `<machine>.<id>`, which no session of this host has
     const remote = opts.sessionId.includes('.') ? this.flow.remote.of(opts.sessionId) : undefined
     if (remote) return this.flow.remote.agentSession(callerId, remote, opts, signal)
+    // A machine's session the caller gave ask_project work there (#2485): its cards, as for a session of another project here below
+    if (opts.sessionId.includes('.') && this.host.linkedReader?.machineOf(opts.sessionId) && this.host.linkedTasks?.open(callerId, opts.sessionId)) {
+      return this.flow.remote.askedThere(callerId, opts.sessionId, opts)
+    }
     // Work a handoff gave away (#693): the original that stayed is told where it went
     const gone = this.flow.handedOverAnswer(callerId, opts.sessionId)
     if (gone) return gone

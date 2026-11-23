@@ -2,8 +2,10 @@
 
 **The link's states** (`MachineInfo.status`, sent as `machine_status`): `connecting`; `connected`; `away` (#1398: the
 machine does not answer at all: ssh's connect timed out, there is no route, or the name does not resolve (`links/away.ts`, ssh's own
-words, on the whole last line of an exit-255 failure, so a program on the remote that prints "timed out" does not make a machine away, and a
-banner exchange that timed out, which something answered, stays an error); asleep, off or off the network, not an error. `error` keeps ssh's
+words, on the whole line of an exit-255 failure that says why, so a program on the remote that prints "timed out" does not make a machine away, and a
+banner exchange that timed out, which something answered, stays an error. That line is ssh's last one that names a failure, its no-answer words
+included (`lastLine`): through a jump host ssh ends with `Connection closed by UNKNOWN port 65535` whatever failed, and the line before it says
+whether the target answered, #1426); asleep, off or off the network, not an error. `error` keeps ssh's
 line for the details; `lastConnectedAt` says when the link was last up, the moment it dropped and not its hello, kept in the store
 (`app_settings`, `links.lastConnected.<id>`, no migration step) so it survives a restart of this host; and `nextAttemptAt` when the hub
 tries again, told to the windows at each attempt although the status does not change. The status stays `away` between the backoff's attempts

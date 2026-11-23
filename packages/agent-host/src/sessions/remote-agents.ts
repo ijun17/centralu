@@ -26,6 +26,9 @@ import type { NoteSent } from '../mail/tool.js'
  * id), the session that started it, and what the hub says of it when the machine cannot be asked. Kept in the store, so
  * agent_session still finds it after the hub restarts. The work given it is the mailbox's, tasks across the link (#1948 step 6)
  */
+/** What a machine's session's cards are read and answered as: one of the caller's children there, or a session it gave an ask_project task */
+type CardHolder = Pick<RemoteAgent, 'sessionId' | 'callerId' | 'name' | 'machine' | 'tool'>
+
 export type RemoteAgent = {
   sessionId: string
   callerId: string
@@ -104,6 +107,8 @@ export class RemoteAgents {
   private loaded: StoredRemoteAgent[] | null = null
   /** The calls waiting on a child's report, each ended at once when the child is deleted there (`observe`) */
   private readonly waits = new Map<string, Set<() => void>>()
+  /** The waits woken by a card a machine's session raised (`untilCard`): session -> wakers */
+  private readonly cardWaits = new Map<string, Set<() => void>>()
 
   constructor(
     private readonly host: RemoteAgentsHost,
@@ -440,6 +445,24 @@ export class RemoteAgents {
     return sent.ok ? { ok: true, messageId: sent.messageId, name: `${rec.name} on ${rec.machine}` } : { ok: false, error: `Could not send to "${rec.name}" on ${rec.machine}: ${bare(sent.text)}.` }
   }
 
+  /**
+   * agent_session on a machine's session the caller gave an ask_project task that is not settled (#2485), as on one here (docs/plans/mailbox.md
+   * §10.6.4): its cards are the caller's to read and to answer as that machine's rule lets it; nothing else of that session is, and ask_project
+   * with no task waits on it
+   */
+  async askedThere(callerId: string, sessionId: string, opts: AgentSessionOpts): Promise<ChildRunResult> {
+    const reader = this.host.linkedReader
+    const machine = reader?.machineOf(sessionId)
+    if (!reader || !machine) return { ok: false, error: `${sessionId} is on a linked machine, and no machine is linked to this computer now.` }
+    const there: CardHolder = { sessionId, callerId, name: reader.describe(sessionId)?.name ?? sessionId, machine, tool: '' }
+    if (opts.action === 'answer') return this.answer(there, opts.card, opts.text ?? '', reader)
+    if (opts.action !== 'status' && opts.action !== 'wait') {
+      return { ok: false, error: `"${there.name}" is another project's session: you can read and answer the cards of the work you gave it (status, answer), and wait on it with ask_project.` }
+    }
+    const cards = await this.cardsOf(there, reader)
+    return cards.length ? this.asking(there, cards) : this.working(there, false)
+  }
+
   private async act(callerId: string, rec: RemoteAgent, opts: AgentSessionOpts | { sessionId: string; action: 'send'; text: string }, signal?: AbortSignal): Promise<ChildRunResult> {
     if (rec.callerId !== callerId) return { ok: false, error: `${rec.sessionId} is not a session this session started. agent_session works only on sessions start_agent started from here.` }
     const reader = this.host.linkedReader
@@ -540,12 +563,32 @@ export class RemoteAgents {
    */
   observe(e: LinkedEvent): void {
     if (e.type === 'machine_resync') return void this.caughtUp(e.machineId)
+    if ((e.type === 'question_request' || e.type === 'approval_request') && typeof e.sessionId === 'string') {
+      for (const wake of [...(this.cardWaits.get(e.sessionId) ?? [])]) wake()
+      return
+    }
     if (e.type !== 'session_deleted' || typeof e.sessionId !== 'string' || !this.of(e.sessionId)) return
     this.forget(e.sessionId)
     for (const end of [...(this.waits.get(e.sessionId) ?? [])]) end()
   }
 
   // ── Waits ───────────────────────────────────────────────────────────────────────────────
+
+  /** Resolves once a machine's session (`sessionId`, qualified) raises a card, as its relayed event says; `done` stops the wait */
+  untilCard(sessionId: string): { raised: Promise<void>; done(): void } {
+    let wake!: () => void
+    const raised = new Promise<void>((resolve) => (wake = resolve))
+    const wakers = this.cardWaits.get(sessionId) ?? new Set<() => void>()
+    wakers.add(wake)
+    this.cardWaits.set(sessionId, wakers)
+    return {
+      raised,
+      done: () => {
+        wakers.delete(wake)
+        if (!wakers.size && this.cardWaits.get(sessionId) === wakers) this.cardWaits.delete(sessionId)
+      },
+    }
+  }
 
   /**
    * Waits up to the bound for Centralu's report on the caller's task `taskId` (#1948 step 6), which comes back from the machine as mail; or for the
@@ -619,7 +662,7 @@ export class RemoteAgents {
     return !listed.some((s) => s.sessionId === rec.sessionId)
   }
 
-  private working(rec: RemoteAgent, reported: boolean): Extract<ChildRunResult, { state: 'working' }> {
+  private working(rec: CardHolder, reported: boolean): Extract<ChildRunResult, { state: 'working' }> {
     return { ok: true, state: 'working', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool, reported }
   }
 
@@ -627,12 +670,12 @@ export class RemoteAgents {
    * The cards standing in the child that its machine shows the caller as a giver of work there, each with whether it may answer (#676, #1948 step 6):
    * that machine alone judges, by its own rule, so none is the caller's from what it gave and none of a turn the person had a part in
    */
-  private async cardsOf(rec: RemoteAgent, reader: LinkedSessions): Promise<RoutedCard[]> {
+  private async cardsOf(rec: CardHolder, reader: LinkedSessions): Promise<RoutedCard[]> {
     const r = await reader.cards(rec.sessionId, rec.callerId)
     return r.ok ? r.cards : []
   }
 
-  private asking(rec: RemoteAgent, cards: RoutedCard[]): ChildRunResult {
+  private asking(rec: CardHolder, cards: RoutedCard[]): ChildRunResult {
     return { ok: true, state: 'asking', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool, cards }
   }
 
@@ -642,7 +685,7 @@ export class RemoteAgents {
    * computer, whatever the child runs under there: a caller's `auto` (which alone lets a caller answer a local child's approval) may give the child
    * `auto` there (#1273), but never answers that computer's cards, so what runs there is allowed there, by the person
    */
-  private async answer(rec: RemoteAgent, card: string | undefined, text: string, reader: LinkedSessions): Promise<ChildRunResult> {
+  private async answer(rec: CardHolder, card: string | undefined, text: string, reader: LinkedSessions): Promise<ChildRunResult> {
     const cards = await this.cardsOf(rec, reader)
     const chosen = card ? cards.find((c) => c.card === card) : undefined
     if (!chosen) {

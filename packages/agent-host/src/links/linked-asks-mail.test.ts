@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { HostMailParams, HubAskResult } from '@cc/protocol'
+import { inTurn } from '../idle.js'
 import { runCleanups } from './links-world.test-helpers.js'
 import { hubHost, machineHost } from './reverse-link.test-helpers.js'
 import { sessionAddress } from '../mail/address.js'
@@ -87,6 +88,50 @@ describe("a hub session's ask_project of a machine's project (#1948 step 6)", { 
     expect(machine.store.mailbox.recipient(task.id, at.machine('w1'))?.deliveredAt).toBeNull()
     free()
     expect(await call).toMatchObject({ ok: true, state: 'done', answer: expect.stringContaining('review the branch') })
+  })
+
+  // #2485: a cancelled call stops the turn its task alone started there, as one here does, and leaves the person's turn alone
+  it('cancelled while the turn its task started runs there: the task is withdrawn and that turn stopped', async () => {
+    const { machine, hub, at, project, taskTo } = await asksRig()
+    const ctl = new AbortController()
+    const call = hub.mgr.askProject('h1', { project, task: 'a long job' }, ctl.signal)
+    await hub.answer('allow')
+    const w1 = () => machine.mgr.listSessions().find((s) => s.id === 'w1')!
+    await eventually(() => inTurn(w1().state))
+    ctl.abort()
+    expect(await call).toEqual({ ok: false, error: `The call was cancelled, so m1/${project}'s session "${w1().name}" was stopped.` })
+    await eventually(() => !inTurn(w1().state))
+    const there = sessionAddress(hub.id, 'm1.w1')
+    expect(hub.store.mailbox.recipient(taskTo(hub, there, at.hub('h1'))!.id, there)?.settled).toBe('withdrawn')
+  })
+
+  it("cancelled while its task waits there behind the person's turn: the task is withdrawn, and the person's turn runs on", async () => {
+    const { machine, hub, at, project, busy, taskTo } = await asksRig()
+    await busy(machine.mgr, 'w1')
+    const ctl = new AbortController()
+    const call = hub.mgr.askProject('h1', { project, task: 'a long job' }, ctl.signal)
+    await hub.answer('allow')
+    await eventually(() => !!taskTo(machine, at.machine('w1'), at.hub('h1')))
+    ctl.abort()
+    expect(await call).toEqual({ ok: false, error: expect.stringContaining("was not stopped: no turn there is that task's alone") })
+    expect(machine.mgr.listSessions().find((s) => s.id === 'w1')?.state).toBe('waiting_approval')
+    const there = sessionAddress(hub.id, 'm1.w1')
+    expect(hub.store.mailbox.recipient(taskTo(hub, there, at.hub('h1'))!.id, there)?.settled).toBe('withdrawn')
+  })
+
+  it('a question its task raised there ends the wait as asking, and the caller answers it with agent_session as that machine lets it', async () => {
+    const { machine, hub, project } = await asksRig()
+    const call = hub.mgr.askProject('h1', { project, task: 'a question for the hub' })
+    await hub.answer('allow')
+    const r = await call
+    expect(r).toMatchObject({ ok: true, state: 'asking', sessionId: 'm1.w1', cards: [expect.objectContaining({ kind: 'question', answerable: true })] })
+    const card = r.ok && r.state === 'asking' ? r.cards[0]!.card : ''
+    expect(await hub.mgr.agentSession('h1', { sessionId: 'm1.w1', action: 'status' })).toMatchObject({ ok: true, state: 'asking', cards: [expect.objectContaining({ card })] })
+    expect(await hub.mgr.agentSession('h1', { sessionId: 'm1.w1', action: 'stop' })).toMatchObject({ ok: false, error: expect.stringContaining("another project's session") })
+    expect(await hub.mgr.agentSession('h1', { sessionId: 'm1.w1', action: 'answer', card, text: 'Yes' })).toMatchObject({ ok: true, state: 'answered', card })
+    await eventually(() => machine.mgr.listSessions().find((s) => s.id === 'w1')!.pendingQuestions.length === 0)
+    // Another session of the hub gave it nothing: none of it is its to read
+    expect(await hub.mgr.agentSession('h2', { sessionId: 'm1.w1', action: 'status' })).toMatchObject({ ok: false })
   })
 
   it('makes the session there work at that depth: at the default of 1 it starts no agent and asks no project until the turn ends', async () => {

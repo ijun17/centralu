@@ -447,6 +447,8 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       turn: (id) => store.mailbox.nextTurnSeq(id) - 1,
       ended: (id) => withdrawEndedCards(store.mailbox, addressOf(id), cardStands),
     },
+    // A giver on another computer is named by its address
+    taskTurnAlone: (id, giver, taskId) => service.stops.alone(addressOf(id), parseAddress(giver) ? giver : addressOf(giver), { gaveIt: 'work', starter: taskId }),
     turnInputs: (id, turn) => delivery.turnInputs(addressOf(id), turn),
     turnStarted: turnRecorder(service, store.mailbox, mailTurns),
     refusesDelegation: (callerId, target, call) => refusesDelegation(service, reach, callerId, target, call),
