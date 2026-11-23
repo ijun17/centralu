@@ -49,6 +49,16 @@ describe('modelRejection', () => {
     expect(turnError(plain, 'badRequest')).toMatchObject({ retryable: false, data: { reason: 'model_rejected', model: 'gpt-5.5' } })
   })
 
+  it('takes "modelNotFound" (codex-cli 0.171.0) for a refusal, as "badRequest" is, when the sentence names the model', () => {
+    const plain = "The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account."
+    expect(modelRejection(plain, 'modelNotFound')?.model).toBe('gpt-5.5')
+    expect(modelRejection(plain, { modelNotFound: {} })?.model).toBe('gpt-5.5')
+    expect(turnError(plain, 'modelNotFound')).toMatchObject({ retryable: false, data: { reason: 'model_rejected', model: 'gpt-5.5' } })
+    // Not named: no model to show, so it stays the ordinary failure it was
+    expect(turnError('Model not found', 'modelNotFound')).toMatchObject({ retryable: true })
+    expect(turnError("Tool 'image_generation' is not supported with model 'gpt-5-nano'.", 'modelNotFound')).toMatchObject({ retryable: true })
+  })
+
   it('needs a 400 invalid_request_error: the same words from a server error are not a refusal', () => {
     expect(modelRejection(JSON.stringify({ status: 500, error: { type: 'server_error', message: "The 'gpt-5.5' model is not supported." } }))).toBeNull()
     expect(modelRejection("The 'gpt-5.5' model is not supported when using Codex.")).toBeNull()
