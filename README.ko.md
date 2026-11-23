@@ -1,6 +1,6 @@
 # Centralu
 
-돌고 있는 Claude Code · Codex CLI 세션 전부를 한 창에서.
+돌고 있는 Claude Code · Codex 등 코딩 에이전트 세션 전부를 한 창에서.
 
 ![한 창에 세션 넷. 하나는 아직 일하는 중, 하나는 `git push --force`를 승인받으려고 멈춰 있고,
 하나는 어느 쪽으로 갈지 묻고 있고, 하나는 끝나서 조용하다.](docs/images/grid.png)

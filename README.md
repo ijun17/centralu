@@ -1,6 +1,6 @@
 # Centralu
 
-Every Claude Code and Codex CLI session you have running, in one window.
+Every Claude Code, Codex and other coding agent session you have running, in one window.
 
 ![Four sessions in one window: one still working, one blocked on an approval it wants for
 `git push --force`, one asking which option to take, one finished and quiet.](docs/images/grid.png)
