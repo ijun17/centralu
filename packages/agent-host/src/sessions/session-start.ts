@@ -661,6 +661,22 @@ export class SessionStarts {
     }
   }
 
+  /**
+   * A conversation the tool itself says it has no record of (`conversation_gone`), in a session the agent never wrote into (#2479): nothing of it is lost, so the
+   * session starts a new conversation instead of failing to wake. Cursor keeps a conversation only once a model turn has run, so
+   * a session opened and never answered is refused at every wake (#1676); once idle sessions sleep, each of them would hit it.
+   * Null (the wake fails as it did) when the agent has written anything here, or the session was imported.
+   */
+  private async startOver(m: SessionInfo): Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean } | null> {
+    if (m.importedFrom || this.host.store.messages.hasAgentRows(m.id)) return null
+    console.error(`[agent-host] ${m.id.slice(0, 8)} tool=${m.tool}: its conversation is gone and the agent wrote nothing here, starting a new one`)
+    m.externalId = null
+    this.host.store.sessions.upsertSession(m)
+    // As a tool switch does: what is stored is not a conversation lost (the guard in doResumeSession)
+    this.host.store.settings.setAppSetting(freshStartKey(m.id), String(this.host.store.messages.loadMessages(m.id, 1)[0]?.seq ?? 0))
+    return this.doResumeSession(m.id)
+  }
+
   async doResumeSession(
     sessionId: string,
   ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }> {
@@ -923,9 +939,12 @@ export class SessionStarts {
       // failure reason (err) but losing it because the check itself hung. The same rule as elsewhere:
       // if it cannot be determined, it does not block (false).
       // The tool said so itself (an ACP tool that does not list the conversation, #1676): no list to ask
-      const gone =
-        (err instanceof Error && Reflect.get(err, 'code') === 'conversation_gone') ||
-        (await withTimeout(this.host.externals.externalGone(m, cwd), 8_000, 'Checking the tool').catch(() => false))
+      const toldGone = err instanceof Error && Reflect.get(err, 'code') === 'conversation_gone'
+      if (toldGone) {
+        const again = await this.startOver(m)
+        if (again) return again
+      }
+      const gone = toldGone || (await withTimeout(this.host.externals.externalGone(m, cwd), 8_000, 'Checking the tool').catch(() => false))
       if (gone) {
         return { session: m, resumed: false, reason: externalMissingReason(this.host.toolLabel(m.tool), cwd) }
       }

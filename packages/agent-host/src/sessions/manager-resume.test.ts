@@ -432,6 +432,8 @@ describe('when the tool cannot find the conversation', () => {
     const { a, m, call } = setup()
     const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
     const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
+    // The agent wrote into it: its conversation is something to lose (a session it never wrote into starts over, below)
+    store.messages.appendMessages([{ sessionId: s.id, seq: 1, role: 'assistant', kind: 'text', payload: { text: 'Done.' }, ts: 1 }])
     await m.tenure.disposeAll()
 
     a.failList = true
@@ -441,6 +443,69 @@ describe('when the tool cannot find the conversation', () => {
     expect(r.resumed).toBe(false)
     expect(r.reason).toMatch(/has no record of this conversation under .* The history kept here is still readable/)
     expect(r.lockedElsewhere).toBeUndefined()
+  })
+
+  /*
+   * #2479, the case Cursor makes (#1676): it keeps a conversation only once a model turn has run, so a session opened and never
+   * answered is refused at every wake. Nothing of it exists to lose, and once idle sessions sleep each one would hit it.
+   */
+  describe('a conversation the tool says is gone, in a session the agent never wrote into', () => {
+    /** The tool refuses to load a conversation once `refuse` is set, and opens a new one (the next id of `ids`) when given none */
+    class CursorLike extends FakeAdapter {
+      opened: (string | undefined)[] = []
+      ids = ['ext-old', 'ext-new']
+      refuse = false
+      override async createSession(opts: CreateSessionOpts, emit: EventSink) {
+        this.opened.push(opts.resumeExternalId)
+        if (this.refuse && opts.resumeExternalId) throw Object.assign(new Error('Fake has no record of this conversation'), { code: 'conversation_gone' })
+        const h = await super.createSession(opts, emit)
+        if (!opts.resumeExternalId) this.last!.externalId = this.ids.shift()
+        return h
+      }
+    }
+    const open = async (imported?: string) => {
+      const a = new CursorLike()
+      const adapters = new Map<ToolName, AgentAdapter>([['claude', a]])
+      const m = new SessionManager(store, adapters, (e) => events.push(e))
+      const call = createRpcHandler(m, adapters)
+      const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+      const s = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', ...(imported ? { resumeExternalId: imported, importHistory: true } : {}) })) as { id: string }
+      a.opened = []
+      a.refuse = true
+      await m.tenure.disposeAll()
+      return { a, m, id: s.id }
+    }
+
+    it('starts a new conversation instead of failing, and keeps it for the next wake', async () => {
+      const { a, m, id } = await open()
+      // What the person typed is no conversation lost either: the agent never answered it
+      store.messages.appendMessages([{ sessionId: id, seq: 1, role: 'user', kind: 'text', payload: { text: 'hello' }, ts: 1 }])
+      const r = await m.processes.resumeSession(id)
+      expect(r.resumed).toBe(true)
+      expect(a.opened).toEqual(['ext-old', undefined])
+      expect(m.listSessions().find((x) => x.id === id)?.externalId).toBe('ext-new')
+      // The next wake resumes the new one, with no second start-over
+      await m.tenure.disposeAll()
+      a.opened = []
+      store.messages.appendMessages([{ sessionId: id, seq: 2, role: 'assistant', kind: 'text', payload: { text: 'hi' }, ts: 2 }])
+      await m.processes.resumeSession(id)
+      expect(a.opened).toEqual(['ext-new'])
+    })
+
+    it('fails as before once the agent has written anything into the session, or when it was imported from the tool', async () => {
+      const wrote = await open()
+      store.messages.appendMessages([{ sessionId: wrote.id, seq: 1, role: 'assistant', kind: 'text', payload: { text: 'Done.' }, ts: 1 }])
+      const r = await wrote.m.processes.resumeSession(wrote.id)
+      expect(r.resumed).toBe(false)
+      expect(r.reason).toMatch(/has no record of this conversation/)
+      expect(wrote.a.opened).toEqual(['ext-old'])
+      expect(wrote.m.listSessions().find((x) => x.id === wrote.id)?.externalId).toBe('ext-old')
+
+      const imported = await open('ext-origin')
+      const again = await imported.m.processes.resumeSession(imported.id)
+      expect(again.resumed).toBe(false)
+      expect(imported.a.opened).toEqual(['ext-origin'])
+    })
   })
 
   it('forking to continue leaves the original alone and points at the copy', async () => {
