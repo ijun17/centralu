@@ -383,6 +383,27 @@ describe('an input given into a turn that ends without it (#2499)', () => {
     expect(w.rowOf(task.id, B)).toMatchObject({ settled: 'reported', givenAgainAt: null })
   })
 
+  it("one the turn folded in, named in its result before the tool says it took it, is that turn's: given again at rest (#2369)", async () => {
+    const w = started()
+    w.send(A, { to: [B], text: 'start on #12' })
+    await w.advance(2_000)
+    w.states.set('b', inTurn)
+    const take = holdDelivery(w)
+    const task = w.mail.task(A, B, { text: 'and the docs', origin: 'agent_session', delivered: false })
+    await w.advance(5_000)
+    const input = w.to('b').at(-1)!.input.id!
+    // Claude Code's result names the folded input; the host handles that end before the tool's word that it took it
+    w.delivery.turnInputs(B, { took: [input], finished: true })
+    w.endTurn('b')
+    w.states.set('b', atRest)
+    take()
+    await w.advance(0)
+    lastResponse(w)
+    expect(w.rowOf(task.id, B)).toMatchObject({ settled: null, deliveredAt: null, givenAgainAt: expect.any(Number) })
+    await w.advance(60_000)
+    expect(w.to('b').filter((d) => d.input.text.includes(task.id))).toHaveLength(2)
+  })
+
   it('one whose delivery fails after the turn ended without it leaves nothing queued: the wake that tries it again answers it', async () => {
     const w = started()
     w.send(A, { to: [B], text: 'start on #12' })

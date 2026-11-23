@@ -166,14 +166,16 @@ export class MailDelivery {
   /** When a mailbox was last woken: the 30 s gap */
   private readonly lastWake = new Map<string, number>()
   /**
-   * Mail given into a running turn, by recipient: the input id the tool was given it under, its messages, and when the tool took it, until that turn
-   * ends (`turnInputs`). Kept from the hand-off, not from the take: Claude Code takes an input it did not fold into the turn only as the input's own
-   * turn opens, and an input the turn ended without must be queued by then for that opening to make it its turn's work (#2499)
+   * Mail given into a running turn, by recipient: the input id the tool was given it under, its messages, when the tool took it, and how it is taken,
+   * until that turn ends (`turnInputs`). Kept from the hand-off, not from the take, since Claude Code says it took an input only late (#2499): one it
+   * did not fold into the turn as the input's own turn opens, which must find it queued to make it that turn's work; one it folded in only after the
+   * turn's end has named it, which then takes it
    */
-  private readonly joined = new Map<string, { id: string; ids: readonly string[]; at?: number }[]>()
+  private readonly joined = new Map<string, { id: string; ids: readonly string[]; at?: number; take: () => void }[]>()
   /**
    * Tasks the receiver said its running turn does (`claim`), by recipient, until that turn ends: apart from `joined`, since the model can claim a task
-   * before the tool says it took the input that gives it (#2497: Claude Code names a folded input in the turn's result)
+   * before the tool says it took the input that gives it (#2497). Cleared at that end to bound it: an input that turn ended without is queued, so a
+   * claim made in it reaches no later turn
    */
   private readonly claims = new Map<string, ReadonlySet<string>>()
   /** Mail a turn ended without taking, held queued in the tool for a turn after (Claude folds a message in only at a tool round): not in any turn yet */
@@ -624,7 +626,7 @@ export class MailDelivery {
         else inputs.delete(recipient)
       }
     }
-    if (inputId) this.joined.set(recipient, [...(this.joined.get(recipient) ?? []), { id: inputId, ids: drained.messageIds }])
+    if (inputId) this.joined.set(recipient, [...(this.joined.get(recipient) ?? []), { id: inputId, ids: drained.messageIds, take: () => taken() }])
     try {
       await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line, listed: drained.listed, wanted: () => drained.messageIds.some((id) => this.records.recipient(id, recipient)?.settled !== 'withdrawn'), ...(joins ? { joins, id: inputId } : {}), ...(shown ? { shown } : {}), ...(depth ? { depth } : {}), taken }, (e) => {
         cancelTurn()
@@ -662,6 +664,8 @@ export class MailDelivery {
     const queued = this.queued.get(recipient) ?? []
     const named = 'opened' in turn ? turn.opened : turn.took
     if ('took' in turn) {
+      // An input the turn folded in, named in its result before the tool says it took it (Claude Code): taken now, as this turn's
+      if (Array.isArray(named)) for (const g of this.joined.get(recipient) ?? []) if (g.at === undefined && named.includes(g.id)) g.take()
       const given = this.joined.get(recipient) ?? []
       const claimed = this.claims.get(recipient)
       this.joined.delete(recipient)

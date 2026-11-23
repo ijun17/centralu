@@ -1992,7 +1992,8 @@ releases it, and that turn is the mail's, as a wake's is (`MailTurns.openedFor`)
 (C8 below). This closes step 2's open low: a message that needs a reply, taken only after the turn ended, was filed under the turn before.
 An input is the turn's from its hand-off, not from the tool's word that it took it (#2499): Claude Code takes an input it did not fold in
 only as that input's own turn opens, so an input the turn ended without is queued at that end whether or not the tool has said so, and the
-opening files it as that turn's work instead of a turn it joined. A delivery the tool fails, before or after it was counted taken, leaves nothing queued.
+opening files it as that turn's work instead of a turn it joined. A delivery the tool fails, before or after it was counted taken, leaves nothing queued. An input
+the turn folded in is named in its result before the tool says it took it, so that end takes it then, and the rule below gives it again.
 After a host restart nothing of this is in memory: an input not yet taken is held `uncertain` for the person (§7.6.5), and one taken is
 answered or filed as its rows say.
 
