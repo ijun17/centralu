@@ -10,7 +10,7 @@ import { Grants, type GrantQuery } from '../core/grants.js'
 import { CoreSession } from '../core/ledger.js'
 import type { CoreIo, RunningTurn, ToolWire, TurnEnding, TurnInput } from '../core/seam.js'
 import type { ToolStart } from '../core/tool-process.js'
-import { fileEditDetail, type FileChange } from '../file-changes.js'
+import { fileEditDetail, lineDiff, type FileChange } from '../file-changes.js'
 import { CardIds, PendingCards } from '../session-kit.js'
 import { UnmappedTypes } from '../unmapped.js'
 import { AcpConnection, AUTH_REQUIRED, METHOD_NOT_FOUND, NOT_FOUND_CODES, NO_TIMEOUT_MS, RpcError, type RpcId } from './connection.js'
@@ -349,7 +349,7 @@ class AcpWire implements ToolWire {
     return err instanceof Error ? err : new Error(String(err))
   }
 
-  /** Centralu's own tools through the same stdio bridge Codex starts (§6). Apps are not attached to an ACP agent yet */
+  /** Centralu's own tools, and the attached apps through its `app` tool (#2231), by the same stdio bridge Codex starts (§6) */
   private mcpServers(): unknown[] {
     const bridge = this.opts.centraluBridge
     if (!this.opts.centraluTools || !bridge) return []
@@ -424,13 +424,22 @@ class AcpWire implements ToolWire {
       case 'cancelled':
         return { how: 'interrupted' }
       case 'refusal':
-        return { how: 'failed', error: { code: 'internal', message: `${this.label} refused to go on with this turn.`, retryable: false }, inputError: null }
+        return { how: 'failed', error: { code: 'internal', message: `${this.label} refused to go on with this turn.`, retryable: true }, inputError: null }
+      case 'max_tokens':
+        return this.limitEnding('the reply reached its length limit')
+      case 'max_turn_requests':
+        return this.limitEnding('the turn reached its limit of steps')
       default:
         return { how: 'complete' }
     }
   }
 
-  /** The turn's usage, an inferred compaction and a limit's notice, before the core's own ending event */
+  /** A limit the tool stopped at ends the turn as a retryable error, as a refusal does (#1654, Q7) */
+  private limitEnding(what: string): TurnEnding {
+    return { how: 'failed', error: { code: 'internal', message: `${this.label} stopped: ${what}.`, retryable: true }, inputError: null }
+  }
+
+  /** The turn's usage and an inferred compaction, before the core's own ending event */
   private endEvents(result: PromptResult, turn: Turn): NormalizedEvent[] {
     const sessionId = this.sessionId
     const events: NormalizedEvent[] = []
@@ -450,15 +459,6 @@ class AcpWire implements ToolWire {
     }
     if (result.stopReason === 'end_turn' && this.inferredCompaction(turn)) {
       events.push({ type: 'compaction', sessionId, failed: false, trigger: 'manual' })
-    }
-    if (result.stopReason === 'max_tokens' || result.stopReason === 'max_turn_requests') {
-      events.push({
-        type: 'notice',
-        sessionId,
-        level: 'warning',
-        from: this.label,
-        text: result.stopReason === 'max_tokens' ? `${this.label} stopped: the reply reached its length limit.` : `${this.label} stopped: the turn reached its limit of steps.`,
-      })
     }
     return events
   }
@@ -771,7 +771,7 @@ export function detailOf(call: ToolCallFields, cwd: string): ApprovalDetail {
   const input = asObj(call.rawInput)
   if (call.kind === 'execute') return { kind: 'command', command: str(input.command) || call.title || '', cwd: str(input.cwd) || cwd }
   if (call.kind === 'edit' || call.kind === 'delete' || call.kind === 'move') {
-    const diffs: FileChange[] = (call.content ?? []).flatMap((c) => (c.type === 'diff' && c.path ? [{ path: c.path, diff: c.newText ?? '' }] : []))
+    const diffs: FileChange[] = (call.content ?? []).flatMap((c) => (c.type === 'diff' && c.path ? [{ path: c.path, diff: lineDiff(c.oldText, c.newText) }] : []))
     const changes = diffs.length ? diffs : editPaths(call).map((path) => ({ path, diff: str(input.content) || str(input.newString) || str(input.new_string) }))
     return fileEditDetail(call.kind === 'delete' ? changes.map((c) => ({ ...c, change: 'delete' as const })) : changes)
   }

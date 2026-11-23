@@ -53,6 +53,32 @@ export function diffLines(prefix: '-' | '+', text: string): string {
     .join('\n')
 }
 
+/** Lines of the file around a change an ACP card keeps, so the change reads in place */
+const DIFF_CONTEXT = 2
+
+/**
+ * A change given as the whole text before and after (an ACP `diff` content), as diff lines: what the two share at the
+ * start and the end is trimmed to a few lines of context, so a change deep in a long file is still on the card. Old text
+ * absent means a new file.
+ */
+export function lineDiff(oldText: string | null | undefined, newText: string | null | undefined): string {
+  const lines = (t: string | null | undefined) => (t ? t.replace(/\n$/, '').split('\n') : [])
+  const before = lines(oldText)
+  const after = lines(newText)
+  let head = 0
+  while (head < before.length && head < after.length && before[head] === after[head]) head++
+  let tail = 0
+  while (tail < before.length - head && tail < after.length - head && before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++
+  if (head + tail === before.length && head + tail === after.length) return ''
+  const context = (from: number, to: number) => after.slice(from, to).map((l) => ` ${l}`)
+  return [
+    ...context(Math.max(0, head - DIFF_CONTEXT), head),
+    ...before.slice(head, before.length - tail).map((l) => `-${l}`),
+    ...after.slice(head, after.length - tail).map((l) => `+${l}`),
+    ...context(after.length - tail, Math.min(after.length, after.length - tail + DIFF_CONTEXT)),
+  ].join('\n')
+}
+
 /**
  * The paths a call changes, reported as `files_touched` only once the call went through (#843).
  *

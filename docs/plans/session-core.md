@@ -51,7 +51,7 @@ Marks: **S** the same in all (shared code already), **I** the same idea in diffe
 | Context reading | `getContextUsage()` after each result (`reportContext:605`): `window > 0 && used >= 0` | `thread/tokenUsage/updated` `last` over `modelContextWindow`; above the window dropped (`codex/token-readings.ts:42`, `:90`) | `usage_update` when `used > 0 && size > 0` (`acp/session.ts:384`) | **I**, differs (§2.2) |
 | Token usage | process total, shared `token-usage.ts` (`tokenCount`, `addTokens`) | thread total, own `splitInput` and `finite` | one turn's, own `tokenUsage` (`acp/normalize.ts:220`) | **I**, differs (§2.1) |
 | Files touched | `TouchedFiles` (after an ok result, #843) | at item completion (after it ran) | on the call, before any approval (`acp/normalize.ts:175`) | **I**, differs (§2.8) |
-| Images | `inlineImageEvent` (8 MB cap) | `mcpImageEvents`, `imageEventFromDisk` | `message_image` built inline, no cap (`acp/normalize.ts:64`) | **I**, differs (§2.9) |
+| Images | `inlineImageEvent` (8 MB cap) | `mcpImageEvents`, `imageEventFromDisk` | `inlineImageEvent`, as the others (built, #2479) | agree (§2.9) |
 | Unknown frames | `UnmappedTypes` + `CLAUDE_KNOWN_TYPES` | surface drift (`codex/surface.ts`) | `UnmappedTypes` + `KNOWN_UPDATES` | **S** |
 | Recorded frames (#1498) | none | none | `frameRecorder` wired in `acp/adapter.ts:52` through `AcpConnection`'s `onFrame` (now the process tap, §6.1); 19 recorded scenarios replayed (11 Cursor, 8 OpenCode) (`acp/replay.test.ts`) | **I**: only ACP records (PR 1 moved it to the process tap and added Codex, §6.1) |
 | Crash vs asleep | stream ends while not closed or detaching → `adapter_crashed` (`read:294`) | idle → `session_live asleep`, else `adapter_crashed` (`codex/session.ts:168`) | idle and open → asleep, else `adapter_crashed` (`acp/session.ts:onExit:495`) | **I**, differs (§2.5) |
@@ -191,8 +191,7 @@ when the tool cannot say what it wrote", which `TouchedFiles.result` takes as a 
 ### 2.9 Images without the cap
 
 `images.ts:inlineImageEvent` caps an inline image at 8 MB (the event travels over the socket to the UI). ACP emits
-`message_image` with the agent's data as is (`acp/normalize.ts:64`). **Right:** `inlineImageEvent`. A bug on a large
-image (by reading): its own small fix.
+`message_image` through the same `inlineImageEvent` since #2479 (it passed the data as is before).
 
 ### 2.10 Smaller copies
 
@@ -210,8 +209,8 @@ image (by reading): its own small fix.
 
 | Concept | Copies | Difference | Right |
 |---|---|---|---|
-| Refusal and turn-limit endings | Claude `normalize.ts:472`, `turn-ending.ts:85`; ACP `acp/session.ts:291`; Codex `model-rejected.ts:62` | Claude: a failed turn is a retryable `error`, `error_max_turns` too; ACP: `refusal` a non-retryable `error` without `turn_complete`, `max_tokens` and `max_turn_requests` a notice and `turn_complete`; Codex: non-retryable only for a rejected model | undefined by any document: an open question (§9.7); the ledger takes `turnEnded(how, detail)` and each tool keeps its mapping until decided |
-| Diff preview on a card | Claude `tool-summary.ts:claudeFileChange:113` (`diffLines`); Codex the vendor's diff; ACP `acp/session.ts:detailOf:577` (`newText` only, `oldText` parsed and ignored) | the `other` card's raw text is cut at 300 characters in Claude (`tool-summary.ts:147`), 2,000 in Codex and ACP | a diff from `oldText` and `newText` for ACP (`file-changes.ts:11` means one preview rule); the 300 against 2,000 cut is a question for review |
+| Refusal and turn-limit endings | Claude `normalize.ts:472`, `turn-ending.ts:85`; ACP `acp/session.ts`; Codex `model-rejected.ts:62` | Claude: a failed turn is a retryable `error`, `error_max_turns` too; ACP (since #2479, Q7 of #1654): `refusal`, `max_tokens` and `max_turn_requests` each a retryable `error` without `turn_complete` (`inputError` null); Codex: non-retryable only for a rejected model | owner decision Q7 (#1654): a retryable error the person sees, the same for every tool; ACP does it, the other two tools keep their mapping until moved; the ledger takes `turnEnded(how, detail)` and each tool keeps its mapping until moved |
+| Diff preview on a card | Claude `tool-summary.ts:claudeFileChange:113` (`diffLines`); Codex the vendor's diff; ACP `acp/session.ts:detailOf` (a diff from `oldText` and `newText`, #2479) | the `other` card's raw text is cut at 300 characters in Claude (`tool-summary.ts:147`), 2,000 in Codex and ACP | a diff from `oldText` and `newText` for ACP (`file-changes.ts:11` means one preview rule); the 300 against 2,000 cut is a question for review |
 | An emptied plan | `plan.ts:todoWritePlan:31` and ACP send it (clears the panel); Codex drops it (`codex/normalize.ts:135`, `plan.length > 0`) | a cleared Codex plan stays on screen (by reading) | `plan.ts`'s rule; a small Codex fix |
 | Compaction `reason` | ACP puts the summary's first line in `reason` on success (`acp/normalize.ts:208`); the protocol and the UI read `reason` only on failure (`ui/src/store/transcript.ts:432`) | drift, nothing shown | the protocol's meaning; ACP drops it on success (no visible change) |
 | The live usage limit | Claude acts only on `rejected` and sets `windowMins` only for `five_hour` (`turn-ending.ts:22`); Codex always reads the primary window (`codex/normalize.ts:281`), even when the weekly one was hit | the same window labelled "5 hours"/"Weekly" (Claude, `usage.ts:25`) or "5h"/"1w" (Codex, `usage.ts:17`) | per tool sources, one label rule: an open question (§9.8); not core |
@@ -640,9 +639,9 @@ PRs 5–9 for one tool do not wait for the others, so `agy` (§8) needs only 1, 
 | ACP marks files only after an ok result (`TouchedFiles`) | §2.8 | now (a file the move does not touch until PR 9) |
 | ACP sends a running token reading, through `tokenCount` | §2.1 | now |
 | ACP fails an input whose turn was stopped | §2.3 | now, before PR 5 |
-| ACP's card shows a diff from `oldText` | §2.11 | now |
+| ACP's card shows a diff from `oldText` | §2.11 | built (#2479) |
 | Codex sends an emptied plan | §2.11 | now |
-| ACP caps inline images (`inlineImageEvent`) | §2.9 | now |
+| ACP caps inline images (`inlineImageEvent`) | §2.9 | built (#2479) |
 | The context guard's upper bound for Claude and ACP | §2.2 | after 9 (then one line) |
 | ACP's crash message in `withStderrTail`'s form | §2.5 | after 5 |
 | Claude's idle exit is asleep, not crashed | §2.5 | done before 7 (Q1 decided 2026-10-27): `MidTurnLedger.exited` with Claude's `inFlight` since PR 7, asleep with no turn open, no tracked input or card, no message unread or unanswered, no background work, once the CLI has said anything (a CLI the keeper kept counts from adoption: it says nothing until its next turn, unless a call it runs is still open) |
@@ -697,8 +696,8 @@ design and its security review. Nothing of it stays: `GateRequests` was removed 
    process (it ends it anyway, its §1.5)?
 6. **Recording Claude and Codex** (PR 2) spends real turns on a logged-in machine: which machine, and is the ACP
    scenario list the right set for them?
-7. **Refusal and turn limits** (§2.11): a refusal, `max_tokens` and a turn limit end a turn differently per tool
-   (retryable error, non-retryable error, notice and completion). Which is the host's meaning?
+7. **Refusal and turn limits** (§2.11): decided (#1654, Q7): a retryable error the person sees, for every tool. ACP
+   does it; Claude already did; Codex keeps its own mapping.
 8. **Usage limits** (§2.11): Codex reads the primary window when the weekly one was hit, and the two tools label the
    same window differently. Out of the core, but worth an issue?
 9. **Input after a Stop, for a tool with mid-turn input** (PR 6/7; from #1674's review). With `midTurnInput: true` the

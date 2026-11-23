@@ -538,8 +538,8 @@ sends neither `initialize` nor `session/load` again. Two things need care:
 | `notice` | `notice` | `from` the descriptor's label |
 | prompt answer `end_turn` | `turn_complete` | |
 | `cancelled` | the turn ends stopped (`interrupted`) | only after our cancel; otherwise `INTERRUPTED_BY_TOOL` |
-| `max_tokens`, `max_turn_requests` | `turn_complete` and a `notice` saying why it stopped | |
-| `refusal` | `error` (not retryable), the turn's text kept | |
+| `max_tokens`, `max_turn_requests` | a retryable `error` saying why it stopped (Q7 of #1654; no `turn_complete`) | |
+| `refusal` | a retryable `error`, the turn's text kept | |
 | a JSON-RPC error on the prompt | `error` | auth (§4.2) and "model not available" get their own wording |
 | process exit | `error` + `session_live {live: false, reason: 'crashed'}` | cards released (`PendingCards`), queued inputs said undelivered |
 | an unknown update kind | nothing; one host.log line | `unmapped.ts`, like the other two |
