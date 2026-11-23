@@ -554,7 +554,9 @@ or left; it does not restate `pnpm pre-pr`'s output, which `open_pr` sums up in 
 Raise a tier by hand when the paths understate the risk; never lower it.
 
 **One report.** Work given by a brief is reported once, in the answer to whoever gave it: the pull
-request, what changed, the review's verdict and what it found, and what was not exercised. The
+request, what changed, the review's verdict and what it found, what was not exercised, and each part
+of the task not done with the issue that carries it or why it was dropped (every brief's frame asks
+it: `ANSWER_GROUNDS`, `sessions/ask-project.ts`). The
 pull request carries its own record in **Verified**; neither is repeated in pull request comments.
 
 ## Commits and pull requests

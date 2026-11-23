@@ -60,9 +60,12 @@ describe('the frame a child gets (#729)', () => {
     expect(agentFrame('parent', 'run the tests')).toContain('Wait for your own background work that ends (a test run, a build) inside your turn before you answer.')
   })
 
-  // #2183: an answer whose claims say what they rest on, here and on another computer
-  it('asks it to say what each claim of its answer rests on and to mark what it did not check', () => {
-    expect(ANSWER_GROUNDS).toBe("In your answer, say what each claim rests on (a file, a command's output, a message) and mark what you did not check as unchecked.")
+  // #2183, #2488: an answer whose claims say what they rest on and that names the undone part, here and on another computer
+  it('asks it to say what each claim of its answer rests on, to mark what it did not check, and to name what it left undone', () => {
+    expect(ANSWER_GROUNDS).toBe(
+      "In your answer, say what each claim rests on (a file, a command's output, a message) and mark what you did not check as unchecked. " +
+        'Name each part of the task you did not do, with the issue that carries it or why it was dropped.',
+    )
     for (const frame of [agentFrame('parent', 'run the tests'), agentFrame('parent', 'run the tests', [], '', true), remoteAgentFrame('parent', 'run the tests')]) {
       expect(frame.split('\n')[0]).toContain(`as the answer: keep it short`)
       expect(frame.split('\n')[0]).toContain(ANSWER_GROUNDS)

@@ -38,8 +38,13 @@ export function taskLine(task: string, max = 160): string {
   return flat.length > max ? `${flat.slice(0, max)}… (cut here; ${flat.length} characters in all)` : flat
 }
 
-/** Said in every frame whose final message goes back as the answer (#2183): the asker can tell a checked claim from an assumed one */
-export const ANSWER_GROUNDS = 'In your answer, say what each claim rests on (a file, a command\'s output, a message) and mark what you did not check as unchecked.'
+/**
+ * Said in every frame whose final message goes back as the answer (#2183): the asker can tell a checked claim from an assumed
+ * one, and a part of the task left undone from a done one (#2488: planned work lost when no answer named it)
+ */
+export const ANSWER_GROUNDS =
+  "In your answer, say what each claim rests on (a file, a command's output, a message) and mark what you did not check as unchecked. " +
+  'Name each part of the task you did not do, with the issue that carries it or why it was dropped.'
 
 /**
  * How a session asks whoever gave it its task something before it finishes (#1984, #2357): that one's address, and the mark that makes the message a
