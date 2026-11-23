@@ -5,7 +5,7 @@ import { createWebPlatform } from './index.js'
 class RecordingSocket {
   static last: RecordingSocket | null = null
   readyState = 0
-  sent: { method?: string }[] = []
+  sent: { id?: string; method?: string }[] = []
   onopen: (() => void) | null = null
   onmessage: ((e: MessageEvent) => void) | null = null
   onclose: (() => void) | null = null
@@ -14,7 +14,7 @@ class RecordingSocket {
     RecordingSocket.last = this
   }
   send(data: string): void {
-    this.sent.push(JSON.parse(data) as { method?: string })
+    this.sent.push(JSON.parse(data) as { id?: string; method?: string })
   }
   close(): void {
     this.readyState = 3
@@ -22,24 +22,56 @@ class RecordingSocket {
   ready(): void {
     this.readyState = 1
     this.onopen?.()
-    this.onmessage?.({ data: JSON.stringify({ kind: 'hello_ok', protocolVersion: 1, resyncRequired: false, currentSeq: 0, streamEpoch: 'e' }) } as MessageEvent)
+    this.receive({ kind: 'hello_ok', protocolVersion: 1, resyncRequired: false, currentSeq: 0, streamEpoch: 'e' })
+  }
+  receive(frame: unknown): void {
+    this.onmessage?.({ data: JSON.stringify(frame) } as MessageEvent)
+  }
+  /** Answers the last call as a host answers a method it does not have */
+  unknown(): void {
+    const call = this.sent.at(-1)!
+    this.receive({ kind: 'res', id: call.id, ok: false, error: { code: 'internal', message: `Unknown method: ${call.method}. This Centralu host does not have it; the window may be from another build.`, retryable: false } })
   }
 }
 
+const methods = () => RecordingSocket.last!.sent.map((f) => f.method).filter((m) => m !== undefined)
+const turn = () => new Promise((r) => setTimeout(r, 0))
+
 /**
- * Pins the window on `orchestrator.*`, which every host answers (docs/plans/assistant-rename.md §3.3), until the switch
- * §3.3 names; then it is flipped to the new names or deleted with the old ones.
+ * The window calls the Assistant's methods by their new names (docs/plans/assistant-rename.md §3.3), and a host that does not
+ * know them (older than beta.54, or beta.57 for the skills) gets the same call under the old name.
  */
 describe("the window's calls to the Assistant", () => {
-  it('use the names every host answers', async () => {
+  it('use the new names', async () => {
     const p = createWebPlatform({ token: 't', WebSocketImpl: RecordingSocket as unknown as typeof WebSocket })
     RecordingSocket.last!.ready()
     void p.agents.assistant().catch(() => {})
     void p.agents.assistantPeek().catch(() => {})
     void p.agents.configureAssistant('claude').catch(() => {})
+    void p.agents.assistantSkills().catch(() => {})
+    void p.agents.deleteAssistantSkill('x').catch(() => {})
     await Promise.resolve()
-    const methods = RecordingSocket.last!.sent.map((f) => f.method).filter((m) => m !== undefined)
-    expect(methods).toEqual(['orchestrator.get', 'orchestrator.peek', 'orchestrator.configure'])
+    expect(methods()).toEqual(['assistant.get', 'assistant.peek', 'assistant.configure', 'agents.assistantSkills', 'agents.deleteAssistantSkill'])
+    await p.dispose()
+  })
+
+  it('ask a host that does not know a new name again under the old one, and pass on any other failure', async () => {
+    const p = createWebPlatform({ token: 't', WebSocketImpl: RecordingSocket as unknown as typeof WebSocket })
+    const socket = RecordingSocket.last!
+    socket.ready()
+    const asked = p.agents.assistant()
+    await turn()
+    socket.unknown()
+    await turn()
+    expect(methods()).toEqual(['assistant.get', 'orchestrator.get'])
+    socket.unknown()
+    await expect(asked).rejects.toThrow('Unknown method: orchestrator.get')
+    const skills = p.agents.assistantSkills()
+    await turn()
+    const call = socket.sent.at(-1)!
+    socket.receive({ kind: 'res', id: call.id, ok: false, error: { code: 'internal', message: 'disk full', retryable: false } })
+    await expect(skills).rejects.toThrow('disk full')
+    expect(methods().slice(2)).toEqual(['agents.assistantSkills'])
     await p.dispose()
   })
 })
