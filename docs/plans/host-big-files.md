@@ -151,6 +151,12 @@ Moved so far: `held-mail.ts` (`HeldMail`, `MessageService.holds`) with the perso
 (`reconcileInterrupted`, `deliveryFailedLate`, `resendHeld`, `hold`, `dismissHeld`), which `delivery.ts` and `person.ts` call
 as `service.holds`; then the handoffs (`handOver`, `moveAcross`, `takeMoves`, `handOverPreview`, `roleMoved`, with
 `foldReports` and `movedNotice`) into `handoff.ts` (`Handoffs`, `MessageService.handoffs`).
+**The rest stays** (2026-11-23, at 1,056 lines): `mail-views.ts`, `message-send.ts`, `message-read.ts` and
+`message-drain.ts` are not made. What is left writes and reads through the service's private core (`put`, `row`, `changed`,
+`isRequest`, `inOpenTurn`, `relation`, `item`), which every one of them shares; each move would add a deps object and its
+wiring for the lines it moves and delete nothing, against this plan's rule that a move is made only where it makes the
+code smaller (top), and the owner's "the same function in less code". `held-mail.ts` and `handoff.ts` moved because
+each is reached as one unit by its callers and uses only a few of the service's own methods.
 
 ## 3. `sessions/remote-agents.ts` (1,560 lines)
 
