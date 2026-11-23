@@ -96,9 +96,10 @@ differs from the brief for step 3, which had the new key read first; the measure
 same N−1 that moves the role writes only `is_orchestrator`, which is why it is the one read
 (`store-assistant-marker.test.ts`).
 
-**Which calls stay old.** None switches to `assistant.*` in this release:
-- the window calls `orchestrator.*`. Under the keeper a window can stay attached to an older host (#280,
-  `e2e/older-host.spec.ts`), which does not know the new methods;
+**Which calls stayed old.** None switched to `assistant.*` in step 3's release:
+- the window called `orchestrator.*`. Under the keeper a window can stay attached to an older host (#280,
+  `e2e/older-host.spec.ts`), which does not know the new methods. Since #2481 it calls the new names and asks again under
+  the old one when the host answers "Unknown method" (`renamed` in `platform/src/web/index.ts`);
 - the hub's calls to a linked machine (`links/routes.ts`) reach machines of other releases, so they stay old until no
   supported release lacks the new names;
 - the Codex bridge (`centralu-bridge.mjs`) runs from the host's own bundle and could switch, but sends nothing new
@@ -155,10 +156,10 @@ replaced; the step runs once; the build of v68 opens the store and the build of 
 
 | Name | Switched? | Why |
 |---|---|---|
-| `orchestrator.get`, `.peek`, `.configure` (the window) | no (`platform/src/web/index.ts`) | the window can reach a host older than step 3 that the store's floor does not keep out: a keeper of an earlier release it attaches to (#280), and on Windows the data folder's `centralu serve` behind `serve --window`, which the hub installed at whatever version (`sidecar/mod.rs`) and which a store at v68 or below does not refuse. The host answers both names, so switching gains nothing yet. The window switches once no supported keeper or `serve` lacks `assistant.*` |
+| `orchestrator.get`, `.peek`, `.configure` (the window) | yes, with the old names as fallback (`platform/src/web/index.ts`, #2481) | the window can reach a host older than step 3 that the store's floor does not keep out: a keeper of an earlier release it attaches to (#280), and on Windows the data folder's `centralu serve` behind `serve --window`, which the hub installed at whatever version (`sidecar/mod.rs`) and which a store at v68 or below does not refuse. The host answers both names. The window calls `assistant.*` first and the old name after "Unknown method" (#2481), so a host can drop the old names once no window of a supported release calls them |
 | `orchestrator.tools`, `.tool` (the Codex bridge) | yes, to `assistant.*` (`centralu-bridge.mjs`) | the bridge runs from the host's own bundle |
 | the old methods, answered by the host | kept | a hub of another release calls them on a linked machine (`links/routes.ts`) |
-| `agents.orchestratorSkills`, `agents.deleteOrchestratorSkill` | twins added (`agents.assistantSkills`, `agents.deleteAssistantSkill`), same rights and routes; the window keeps the old names | the previous host lacks the twins; the window switches in the release after this one |
+| `agents.orchestratorSkills`, `agents.deleteOrchestratorSkill` | twins added (`agents.assistantSkills`, `agents.deleteAssistantSkill`), same rights and routes; the window calls the twins | the previous host lacks the twins; the window calls the twins first and the old names after "Unknown method" (#2481) |
 | `SessionKind` `'orchestrator'` (`ASSISTANT_KIND`) | kept | sessions reach the hub from a linked machine, and the hub may be of a release before step 3, which parses a closed enum |
 | `by: 'orchestrator'` | kept | sent by the hub's Assistant to a linked machine |
 | `orchestrator_proposals_changed` | kept | relayed from a linked machine to the hub (`links/qualifier.ts`) |
