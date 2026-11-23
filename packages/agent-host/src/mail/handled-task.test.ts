@@ -24,6 +24,16 @@ const started = () => {
   return w
 }
 type World = ReturnType<typeof started>
+/** Holds the next delivery until the call it returns, as a tool that takes a folded input only late does; a hold set after it stays */
+function holdDelivery(w: World): () => void {
+  let take = () => {}
+  const hold = new Promise<void>((r) => (take = r))
+  w.behaviour.hold = hold
+  return () => {
+    if (w.behaviour.hold === hold) w.behaviour.hold = null
+    take()
+  }
+}
 const handled = async (w: World, id: string) => (await w.tool.call('b', { action: 'handled', thread: id })).text
 /** The turn ends as turns do, at rest: the tool took what it was given, and the session's last response answers its open tasks */
 function endAtRest(w: World) {
@@ -62,13 +72,11 @@ describe('a task marked handled by its receiver (#2493)', () => {
     await w.advance(2_000)
     w.states.set('b', inTurn)
     // The tool takes a folded input late: Claude Code names it in the turn's result, the host counts it taken after 90 s at most
-    let take = () => {}
-    w.behaviour.hold = new Promise<void>((r) => (take = r))
+    const take = holdDelivery(w)
     const a = w.mail.task(A, B, { text: 'and review #13', origin: 'agent_session', delivered: false })
     await w.advance(5_000)
     expect(w.to('b').at(-1)?.input.text).toContain(a.id)
     expect(await handled(w, a.id)).toContain('is answered by this turn')
-    w.behaviour.hold = null
     take()
     await w.advance(0)
     endAtRest(w)
@@ -84,8 +92,7 @@ describe('a task marked handled by its receiver (#2493)', () => {
     w.mail.task(A, B, { text: 'start on #12', origin: 'agent_session', delivered: false })
     await w.advance(2_000)
     w.states.set('b', inTurn)
-    let take = () => {}
-    w.behaviour.hold = new Promise<void>((r) => (take = r))
+    const take = holdDelivery(w)
     const a = w.mail.task(A, B, { text: 'and review #13', origin: 'agent_session', delivered: false })
     await w.advance(5_000)
     expect(await handled(w, a.id)).toContain('is answered by this turn')
@@ -94,15 +101,13 @@ describe('a task marked handled by its receiver (#2493)', () => {
     // The tool takes the input into the turn after, which ends having done it: a task that joined it, given again at rest as any (#2369)
     w.turns.beginOther('b', 'person', null)
     // The next turn's own claim, made while its task's delivery waits for the tool too, holds
-    let takeD = () => {}
-    w.behaviour.hold = new Promise<void>((r) => (takeD = r))
+    const takeD = holdDelivery(w)
     const d = w.mail.task(D, B, { text: 'and the changelog', origin: 'agent_session', delivered: false })
     await w.advance(5_000)
     take()
     await w.advance(5_000)
     expect(w.to('b').at(-1)?.input.text).toContain(d.id)
     expect(await handled(w, d.id)).toContain('is answered by this turn')
-    w.behaviour.hold = null
     takeD()
     await w.advance(0)
     endAtRest(w)
@@ -115,8 +120,7 @@ describe('a task marked handled by its receiver (#2493)', () => {
     w.mail.task(A, B, { text: 'start on #12', origin: 'agent_session', delivered: false })
     await w.advance(2_000)
     w.states.set('b', inTurn)
-    let take = () => {}
-    w.behaviour.hold = new Promise<void>((r) => (take = r))
+    const take = holdDelivery(w)
     const a = w.mail.task(A, B, { text: 'and review #13', origin: 'agent_session', delivered: false })
     await w.advance(5_000)
     // d waits behind a's delivery (one in flight per mailbox), and goes into the turn once a's is done, its own waiting for the tool too
@@ -127,13 +131,11 @@ describe('a task marked handled by its receiver (#2493)', () => {
     expect(await handled(w, a.id)).toContain('is answered by this turn')
     w.mail.handOver(A, C, 'all', [B])
     const again = w.store.mailbox.watchedTo(B).find((r) => w.store.mailbox.message(r.messageId)?.sender === C)?.messageId ?? ''
-    let takeD = () => {}
-    w.behaviour.hold = new Promise<void>((r) => (takeD = r))
+    const takeD = holdDelivery(w)
     take()
     await w.advance(5_000)
     expect(w.to('b').at(-1)?.input.text).toContain(d.id)
     expect(await handled(w, d.id)).toContain('is answered by this turn')
-    w.behaviour.hold = null
     takeD()
     await w.advance(0)
     const given = w.to('b').length
