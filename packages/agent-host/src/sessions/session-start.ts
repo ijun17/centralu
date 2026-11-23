@@ -667,18 +667,22 @@ export class SessionStarts {
    * a session opened and never answered is refused at every wake (#1676); once idle sessions sleep, each of them would hit it.
    * Null (the wake fails as it did) when the agent has written anything here, or the session was imported.
    */
-  private async startOver(m: SessionInfo): Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean } | null> {
+  private async startOver(m: SessionInfo, tool: ToolName): Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean } | null> {
     if (m.importedFrom || this.host.store.messages.hasAgentRows(m.id)) return null
-    console.error(`[agent-host] ${m.id.slice(0, 8)} tool=${m.tool}: its conversation is gone and the agent wrote nothing here, starting a new one`)
+    // The session may have been deleted or moved to another tool while it woke: nothing is started for it then
+    if (this.host.leaving.has(m.id) || !this.host.meta.has(m.id) || m.tool !== tool) return null
+    console.error(`[agent-host] ${m.id.slice(0, 8)} tool=${m.tool}: conversation ${m.externalId ?? '?'} is gone and the agent wrote nothing here, starting a new one`)
     m.externalId = null
     this.host.store.sessions.upsertSession(m)
     // As a tool switch does: what is stored is not a conversation lost (the guard in doResumeSession)
     this.host.store.settings.setAppSetting(freshStartKey(m.id), String(this.host.store.messages.loadMessages(m.id, 1)[0]?.seq ?? 0))
-    return this.doResumeSession(m.id)
+    return this.doResumeSession(m.id, true)
   }
 
   async doResumeSession(
     sessionId: string,
+    /** Set by `startOver`: a second start-over is never asked for, whatever the new conversation answers */
+    startedOver = false,
   ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }> {
     const m = this.host.openSession(sessionId)
 
@@ -940,8 +944,8 @@ export class SessionStarts {
       // if it cannot be determined, it does not block (false).
       // The tool said so itself (an ACP tool that does not list the conversation, #1676): no list to ask
       const toldGone = err instanceof Error && Reflect.get(err, 'code') === 'conversation_gone'
-      if (toldGone) {
-        const again = await this.startOver(m)
+      if (toldGone && !startedOver) {
+        const again = await this.startOver(m, tool)
         if (again) return again
       }
       const gone = toldGone || (await withTimeout(this.host.externals.externalGone(m, cwd), 8_000, 'Checking the tool').catch(() => false))

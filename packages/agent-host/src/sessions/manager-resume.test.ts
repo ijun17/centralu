@@ -459,7 +459,7 @@ describe('when the tool cannot find the conversation', () => {
         this.opened.push(opts.resumeExternalId)
         if (this.refuse && opts.resumeExternalId) throw Object.assign(new Error('Fake has no record of this conversation'), { code: 'conversation_gone' })
         const h = await super.createSession(opts, emit)
-        if (!opts.resumeExternalId) this.last!.externalId = this.ids.shift()
+        if (!opts.resumeExternalId) this.last!.externalId = this.ids.shift() ?? null
         return h
       }
     }
@@ -490,6 +490,21 @@ describe('when the tool cannot find the conversation', () => {
       store.messages.appendMessages([{ sessionId: id, seq: 2, role: 'assistant', kind: 'text', payload: { text: 'hi' }, ts: 2 }])
       await m.processes.resumeSession(id)
       expect(a.opened).toEqual(['ext-new'])
+    })
+
+    it('counts a tool step the agent made as something it wrote: a turn that ran tools and no text keeps its conversation', async () => {
+      const { a, m, id } = await open()
+      store.messages.appendMessages([{ sessionId: id, seq: 1, role: 'system', kind: 'tool_call', payload: { name: 'shell' }, ts: 1 }])
+      expect((await m.processes.resumeSession(id)).resumed).toBe(false)
+      expect(a.opened).toEqual(['ext-old'])
+    })
+
+    it('starts over once: a new conversation the tool also refuses does not start another', async () => {
+      const { a, m, id } = await open()
+      a.failCreate = Object.assign(new Error('Fake has no record of this conversation'), { code: 'conversation_gone' })
+      const r = await m.processes.resumeSession(id)
+      expect(r.resumed).toBe(false)
+      expect(a.opened).toEqual(['ext-old', undefined])
     })
 
     it('fails as before once the agent has written anything into the session, or when it was imported from the tool', async () => {

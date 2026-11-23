@@ -360,9 +360,11 @@ wake then fails with "no record of this conversation" (`sessions/session-start.t
 session never typed to after a host restart; with sleep, every such session hits it 15 minutes after it opened. Fixed at
 its owner, the resume's failure path in `session-start.ts`: a session whose store holds no reply from the agent has
 nothing to lose, so a `conversation_gone` wake starts a new conversation for it instead of failing. This fixes the
-restart case too. **Built (#2479 A9, 2026-11-23)**: `SessionStarts.startOver`, only on the tool's own `conversation_gone` (not the list
-check Claude and Codex have, where "not listed" can mean a moved folder), only when the store holds no `assistant` row
-(`hasAgentRows`) and the session was not imported; the boundary is recorded as a tool switch does. Real Cursor 2026.10.22, a
+restart case too. **Built (#2479 A9, 2026-11-23)**: `SessionStarts.startOver`, only on the tool's own `conversation_gone` (the adapter's, not the list
+check Claude and Codex have), only when the store holds nothing the agent wrote (`hasAgentRows`: an `assistant` row or a tool step) and
+the session was not imported, once per wake, and not for a session that was deleted or switched tools meanwhile. The adapter's
+own `conversation_gone` is a `session/list` of the session's folder (`acp/session.ts`), so a moved folder reads as gone too: with
+nothing of the agent's in the store, a new conversation is started and the old id is only in host.log; the boundary is recorded as a tool switch does. Real Cursor 2026.10.22, a
 session created and never typed to, then `agents.restartSession` twice on a temp data folder: before, `session_live` false with
 reason `restart_failed` and the conversation id unchanged; after, live, on a new conversation id each time. No model turn was
 needed, so no quota. A session where the person's message was sent and Cursor never answered also starts over; only the
