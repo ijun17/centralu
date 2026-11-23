@@ -38,7 +38,7 @@ function commentOf(line: string, yaml: boolean): { text: string; starts: boolean
   const after = own || yaml ? null : /\s\/\/(.*)$/.exec(line)
   const text = own ? (yaml ? own[1] : own[2]) : after?.[1]
   if (text === undefined) return null
-  return { text: words(text), starts: !!after || (!!own && !yaml && own[1].startsWith('/*')) }
+  return { text: words(text), starts: !!after || (!yaml && !!own?.[1]?.startsWith('/*')) }
 }
 
 /**
@@ -59,7 +59,7 @@ export function unownedPromises(path: string, text: string): string[] {
     block.forEach((l, k) => {
       const m = MARKER.exec(l.text) ?? LATER.exec(l.text)
       if (!m) return
-      const at = starts[k] + m.index
+      const at = (starts[k] ?? 0) + m.index
       const from = Math.max(0, ...[...joined.slice(0, at).matchAll(END)].map((x) => x.index + 2))
       const end = joined.slice(at).search(new RegExp(END.source))
       if (!CARRIED.test(joined.slice(from, end < 0 ? joined.length : at + end + 1))) found.push(`${l.at + 1}: ${m[0]}`)
