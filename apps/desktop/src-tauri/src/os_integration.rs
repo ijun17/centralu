@@ -341,14 +341,35 @@ fn play_sound(kind: &str) {
     );
 }
 
-/// Deliberately silent, and deliberately not a compile error.
-///
-/// Windows (#14) has no sound here yet: the alert still flashes the taskbar button
-/// (`request_user_attention`), and the notification plugin's toast is the other way to reach
-/// the person (neither has been seen on a Windows machine yet). A system sound
-/// (`PlaySoundW` with an alias such as `SystemAsterisk`) is the obvious next step once
-/// someone can hear it.
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+/// The same four meanings as system sounds, by the aliases every Windows install registers (Control Panel > Sound),
+/// so the person's own sound scheme and mute setting decide how they sound. Distinguishing them is a feature, as above.
+/// Kept apart from the call so it can be tested on any machine.
+#[cfg(any(windows, test))]
+fn windows_alias(kind: &str) -> &'static str {
+    match kind {
+        "error" => "SystemHand",
+        "done" => "SystemAsterisk",
+        "all_done" => "SystemNotification",
+        _ => "SystemExclamation", // waiting (an approval)
+    }
+}
+
+/// Windows (#14, #2487): `PlaySoundW` with an alias, asynchronously (it returns at once, so the alert path never waits on
+/// the sound). `SND_NODEFAULT` keeps an alias the person's scheme does not define silent instead of beeping the default.
+/// Not heard on a Windows machine yet: the alert still also flashes the taskbar button (`request_user_attention`).
+#[cfg(windows)]
+fn play_sound(kind: &str) {
+    use windows_sys::Win32::Media::Audio::{PlaySoundW, SND_ALIAS, SND_ASYNC, SND_NODEFAULT};
+    let alias: Vec<u16> = windows_alias(kind).encode_utf16().chain(std::iter::once(0)).collect();
+    // SAFETY: `alias` is a NUL-terminated UTF-16 name (SND_ALIAS); winmm copies a name before the call returns, so dropping it after is fine.
+    let played = unsafe { PlaySoundW(alias.as_ptr(), std::ptr::null_mut(), SND_ALIAS | SND_ASYNC | SND_NODEFAULT) };
+    if played == 0 {
+        eprintln!("[alert] failed to play sound ({})", windows_alias(kind));
+    }
+}
+
+/// Deliberately silent, and deliberately not a compile error, where there is no way to play a sound here.
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 fn play_sound(_kind: &str) {}
 
 /// Spawns a fire-and-forget child and reaps it. `Err` means it could not start at all.
@@ -381,5 +402,18 @@ pub(crate) fn focus_window(app: AppHandle) {
         let _ = w.unminimize();
         let _ = w.show();
         let _ = w.set_focus();
+    }
+}
+
+#[cfg(test)]
+mod windows_sound_tests {
+    use super::windows_alias;
+
+    #[test]
+    fn the_four_alert_kinds_sound_different_and_an_unknown_one_is_the_waiting_sound() {
+        let kinds = ["error", "done", "all_done", "approval"];
+        let aliases: Vec<&str> = kinds.iter().map(|k| windows_alias(k)).collect();
+        assert_eq!(aliases, ["SystemHand", "SystemAsterisk", "SystemNotification", "SystemExclamation"]);
+        assert_eq!(windows_alias("anything else"), windows_alias("approval"));
     }
 }
