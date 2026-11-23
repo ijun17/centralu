@@ -254,11 +254,15 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
     const { t } = control()
     const exec: HostControl['exec'] = async (cmd) => {
       if (down) throw new Error('ssh: connect to host box port 22: Connection timed out')
-      const r = await t.exec(cmd)
-      if (events().some((e) => e.startsWith('stop'))) down = true
-      return r
+      return t.exec(cmd)
     }
-    await expect(update('9.9.2', {}, { exec, followMs: 3_000 }).done).rejects.toThrow(/could not be followed to its end from this computer/)
+    // The switcher waits once the old host stopped, so the link drops after the stop and before any outcome: dropped on the
+    // first command answered after the stop instead, a loaded runner's switcher could finish between two reads (#2500)
+    const { done } = update('9.9.2', { FAKE_HOLD: 'stopped' }, { exec, followMs: 3_000 })
+    await eventually(() => existsSync(data('holding')), 60_000)
+    down = true
+    writeFileSync(data('release'), 'go')
+    await expect(done).rejects.toThrow(/could not be followed to its end from this computer/)
     await eventually(() => running() === '9.9.2' && switchNow().outcome === 'done', 30_000)
     expect(events()).toEqual(['stop 9.9.1 (for update)', 'start 9.9.2'])
   }, 90_000 * SLOW)

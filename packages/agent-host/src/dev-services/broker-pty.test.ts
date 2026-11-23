@@ -244,11 +244,16 @@ describe.runIf(process.platform === 'win32')('a terminal through the real broker
     const parent = execFileSync('powershell.exe', ['-NoProfile', '-Command', `(Get-CimInstance Win32_Process -Filter "ProcessId=${shell}").ParentProcessId`], { encoding: 'utf8', windowsHide: true }).trim()
     expect(Number(parent)).toBe(broker.pid)
 
-    // Resize reaches the pseudoconsole
+    // Resize reaches the pseudoconsole. It travels through the broker in its own time, so the shell is asked its width until
+    // it answers 77; each answer is the event waited for, and one that stays at 100 ends the test after 20 asks (#2500)
     svc.resize(t.id, 77, 21)
-    await new Promise((r) => setTimeout(r, 500))
-    svc.input(t.id, 'Write-Output ("width-" + [Console]::WindowWidth)\r')
-    expect(await settle(() => t.history(), (h) => h.includes('width-77'), 30_000 * SLOW)).toContain('width-77')
+    const widths: string[] = []
+    for (let n = 1; n <= 20 && widths.at(-1) !== '77'; n++) {
+      svc.input(t.id, `Write-Output ("width" + ${n} + "-" + [Console]::WindowWidth)\r`)
+      const answer = new RegExp(`width${n}-(\\d+)`)
+      widths.push((await settle(() => answer.exec(t.history()), Boolean, 30_000 * SLOW))![1]!)
+    }
+    expect(widths.at(-1)).toBe('77')
 
     // `exit` ends the tab with its code
     svc.input(t.id, 'exit 7\r')
