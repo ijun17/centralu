@@ -18,10 +18,18 @@ completedAtMs?: number | null, } & ({ "type": "userMessage", id: string, clientI
 
 const names = (fields: { name: string }[] | null) => fields?.map((f) => f.name)
 
+/** The committed type, as the generator wrote it (what the drift run reads in a fresh one) */
+const COMMITTED = Object.values(import.meta.glob<string>('./generated/v2/ThreadItem.ts', { query: '?raw', import: 'default', eager: true }))[0]!
+
 describe('the fields of a generated Codex type (#2513)', () => {
   it('reads a variant by its tag in the old shape and in the new one', () => {
     expect(names(variantFields(PLAIN, 'userMessage'))).toEqual(['id', 'clientId', 'content'])
     expect(names(variantFields(INTERSECTED, 'userMessage'))).toEqual(['id', 'clientId', 'content'])
+  })
+
+  it('reads the user message of the committed ThreadItem, whatever Codex version made it', () => {
+    expect(names(variantFields(COMMITTED, 'userMessage'))).toContain('clientId')
+    expect(names(variantFields(COMMITTED, 'userMessage'))).not.toContain('startedAtMs')
   })
 
   it('does not take a field of another variant, nor the lifecycle times, for the tagged one', () => {
@@ -35,8 +43,20 @@ describe('the fields of a generated Codex type (#2513)', () => {
     expect(variantFields(INTERSECTED, 'hookPrompt')).toBeNull()
   })
 
-  it('reads a params type, which is one object, with what is optional', () => {
-    const params = `/** doc, with a comma */\nexport type TurnStartParams = { threadId: string, clientUserMessageId?: string | null, input: Array<UserInput>, };`
+  it('does not take an object nested in another variant for the variant, nor a tag in a comment', () => {
+    const nested = `export type T = { "type": "hookPrompt", inner: { "type": "userMessage", clientId: string, }, } | { "type": "userMessage", id: string, };`
+    expect(names(variantFields(nested, 'userMessage'))).toEqual(['id'])
+    const commented = `export type T = /** { "type": "userMessage", clientId: string, } */ { "type": "userMessage", id: string, };`
+    expect(names(variantFields(commented, 'userMessage'))).toEqual(['id'])
+  })
+
+  it('says it cannot read a variant that only names another type, and reads past a function type', () => {
+    expect(variantFields(`export type T = { "type": "sleep" } & SleepItem | { "type": "x", id: string, };`, 'sleep')).toBeNull()
+    expect(names(variantFields(`export type T = { "type": "x", cb: (a: string) => void, clientId: string, };`, 'x'))).toEqual(['cb', 'clientId'])
+  })
+
+  it('reads a params type, which is one object, with what is optional and without its comments', () => {
+    const params = `/** doc, with a comma */\nexport type TurnStartParams = { threadId: string, /** a, b */ clientUserMessageId?: string | null, input: Array<UserInput>, };`
     expect(paramFields(params)).toEqual([
       { name: 'threadId', required: true },
       { name: 'clientUserMessageId', required: false },

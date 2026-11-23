@@ -172,7 +172,7 @@ for (const [type, variants] of Object.entries(contract.variantFields ?? {})) {
   for (const [tag, names] of Object.entries(variants)) {
     const fields = variantFields(src, tag)
     if (!fields) {
-      missing.push(`${type}: no variant "${tag}"`)
+      missing.push(`${type}: no variant "${tag}" that can be read`)
       continue
     }
     const known = new Set(fields.map((f) => f.name))
