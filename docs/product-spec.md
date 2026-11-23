@@ -1,6 +1,6 @@
 # Centralu Product Spec
 
-> A lightweight desktop app that runs, watches and controls several agentic coding tools (Claude Code, Codex CLI) from a single window
+> A lightweight desktop app that runs, watches and controls several agentic coding tools (Claude Code, Codex, Cursor, OpenCode and Antigravity) from a single window
 
 - Version: v0.5 (**synced to the implementation, 2026-08-26** — M2 is done and the app is in dogfooding, so this document now describes what exists, not what is planned)
 - Written: 2026-08-15 (v0.4), realigned 2026-08-26 (v0.5)
@@ -85,7 +85,7 @@ To stop the scope leaking, what v1 explicitly **does not do**:
   local forward. It is opt-in and for one trusted person: the host listens on loopback on both ends, nothing is ever
   exposed on a public port, and there is no shared or multi-user server. **Cloud execution stays a non-goal**: Centralu
   does not run agents on infrastructure of its own. How it is built: [agent-host/remote/serve.md](agent-host/remote/serve.md).
-- Tools other than Claude Code and Codex (only the adapter structure is designed to extend)
+- ~~Tools other than Claude Code and Codex~~ — **built, listed 2026-11-23.** Cursor, OpenCode and Antigravity run through the adapter interface
 - ~~**Concurrent split grid view**~~ — **withdrawn 2026-08-20.** It was built, and it ships marked **experimental** (§5.4).
   The line is kept rather than deleted: there was a period where this document said "we do not build this"
   while the grid was on screen (issue #25), and where that mismatch came from must not vanish from the list.
@@ -97,7 +97,7 @@ To stop the scope leaking, what v1 explicitly **does not do**:
 | Item | Decision | Reasoning |
 |---|---|---|
 | App shell | **Tauri 2.x** (Rust core + native webview) | The "lightweight" requirement. Drastically lower memory and energy use than Electron |
-| Supported agents (v1) | **Claude Code, Codex CLI** | User's decision. Extensible later through the adapter interface |
+| Supported agents | **Claude Code, Codex, Cursor, OpenCode, Antigravity** | Started with the first two (v1); the others came through the adapter interface |
 | Integration | **SDK/protocol based** (not PTY wrapping) | Receive state detection (is it waiting), context usage and approval requests precisely, as structured events |
 | Agent adapter execution | Node.js sidecar process | Run the Claude Agent SDK (TypeScript) and the Codex protocol client in Node, supervised by Tauri |
 | Front end | **React** (settled) | Idle energy is decided by the render policy (§7.1), not the framework. The ecosystem and agent-driven-development friendliness are a clear advantage |
@@ -273,7 +273,7 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   and its bar says it is an older build and offers to switch back by hand. Desktop only, with the keeper;
   elsewhere, and from a build the update did not replace (`pnpm app:open`), the line says to restart as before
   ([architecture.md](architecture.md) §4.5).
-- **Agent CLI updates** (#297). Each session runs its own Claude Code or Codex process, which keeps the CLI version it
+- **Agent CLI updates** (#297). Each session runs its own agent process, which keeps the CLI version it
   started with, and with the keeper a process can outlive every app restart. When the installed CLI is newer, the
   session header says so quietly ("Claude Code 2.1.290 installed — this session runs 2.1.282") next to one app-wide
   action, **Update idle sessions**, which restarts every idle session on the installed version and leaves busy ones.

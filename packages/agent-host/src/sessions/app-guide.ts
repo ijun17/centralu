@@ -31,7 +31,7 @@ export type GuideSeats = { assistant: GuideTool[]; scoped: GuideTool[]; reader: 
 
 const STATIC: Record<Exclude<AppGuideTopic, 'assistant'>, string> = {
   overview: `# Centralu overview
-A desktop app that runs, watches, and steers several Claude Code and Codex CLI sessions in one window.
+A desktop app that runs, watches, and steers several Claude Code, Codex and other coding agent sessions in one window.
 (⌘ in shortcuts is for macOS. On other operating systems it is Ctrl.)
 - Left sidebar: the Assistant and Grid buttons at the top, the project and session list below
   them, and Add project at the bottom. A project is one local directory.
@@ -48,7 +48,7 @@ For a question this guide does not cover (including bug reports and feature requ
 answer from a guess; point to a GitHub issue: https://github.com/ijun17/centralu/issues`,
 
   sessions: `# Sessions
-One session = one agent process (Claude Code or Codex).
+One session = one agent process (Claude Code, Codex or another coding agent).
 - Creating one: hover over a project row in the sidebar for the ⋯ menu → New session. In the
   window that opens, start a new conversation, or pick and load a past conversation that tool had
   in that folder (Load).

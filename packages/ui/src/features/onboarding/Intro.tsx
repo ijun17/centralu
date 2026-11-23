@@ -119,7 +119,7 @@ export function Intro() {
         <p className="mt-2 text-xs text-ink-faint">You can change this later in Settings.</p>
 
         {tools === null && detected.error === null ? (
-          <p className="mt-4 text-xs text-ink-faint">Looking for Claude Code and Codex…</p>
+          <p className="mt-4 text-xs text-ink-faint">Looking for Claude Code, Codex and other coding agents…</p>
         ) : (
           <>
             {detected.error !== null && (

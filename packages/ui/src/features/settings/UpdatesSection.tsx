@@ -125,7 +125,7 @@ export function AgentCliUpdates() {
         hint="A session restarts on the newer one once it is idle; its conversation continues."
         more={
           <>
-            Each session runs its own Claude Code or Codex process, which keeps the version it started with. With this on, a
+            Each session runs its own agent process, which keeps the version it started with. With this on, a
             session restarts on the newer one once it is not working, not waiting for you and not running background tasks.
             The conversation continues, and a line in it says the session moved.
           </>
