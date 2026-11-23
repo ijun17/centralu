@@ -19,6 +19,7 @@ import { autoNotice, bare, carriedPreset, remotePreset, remoteWorktreeLine, show
 import { ASK_THE_PERSON, START_AGENT_CALL_MS, START_AGENT_SETUP_MS } from './start-agent-terms.js'
 import { labelOf } from './transcript-view.js'
 import { raceTimeout } from '../timing.js'
+import type { NoteSent } from '../mail/tool.js'
 
 /**
  * A child start_agent started on a linked machine (#1038), as the hub keeps it: the machine's session (its qualified
@@ -425,6 +426,18 @@ export class RemoteAgents {
   /** New work for a child of a linked machine (`AgentSessionActions.sendWork`, the caller's `mail` to it), through the link */
   send(callerId: string, rec: RemoteAgent, text: string): Promise<ChildRunResult> {
     return this.act(callerId, rec, { sessionId: rec.sessionId, action: 'send', text })
+  }
+
+  /**
+   * A note for the child across the link (the caller's `mail` with `kind: "note"`, #2493): a message that needs no reply, written quiet there, with
+   * no task and no report. Refused for a child above its caller, as new work is; the start gate is not read, since a note starts nothing
+   */
+  async note(callerId: string, rec: RemoteAgent, text: string): Promise<NoteSent> {
+    const above = aboveCallerError(rec.name, rec.preset ?? 'normal', this.callerPreset(callerId))
+    if (above) return { ok: false, error: above }
+    const tasks = this.host.linkedTasks
+    const sent = tasks ? await tasks.send(callerId, rec.sessionId, text, { origin: 'agent_session', note: true }) : { ok: false as const, text: NO_MAIL }
+    return sent.ok ? { ok: true, messageId: sent.messageId, name: `${rec.name} on ${rec.machine}` } : { ok: false, error: `Could not send to "${rec.name}" on ${rec.machine}: ${bare(sent.text)}.` }
   }
 
   private async act(callerId: string, rec: RemoteAgent, opts: AgentSessionOpts | { sessionId: string; action: 'send'; text: string }, signal?: AbortSignal): Promise<ChildRunResult> {

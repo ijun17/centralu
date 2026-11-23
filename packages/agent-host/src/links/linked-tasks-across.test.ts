@@ -262,6 +262,23 @@ describe('a task across a link (#1948 step 6)', () => {
     expect(machine.mail!.service.read(at(machine, 'w1'), { id }).items[0]?.forPerson).toBeUndefined()
     expect(machine.store.mailbox.recipient(id, at(machine, 'w1'))?.settled).toBeNull()
   })
+
+  it("is marked handled by the machine's session in its turn, handed over on the hub meanwhile: that turn's report reaches the heir (#2493)", async () => {
+    const { machine, hub, across } = await rig()
+    const sent = await across.sendTask('h1', at(hub, 'm1.w1'), 'review the branch', { origin: 'agent_session' })
+    const id = sent.ok ? sent.messageId : ''
+    const there = machine.mail!
+    await eventually(() => machine.store.mailbox.recipient(id, at(machine, 'w1')) !== undefined)
+    if (!there.turns.current('w1')) there.turns.beginOther('w1', 'person', null)
+    expect((await there.tool.call('w1', { action: 'handled', thread: id })).text).toContain("is answered by this turn's report")
+    hub.mail!.service.handOver(at(hub, 'h1'), at(hub, 'h2'), 'all', [at(hub, 'm1.w1')])
+    await across.movedAcross(hub.mail!.service.takeMoves())
+    expect(machine.store.mailbox.message(id)?.sender).toBe(at(hub, 'h2'))
+    there.turns.observe({ type: 'turn_complete', sessionId: 'w1' } as never, true)
+    there.service.lastResponse(at(machine, 'w1'), { body: () => 'The session ended its turn.', released: false, answers: () => true })
+    await eventually(() => hub.store.mailbox.reportsOn(id).length === 1)
+    expect(hub.store.mailbox.recipients(hub.store.mailbox.reportsOn(id)[0]!.id).map((r) => r.recipient)).toEqual([at(hub, 'h2')])
+  })
 })
 
 describe("a hub's copy of a task across (#1948 step 6)", () => {

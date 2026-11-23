@@ -67,6 +67,9 @@ export type MailToolResult = { text: string; isError?: boolean }
 /** What the host knows of a session that asked the Assistant (§7.6): the facts the person decides on, which the session cannot write */
 export type AskerFacts = { name: string; project: string | null; trusted: boolean }
 
+/** A note for a session the caller started, as `MailToolHost.note` answers it: written, or refused with why (#2493) */
+export type NoteSent = { ok: true; messageId: string; name: string } | { ok: false; error: string }
+
 /** What the tool reads of the host (§16 M3a; M3b adds the session list and name resolution) */
 export type MailToolHost = {
   /** The calling session: its address, and the session that started it (`parent`, D16) */
@@ -88,6 +91,10 @@ export type MailToolHost = {
   across?: Pick<MailAcross, 'send' | 'sendHeld' | 'holds' | 'dropHeld' | 'foreign' | 'find' | 'named' | 'personTarget' | 'parentHost'>
   /** A send that is work for a session the caller started (`AgentSessionActions.sendWork`, #1948), or null for plain mail */
   work?(callerId: string, target: string, text: string, ifBusy: IfBusy | undefined, signal?: AbortSignal): Promise<MailToolResult | null>
+  /** A note for a session the caller started (`AgentSessionActions.sendNote`, #2493), or null for plain mail */
+  note?(callerId: string, target: string, text: string): Promise<NoteSent | null>
+  /** The receiver's running turn does task `id` (`MailDelivery.claim`, #2493) */
+  claim?(address: string, id: string): boolean
   /** The watches the caller keeps (docs/plans/mailbox.md §18.2): `watch` sets one, `close` with its id cancels it, `inbox` lists them */
   watches?: Pick<Watches, 'register' | 'registerPr' | 'cancel' | 'read' | 'list' | 'what' | 'clock'>
   now?: () => number
@@ -243,6 +250,11 @@ export class MailTool {
     const target = 'address' in ref ? this.ownId(ref.address) : ref.here.length === 1 && ref.here[0] ? ref.here[0].id : ref.word
     if (target === null) return null
     const subject = a.subject?.trim() ? `${oneLineText(a.subject, SUBJECT_CHARS)}\n\n` : ''
+    if (a.kind === 'note' && this.host.note) {
+      const n = await this.host.note(sessionId, target, subject + a.text.trim())
+      if (n === null) return null
+      return n.ok ? { text: `Sent ${n.messageId} to ${n.name} as a note: it reaches it at its next turn and wakes nothing.` } : { text: n.error, isError: true }
+    }
     const r = await this.host.work(sessionId, target, subject + a.text.trim(), a.ifBusy, signal)
     return r && !r.isError ? { ...r, text: `Sent as work for a session you started${a.kind ? ` (kind: "${a.kind}" is for other mail)` : ''}. ${r.text}` } : r
   }
@@ -394,6 +406,10 @@ export class MailTool {
   private handled(me: string, id: string): string {
     if (this.host.across?.dropHeld(me, id)) return `Dropped: ${id} was held for its link and is not sent.`
     const r = this.service.done(me, id)
+    if (r.how === 'task')
+      return this.host.claim?.(me, id)
+        ? `${id} is answered by this turn's report, and is not given again.`
+        : `Task ${id} is answered by the report of the turn it runs in, not marked handled: it is not in this turn.`
     if (r.how === 'done') return '1 message marked handled.'
     if (r.how === 'withdrawn') return `Withdrawn: ${id} no longer waits for an answer from ${r.settled} recipient${r.settled === 1 ? '' : 's'}.`
     return 'Nothing was waiting to be marked handled.'

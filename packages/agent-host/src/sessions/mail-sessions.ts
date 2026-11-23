@@ -6,8 +6,9 @@ import type { AnswerGiven, GivenTask, LinkedTasks } from '../mail/delegation.js'
 import type { CardHooks } from '../mail/card-notices.js'
 import type { HandedOverMessage } from '../mail/messages.js'
 import type { StopTold, StopWhy, WaitEnd } from '../mail/stop-notices.js'
-import type { MailToolArgs, MailToolResult } from '../mail/tool.js'
+import type { MailToolArgs, MailToolResult, NoteSent } from '../mail/tool.js'
 import type { TurnStart } from '../mail/turns.js'
+import { isQuietNote } from '../mail/rules.js'
 import type { TurnInputs } from '../mail/delivery.js'
 import type { HandOverScope } from '../dev-services/store/mailbox.js'
 import type { ThreadOrigin } from '../dev-services/store/mail-types.js'
@@ -303,13 +304,19 @@ export class MailSessionsView {
     return r && agentCallsFor(this.host.tools.toolProfileOf(callerId) ?? 'human', agentRunText(r))
   }
 
+  /** `MailToolHost.note` (#2493): a note for a session the caller started, or null for plain mail */
+  note(callerId: string, target: string, text: string): Promise<NoteSent | null> {
+    return this.host.delegationFlow.actions.sendNote(callerId, target, text)
+  }
+
   /**
    * A send to a session that cannot take it now: a task from the caller, which the delivery gives it as a turn of its own once it is free (§10.6.2).
    * A `note` (send_to_session without reportBack, #2258) is a message that needs no reply, given the same way, busy or not
    */
   mailTask(callerId: string, target: SessionInfo, origin: SendOrigin, text: string, note = false, depth?: number): Extract<BusyAnswer, { state: 'mailed' }> | { error: string } {
     const hooks = this.hooks
-    if (!hooks?.sendTask || !this.canReadMail(target.id)) return { error: `"${target.name}" is busy and takes no mail: send to it once it is at rest.` }
+    // A quiet note goes only as mail (#2493): a session that reads none is not busy, it takes no note
+    if (!hooks?.sendTask || !this.canReadMail(target.id)) return { error: isQuietNote({ note, origin }) ? `"${target.name}" takes no mail, so a note cannot reach it: send it work instead, with no kind.` : `"${target.name}" is busy and takes no mail: send to it once it is at rest.` }
     try {
       return { state: 'mailed', sessionId: target.id, sessionName: target.name, messageId: hooks.sendTask(callerId, target.id, origin, text, note, depth), ...(note ? { note: true as const } : {}) }
     } catch (e) {

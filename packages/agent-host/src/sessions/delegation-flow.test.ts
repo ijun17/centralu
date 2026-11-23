@@ -83,10 +83,12 @@ describe('what a handoff gave away', () => {
   })
 
   // #1948: agent_session's send told it too; a mail send to that child must, rather than mail a session it no longer follows
-  it('a mail send by the original that stayed hears where the work went, as agent_session did', async () => {
+  it('a mail send or note by the original that stayed hears where the work went, as agent_session did', async () => {
     children.recordHandedOver('child', 'caller', 'heir')
     const flow = new DelegationFlow(hostWith({ meta, children }))
     expect(await flow.actions.sendWork('caller', 'child', 'and the docs')).toMatchObject({ ok: false, error: expect.stringContaining('A handoff gave "Child" [child] to the session that took over from this one, "Heir" [heir].') })
+    // A note too (#2493): plain mail would reach a child the original no longer follows
+    expect(await flow.actions.sendNote('caller', 'child', 'fyi')).toMatchObject({ ok: false, error: expect.stringContaining('A handoff gave "Child" [child]') })
   })
 
   it('a wait the move ended always has an answer, even once the record is gone', () => {
@@ -400,6 +402,14 @@ describe("a child's turn and the call waiting on it", () => {
     const flow = flowWith({ refusesDelegation: (callerId: string) => (asked.push(callerId), null) })
     expect(await flow.actions.sendWork('caller', 'm1.c1', 'and the tests')).toBeNull()
     expect(asked).toEqual([])
+  })
+
+  // #2493: work and a note to the caller's own child share one check (`ownTarget`)
+  it("refuses work and a note to the caller's own child on a linked machine when §7.4 refuses, before anything goes over the link", async () => {
+    store.settings.setAppSetting(REMOTE_AGENTS_KEY, JSON.stringify([{ sessionId: 'm1.c1', callerId: 'caller', machineId: 'm1', machine: 'Box', name: 'Child', tool: 'claude', project: 'app', startedAt: 1, sent: 'TASK' }]))
+    const flow = flowWith({ refusesDelegation: () => 'your project is not trusted', linkedReader: undefined })
+    expect(await flow.actions.sendNote('caller', 'm1.c1', 'fyi')).toEqual({ ok: false, error: 'your project is not trusted' })
+    expect(await flow.actions.sendWork('caller', 'm1.c1', 'and the tests')).toEqual({ ok: false, error: 'your project is not trusted' })
   })
 })
 

@@ -34,6 +34,19 @@ describe('a send that is work (#1948: agent_session send folded into mail)', () 
     expect(w.store.mailbox.feedOf(A, { limit: 5 })).toEqual([])
   })
 
+  it('with kind note to a session the caller started is a note, given quietly with no task (#2493); to any other session it is plain mail', async () => {
+    const noted: string[] = []
+    const w = hostWorld({ work: async () => ({ text: 'work' }), note: async (_caller, target, text) => (noted.push(text), target === 'w' ? { ok: true, messageId: 'hub-aaaaaaaa.m_1', name: 'worker' } : null) })
+    expect(await w.tool.call('a', { action: 'send', to: 'w', kind: 'note', subject: 'Rule', text: 'rebase before review' })).toEqual({ text: 'Sent hub-aaaaaaaa.m_1 to worker as a note: it reaches it at its next turn and wakes nothing.' })
+    expect(noted).toEqual(['Rule\n\nrebase before review'])
+    // With no kind it is work, as before
+    expect((await w.tool.call('a', { action: 'send', to: 'w', text: 'and the tests' })).text).toBe('Sent as work for a session you started. work')
+    expect((await w.tool.call('a', { action: 'send', to: 'beta', kind: 'note', text: 'fyi' })).text).toMatch(/^Sent hub-aaaaaaaa\.m_/)
+    // A note the sessions refuse is said as refused
+    const refused = hostWorld({ work: async () => ({ text: 'work' }), note: async () => ({ ok: false, error: 'it has more permissions' }) })
+    expect(await refused.tool.call('a', { action: 'send', to: 'w', kind: 'note', text: 'x' })).toEqual({ text: 'it has more permissions', isError: true })
+  })
+
   // #1948: a role is never work, whatever a session is named: a child named "parent" does not take its parent's mail
   it('never asks for a role, even of a session named like it', async () => {
     const asked: string[] = []

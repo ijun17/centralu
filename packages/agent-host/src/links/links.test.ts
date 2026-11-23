@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import WsSocket, { WebSocketServer } from 'ws'
-import { sendWork } from '../sessions/cross-project.test-helpers.js'
+import { sendNote, sendWork } from '../sessions/cross-project.test-helpers.js'
 import { execFileSync } from 'node:child_process'
 import { connect, createServer, type AddressInfo, type Socket } from 'node:net'
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
@@ -2873,8 +2873,8 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
     })
 
     // #1273 review (RVIA 1): a caller that left auto kept giving its auto child work there
-    it('gives no work to a child that runs above its caller, once the caller has less', async () => {
-      const { hub, card, agent } = await rig()
+    it('gives no work and no note to a child that runs above its caller, once the caller has less', async () => {
+      const { hub, card, agent, remoteStore } = await rig()
       await hub.mgr.updateSettings('h1', { permissionPreset: 'auto' })
       const r = await unasked(hub, card)
       if (!r.ok) throw new Error(r.error)
@@ -2883,9 +2883,14 @@ describe('start_agent starts a child on a linked machine (#1038)', { timeout: 30
         ok: false,
         error: expect.stringContaining('now has more permissions (auto) than this session (safe), so this session cannot give it work'),
       })
-      // Back under auto, the caller may again
+      // A note is words the child reads too (#2493)
+      expect(await sendNote(hub.mgr, 'h1', r.sessionId, 'fyi')).toMatchObject({ ok: false, error: expect.stringContaining('now has more permissions (auto)') })
+      // Back under auto, the caller may again; its note is written quiet on the machine, as a message that needs no reply
       await hub.mgr.updateSettings('h1', { permissionPreset: 'auto' })
       expect(await agent(r.sessionId, 'send', 'now do more')).toMatchObject({ ok: true })
+      const note = await sendNote(hub.mgr, 'h1', r.sessionId, 'fyi: rebase before review')
+      if (!note?.ok) throw new Error(JSON.stringify(note))
+      expect(remoteStore.mailbox.message(note.messageId)).toMatchObject({ kind: 'message', needsReply: false, facts: { quiet: true } })
     })
 
     // #1273 review (RVIA 2): the preset was decided from the caller as it was before the machine was asked
