@@ -329,8 +329,8 @@ export type LinkedSessions = {
    * for the machine's assistant, and when the hub holds no row of it, which the reader treats as not readable.
    */
   readerFacts(sessionId: string): { trusted: boolean } | null
-  /** A machine's session as the hub last knew it (the headers mirror): its name and its project's */
-  describe(sessionId: string): { name: string; project: string } | null
+  /** A machine's session as the hub last knew it (the headers mirror): its name, its project's as shown (`<name> on <machine>`), and its project's own (`projectName`) */
+  describe(sessionId: string): { name: string; project: string; projectName: string } | null
   /**
    * The last thing a machine's session said (`host.lastAnswer` there, #1186): its head up to `maxChars` (an ellipsis
    * past it), its length in all, and the seq its first message has there (`around` for read_session), or null when
@@ -451,6 +451,8 @@ export type ChildRunResult =
       via?: 'fork'
       /** For a fork: the session it was copied from */
       forkedFrom?: string
+      /** A session the caller gave ask_project work, as ask_project names its project (#2485): ask_project with no task waits on it, and agent_session neither waits nor stops it */
+      askedOf?: string
     } & (
       /**
        * `cleanUp` (#690): the caller's own child, its work over, so the answer names its delete. Not for a session it

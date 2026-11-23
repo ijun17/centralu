@@ -289,7 +289,7 @@ export class AskProjectFlow {
     const of = (g: { taskId: string; sessionId: string }, sessionName: string): AskAcross => ({ taskId: g.taskId, sessionId: g.sessionId, child: g.sessionId, sessionName, project })
     if (target.away) {
       // A task already given there: the machine is down, and what became of it is the answer, not a refusal to ask
-      const there = given.filter((g) => reader.describe(g.sessionId)?.project === target.name && (!wanted || g.sessionId === wanted))
+      const there = given.filter((g) => reader.describe(g.sessionId)?.projectName === target.name && (!wanted || g.sessionId === wanted))
       const [only] = there
       if (!opts.task && only && there.length === 1) return this.awaitAsk(callerId, of(only, reader.describe(only.sessionId)?.name ?? only.sessionId), reader, signal)
       return { ok: false, error: awayRefusal(target.machine, target.away, `${label} cannot be asked`) }
@@ -449,17 +449,18 @@ export class AskProjectFlow {
   }
 
   /**
-   * A cancelled call to a machine's session stops its task's turn there, as a cancelled ask here does (#2485): the task is withdrawn (the withdrawal crosses
-   * by the receipts) and the machine stops the session's turn only when that task alone started it (`host.stopTask`): a turn of the person's, or one the
-   * task joined or has not started, runs on. A host that is quitting does neither: its calls end with it, and the work there goes on
+   * A cancelled call to a machine's session stops its task's turn there, as a cancelled ask here does (#2485): the machine withdraws the task and stops
+   * the session's turn only when that task alone started it (`host.stopTask`); a turn of the person's, or one the task joined or has not started, runs
+   * on. Withdrawn here too once the machine answered; a machine that cannot be asked (an older build, a link that is down) keeps the task, whose
+   * report comes as mail. A host that is quitting asks nothing: its calls end with it, and the work there goes on
    */
   private async cancelAsk(callerId: string, ask: AskAcross, reader: LinkedSessions): Promise<AskProjectResult> {
     const where = `${ask.project}'s session "${ask.sessionName}"`
     const tasks = this.host.linkedTasks
     if (this.host.closing || !reader.stopTask || !tasks) return { ok: false, error: `The call was cancelled; ${where} was left running.` }
-    tasks.withdraw(callerId, ask.sessionId, ask.taskId)
     const r = await reader.stopTask(ask.sessionId, callerId, ask.taskId)
-    if (!r.ok) return { ok: false, error: `The call was cancelled and its task withdrawn, but ${where} could not be stopped: ${r.error}.` }
+    if (!r.ok) return { ok: false, error: `The call was cancelled, but ${where} could not be asked to stop (${r.error}), so it was left running; its answer comes as mail.` }
+    tasks.withdraw(callerId, ask.sessionId, ask.taskId)
     if (r.stopped) return { ok: false, error: `The call was cancelled, so ${where} was stopped.` }
     return { ok: false, error: `The call was cancelled and its task withdrawn. ${where} was not stopped: no turn there is that task's alone (not started yet, or the person or other work had a part in it).` }
   }

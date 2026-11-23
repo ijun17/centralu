@@ -203,8 +203,13 @@ export function agentRunText(r: ChildRunResult): ToolOutput {
         `agent_session(sessionId="${r.sessionId}", action="wait") waits for the answer, action="stop" withdraws the request.`,
     }
   }
-  const who = `the ${r.tool} session "${r.sessionName}" [${r.sessionId}]` + (r.via === 'fork' ? `, a fork of [${r.forkedFrom}]` : '')
+  const who = `the ${r.tool ? `${r.tool} ` : ''}session "${r.sessionName}" [${r.sessionId}]` + (r.via === 'fork' ? `, a fork of [${r.forkedFrom}]` : '')
   return agentStateText(r, who)
+}
+
+/** How a session the caller gave ask_project work is waited on (`askedOf`): ask_project again with no task, its project named when known */
+function askedWait(project: string, sessionId: string): string {
+  return `To wait for its answer, call ask_project with ${project ? `project "${project}"` : 'its project'}, session "${sessionId}" and no task.`
 }
 
 function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { state: 'pending' }>, who: string): ToolOutput {
@@ -214,7 +219,7 @@ function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { stat
         text:
           `${who} is working on it${r.notice ? ` — ${r.notice}` : ''}.${progressText(r.progress)} ` +
           (r.reported ? `You will be told when it ends. ${NO_POLLING} ` : '') +
-          `agent_session(sessionId="${r.sessionId}", action="wait") waits for its answer, action="stop" stops it.`,
+          (r.askedOf !== undefined ? askedWait(r.askedOf, r.sessionId) : `agent_session(sessionId="${r.sessionId}", action="wait") waits for its answer, action="stop" stops it.`),
       }
     case 'asking':
       return {
@@ -225,7 +230,7 @@ function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { stat
     case 'mailed':
       return { text: `${mailedText(r, 'mail')} agent_session(sessionId="${r.sessionId}", action="stop") withdraws it until it is delivered.` }
     case 'answered':
-      return { text: `Answered card ${r.card} in ${who}; it goes on. agent_session(sessionId="${r.sessionId}", action="wait") waits for its answer.` }
+      return { text: `Answered card ${r.card} in ${who}; it goes on. ${r.askedOf !== undefined ? askedWait(r.askedOf, r.sessionId) : `agent_session(sessionId="${r.sessionId}", action="wait") waits for its answer.`}` }
     case 'stopped':
       // A request withdrawn before the person answered has no session to name (#673)
       if (!r.sessionName) return { text: `Withdrew request ${r.sessionId}: its card is gone and no session was started.` }

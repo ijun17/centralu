@@ -1,6 +1,7 @@
 import type { OrchestratedSession, RecallHit } from '../adapters/contract.js'
 import { oneLineText, isAssistantKind, isAssistantOrCoordinator } from '@cc/protocol'
 import { rpcError } from '../rpc-error.js'
+import { inTurn } from '../idle.js'
 import { hubAskDepthKey } from './agent-depth.js'
 import { budgetOf } from './session-lines.js'
 import type { DelegationHost } from './delegation-flow.js'
@@ -36,7 +37,7 @@ export type LinkedHostHost = Pick<DelegationHost, 'meta' | 'store' | 'children' 
     readonly linkedReports: LinkedReports
     /** A turn the provider ended for want of capacity, kept waiting to be continued (turn-continue.ts) */
     readonly turnContinue: Pick<TurnContinue, 'stands'>
-    readonly mail: Pick<MailSessionsView, 'taskTurnAlone'>
+    readonly mail: Pick<MailSessionsView, 'cancelGiven'>
     readonly inputs: Pick<TurnInputs, 'interrupt'>
   }
 
@@ -95,13 +96,15 @@ export class LinkedHost {
   }
 
   /**
-   * A hub's session's call that gave this task was cancelled (`host.stopTask`, #2485): the session's running turn is stopped when that task alone
-   * started it and nothing else had a part in it (`StopNotices.alone`), as a cancelled ask_project stops its turn here. A turn of the person's, or
-   * one the task only joined, runs on. The hub withdraws the task itself; whether the turn was stopped
+   * A hub's session's call that gave this task was cancelled (`host.stopTask`, #2485): the task is withdrawn here, and the session's turn, while it
+   * runs, is stopped when that task alone started it and nothing else had a part in it (`StopNotices.alone`), as a cancelled ask_project stops its
+   * turn here. A turn of the person's, or one the task only joined, runs on. Whether the turn was stopped
    */
   hubStopTask(sessionId: string, giver: string, taskId: string): { stopped: boolean } {
     this.directedFromHub(sessionId)
-    if (!this.host.mail.taskTurnAlone(sessionId, giver, taskId)) return { stopped: false }
+    const running = inTurn(this.host.meta.get(sessionId)?.state ?? 'idle')
+    const alone = this.host.mail.cancelGiven(sessionId, giver, taskId)
+    if (!running || !alone) return { stopped: false }
     this.host.inputs.interrupt(sessionId)
     return { stopped: true }
   }

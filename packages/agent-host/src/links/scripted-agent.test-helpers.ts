@@ -162,8 +162,10 @@ class ScriptedHandle implements SessionHandle {
     return true
   }
 
+  /** As the real adapters end a stopped turn (`MidTurnLedger`, codex's `normalize`): a stop, not a turn that completed */
   interrupt(): void {
-    this.emit({ type: 'turn_complete', sessionId: this.sessionId })
+    this.open = false
+    this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'waiting_input', reason: 'interrupted' })
   }
 
   async listCommands() {

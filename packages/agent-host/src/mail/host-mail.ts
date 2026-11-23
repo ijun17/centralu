@@ -447,8 +447,13 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
       turn: (id) => store.mailbox.nextTurnSeq(id) - 1,
       ended: (id) => withdrawEndedCards(store.mailbox, addressOf(id), cardStands),
     },
-    // A giver on another computer is named by its address
-    taskTurnAlone: (id, giver, taskId) => service.stops.alone(addressOf(id), parseAddress(giver) ? giver : addressOf(giver), { gaveIt: 'work', starter: taskId }),
+    // A giver on another computer is named by its address. Read before the withdrawal, which the turn's own record does not depend on
+    cancelGiven: (id, giver, taskId) => {
+      const from = parseAddress(giver) ? giver : addressOf(giver)
+      const alone = service.stops.alone(addressOf(id), from, { gaveIt: 'work', starter: taskId })
+      if (store.mailbox.message(taskId)?.sender === from) service.done(from, taskId)
+      return alone
+    },
     turnInputs: (id, turn) => delivery.turnInputs(addressOf(id), turn),
     turnStarted: turnRecorder(service, store.mailbox, mailTurns),
     refusesDelegation: (callerId, target, call) => refusesDelegation(service, reach, callerId, target, call),

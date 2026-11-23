@@ -69,7 +69,7 @@ function linkMachine(): void {
       overLink.push('origin')
       return { ok: false as const, error: 'not asked further here' }
     },
-    describe: () => ({ name: 'Worker', project: 'api on Box' }),
+    describe: () => ({ name: 'Worker', project: 'api on Box', projectName: 'api' }),
     machineLinked: () => true,
     backgroundTasks: async () => [],
   } as unknown as LinkedSessions)

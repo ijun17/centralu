@@ -562,7 +562,8 @@ export function linkedSessions(
       const s = (m.lastKnown('sessions') ?? []).find((x) => isObj(x) && x.id === at.id)
       if (!isObj(s)) return null
       const p = (m.lastKnown('projects') ?? []).find((x) => isObj(x) && x.id === s.projectId)
-      return { name: oneLine(s.name), project: `${isObj(p) ? oneLine(p.name) : '(none)'} on ${m.name}` }
+      const projectName = isObj(p) ? oneLine(p.name) : '(none)'
+      return { name: oneLine(s.name), project: `${projectName} on ${m.name}`, projectName }
     },
 
     lastWords(sessionId, maxChars, opts) {

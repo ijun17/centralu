@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { HostMailParams, HubAskResult } from '@cc/protocol'
 import { inTurn } from '../idle.js'
+import { linkedSessions } from './linked-sessions.js'
+import { agentRunText } from '../sessions/tool-answers.js'
 import { runCleanups } from './links-world.test-helpers.js'
 import { hubHost, machineHost } from './reverse-link.test-helpers.js'
 import { sessionAddress } from '../mail/address.js'
@@ -91,7 +93,7 @@ describe("a hub session's ask_project of a machine's project (#1948 step 6)", { 
   })
 
   // #2485: a cancelled call stops the turn its task alone started there, as one here does, and leaves the person's turn alone
-  it('cancelled while the turn its task started runs there: the task is withdrawn and that turn stopped', async () => {
+  it('cancelled while the turn its task started runs there: the task is withdrawn there and that turn stopped, with no stop notice after the answer', async () => {
     const { machine, hub, at, project, taskTo } = await asksRig()
     const ctl = new AbortController()
     const call = hub.mgr.askProject('h1', { project, task: 'a long job' }, ctl.signal)
@@ -101,22 +103,41 @@ describe("a hub session's ask_project of a machine's project (#1948 step 6)", { 
     ctl.abort()
     expect(await call).toEqual({ ok: false, error: `The call was cancelled, so m1/${project}'s session "${w1().name}" was stopped.` })
     await eventually(() => !inTurn(w1().state))
+    const task = taskTo(machine, at.machine('w1'), at.hub('h1'))!
+    expect(machine.store.mailbox.recipient(task.id, at.machine('w1'))?.settled).toBe('withdrawn')
     const there = sessionAddress(hub.id, 'm1.w1')
-    expect(hub.store.mailbox.recipient(taskTo(hub, there, at.hub('h1'))!.id, there)?.settled).toBe('withdrawn')
+    expect(hub.store.mailbox.recipient(task.id, there)?.settled).toBe('withdrawn')
+    // The call said it: the stop, which the tool reports as the real ones do, writes the giver nothing more
+    expect(machine.store.mailbox.feedOf(at.hub('h1'), { limit: 20 }).filter((m) => m.kind !== 'task')).toEqual([])
   })
 
-  it("cancelled while its task waits there behind the person's turn: the task is withdrawn, and the person's turn runs on", async () => {
-    const { machine, hub, at, project, busy, taskTo } = await asksRig()
+  it("cancelled while its task waits there behind the person's turn: only that task is withdrawn, and the person's turn runs on", async () => {
+    const { machine, hub, at, project, busy } = await asksRig()
     await busy(machine.mgr, 'w1')
+    const there = sessionAddress(hub.id, 'm1.w1')
+    // Other work of the same caller's to the same session, which the cancel leaves
+    const other = await hub.mail!.across.sendTask('h1', there, 'other work', { origin: 'agent_session' })
+    if (!other.ok) throw new Error(other.text)
     const ctl = new AbortController()
     const call = hub.mgr.askProject('h1', { project, task: 'a long job' }, ctl.signal)
     await hub.answer('allow')
-    await eventually(() => !!taskTo(machine, at.machine('w1'), at.hub('h1')))
+    await eventually(() => machine.store.mailbox.feedOf(at.machine('w1'), { limit: 10 }).filter((m) => m.kind === 'task').length === 2)
     ctl.abort()
     expect(await call).toEqual({ ok: false, error: expect.stringContaining("was not stopped: no turn there is that task's alone") })
     expect(machine.mgr.listSessions().find((s) => s.id === 'w1')?.state).toBe('waiting_approval')
-    const there = sessionAddress(hub.id, 'm1.w1')
-    expect(hub.store.mailbox.recipient(taskTo(hub, there, at.hub('h1'))!.id, there)?.settled).toBe('withdrawn')
+    const asked = hub.store.mailbox.feedOf(there, { limit: 10 }).find((m) => m.kind === 'task' && m.origin === 'ask_project')!
+    expect(hub.store.mailbox.recipient(asked.id, there)?.settled).toBe('withdrawn')
+    expect(hub.store.mailbox.recipient(other.messageId, there)?.settled).toBeNull()
+  })
+
+  it('a stop asked for after the turn its task started has ended stops nothing', async () => {
+    const { machine, hub, at, project, taskTo } = await asksRig()
+    const call = hub.mgr.askProject('h1', { project, task: 'say hello' })
+    await hub.answer('allow')
+    expect(await call).toMatchObject({ ok: true, state: 'done' })
+    const task = taskTo(machine, at.machine('w1'), at.hub('h1'))!
+    const reader = linkedSessions(() => hub.links.all(), (method, params) => hub.router.handle(method, params))
+    expect(await reader.stopTask!('m1.w1', 'h1', task.id)).toEqual({ ok: true, stopped: false })
   })
 
   it('a question its task raised there ends the wait as asking, and the caller answers it with agent_session as that machine lets it', async () => {
@@ -126,9 +147,19 @@ describe("a hub session's ask_project of a machine's project (#1948 step 6)", { 
     const r = await call
     expect(r).toMatchObject({ ok: true, state: 'asking', sessionId: 'm1.w1', cards: [expect.objectContaining({ kind: 'question', answerable: true })] })
     const card = r.ok && r.state === 'asking' ? r.cards[0]!.card : ''
+    // Asked again, the standing card is read before any wait: a cancelled one stops nothing
+    expect(await hub.mgr.askProject('h1', { project, session: 'm1.w1' }, AbortSignal.abort())).toMatchObject({ ok: true, state: 'asking', cards: [expect.objectContaining({ card })] })
     expect(await hub.mgr.agentSession('h1', { sessionId: 'm1.w1', action: 'status' })).toMatchObject({ ok: true, state: 'asking', cards: [expect.objectContaining({ card })] })
-    expect(await hub.mgr.agentSession('h1', { sessionId: 'm1.w1', action: 'stop' })).toMatchObject({ ok: false, error: expect.stringContaining("another project's session") })
-    expect(await hub.mgr.agentSession('h1', { sessionId: 'm1.w1', action: 'answer', card, text: 'Yes' })).toMatchObject({ ok: true, state: 'answered', card })
+    for (const action of ['stop', 'wait'] as const) {
+      expect(await hub.mgr.agentSession('h1', { sessionId: 'm1.w1', action })).toMatchObject({ ok: false, error: expect.stringContaining(`call ask_project with project "m1/${project}", session "m1.w1" and no task`) })
+    }
+    const answered = await hub.mgr.agentSession('h1', { sessionId: 'm1.w1', action: 'answer', card, text: 'Yes' })
+    expect(answered).toMatchObject({ ok: true, state: 'answered', card })
+    // Its words name ask_project's wait, not agent_session's, and no tool it does not know
+    const words = agentRunText(answered).text
+    expect(words).toContain(`To wait for its answer, call ask_project with project "m1/${project}", session "m1.w1" and no task.`)
+    expect(words).not.toContain('action="wait"')
+    expect(words).not.toContain('the  session')
     await eventually(() => machine.mgr.listSessions().find((s) => s.id === 'w1')!.pendingQuestions.length === 0)
     // Another session of the hub gave it nothing: none of it is its to read
     expect(await hub.mgr.agentSession('h2', { sessionId: 'm1.w1', action: 'status' })).toMatchObject({ ok: false })

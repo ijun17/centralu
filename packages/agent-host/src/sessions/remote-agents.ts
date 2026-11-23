@@ -454,13 +454,19 @@ export class RemoteAgents {
     const reader = this.host.linkedReader
     const machine = reader?.machineOf(sessionId)
     if (!reader || !machine) return { ok: false, error: `${sessionId} is on a linked machine, and no machine is linked to this computer now.` }
-    const there: CardHolder = { sessionId, callerId, name: reader.describe(sessionId)?.name ?? sessionId, machine, tool: '' }
-    if (opts.action === 'answer') return this.answer(there, opts.card, opts.text ?? '', reader)
-    if (opts.action !== 'status' && opts.action !== 'wait') {
-      return { ok: false, error: `"${there.name}" is another project's session: you can read and answer the cards of the work you gave it (status, answer), and wait on it with ask_project.` }
+    const seen = reader.describe(sessionId)
+    const there: CardHolder = { sessionId, callerId, name: seen?.name ?? sessionId, machine, tool: '' }
+    // ask_project's name for its project, `<machine id>/<name>`, which its wait takes
+    const askedOf = seen ? `${sessionId.slice(0, sessionId.indexOf('.'))}/${seen.projectName}` : ''
+    if (opts.action === 'answer') {
+      const r = await this.answer(there, opts.card, opts.text ?? '', reader)
+      return r.ok ? { ...r, askedOf } : r
+    }
+    if (opts.action !== 'status') {
+      return { ok: false, error: `"${there.name}" is another project's session: you can read and answer the cards of the work you gave it (status, answer). To wait on it, call ask_project with ${askedOf ? `project "${askedOf}"` : 'its project'}, session "${sessionId}" and no task.` }
     }
     const cards = await this.cardsOf(there, reader)
-    return cards.length ? this.asking(there, cards) : this.working(there, false)
+    return cards.length ? this.asking(there, cards) : { ...this.working(there, false), askedOf }
   }
 
   private async act(callerId: string, rec: RemoteAgent, opts: AgentSessionOpts | { sessionId: string; action: 'send'; text: string }, signal?: AbortSignal): Promise<ChildRunResult> {

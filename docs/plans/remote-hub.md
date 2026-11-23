@@ -1474,10 +1474,12 @@ that existed on a linked machine and listed only this computer's.
   mailbox.md §10.6.4) ends the call's wait as `asking`, as one here does: read before the wait, and again when the
   machine's relayed `question_request` or `approval_request` for that session arrives or the bound passes. The caller
   reads and answers it with `agent_session` (`status`, `answer`) while its task there is open, as that machine's rule lets
-  it; an approval stays the person's there. A cancelled call withdraws its task and asks the machine to stop the
-  session's turn (`host.stopTask`), which it does only when that task alone started the turn (`StopNotices.alone`): a
-  turn of the person's, one the task joined, or none yet runs on, and the call says which. A hub that is quitting
-  stops nothing, and a machine from before `host.stopTask` is named as needing an update, its turn left running.
+  it; an approval stays the person's there, and the caller waits again with `ask_project` and no task. A cancelled call
+  asks the machine to stop (`host.stopTask`): it withdraws the task, so the stop tells the caller nothing more, and
+  stops the session's turn only while it runs and only when that task alone started it (`StopNotices.alone`); a turn
+  of the person's, one the task joined, or none yet runs on, and the call says which. The hub withdraws its row once
+  the machine answered. A machine it cannot ask (one from before `host.stopTask`, a link that is down) keeps the task,
+  whose report comes as mail, and a hub that is quitting asks nothing.
 - **Not built**: `ifBusy` (a busy session there gets the task as mail, held until it can take it, #1948 step 6).
 - **`find_apps` is unchanged.** It lists apps another project shares, and attaching one needs the app process and the
   session on one machine (§6, Attaching a hub app to a remote session). §13 (#1938) changes this: it reaches across,
