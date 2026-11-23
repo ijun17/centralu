@@ -17,9 +17,10 @@ let adapter: FakeAdapter
 let mgr: SessionManager
 let rpc: ReturnType<typeof createRpcHandler>
 let events: NormalizedEvent[]
+let store: ReturnType<typeof managerWorld>['store']
 
 beforeEach(() => {
-  ;({ adapter, mgr, rpc, events } = managerWorld())
+  ;({ adapter, mgr, rpc, events, store } = managerWorld())
 })
 
 async function session() {
@@ -79,7 +80,7 @@ describe('nothing else is stamped', () => {
     await rpc('agents.send', { sessionId: s.id, text: handoffPrompt() })
     expect(adapter.last!.sent).toEqual([handoffPrompt()])
     expect(adapter.last!.origins).toEqual([undefined])
-    expect(mgr.store.messages.loadMessages(s.id, 10).find((r) => r.role === 'user')?.payload).toMatchObject({ text: handoffPrompt(), byPerson: true })
+    expect(store.messages.loadMessages(s.id, 10).find((r) => r.role === 'user')?.payload).toMatchObject({ text: handoffPrompt(), byPerson: true })
   })
 
   it('a send with no flag: a builder request or a Centralu frame the host sends on the person\'s click', async () => {
