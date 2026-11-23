@@ -34,6 +34,7 @@
     "drift:claude": "node scripts/claude-sdk-drift.mjs",
     "drift:surface": "tsx scripts/surface-drift.mts",
     "drift:cursor-usage": "tsx scripts/cursor-usage-drift.mts",
+    "drift:acp-schema": "tsx scripts/acp-schema-drift.mts",
     "smoke:codex": "node packages/agent-host/scripts/smoke-codex.mjs",
     "smoke:cursor": "node packages/agent-host/scripts/smoke-cursor.mjs",
     "smoke:opencode": "node packages/agent-host/scripts/smoke-opencode.mjs",
