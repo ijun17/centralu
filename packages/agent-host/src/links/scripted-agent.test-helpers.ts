@@ -91,6 +91,13 @@ class ScriptedHandle implements SessionHandle {
       this.emit({ type: 'approval_request', sessionId: this.sessionId, requestId: id, detail: { kind: 'command', command: 'echo linked', cwd: '.' } })
       return
     }
+    // A usage limit, in Claude's order: the rejected limit, then the result's error at rest; the turn waits to be continued at the reset
+    if (/usage limit/i.test(said)) {
+      this.open = false
+      this.emit({ type: 'limit_reached', sessionId: this.sessionId, resumeAt: new Date(Date.now() + 60 * 60_000).toISOString(), windowMins: 300 })
+      this.emit({ type: 'error', sessionId: this.sessionId, error: { code: 'internal', message: "You've hit your session limit · resets 1:20am", retryable: true } })
+      return
+    }
     // A long job, or one continued after its host was stopped: the turn runs until it is ended (`finish`) or its process goes (#1618)
     if (/\blong job\b/i.test(said) || said.includes('Continue where you stopped')) {
       this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text: 'working on it…' })

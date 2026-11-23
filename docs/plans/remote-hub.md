@@ -1476,7 +1476,8 @@ that existed on a linked machine and listed only this computer's.
   reads and answers it with `agent_session` (`status`, `answer`) while its task there is open, as that machine's rule lets
   it; an approval stays the person's there, and the caller waits again with `ask_project` and no task. A cancelled call
   asks the machine to stop (`host.stopTask`): it withdraws the task, so the stop tells the caller nothing more, and
-  stops the session's turn only while it runs and only when that task alone started it (`StopNotices.alone`); a turn
+  stops the session's turn only while it runs or waits to be continued (a usage limit's wait, a retry, an update's cut
+  turn) and only when that task alone started it (`StopNotices.alone`); a turn
   of the person's, one the task joined, or none yet runs on, and the call says which. The hub withdraws its row once
   the machine answered. A machine it cannot ask (one from before `host.stopTask`, a link that is down) keeps the task,
   whose report comes as mail, and a hub that is quitting asks nothing.

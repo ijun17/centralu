@@ -36,7 +36,7 @@ export type LinkedHostHost = Pick<DelegationHost, 'meta' | 'store' | 'children' 
     /** Each linked machine's session's own background work, as the hub last heard it (linked-reports.ts) */
     readonly linkedReports: LinkedReports
     /** A turn the provider ended for want of capacity, kept waiting to be continued (turn-continue.ts) */
-    readonly turnContinue: Pick<TurnContinue, 'stands'>
+    readonly turnContinue: Pick<TurnContinue, 'stands' | 'waitsToContinue'>
     readonly mail: Pick<MailSessionsView, 'cancelGiven'>
     readonly inputs: Pick<TurnInputs, 'interrupt'>
   }
@@ -97,12 +97,12 @@ export class LinkedHost {
 
   /**
    * A hub's session's call that gave this task was cancelled (`host.stopTask`, #2485): the task is withdrawn here, and the session's turn, while it
-   * runs, is stopped when that task alone started it and nothing else had a part in it (`StopNotices.alone`), as a cancelled ask_project stops its
-   * turn here. A turn of the person's, or one the task only joined, runs on. Whether the turn was stopped
+   * runs or waits to be continued, is stopped when that task alone started it and nothing else had a part in it (`StopNotices.alone`), as a
+   * cancelled ask_project stops its turn here. A turn of the person's, or one the task only joined, runs on. Whether the turn was stopped
    */
   hubStopTask(sessionId: string, giver: string, taskId: string): { stopped: boolean } {
     this.directedFromHub(sessionId)
-    const running = inTurn(this.host.meta.get(sessionId)?.state ?? 'idle')
+    const running = inTurn(this.host.meta.get(sessionId)?.state ?? 'idle') || this.host.turnContinue.waitsToContinue(sessionId)
     const alone = this.host.mail.cancelGiven(sessionId, giver, taskId)
     if (!running || !alone) return { stopped: false }
     this.host.inputs.interrupt(sessionId)

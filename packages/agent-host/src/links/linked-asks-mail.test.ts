@@ -100,6 +100,8 @@ describe("a hub session's ask_project of a machine's project (#1948 step 6)", { 
     await hub.answer('allow')
     const w1 = () => machine.mgr.listSessions().find((s) => s.id === 'w1')!
     await eventually(() => inTurn(w1().state))
+    // While it works, the caller reads it with agent_session and is told to wait with ask_project
+    expect(agentRunText(await hub.mgr.agentSession('h1', { sessionId: 'm1.w1', action: 'status' })).text).toContain(`To wait for its answer, call ask_project with project "m1/${project}", session "m1.w1" and no task.`)
     ctl.abort()
     expect(await call).toEqual({ ok: false, error: `The call was cancelled, so m1/${project}'s session "${w1().name}" was stopped.` })
     await eventually(() => !inTurn(w1().state))
@@ -130,6 +132,38 @@ describe("a hub session's ask_project of a machine's project (#1948 step 6)", { 
     expect(hub.store.mailbox.recipient(other.messageId, there)?.settled).toBeNull()
   })
 
+  it('cancelled while the turn its task started waits there to be continued after a usage limit: that wait ends, and nothing continues it', async () => {
+    const { machine, hub, at, project, taskTo } = await asksRig()
+    const ctl = new AbortController()
+    const call = hub.mgr.askProject('h1', { project, task: 'hit the usage limit' }, ctl.signal)
+    await hub.answer('allow')
+    const w1 = () => machine.mgr.listSessions().find((s) => s.id === 'w1')!
+    await eventually(() => w1().interruption?.autoContinue !== undefined)
+    expect(inTurn(w1().state)).toBe(false)
+    ctl.abort()
+    expect(await call).toEqual({ ok: false, error: `The call was cancelled, so m1/${project}'s session "${w1().name}" was stopped.` })
+    expect(w1().interruption?.autoContinue).toBeUndefined()
+    expect(machine.store.mailbox.recipient(taskTo(machine, at.machine('w1'), at.hub('h1'))!.id, at.machine('w1'))?.settled).toBe('withdrawn')
+  })
+
+  it('asked again with no task while its machine is down, waits on the task given there; a cancel that cannot reach the machine keeps that task', async () => {
+    const { machine, hub, project } = await asksRig()
+    const first = new AbortController()
+    const call = hub.mgr.askProject('h1', { project, task: 'a long job' }, first.signal)
+    await hub.answer('allow')
+    await eventually(() => inTurn(machine.mgr.listSessions().find((s) => s.id === 'w1')!.state))
+    await machine.server.close()
+    await eventually(() => hub.machine().status !== 'connected')
+    const again = await hub.mgr.askProject('h1', { project }, AbortSignal.abort())
+    expect(again).toEqual({ ok: false, error: expect.stringContaining('could not be asked to stop') })
+    first.abort()
+    await call
+    const there = sessionAddress(hub.id, 'm1.w1')
+    const asked = hub.store.mailbox.feedOf(there, { limit: 10 }).find((m) => m.kind === 'task' && m.origin === 'ask_project')!
+    // Its report comes as mail once the machine is back
+    expect(hub.store.mailbox.recipient(asked.id, there)?.settled).toBeNull()
+  })
+
   it('a stop asked for after the turn its task started has ended stops nothing', async () => {
     const { machine, hub, at, project, taskTo } = await asksRig()
     const call = hub.mgr.askProject('h1', { project, task: 'say hello' })
@@ -138,6 +172,8 @@ describe("a hub session's ask_project of a machine's project (#1948 step 6)", { 
     const task = taskTo(machine, at.machine('w1'), at.hub('h1'))!
     const reader = linkedSessions(() => hub.links.all(), (method, params) => hub.router.handle(method, params))
     expect(await reader.stopTask!('m1.w1', 'h1', task.id)).toEqual({ ok: true, stopped: false })
+    // A task that never reached the machine: nothing to withdraw there, and nothing stopped
+    expect(await reader.stopTask!('m1.w1', 'h1', 'hub-0000000b.m_01JX000000000000000000000T')).toEqual({ ok: true, stopped: false })
   })
 
   it('a question its task raised there ends the wait as asking, and the caller answers it with agent_session as that machine lets it', async () => {
