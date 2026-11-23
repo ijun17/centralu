@@ -108,6 +108,10 @@ describe('a task is answered by its reply or by the last response at rest (§10.
     // Its words point at read_session: a reader read_session refuses, as one a report was handed over to may be, is told so (#2474)
     const shown = async () => (await m.tool.call(parent, { action: 'read', thread: report!.id })).text
     expect(await shown()).not.toContain('does not read')
+    // A reader that may read the session is shown no last response the report did not keep
+    const own = await shown()
+    expect(own).toContain('It wrote no response')
+    expect(own).not.toContain('Its last response, quoted below')
     vi.spyOn(m.service, 'readsSession').mockReturnValue(null)
     expect(await shown()).toContain(`read_session does not read ${child} for you: you may not read it.`)
     expect(await shown()).not.toContain('Its last response is not shown')

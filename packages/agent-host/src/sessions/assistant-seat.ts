@@ -165,7 +165,7 @@ export function centraluToolsFor(
   /** An Assistant's row is never read, even one with a project (a project assistant restored from before #1941) */
   const readable = (s: SessionInfo) => !isAssistantKind(s.kind) && (inScope(s) || wide())
   /**
-   * An archived session of its own project that it or one of its handoff lineage started (#2474), by the host's own record of who started it,
+   * An archived session of its own project that it or one of its handoff lineage started (#2474), by the host's own `asked_by` record,
    * never by anything the caller says: a successor reads what its predecessor's moved reports point at. The archive is read no further
    */
   const archivedChild = (sessionId: string): boolean => {
