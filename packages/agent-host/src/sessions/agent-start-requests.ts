@@ -15,9 +15,6 @@ import type { MemoryShortfall } from './memory-gate.js'
 import { FILL, namedCall } from './tool-seats.js'
 import { ASK_THE_PERSON, ASSISTANT_PLACE, agentStartPending, agentStartPersonText, assistantPlace, type StartProgress } from './start-agent-terms.js'
 
-/** The sender Centralu's own messages to a session are recorded under (#673): like `HUB_SENDER`, no session's id */
-const HOST_SENDER = '_centralu'
-
 /** Reads a stored request back; a row this build cannot read is dropped rather than raised half-formed */
 function readAgentStartRequest(raw: unknown): AgentStartRequest | null {
   const r = raw as Partial<AgentStartRequest> | null
@@ -84,15 +81,15 @@ export class AgentStartRequests {
     if (rec.detached) void this.tellAgentStartEnded(rec.req, ended.error)
   }
 
-  /** The caller of a request that already answered "pending" hears how it ended (#673), as a message in its session */
+  /** The caller of a request that already answered "pending" hears how it ended (#673), once, from Centralu: in its mail, or in its conversation */
   private async tellAgentStartEnded(req: AgentStartRequest, why: string): Promise<void> {
-    await this.host.tellSession(
+    await this.host.tellFromCentralu(
       req.callerId,
       `[Centralu] Your start_agent request ${req.requestId} did not start a session.\n` +
         `Agent: ${frameField(req.detail.tool)}\n` +
         `Task: ${frameField(req.detail.text)}\n\n` +
         `Reason: ${why.slice(0, 600)}`,
-      { sessionId: HOST_SENDER, name: 'Centralu' },
+      `agent-start-ended:${req.requestId}`,
       false,
     )
   }

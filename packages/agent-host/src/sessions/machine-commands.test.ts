@@ -11,6 +11,7 @@ import { commandRig, expectOnlyAssistantRuns } from './assistant-commands.test-h
 import type { MachineOps } from './machine-flow.js'
 import { CrossAdapter } from './cross-project.test-helpers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
+import { addressOf, wireHostMail } from './host-mail.test-helpers.js'
 
 /**
  * The Assistant's commands for linked machines (#1219): each reaches the hub's links as the Machines screen does,
@@ -398,7 +399,7 @@ describe('install_machine', () => {
   })
 
   // #1399: the call was answered "still under way", so how the update ends reaches its caller some other way
-  it('tells the caller in its conversation when an update it was answered "still under way" for fails later, and when it ends', async () => {
+  it('on a host without mail, tells the caller in its conversation when an update it was answered "still under way" for fails later, and when it ends', async () => {
     ops.running({ working: 2 })
     ops.slowUpdate(200, 40)
     ops.failUpdate('the update of Laptop was cancelled while it waited for the sessions there to finish; nothing was switched')
@@ -412,6 +413,28 @@ describe('install_machine', () => {
     ops.failUpdate(null)
     await answered(orc.id, 'install_machine', { machine: 'laptop', action: 'update' }, 'allow')
     await eventually(() => !!claude.handles.get(orc.id)?.sent.some((t) => t.includes('The update of "Laptop" you started has finished: Centralu 9.9.9-test.1 is there.')))
+  })
+
+  // #2478: on a host with mail, Centralu's word is a notice in the caller's mail, not text put into its conversation (turn-owned-by-no-one.md P10)
+  it('tells a caller that reads mail by a Centralu notice in its mail, once for each update, due to wake it as mail does', async () => {
+    wireHostMail(mgr, store)
+    ops.running({ working: 2 })
+    ops.slowUpdate(200, 40)
+    ops.failUpdate('the update of Laptop was cancelled while it waited for the sessions there to finish; nothing was switched')
+    const orc = await mgr.assistant()
+    const notices = () => store.mailbox.feedOf(addressOf(orc.id), { limit: 50 }).filter((m) => m.sender === 'centralu' && m.kind === 'notice' && m.body.includes('The update of "Laptop" you started'))
+    expect((await answered(orc.id, 'install_machine', { machine: 'laptop', action: 'update' }, 'allow')).r.text).toContain('is still under way')
+    await eventually(() => notices().length === 1)
+    expect(notices()[0]!.body).toContain('did not finish: the update of Laptop was cancelled while it waited')
+    // The same words again are another update's end, told again
+    expect((await answered(orc.id, 'install_machine', { machine: 'laptop', action: 'update' }, 'allow')).r.text).toContain('is still under way')
+    await eventually(() => notices().length === 2)
+    // Due, not held and not quiet: delivery wakes the caller with it as with any mail (`MailDelivery`), and its conversation gets no relayed text
+    const row = store.mailbox.recipient(notices()[0]!.id, addressOf(orc.id))
+    expect(row).toMatchObject({ held: null, deliveredAt: null, settled: null })
+    expect(row!.dueAt).toBeLessThanOrEqual(Date.now() + 60_000)
+    expect(notices()[0]!.facts.quiet).toBeUndefined()
+    expect(store.messages.loadMessages(orc.id, 50).some((m) => JSON.stringify(m.payload).includes('"sourceSessionId":"_centralu"'))).toBe(false)
   })
 
   it('runs nothing when the person denies it', async () => {
