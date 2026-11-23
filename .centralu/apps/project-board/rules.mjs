@@ -270,8 +270,8 @@ export const multiClosingWarnings = (text, what = 'The description') =>
 const PLACEHOLDER = /^(?:n\/?a|-+|tbd|todo|none\??|\?+|\.+|…)$/i
 
 // --- Planned items (#2488) -------------------------------------------------------------------------
-// Not a file's anchor (plans/x.md#13-heading, docs/plans/x.md#13) nor an HTML entity (&#35;)
-const CARRIER = new RegExp(String.raw`(?<![\w&/.-])(?![\w.-]+\.md#)${ISSUE_REF}(?![\w-])|https?://github\.com/[\w.-]+/[\w.-]+/pull/\d+`, 'i')
+// Not a file's anchor (plans/x.md#13, docs/plans/x.md#13-heading) nor an HTML entity (&#35;)
+const CARRIER = new RegExp(String.raw`(?<![\w&/.-])(?![\w./-]+\.md#)${ISSUE_REF}(?![\w-])|https?://github\.com/[\w.-]+/[\w.-]+/pull/\d+`, 'i')
 const DROPPED = /\bdropped:\s*\S/i
 
 /** Where a planned item went, by its own text: ticked, an issue or pull request named, or dropped with a reason; null while it is open. */

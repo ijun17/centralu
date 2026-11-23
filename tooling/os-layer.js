@@ -96,16 +96,16 @@ export const OS_LAYER = [
 ]
 
 /**
- * The modules that may ask which OS this is (`local/platform-checks`): the layer, and two places parked there before
- * the layer had a name. Neither is the layer: what in them touches the OS is on the allowlist, and moves out with
- * them.
+ * The modules that may ask which OS this is (`local/platform-checks`): the layer, and two places that are not the layer.
+ * What in them touches the OS is on the allowlist.
  */
 export const PLATFORM_MODULES = [
   ...OS_LAYER,
-  // TODO: move the launcher's own checks into platform.mjs once remote phase 3's launcher work has
-  // landed (it is changing serve.mjs and centralu.mjs now); listed so that work is not blocked.
+  // The npm launcher's entry: installing and opening the app is a different job on each OS, and its checks name the OS
+  // that job is for
   'packaging/npm/centralu/bin/centralu.mjs',
-  // TODO: remote phase 3 is changing the hub's links; revisit what platform checks they need then.
+  // The links mostly compare a linked machine's platform ('win32-x64'), read from that machine: data, not this host's
+  // OS. This host's own are `tunnel.ts`'s code page and the fake host the links tests write as a program
   'packages/agent-host/src/links/**',
 ]
 
