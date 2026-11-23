@@ -1191,7 +1191,8 @@ export class MessageService {
     if (target?.kind === 'task' && target.sender === recipient) return 'the session you gave this work to'
     if (this.reach.isAssistant(m.sender)) return 'the Assistant'
     const mine = this.reach.projectOf(recipient)
-    return mine !== null && mine === this.reach.projectOf(m.sender) ? 'a session of your project' : 'a session of another project'
+    // A sender gone from here (an heir's archived predecessor) by the project stamped when it wrote; a sender across a link has none
+    return mine !== null && mine === (this.reach.projectOf(m.sender) ?? m.senderProject) ? 'a session of your project' : 'a session of another project'
   }
 
   /** A message as `reader` sees it: whole, or a phantom without its words (§5.5), or a request whose words are for the turn it is in only (§7.6) */

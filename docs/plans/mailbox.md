@@ -1398,6 +1398,9 @@ The relation words, from `relationWord(recipient, message)`:
 | A session of the same project | `a session of your project` |
 | Any other session | `a session of another project` |
 
+A sender no longer here (a successor's archived predecessor, whose mail is in the chain it reads) counts by the project its
+message was stamped with when written, so it reads as `a session of your project` (#2474). A sender across a link has no stamp.
+
 The text after `</centralu-mail>` is in §15 (S1).
 
 ### 8.4 Reading and the chain

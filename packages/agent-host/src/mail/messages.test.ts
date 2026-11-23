@@ -674,6 +674,16 @@ describe('reading (§8.4)', () => {
     expect(w.mail.read(A, { id: down.id }).items.map((i) => [i.phantom ?? null, i.message.body])).toEqual([[null, 'held ancestor'], [null, 'reply']])
   })
 
+  it('names a sender gone from here by the project it wrote from, so an heir reads its predecessor as of its project (#2474)', () => {
+    const w = world()
+    const m1 = w.send(A, { to: [B], text: 'one' }).message
+    const m2 = w.send(B, { replyTo: m1.id, to: [C], text: 'two' }).message
+    expect(w.mail.read(B, { id: m2.id }).items[0]?.relation).toBe('a session of your project')
+    w.sessions.delete('a')
+    expect(w.mail.read(B, { id: m2.id }).items[0]?.relation).toBe('a session of your project')
+    expect(w.mail.read(C, { id: m2.id }).items[1]?.relation).toBe('a session of another project')
+  })
+
   it('read of a long chain returns the last nine ancestors and where to read on with before; a message that is no longer kept is one line', () => {
     const w = world()
     const ids = [w.send(A, { to: [B], text: 'm0', needsReply: false }).message.id]
