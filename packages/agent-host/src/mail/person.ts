@@ -355,7 +355,7 @@ export class MailPerson {
     if (!stored || !now) return
     const at = this.records.recipient(stored.id, t.address)?.deliveredAt
     this.host.tell(sessionId, text).catch(() => {
-      if (at != null) this.service.deliveryFailedLate(t.address, [stored.id], at)
+      if (at != null) this.service.holds.deliveryFailedLate(t.address, [stored.id], at)
     })
   }
 
@@ -364,7 +364,7 @@ export class MailPerson {
    * row held for its project's trust goes when the person trusts the project (§7.4): its Release says so. A dismissed answer leaves its question open (D8)
    */
   held(action: 'release' | 'dismiss', recipient: string, messageIds: string[]): { changed: number } {
-    if (action === 'dismiss') return { changed: this.service.dismissHeld(recipient, messageIds, PERSON_HOLDS) }
+    if (action === 'dismiss') return { changed: this.service.holds.dismissHeld(recipient, messageIds, PERSON_HOLDS) }
     const projects = new Set(messageIds.flatMap((id) => (this.records.recipient(id, recipient)?.held === 'policy' ? (this.records.message(id)?.senderProject ?? []) : [])))
     // Refused whole before anything changes: a Release that let some rows go and refused the rest would leave the window guessing which
     const still = [...projects].find((p) => this.host.untrusted(p))
@@ -374,7 +374,7 @@ export class MailPerson {
     for (const p of projects) this.trusted(p)
     // What the trust let go counts as released here too
     const letGo = policy.filter((id) => this.records.recipient(id, recipient)?.held !== 'policy').length
-    return { changed: letGo + this.service.resendHeld(recipient, messageIds) }
+    return { changed: letGo + this.service.holds.resendHeld(recipient, messageIds) }
   }
 
   /**

@@ -775,73 +775,9 @@ export class MessageService {
     }
   }
 
-  /**
-   * What a host that died left half done (§7.6.5 of the old plan): a delivery whose attempt was written and whose acceptance was not. It is not sent
-   * again on its own, since an inline task the tool took just before the host died would start the same work twice: it is held `uncertain`, for the
-   * person to resend or dismiss. News and Centralu's own words go again, and their next frame says it may be a repeat
-   */
-  reconcileInterrupted(): { recipient: string; resent: number; held: number }[] {
-    const byRecipient = new Map<string, string[]>()
-    for (const r of this.records.interrupted()) byRecipient.set(r.recipient, [...(byRecipient.get(r.recipient) ?? []), r.messageId])
-    return this.run(() => [...byRecipient].map(([recipient, ids]) => ({ recipient, ...this.settleUncertain(recipient, ids) })))
-  }
-
-  /** A wake the tool failed after the wait for it ran out: the rows it delivered at `deliveredAt` are undelivered again, and treated as a restart's */
-  deliveryFailedLate(recipient: string, ids: readonly string[], deliveredAt: number): { resent: number; held: number } {
-    return this.run(() => this.settleUncertain(recipient, this.records.undeliver(recipient, ids, deliveredAt)))
-  }
-
-  /**
-   * The person says send it: mail held `uncertain` or `failed` goes now. Mail held for the project's trust has its own way out, and so does a
-   * row an earlier build held `loop` (`HeldMail.resumeHeld`)
-   */
-  resendHeld(recipient: string, ids: readonly string[]): number {
-    return this.run(() => {
-      const released = this.heldBy(recipient, ids, ['uncertain', 'failed'])
-      const n = this.records.release(recipient, released, this.now())
-      // The delivery hears of it (it goes now), and so does the Inbox (it is no longer held)
-      for (const id of released) {
-        const m = this.records.message(id)
-        if (m) this.changed(m, [recipient, PERSON])
-      }
-      return n
-    })
-  }
-
-  /** The delivery held these rows for the person (the one hold): written, and the Inbox is told */
-  hold(recipient: string, held: readonly { messageId: string; reason: string }[]): void {
-    if (held.length === 0) return
-    this.run(() => {
-      for (const reason of new Set(held.map((h) => h.reason))) this.records.hold(recipient, held.filter((h) => h.reason === reason).map((h) => h.messageId), reason)
-      for (const h of held) {
-        const m = this.records.message(h.messageId)
-        if (m) this.changed(m, [PERSON])
-      }
-    })
-  }
-
   /** Something the Inbox shows changed that is no message (the question about sleeping sessions): the listeners hear an empty change for the person */
   announce(rootId = ''): void {
     this.listeners.emit({ messageId: '', rootId, recipients: [PERSON] })
-  }
-
-  /**
-   * The person says never: held mail is left undelivered, and not held against anyone. `uncertain` and `failed` by default; the person's window may
-   * dismiss any hold it shows, and a dismissed answer leaves the question it answers open (D8)
-   */
-  dismissHeld(recipient: string, ids: readonly string[], why: readonly string[] = ['uncertain', 'failed']): number {
-    return this.run(() => {
-      const dismissed = this.heldBy(recipient, ids, why)
-      for (const id of dismissed) this.records.answerDropped(id)
-      const n = this.records.dismiss(recipient, dismissed)
-      // Never delivered now, so nothing waits on it: its sender's wait for an answer or a report ends
-      for (const id of dismissed) this.records.settle(id, recipient, 'withdrawn', this.now())
-      for (const id of dismissed) {
-        const m = this.records.message(id)
-        if (m) this.changed(m, [PERSON])
-      }
-      return n
-    })
   }
 
   // ── The Assistant's requests (§7.6) ──
@@ -1165,23 +1101,6 @@ export class MessageService {
     const task = m.kind === 'report' && m.replyTo !== null ? this.records.message(m.replyTo) : undefined
     const cause = task?.causeId ? this.records.message(task.causeId) : undefined
     return cause?.kind === 'task' && this.records.recipient(cause.id, recipient)?.settled === null ? cause.id : undefined
-  }
-
-  /** Mail whose delivery may or may not have gone: news and Centralu's own words go again, the rest is held `uncertain` for the person */
-  private settleUncertain(recipient: string, ids: readonly string[]): { resent: number; held: number } {
-    const messages = ids.flatMap((id) => this.records.message(id) ?? [])
-    const again = messages.filter((m) => m.kind === 'notice' || m.sender === CENTRALU).map((m) => m.id)
-    const unsure = messages.filter((m) => !again.includes(m.id)).map((m) => m.id)
-    if (again.length > 0) this.records.markMaybeRepeated(recipient, again, this.now())
-    if (unsure.length > 0) this.records.markUncertain(recipient, unsure)
-    // What goes again is the delivery's to look at; what is held, the Inbox's
-    for (const m of messages) this.changed(m, again.includes(m.id) ? [recipient, PERSON] : [PERSON])
-    return { resent: again.length, held: unsure.length }
-  }
-
-  /** The ids of those of `ids` that `recipient`'s rows hold for one of `why` */
-  private heldBy(recipient: string, ids: readonly string[], why: readonly string[]): string[] {
-    return ids.filter((id) => why.includes(this.records.recipient(id, recipient)?.held ?? ''))
   }
 
   // ── What the reader sees ──

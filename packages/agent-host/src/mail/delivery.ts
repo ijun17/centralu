@@ -426,7 +426,7 @@ export class MailDelivery {
     if (attempts >= this.o.maxAttempts) {
       this.records.transaction(() => {
         this.records.failedTry(recipient, messageIds, error, this.now())
-        this.service.hold(recipient, messageIds.map((messageId) => ({ messageId, reason: 'failed' })))
+        this.service.holds.hold(recipient, messageIds.map((messageId) => ({ messageId, reason: 'failed' })))
       })
       this.tellHeldFailed(recipient, messageIds, error)
       return
@@ -461,14 +461,14 @@ export class MailDelivery {
    * The tool failed a wake after the wait for it ran out and the wake was counted as taken (§7.6.2). Counted as taken, the mail was
    * delivered and read; failed, it must not stay so. It is not sent again by itself, though: a failure told this late (the session was
    * stopped or closed, a turn that took the input among others ended in an error) does not prove the tool never ran it, and sending
-   * work twice is worse than asking. So it is treated as a restart's uncertain delivery (§7.6.5, `MessageService.deliveryFailedLate`): unread
+   * work twice is worse than asking. So it is treated as a restart's uncertain delivery (§7.6.5, `HeldMail.deliveryFailedLate`): unread
    * and undelivered again, held `uncertain` for the person (Inbox: Send again), said in the thread to the sender and in the receiver's
    * conversation, and never sent again by itself, unless it is news that starts no work. Only the receipts that wake delivered:
    * mail delivered again since by another wake, handled, or held is left alone
    */
   private takeBack(recipient: string, messageIds: readonly string[], deliveredAt: number, cause: Error): void {
     console.error(`[mail] ${recipient}: the tool failed a wake after it had been counted as taken (${errorMessage(cause)}); not sent again by itself`)
-    const { held } = this.service.deliveryFailedLate(recipient, messageIds, deliveredAt)
+    const { held } = this.service.holds.deliveryFailedLate(recipient, messageIds, deliveredAt)
     const party = parseAddress(recipient)
     if (held > 0 && party?.kind === 'session') {
       const n = held === 1 ? 'A delivery' : `${held} deliveries`
@@ -479,7 +479,7 @@ export class MailDelivery {
   /** A delivery the previous host left half done is held or sent again (`reconcileInterrupted`), and the receiver is told when it is held */
   private sayWhatWasLeftHalfDone(): void {
     try {
-      for (const { recipient, held } of this.service.reconcileInterrupted()) {
+      for (const { recipient, held } of this.service.holds.reconcileInterrupted()) {
         const party = parseAddress(recipient)
         if (held > 0 && party?.kind === 'session') {
           const n = held === 1 ? 'A delivery' : `${held} deliveries`
@@ -563,7 +563,7 @@ export class MailDelivery {
       let drained = drain(skip)
       // A live session that other mail wakes takes it with the wake. A sleeping one was just resumed for what needs it, and the rest waits (§7.9)
       if (!waiting && state.live && this.cutoff !== null && drained.wake) drained = drain(undefined)
-      this.service.hold(recipient, drained.heldBack)
+      this.service.holds.hold(recipient, drained.heldBack)
       if (drained.messageIds.length === 0) return { drained, go: false as const, waitMs: 0 }
       // Mail that wakes goes at most every 30 s, but the person's words and urgent mail do not wait (§7.9); mail joining a turn wakes nothing. Nor
       // does a delegation tool's task once the last wake's turn is over: held for the turn's end, it goes when that turn ends, as the tool's direct send would (§10.6.2)
