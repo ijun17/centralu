@@ -11,7 +11,7 @@ original's things is in this table; the bullets below say how.
 |---|---|---|
 | Children: sessions it started, forked or asked in another project | **Every** one, finished ones too (#738, #1475), with the report, turn and delegation that are theirs | Another project's session keeps its own `askedBy` row. A child the original starts **after** the handoff stays until the original is deleted (below) |
 | Requests it queued for a busy child; its standing start_agent requests | Both. A standing card closes in the original and stands in the new session | A request only `auto` let through is dropped when the new session is not `auto` (#606). Both are dropped, not moved, when the original is removed later |
-| Mail | The unread mail and watched rows: those from the moved children and Centralu's reports about them when the original stays, all of them when it goes (`MessageService.handOver`, #1574) | The rest of an original that stays, which is still there to read and answer it. A moved child's reply to a message the original sent goes to the original, which still exists |
+| Mail | The unread mail and watched rows: those from the moved children and Centralu's reports about them when the original stays, all of them when it goes (`Handoffs.handOver`, #1574) | The rest of an original that stays, which is still there to read and answer it. A moved child's reply to a message the original sent goes to the original, which still exists |
 | Attached apps (`attach_app`) | **Copied**, before the new session's process starts: the same apps with the same consent, except an "Allow once" answer, which is copied only when the original goes (#1638) | Its own copy. A one-time answer the original keeps when it stays: the note says to attach that app again, and the person is asked. The copy goes with the original when it is deleted |
 | The note, the name and the preset | The note is the new session's first message; it takes the original's settings and preset | The conversation and its history |
 | The original itself | | It stays, unless the window removes it as a last step (`removesOriginal`, the window's default since #1477). `handoff_session` never removes it |
@@ -26,7 +26,7 @@ original's things is in this table; the bullets below say how.
   with an original that goes it belonged to nobody (#738); left with one that stays, the session that carries the work
   on could not list or archive it (#1475). So it moves whether the original goes or stays.
 - **What moves**: `askedBy` and `parentSessionId` where they name the original (another project's session keeps its
-  own row), its open tasks from the original (re-pointed by `MessageService.handOver`, plans/mailbox.md §10.6.5), so its answer and its cards reach the successor (§10.6.4), and the delegation the
+  own row), its open tasks from the original (re-pointed by `Handoffs.handOver`, plans/mailbox.md §10.6.5), so its answer and its cards reach the successor (§10.6.4), and the delegation the
   host holds for it (its key names the caller), and its standing
   start requests (`agent_start_requests`, whose stored request names its caller too). A standing card closes in the
   original and stands in the new session as a card raised between turns, so the new session's first turn hides it and
@@ -116,11 +116,11 @@ original's things is in this table; the bullets below say how.
   store mirror writes it there; the manager reads through read-only maps. The memory side of the move is one call,
   `moveOwner`, which runs the manager's card move for the moving start requests in the middle, in the order above.
   It holds nothing the mail holds: what a session owes, and to whom, is the mailbox's open tasks, moved by the mail's one move
-  (`MessageService.handOver`, plans/mailbox.md §10.6.5). What moves, the store's transaction, and `askedBy` / `parentSessionId` stay
+  (`Handoffs.handOver`, plans/mailbox.md §10.6.5). What moves, the store's transaction, and `askedBy` / `parentSessionId` stay
   with the manager. The standing start_agent requests are read back at startup by `AgentStartFlow.restoreAgentStarts`.
 - **The windows** hear `session_owner` (the session's `askedBy` and `parentSessionId` now) and hang the child under
   its new owner; a linked machine's event is qualified (`Qualifier.event`) and patched into the hub's mirror.
-- **The mail moves too** (#1574, docs/plans/mailbox.md §7.7): `MessageService.handOver`, run last inside the same
+- **The mail moves too** (#1574, docs/plans/mailbox.md §7.7): `Handoffs.handOver`, run last inside the same
   transaction (`moveChildren`'s `then`), so a refusal there leaves the children and the mail on the original. With the
   original kept (scope `kept`), what the moved children sent it and Centralu's mail about them (a finished child's report
   is sent as Centralu, with the child in its `about`, so it goes with the child it reports and does not wake the

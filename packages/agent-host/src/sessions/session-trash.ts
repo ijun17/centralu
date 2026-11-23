@@ -38,7 +38,7 @@ import type { HostCards } from './host-cards.js'
 import type { SessionRecord } from './session-record.js'
 import { rpcError } from '../rpc-error.js'
 import type { SubagentStepsRow } from '../dev-services/store/subagent-steps.js'
-import type { HandedOverMessage } from '../mail/messages.js'
+import type { HandedOverMessage } from '../mail/handoff.js'
 import type { CardRests } from './card-rest.js'
 import { realOs } from '../os/real.js'
 import type { TurnContinue } from './turn-continue.js'
@@ -63,7 +63,7 @@ export type SessionTrashHost = {
   mailGone: (sessionId: string) => void
   /** The first lines of the messages that wait for its answer and of the tasks it owes a report of (what `mailGone` settles); null when the mailbox could not be read */
   mailWork: (sessionId: string) => { unanswered: string[]; owed: string[] } | null
-  /** What a handoff's move would give `heir` of its mail if it went now (`MessageService.handOverPreview`); null when the mailbox could not be read */
+  /** What a handoff's move would give `heir` of its mail if it went now (`Handoffs.handOverPreview`); null when the mailbox could not be read */
   mailHandOverPreview: (sessionId: string, heir: string) => HandedOverMessage[] | null
   /** The session is back: the mail that waited for it may go (#1347). Never throws */
   mailPoke: (sessionId: string) => void

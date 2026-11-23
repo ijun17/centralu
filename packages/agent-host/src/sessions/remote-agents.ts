@@ -200,7 +200,7 @@ export class RemoteAgents {
 
   /**
    * A handoff gave the original's work to `to` (#693): its children on linked machines are the heir's. Returns them, whose tasks the handoff moves
-   * with the original's mail (`MessageService.handOver`, #1948 step 6)
+   * with the original's mail (`Handoffs.handOver`, #1948 step 6)
    */
   moveCaller(from: string, to: string): string[] {
     const moving = this.records().filter((r) => r.callerId === from)

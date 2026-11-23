@@ -344,7 +344,7 @@ export class Watches {
   }
 
   /**
-   * A handoff moves `from`'s mailbox to `to` (`moveMail`: `MessageService.handOver`, scope `all`), in one transaction with this: its active watches
+   * A handoff moves `from`'s mailbox to `to` (`moveMail`: `Handoffs.handOver`, scope `all`), in one transaction with this: its active watches
    * are `to`'s, the same rows, and the watches others keep on `from` wait for `to`, from `to`'s state now. One that would have `to` watch itself (the
    * original's on its heir, or the heir's on the original) ends, and nobody is told: no one set a watch on itself
    */

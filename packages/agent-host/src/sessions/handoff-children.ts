@@ -3,7 +3,7 @@ import { busyWith, oneLineText, pausedOnBackground } from '@cc/protocol'
 import type { DelegationHost } from './delegation-flow.js'
 import type { SessionTrashHost } from './session-trash.js'
 import type { HandOverScope } from '../dev-services/store/mailbox.js'
-import type { HandedOverMessage } from '../mail/messages.js'
+import type { HandedOverMessage } from '../mail/handoff.js'
 import type { SessionAppWiring } from './session-app-wiring.js'
 
 /**
@@ -99,7 +99,7 @@ export type HandoffChildrenHost = Pick<DelegationHost, 'children' | 'emit' | 'me
     turnRunning: (m: SessionInfo) => boolean
     /** The apps a session attached itself (#1638) */
     readonly apps: Pick<SessionAppWiring, 'appAccess'>
-    /** The original's mail and the tasks it gave the children that move, moved to the successor inside the store's transaction (`MessageService.handOver`); nothing without a mailbox */
+    /** The original's mail and the tasks it gave the children that move, moved to the successor inside the store's transaction (`Handoffs.handOver`); nothing without a mailbox */
     mailHandOver: (fromSessionId: string, toSessionId: string, which: HandOverScope, children: readonly string[]) => HandedOverMessage[]
   }
 

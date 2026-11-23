@@ -149,7 +149,8 @@ three. This round kept them as they are; §6 has the answer.
 Moved so far: `held-mail.ts` (`HeldMail`, `MessageService.holds`) with the person's acts on held mail: `dismissProject`,
 `trustChanged` and `resumeHeld`, and `replyAnswers` into `rules.ts`, which both read; then the delivery's holds
 (`reconcileInterrupted`, `deliveryFailedLate`, `resendHeld`, `hold`, `dismissHeld`), which `delivery.ts` and `person.ts` call
-as `service.holds`.
+as `service.holds`; then the handoffs (`handOver`, `moveAcross`, `takeMoves`, `handOverPreview`, `roleMoved`, with
+`foldReports` and `movedNotice`) into `handoff.ts` (`Handoffs`, `MessageService.handoffs`).
 
 ## 3. `sessions/remote-agents.ts` (1,560 lines)
 

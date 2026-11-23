@@ -2231,12 +2231,12 @@ an approval. Telling a hub's giver of a card across the link is not built: it re
 ### 10.6.5 A handoff is the mail's one move (#1948 step 5)
 
 Target 5 of #1948: a handoff moved marks, turns, the queue and cards by hand beside the mail's own move. Steps 2 to 4 removed the marks, the
-queue and the turn owners; this step makes `MessageService.handOver` the one move of what a session owes and is owed, and fixes #1936.
+queue and the turn owners; this step makes `Handoffs.handOver` the one move of what a session owes and is owed, and fixes #1936.
 
 **The move.** `HandoffChildren.moveChildren` decides what moves (the children, the original's delegations in another project, its standing
 start requests; a child doing work the original owes its own giver stays with an original that stays, #1932) and runs one store transaction
 (`Store.moveChildren`): the children's parent link (`asked_by_session_id`, `parent_session_id`: ownership, reach and depth read it), the start
-requests (`agent_start_requests`), then `MessageService.handOver(from, to, scope, children)`. That last call moves, as before, every unsettled
+requests (`agent_start_requests`), then `Handoffs.handOver(from, to, scope, children)`. That last call moves, as before, every unsettled
 watched row and unread message of the original in `scope` (§7.7), and now also the tasks the original gave the children that move: each task
 not settled is withdrawn and goes again from the successor with the same words, cause, facts and delivery (`deliveredAt`, `readAt`), one task
 for one task; a task a stop released stays released, so its sender is not owed it twice. Before, a shim beside it (`taskRepointer`, `MailHooks.repointTasks`) wrote one task for all of a child's open tasks, with
@@ -3918,7 +3918,7 @@ Indexes: `(owner, state)` and `(state, next_at)`. A row ends at `expires_at` (24
 watches, the time itself for `in` and `at`, never more than 7 days), when a one-shot fires, when it is cancelled, or
 when its owner is deleted. An owner in the session archive keeps its rows, as it keeps its mail, since the archive may
 give it back; they are deleted with its mail when it is deleted for good (`MailboxRecords.purgeParty`). A
-handoff that moves a session's mailbox to its heir (`MessageService.handOver`, scope `all`: the original goes) moves its
+handoff that moves a session's mailbox to its heir (`Handoffs.handOver`, scope `all`: the original goes) moves its
 active watches with it in the same transaction, the same rows with `owner` rewritten to the heir, and the watches others
 keep on the original wait for the heir, from the heir's state then. One that would have the heir watch itself (the
 original's on the heir, or the heir's on the original) ends, `ended_by` `host`, and nobody is told. A row that expires without firing posts one quiet notice (`facts.quiet`: read at the next wake, wakes no one):

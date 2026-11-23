@@ -112,7 +112,7 @@ export function isSendNote(m: Pick<MailRow, 'kind' | 'origin'>): boolean {
 /**
  * The Assistant's `send_to_session` words, a task or a note: the Assistant acts for the person, so they flow down inline and
  * read as the person's request, where every other session's mail stays its sender's text, not an instruction. A task a handoff
- * gave again (`MessageService.handOver`, fact `handedOver`) has the heir as its sender and someone else's words, so it never
+ * gave again (`Handoffs.handOver`, fact `handedOver`) has the heir as its sender and someone else's words, so it never
  * reads as the person's, even when the heir is the Assistant
  */
 export function forPersonOf(m: Pick<MailRow, 'kind' | 'origin' | 'facts'>, fromAssistant: boolean): 'task' | 'note' | undefined {

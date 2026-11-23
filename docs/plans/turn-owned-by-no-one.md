@@ -156,7 +156,7 @@ cause, as step 3's shim did without the cause, so no message's sender is rewritt
 
 - B gives C task T2 while working on A's T1 (`cause_id = T1`). B's turn ends: B is not at rest for T1 while T2 is open
   (§2.2 item 3). C's report or reply wakes B; B answers T1 by reply, or by its last response once at rest.
-- **Handoff.** `MessageService.handOver` (`messages.ts:831`) moves `from`'s open watched rows to the heir and tells it
+- **Handoff.** `Handoffs.handOver` (`handoff.ts`) moves `from`'s open watched rows to the heir and tells it
   once. It does not touch the open tasks `from` **sent**. New rule (needed for #1936, §10): `handOver` also re-points
   the sender of `from`'s open sent tasks to the heir (a new recipient-row fact, or a `sender` rewrite in the same
   transaction; Q6), so the child's reply or at-rest report reaches the heir, and the heir's own at-rest rule then
@@ -445,7 +445,7 @@ one release after step 75 has shipped.
 | B2/B3 `report_marks`, paused reports, adoption at `ready` | Task rows are the record (M8); paused reports go (Target 4); adoption keeps only step 1 for one release | P4, P6 |
 | B4/B5 relayed notices (`tellSession`, `tellNoteRefused`, `tellQueuedFailed`, `tellEnd`, five sites in `remote-agents.ts`) | Mail `notice`s for seats that read mail (`canReadMail`, `manager.ts:2462`); the legacy `coordinator`/`scoped` seats nothing creates keep the relayed notice. The five remote sites stay until mail crosses links. **Built 2026-11-23 (#2478):** `tellNoteRefused` and `tellQueuedFailed` went with B6; `tellEnd` (`machine-flow.ts`) and the end of a `start_agent` request answered pending (`agent-start-requests.ts`) go through `ChildReports.tellFromCentralu`, a Centralu `notice` in the mail of a seat that reads it, keyed by the event so it is told once, and the relayed message otherwise. `ChildReports.tellSession` stays the path of a seat without the mail tool. `remote-agents.ts` `restore` is left relayed: a one-time notice at the start of a build that replaced one from before #1948 step 6, about a linked child, for which the relayed message's source is the pointer to read | P10 |
 | B6 `queued_requests`, `ifBusy: 'queue'`, the note/queue/fork menu | A send to a busy session is a mail row that joins the turn or waits (Target 2). `note` and `queue` go; `fork` stays as its own choice (Q5) | P8 |
-| B7 handoff moves both worlds | `MessageService.handOver` only, plus the sent-task rule (§3.4) | P9 |
+| B7 handoff moves both worlds | `Handoffs.handOver` only, plus the sent-task rule (§3.4) | P9 |
 | B8 thread-shaped fields (`state`, `next`, `blocked`, `blockers`, `follows`, `protocol/src/entities/mail.ts`) | The host keeps filling constants for older windows; the window stops reading `state`/`next` when its layout changes (owner). **`next` done 2026-11-06:** the window no longer reads it (the "Next: …" line never drew since #1914 filled null); the field stays and the host fills null. The state pill (Open / Running / In review / Done) stays, computed from the messages (owner) | P11 |
 | B9 the Inbox and the mail list | Owner's layout (§9.2); session-state rows become mail (owner 2026-11-04) | P11 |
 | C1 the composer choice end to end | Removed (owner) | P3 |

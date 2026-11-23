@@ -130,7 +130,7 @@ type OwnershipStore = Pick<Store, 'children' | 'settings' | 'mailbox' | 'message
  * Who owns a child session's work (#428): the delegations and start requests a session made, and what a handoff gave away. What a session
  * owes the sessions that gave it work is the mailbox's open tasks (`openTasks`, docs/plans/mailbox.md §10.6.3). Each change that has a store
  * mirror writes it here, so memory and store do not drift apart; reads go through the read-only maps. A handoff's move of what only memory
- * holds is one operation (`moveOwner`); the stored move is the mail's (`MessageService.handOver`) with the parent link and the start
+ * holds is one operation (`moveOwner`); the stored move is the mail's (`Handoffs.handOver`) with the parent link and the start
  * requests in one transaction (`Store.moveChildren`, docs/plans/mailbox.md §10.6.5).
  */
 export class ChildOwnership {

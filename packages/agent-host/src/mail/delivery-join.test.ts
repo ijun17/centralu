@@ -179,7 +179,7 @@ describe('mail joins a running turn (§10.6.2)', () => {
     w.delivery.turnInputs(B, { took: w.to('b').slice(1).map((d) => d.input.id!), finished: true })
     w.endTurn('b')
     expect(w.rowOf(task.id, B).givenAgainAt).toEqual(expect.any(Number))
-    w.mail.handOver(B, C, 'all')
+    w.mail.handoffs.handOver(B, C, 'all')
     expect(w.rowOf(task.id, C)).toMatchObject({ deliveredAt: null, givenAgainAt: null })
     w.states.set('c', { kind: 'ready', live: true, quiet: false })
     w.delivery.poke('c')
