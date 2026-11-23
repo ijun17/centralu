@@ -948,6 +948,7 @@ export class SessionManager {
       mailRequestTurnEnded: (id) => self.mail.mailRequestTurnEnded(id),
       mailLastResponse: (id, last) => self.mail.mailLastResponse(id, last),
       mailWatchedAtRest: (id) => self.mail.mailWatchedAtRest(id),
+      mailNotice: (...a) => self.mail.mailNotice(...a),
       mailTurnInputs: (id, turn) => self.mail.mailTurnInputs(id, turn),
       mailEvent: (e, ended) => {
         try {
@@ -1117,6 +1118,7 @@ export class SessionManager {
       },
       sweepOrphanHandoffNotes: (...a) => self.handoffNotes.sweepOrphanHandoffNotes(...a),
       tellSession: (...a) => self.reports.tellSession(...a),
+      tellFromCentralu: (...a) => self.reports.tellFromCentralu(...a),
       toolProfileOf: (...a) => self.tools.toolProfileOf(...a),
       toolLabel: (...a) => self.toolRegistry.toolLabel(...a),
       get tools() {

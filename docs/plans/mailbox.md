@@ -1111,6 +1111,11 @@ go once P is trusted. An answer to a clarification (§9.7) is stored as a task b
 answers the questions they answer. Until D32 a row deep in a chain was held `loop` again here; nothing is now. A row
 the person released has `held = 'released'`; `policy` is read live even then.
 
+**A sender gone to the trash** (#2478): its held mail follows the rule for its mail not held (`partyGone`, §7.7), as
+mail held for its link does (linked-mail.md §12). A question or task is withdrawn, which takes it off the person's held
+list, and is never delivered: no one is left to hear the answer. Any other message stays held and goes on the person's
+trust as it would have, since the hold is the person's to decide, not the sender's; Dismiss drops it as before.
+
 | Case | Held? |
 |---|---|
 | A session of untrusted P → a session of P | no: within one project |

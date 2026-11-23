@@ -47,6 +47,8 @@ export type MailHooks = {
   /** Mail that wakes the session waits for it (due or not yet): its turn is coming, and a note of the host's (`compact_self`'s `then`) follows it */
   waiting?(sessionId: string): boolean
   sessionChanged(sessionId: string): void
+  /** Centralu's own word to a session (`ChildReports.tellFromCentralu`), as a notice in its mail; a `dedupeKey` used already writes nothing */
+  notice?(sessionId: string, body: string, dedupeKey: string): void
   sessionEvent?(e: NormalizedEvent, endedTurn: boolean): void
   /** The `mail` tool of a session */
   tool?(sessionId: string, args: MailToolArgs, signal?: AbortSignal): Promise<{ text: string; isError?: boolean }>
@@ -171,6 +173,22 @@ export class MailSessionsView {
       this.hooks?.lastResponse?.(sessionId, last)
     } catch (e) {
       console.error(`[mail] ${sessionId.slice(0, 8)}: its last response could not answer its tasks (${errorMessage(e)})`)
+    }
+  }
+
+  /**
+   * Centralu's own word to a session as a notice in its mail (`MailHooks.notice`): false when its seat cannot read mail, there is no mailbox, or the
+   * write failed, so the caller tells it in its conversation instead. Never throws
+   */
+  mailNotice(sessionId: string, body: string, dedupeKey: string): boolean {
+    const hooks = this.hooks
+    if (!hooks?.notice || !this.canReadMail(sessionId)) return false
+    try {
+      hooks.notice(sessionId, body, dedupeKey)
+      return true
+    } catch (e) {
+      console.error(`[mail] ${sessionId.slice(0, 8)}: a notice from Centralu could not be written (${errorMessage(e)})`)
+      return false
     }
   }
 

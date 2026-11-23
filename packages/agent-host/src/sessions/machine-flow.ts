@@ -53,10 +53,7 @@ export type { MachineRequest }
 export type MachineAnswer = { ok: true; text: string } | { ok: false; error: string }
 
 /** What the machine commands reach of the session manager: its cards */
-export type MachineFlowHost = { readonly hostCards: Pick<HostCards, 'askHost'> } & Pick<DelegationHost, 'tellSession'>
-
-/** Who a message from Centralu itself is from, in a session's conversation (as `agent-start-requests.ts`) */
-const HOST_SENDER = '_centralu'
+export type MachineFlowHost = { readonly hostCards: Pick<HostCards, 'askHost'> } & Pick<DelegationHost, 'tellFromCentralu'>
 
 /** How long install_machine waits for the install or update before it answers that it is still under way (#1399) */
 const UPDATE_ANSWER_MS = 200_000
@@ -240,13 +237,14 @@ export class MachineFlow {
            * it, and the person can cancel the wait from Settings
            */
           const run = req.action === 'install' ? ops.install(m.id) : ops.update(m.id, { when: 'idle', ...(unasked ? { unasked } : {}) })
+          const ended = `machine-ended:${m.id}:${req.action}:${Date.now()}`
           const waited = ops.updateAnswerMs ?? UPDATE_ANSWER_MS
           const r = await raceTimeout(run, waited, null)
           if (!r) {
-            // Answered as still under way (#1399): how it ends is told to the caller in its conversation, a failure too
+            // Answered as still under way (#1399): how it ends is told to the caller by Centralu, a failure too
             void run.then(
-              (ended) => this.tellEnd(sessionId, `[Centralu] The ${req.action} of ${plainQuoted(m.name)} you started has finished: Centralu ${ended.current.version} is there.${ended.note ? ` ${ended.note}` : ''}`),
-              (e: unknown) => this.tellEnd(sessionId, `[Centralu] The ${req.action} of ${plainQuoted(m.name)} you started did not finish: ${errorMessage(e).slice(0, 600)}`),
+              (result) => this.tellEnd(sessionId, ended, `[Centralu] The ${req.action} of ${plainQuoted(m.name)} you started has finished: Centralu ${result.current.version} is there.${result.note ? ` ${result.note}` : ''}`),
+              (e: unknown) => this.tellEnd(sessionId, ended, `[Centralu] The ${req.action} of ${plainQuoted(m.name)} you started did not finish: ${errorMessage(e).slice(0, 600)}`),
             )
             return done(
               `${req.action === 'install' ? 'Installing' : 'Updating'} ${m.name} is still under way${req.action === 'update' ? ' (it installs beside, then waits until no session there is in a turn, and stops none)' : ''}. ` +
@@ -347,12 +345,15 @@ export class MachineFlow {
     }
   }
 
-  /** The hosts of the person's ssh config, each with the machines linked through it: what add_machine can be given (#1219) */
-  /** Tells the session that called, in its conversation (relayed, since an Assistant only gets a pointer to a message that is not), how an update it was answered "still under way" for ended; never throws */
-  private async tellEnd(sessionId: string, text: string): Promise<void> {
-    await this.host.tellSession(sessionId, text, { sessionId: HOST_SENDER, name: 'Centralu' }, true).catch(() => undefined)
+  /**
+   * Tells the session that called how an update it was answered "still under way" for ended, once (`key`): in its mail, or in its conversation
+   * relayed, since an Assistant only gets a pointer to a message that is not; never throws
+   */
+  private async tellEnd(sessionId: string, key: string, text: string): Promise<void> {
+    await this.host.tellFromCentralu(sessionId, text, key, true).catch(() => undefined)
   }
 
+  /** The hosts of the person's ssh config, each with the machines linked through it: what add_machine can be given (#1219) */
   private async sshHosts(ops: MachineOps): Promise<MachineAnswer> {
     const list = await ops.sshHosts()
     // The config file's path and ssh's own notes can echo lines of the file: each is quoted

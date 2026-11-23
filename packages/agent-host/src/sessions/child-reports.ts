@@ -23,6 +23,9 @@ import { namedCall } from './tool-seats.js'
 import type { RoutedCardsHost } from './routed-cards.js'
 import { agentState, cleanUpDue, ownAgents } from './own-agents.js'
 
+/** The sender Centralu's own words to a session are recorded under in its conversation (#673): like `HUB_SENDER`, no session's id */
+const HOST_SENDER = '_centralu'
+
 /** The person's part in a turn a report tells of (#1377), and what Centralu did to it: an update cut it (#1966) */
 export type ReportPart = { wrote?: true; cut?: true }
 
@@ -46,6 +49,8 @@ export type ChildReportsHost = Pick<DelegationHost, 'children' | 'deliver' | 'di
     mailLastResponse(sessionId: string, last: SessionLastResponse): void
     /** A watch waits for the session's rest (`MailSessionsView.mailWatchedAtRest`): its settle tells it as it answers tasks */
     mailWatchedAtRest(sessionId: string): boolean
+    /** Centralu's own word as a notice in the session's mail (`MailSessionsView.mailNotice`): false when its seat cannot read mail */
+    mailNotice(sessionId: string, body: string, dedupeKey: string): boolean
   } &
   Pick<ProjectRegistry, 'projectRow'>
 
@@ -390,6 +395,17 @@ export class ChildReports {
       console.error(`[sessions] ${sessionId.slice(0, 8)}: a notice about ${from.sessionId.slice(0, 8)} could not be delivered (${(e as Error).message}); kept for its next message`)
       return false
     }
+  }
+
+  /**
+   * Centralu's own word to a session (#1948 B4/B5, turn-owned-by-no-one.md P10): how a request it was answered "pending" or "still under way" for
+   * ended. A seat that reads mail gets it as a Centralu notice in its mail, which wakes it as mail does and is kept with its mail; a seat without
+   * the mail tool (an older build's coordinator, a builder) is told in its conversation, as before mail. `relayed` is that message's: an Assistant
+   * gets only a pointer to a message that is not relayed. `dedupeKey` names the event, so it is told once
+   */
+  tellFromCentralu(sessionId: string, text: string, dedupeKey: string, relayed: boolean): Promise<boolean> {
+    if (this.host.mailNotice(sessionId, text, dedupeKey)) return Promise.resolve(true)
+    return this.tellSession(sessionId, text, { sessionId: HOST_SENDER, name: 'Centralu' }, relayed)
   }
 
   /** Notices that could not be delivered, by the session they are for (`tellSession`) */

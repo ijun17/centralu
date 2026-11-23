@@ -68,6 +68,8 @@ export type DelegationHost = {
   nameOf: (sessionId: string) => string
   /** Tells a session something in its conversation, never while the host leaves, never throwing (`ChildReports.tellSession`, #428) */
   tellSession: (sessionId: string, text: string, from: { sessionId: string; name: string }, relayed: boolean, forModel?: string) => Promise<boolean>
+  /** Centralu's own word to a session: in its mail when its seat reads mail, else in its conversation (`ChildReports.tellFromCentralu`); never throws */
+  tellFromCentralu: (sessionId: string, text: string, dedupeKey: string, relayed: boolean) => Promise<boolean>
   /** The seat a session's tools are, which decides the form an answer names a call in (`namedCall`, tool-seats.ts) */
   toolProfileOf: (sessionId: string) => ToolProfile | null
   deliver: (sessionId: string, text: string, attachments: Attachment[] | undefined, from: { sessionId: string; name: string } | undefined, relayed: boolean, fromApp?: undefined, fromAppVia?: 'inline', sendInput?: (handle: SessionHandle, text: string, inputId?: string) => void, stillAllowed?: () => string | null, relayedText?: string) => Promise<void>

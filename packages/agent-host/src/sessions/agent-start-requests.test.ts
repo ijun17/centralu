@@ -108,6 +108,29 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
     expect(store.children.listAgentStartRequests()).toEqual([])
   })
 
+  // #2478: Centralu's word goes as mail to a seat that reads mail, and in the conversation only to one that cannot (turn-owned-by-no-one.md P10)
+  it.each([
+    ['reads mail', true],
+    ['cannot read mail', false],
+  ] as const)('a refusal under the next host, to a caller that %s, is told once, in its mail or in its conversation', async (_, reads) => {
+    const a = host()
+    const { parent, requestId } = await asking(a)
+    await a.mgr.tenure.disposeAll()
+    const b = host()
+    wireHostMail(b.mgr, store)
+    if (!reads) {
+      const real = b.mgr.tools.toolProfileOf.bind(b.mgr.tools)
+      vi.spyOn(b.mgr.tools, 'toolProfileOf').mockImplementation((id: string) => (id === parent ? 'scoped' : real(id)))
+    }
+    b.mgr.inputs.respondApproval(parent, requestId, 'deny')
+    const said = `start_agent request ${requestId} did not start a session`
+    const mailed = () => store.mailbox.feedOf(addressOf(parent), { limit: 50 }).filter((m) => m.sender === 'centralu' && m.kind === 'notice' && m.body.includes(said))
+    // In the conversation as stored: a seat without the mail tool reads Centralu's message there (its model gets a pointer to it)
+    const told = () => store.messages.loadMessages(parent, 50).filter((m) => JSON.stringify(m.payload).includes(said))
+    await eventually(() => (reads ? mailed() : told()).length === 1)
+    expect((reads ? told : mailed)()).toEqual([])
+  })
+
   it('is dropped by the next host when the session that asked is gone', async () => {
     const a = host()
     const { parent, requestId } = await asking(a)

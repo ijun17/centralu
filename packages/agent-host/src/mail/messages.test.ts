@@ -329,6 +329,21 @@ describe('the one hold (D12)', () => {
     expect(w.records.pendingFor(Y, w.clock.t + 10_000)).toHaveLength(1)
   })
 
+  it('a sender gone to the trash: its held question is withdrawn and leaves the held list, as one not held is; its held message waits for the person and goes on trust', () => {
+    const w = world()
+    const question = w.send(X, { to: [C], text: 'which branch?' }).message
+    const note = w.send(X, { to: [C], text: 'fyi', needsReply: false }).message
+    expect(w.records.heldRows().map((r) => r.messageId)).toEqual([question.id, note.id])
+
+    w.mail.stops.partyGone(X)
+    expect(w.rowOf(question.id, C).settled).toBe('withdrawn')
+    expect(w.records.heldRows().map((r) => r.messageId)).toEqual([note.id])
+
+    w.projects.set('px', { trusted: true })
+    w.mail.holds.trustChanged('px')
+    expect(w.records.pendingFor(C, w.clock.t + 10_000).map((p) => p.message.id)).toEqual([note.id])
+  })
+
 })
 
 describe('quiet answers (D3)', () => {

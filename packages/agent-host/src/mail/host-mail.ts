@@ -380,6 +380,9 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     handOverPreview: (from, to) => aboutSessions(service.handOverPreview(addressOf(from), addressOf(to))),
     openWork: (id) => openWork(service, store, addressOf(id)),
     sessionChanged: (id) => delivery.poke(id),
+    notice: (id, body, dedupeKey) => {
+      service.notice(addressOf(id), { body, facts: {}, dedupeKey })
+    },
     waiting: (id) => service.wakingFor(addressOf(id)),
     // The person's warning, written as the mailbox writes its own (delivery.ts `warnIfRunning`): one a clock hour for the session, and nothing waits for it
     compactCycles: (id, count) => service.notice(PERSON, { body: WARNING_TEXT.compactCycles(service.labelOf(addressOf(id)), count), facts: { compactCycles: { session: addressOf(id), count } }, dedupeKey: hourlyKey(`compactcycles:${addressOf(id)}`, now()) }),
