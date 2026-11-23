@@ -118,9 +118,6 @@
     "ItemStartedNotification": [
       "turnId"
     ],
-    "ThreadItem": [
-      "clientId"
-    ],
     "TurnStartResponse": [
       "turn"
     ],
@@ -149,6 +146,18 @@
       "status",
       "turns"
     ]
+  },
+  "_variantFieldsComment": [
+    "Fields the adapter reads from one variant of a union, found by its `type` tag (#2513). A turn's first `userMessage`",
+    "item names the `clientId` the inputs were sent under (session.ts, #1604); without it a turn's inputs are never",
+    "matched to it. Read at the union's own level, so a plain union and an intersection with lifecycle times both work."
+  ],
+  "variantFields": {
+    "ThreadItem": {
+      "userMessage": [
+        "clientId"
+      ]
+    }
   },
   "_enumValuesComment": [
     "Values the adapter sends or compares by name (#342): history pages newest first with full items, the running",
