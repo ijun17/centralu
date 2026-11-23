@@ -100,7 +100,8 @@ If you're on Linux, `npm i -g centralu` gets you the AppImage — tell us how it
 [MIT](LICENSE). Issues and pull requests are welcome; please read
 [CONTRIBUTING.md](CONTRIBUTING.md) first, as there is a CLA. Everyone here follows the
 [Code of Conduct](CODE_OF_CONDUCT.md). Found a security problem? Report it privately, as
-[SECURITY.md](SECURITY.md) describes, not in a public issue.
+[SECURITY.md](SECURITY.md) describes, not in a public issue. What is signed, who approves it and what Centralu
+sends over the network: [code signing policy](docs/code-signing-policy.md).
 
 ## Documentation
 
