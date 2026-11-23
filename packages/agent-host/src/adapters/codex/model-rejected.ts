@@ -21,11 +21,12 @@ export function modelRejection(message: string, errorInfo?: unknown): { model: s
   /*
    * Codex's own classification (`TurnError.codexErrorInfo`, a bare string such as "badRequest" or an object keyed by the
    * kind) when it gives one: another kind (a usage limit, a context window, a dropped stream) is never a refused model,
-   * whatever the sentence says, and "badRequest" is the 400 the provider's body would otherwise have to prove.
+   * whatever the sentence says, and "badRequest" is the 400 the provider's body would otherwise have to prove. "modelNotFound"
+   * (`CodexErrorInfo`, codex-cli 0.171.0) names the case itself, so it stands for the 400 as well; the sentence must still name the model.
    */
   const kind = typeof errorInfo === 'string' ? errorInfo : errorInfo !== null && typeof errorInfo === 'object' ? Object.keys(errorInfo)[0] : undefined
   // "other" is the catch-all: it says nothing, so the sentence decides as it does with no kind
-  if (kind !== undefined && kind !== 'badRequest' && kind !== 'other') return null
+  if (kind !== undefined && kind !== 'badRequest' && kind !== 'modelNotFound' && kind !== 'other') return null
   const body = jsonBody(message)
   const error = asObj(body.error)
   // Codex may name the kind of error on a line of its own after the sentence (turn.error.additionalDetails)
@@ -33,8 +34,8 @@ export function modelRejection(message: string, errorInfo?: unknown): { model: s
     .split('\n')
     .filter((line) => line.trim() !== 'invalid_request_error')
     .join('\n')
-  // A 400 (Codex's "badRequest", else the provider's invalid_request_error), naming a model it will not serve. Other 400s are not this one
-  if (kind !== 'badRequest') {
+  // A 400 (Codex's "badRequest" or "modelNotFound", else the provider's invalid_request_error), naming a model it will not serve. Other 400s are not this one
+  if (kind !== 'badRequest' && kind !== 'modelNotFound') {
     if (body.status !== undefined && body.status !== 400) return null
     if (str(error.type) !== 'invalid_request_error' && !/invalid_request_error/.test(message)) return null
   }
