@@ -2,7 +2,7 @@ import { scriptLabel } from './mail/script-label.js'
 import { relative } from 'node:path'
 import type { z } from 'zod'
 import { ThemeFiles } from './themes.js'
-import { RpcMethods, hubAutoOf, noSuchAppText, setupOfDetection, type LinkedAppNoticeParams, type RpcMethodName, sameApp } from '@cc/protocol'
+import { RpcMethods, handoffPrompt, hubAutoOf, noSuchAppText, setupOfDetection, type LinkedAppNoticeParams, type RpcMethodName, sameApp } from '@cc/protocol'
 import type { SessionManager } from './sessions/manager.js'
 import { searchFiles } from './dev-services/file-search.js'
 import type { TerminalHandle, TerminalService } from './dev-services/terminal.js'
@@ -368,7 +368,8 @@ export function createRpcHandler(
     },
     'agents.send': async ({ sessionId, text, attachments }, ctx) => {
       // A script (the limited credential) is not the person typing: its text is stored and handed on as the script's, under the label of its connection (§8.1)
-      await mgr.inputs.send(sessionId, text, attachments, undefined, true, scriptAuthor('agents.send', ctx))
+      // The window's handoff request is Centralu's fixed text, sent at the person's click: theirs to cite, not their words to the tool (#2478)
+      await mgr.inputs.send(sessionId, text, attachments, undefined, text === handoffPrompt() && !attachments?.length ? 'click' : true, scriptAuthor('agents.send', ctx))
       return { ok: true as const }
     },
     'agents.respondApproval': async ({ sessionId, requestId, decision, scope, matcher }) => ack(mgr.inputs.respondApproval(sessionId, requestId, decision, scope, matcher)),

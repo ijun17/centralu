@@ -9,7 +9,7 @@ import type { ApprovalRules } from './approval-rules.js'
 import type { DelegationHost } from './delegation-flow.js'
 import type { HostCards } from './host-cards.js'
 import type { MailSessionsHost } from './mail-sessions.js'
-import type { SessionEventsHost } from './session-events.js'
+import type { PersonInput, SessionEventsHost } from './session-events.js'
 
 /**
  * What a session's turn inputs reach of the session manager (#1143), typed as the manager declares each member. The manager builds it with
@@ -58,15 +58,15 @@ export class TurnInputs {
      * screen uses it to draw "what the person said" and "what another session instructed" differently.
      */
     from?: { sessionId: string; name: string },
-    /** The person's own typing, as the screen's composer sends it: the tool is told it is the person's (`InputOrigin`) */
-    fromPerson = false,
+    /** The person's own typing, as the screen's composer sends it: the tool is told it is the person's (`InputOrigin`); `click`, as `deliverNow` takes it */
+    fromPerson: PersonInput = false,
     /** A script wrote it (the limited credential, §8.1): its words are not the person's — no `origin: human` */
     fromScript?: { credential: string },
   ): Promise<void> {
     // The person wrote to it (#378): an app's agent session they wrote to becomes theirs
     if (!from && !fromScript) this.host.appSessions.noteTookPart(sessionId, 'wrote')
     // A person's message never closes a delegation report (#1377, #1948): its turn is theirs, and not reported
-    await this.host.events.deliver(sessionId, text, attachments, from, false, undefined, 'inline', undefined, undefined, undefined, fromPerson && !from && !fromScript, fromScript)
+    await this.host.events.deliver(sessionId, text, attachments, from, false, undefined, 'inline', undefined, undefined, undefined, from || fromScript ? false : fromPerson, fromScript)
   }
 
   /**

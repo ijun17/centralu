@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { tmpdir } from 'node:os'
-import type { NormalizedEvent } from '@cc/protocol'
+import { handoffPrompt, type NormalizedEvent } from '@cc/protocol'
 import { SessionManager } from './manager.js'
 import type { ChildReports } from './child-reports.js'
 import type { FakeAdapter } from './manager.test-helpers.js'
@@ -17,9 +17,10 @@ let adapter: FakeAdapter
 let mgr: SessionManager
 let rpc: ReturnType<typeof createRpcHandler>
 let events: NormalizedEvent[]
+let store: ReturnType<typeof managerWorld>['store']
 
 beforeEach(() => {
-  ;({ adapter, mgr, rpc, events } = managerWorld())
+  ;({ adapter, mgr, rpc, events, store } = managerWorld())
 })
 
 async function session() {
@@ -72,6 +73,14 @@ describe('nothing else is stamped', () => {
     await mgr.inputs.send(s.id, 'do this', undefined, { sessionId: 'caller', name: 'Caller' })
     await mgr.inputs.send(s.id, 'and this', undefined, { sessionId: 'caller', name: 'Caller' }, true)
     expect(adapter.last!.origins).toEqual([undefined, undefined])
+  })
+
+  it("the window's handoff request: Centralu's fixed text the person's click sends, theirs to cite (byPerson) and not their words to the tool (#2478)", async () => {
+    const s = await session()
+    await rpc('agents.send', { sessionId: s.id, text: handoffPrompt() })
+    expect(adapter.last!.sent).toEqual([handoffPrompt()])
+    expect(adapter.last!.origins).toEqual([undefined])
+    expect(store.messages.loadMessages(s.id, 10).find((r) => r.role === 'user')?.payload).toMatchObject({ text: handoffPrompt(), byPerson: true })
   })
 
   it('a send with no flag: a builder request or a Centralu frame the host sends on the person\'s click', async () => {
