@@ -1251,6 +1251,9 @@ Since D32 no row of this table holds, defers or refuses mail for how much of it 
   - every unsettled watched row **to** `from` moves to `to`, undelivered again unless read;
   - when `to` already has a row for the same message, `to`'s row stays as it is and `from`'s is deleted;
   - the open tasks `from` gave the `children` that move go again from `to` (§10.6.5, #1936).
+  - each local child that moves gets a quiet Centralu notice naming `to` as its parent now, and `from` (#2474);
+  - of Centralu's unread reports that move, one that a newer report on the same session follows is marked read for `to` (#2474): a
+    handoff moved days of turn-ended reports one by one. The newest says how that session stands, and the notice counts the rest.
 
   The preview (`handOverPreview`) lists each moved message by id and the first line of its body, quoted.
 - **`partyGone(address)`** (trash):

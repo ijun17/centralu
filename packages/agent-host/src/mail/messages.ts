@@ -917,7 +917,17 @@ export class MessageService {
         // A task a stop released stays released: its sender was told, and no one is owed it twice
         if (row.releasedAt !== null && row.releasedWhy !== null) this.records.markReleased(again.id, row.recipient, row.releasedAt, row.releasedWhy)
       }
-      this.movedNotice(to, fresh.map((p) => p.messageId))
+      /*
+       * A child that moved is told by Centralu who its parent is now (#2474): its conversation names the session that started it, and without this
+       * it took the heir's work as a stranger's. Quiet, so it comes with the heir's first mail rather than as a turn of its own
+       */
+      for (const child of children) {
+        if (this.across(child)) continue
+        const name = (address: string) => `“${this.labelOf(address)}” [${this.shownId(address)}]`
+        const body = `[Centralu] ${name(from)}, which started you, handed over to ${name(to)}: that session is your parent now, and its work and mail for you are your parent's.`
+        this.notice(child, { body, facts: { quiet: true }, dedupeKey: `parent:${child}:${to}` })
+      }
+      this.movedNotice(to, fresh.map((p) => p.messageId), this.foldReports(to, fresh.map((p) => p.messageId)))
       if (across.length) this.queuedMoves.push({ from, to, ids: across })
       return plan
     })
@@ -1098,11 +1108,33 @@ export class MessageService {
   }
 
   /** Rows came to `to` from another holder (a handoff, the role's move): one quiet notice for the move, so it knows why the messages are there (key `handover:`) */
-  private movedNotice(to: string, messageIds: readonly string[]): void {
+  /**
+   * Of Centralu's unread reports among `ids` just moved to `to`, each that a newer one on the same session follows is marked read (#2474): a handoff
+   * moved one report per turn ended, days of them, into the heir's context one by one, and the newest says how that session stands. They stay
+   * readable by id. Returns how many were folded
+   */
+  private foldReports(to: string, ids: readonly string[]): number {
+    const reports = ids.flatMap((id) => {
+      const m = this.records.message(id)
+      const session = m?.sender === CENTRALU && m.kind === 'report' ? m.facts.about?.session : undefined
+      return m && session && this.records.recipient(id, to)?.readAt === null ? [{ m, session }] : []
+    })
+    const newest = new Map<string, MailRow>()
+    for (const { m, session } of reports) {
+      const kept = newest.get(session)
+      if (!kept || m.createdAt > kept.createdAt || (m.createdAt === kept.createdAt && m.id > kept.id)) newest.set(session, m)
+    }
+    const folded = reports.filter(({ m, session }) => newest.get(session) !== m).map(({ m }) => m.id)
+    if (folded.length > 0) this.records.markRead(to, folded, this.now())
+    return folded.length
+  }
+
+  private movedNotice(to: string, messageIds: readonly string[], folded = 0): void {
     if (messageIds.length === 0 || parseAddress(to)?.kind !== 'session') return
+    const moved = messageIds.length === 1 ? 'A message addressed to the previous holder was moved to you.' : `${messageIds.length} messages addressed to the previous holder were moved to you.`
     this.centralu(to, {
       kind: 'notice',
-      body: messageIds.length === 1 ? 'A message addressed to the previous holder was moved to you.' : `${messageIds.length} messages addressed to the previous holder were moved to you.`,
+      body: folded === 0 ? moved : `${moved} ${folded} older report${folded === 1 ? '' : 's'} on a session a newer report on it follows ${folded === 1 ? 'was' : 'were'} marked read: the newest report on each session says how it stands.`,
       facts: { quiet: true, handedOver: true },
       dedupeKey: `handover:${to}:${hash16(messageIds)}`,
     })

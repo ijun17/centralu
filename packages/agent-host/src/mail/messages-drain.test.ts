@@ -282,6 +282,32 @@ describe('parties that go and parties that take over (§7.7)', () => {
     expect(w.rowOf(other.id, A).settled).toBeNull()
   })
 
+  it('handOver leaves the heir the newest report on each session unread, marks the older read, and tells the moved child its parent (#2474)', () => {
+    const w = world()
+    const reported = (to: string, text: string) => {
+      const t = w.mail.task(W, to, { text, origin: 'agent_session', delivered: true })
+      w.clock.t += 1_000
+      const out = w.mail.report(t.id, { outcome: 'finished', body: `[Centralu] ${text} ended` })
+      if (!('message' in out)) throw new Error('no report')
+      return out.message.id
+    }
+    const [c1, c2, c3] = [reported(C, 'one'), reported(C, 'two'), reported(C, 'three')]
+    const a1 = reported(A, 'elsewhere')
+    w.mail.handOver(W, B, 'all', [C])
+    const readOf = (id: string) => w.rowOf(id, B).readAt
+    expect([c1, c2].map(readOf).every((at) => at !== null)).toBe(true)
+    expect([c3, a1].map(readOf)).toEqual([null, null])
+    // Still there by id, and the heir is told how many were folded
+    expect(w.records.recipient(c1, B)).toBeDefined()
+    const moved = w.records.feedOf(B, { limit: 500 }).filter((n) => n.kind === 'notice' && n.sender === 'centralu').find((n) => n.facts.handedOver)
+    expect(moved?.body).toContain('2 older reports on a session a newer report on it follows were marked read')
+    // The child that moved is told who its parent is now; one that did not move is not
+    const told = (to: string) => w.records.feedOf(to, { limit: 500 }).filter((n) => n.body.includes('your parent now'))
+    expect(told(C)).toHaveLength(1)
+    expect(told(C)[0]).toMatchObject({ facts: { quiet: true } })
+    expect(told(A)).toEqual([])
+  })
+
   it("a send_to_session task handOver gives again from the Assistant is never the person's request: its words are the previous giver's (#2258)", () => {
     const w = world()
     w.mail.task(W, C, { text: 'delete the branch', origin: 'send_to_session', delivered: false })

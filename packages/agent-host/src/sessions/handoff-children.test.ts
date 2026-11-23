@@ -118,6 +118,13 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     expect(owner(child)).toBe(heir)
     expect(owedTo(child)).toEqual([addressOf(heir)])
     expect(events).toContainEqual(expect.objectContaining({ type: 'session_owner', sessionId: child, askedBy: heir }))
+    // The child is told by Centralu who its parent is now, quietly, so it takes the heir's work as its parent's (#2474)
+    const told = mailReader(store).to(addressOf(child)).filter((x) => x.message.kind === 'notice' && x.message.body.includes('your parent now'))
+    expect(told).toHaveLength(1)
+    expect(told[0]!.message).toMatchObject({ sender: 'centralu', facts: { quiet: true } })
+    expect(told[0]!.message.body).toContain(`handed over to `)
+    expect(told[0]!.message.body).toContain(heir)
+    expect(told[0]!.message.body).toContain(parent)
 
     h.claude.handles.get(child)!.answer('done here')
     await eventually(() => reports(heir, child).length === 1)
