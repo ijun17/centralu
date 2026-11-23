@@ -29,7 +29,7 @@
 //             same number each pass CI alone and clash only when the second lands. `gh` lists the open pull
 //             requests; the stack's own are left out. The Assistant assigns the numbers; this is the backstop.
 //   readers   the vitest files the branch did not change that quote, word for word, a sentence it took out of a code file that is
-//             not a test (a quoted string of SENTENCE_MIN characters or more, on a removed line, in no file but a test), run at the
+//             not a test (a quoted string of SENTENCE_MIN characters or more, on a removed line, in no other code file), run at the
 //             head: a test in another folder that asserts on a tool definition's old sentence failed only in CI (#2494, #2495).
 //   revert    each new or changed vitest file is run at the head with every other change of the pull
 //             request reverted to its base: a new test that passes there protects nothing
