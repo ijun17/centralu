@@ -30,6 +30,18 @@ describe('guard/promises', () => {
     expect(unownedPromises('src/x.ts', text)).toEqual(['2: a later release sends', '5: TODO', '6: not supported yet'])
   })
 
+  it('asks the sentence that holds the promise for its issue, not the whole block', () => {
+    const text = [
+      '// See #12 for why the copy is kept. A later release removes the copy.',
+      '// A later release removes the old key, e.g. the one #1141 wrote, once no build reads it (#2481).',
+      '// TODO: events are dropped when the queue is full',
+      '/*',
+      '  a later release drops this table',
+      '*/',
+    ].join('\n')
+    expect(unownedPromises('src/x.ts', text)).toEqual(['1: A later release removes', '3: TODO', '5: a later release drops'])
+  })
+
   it('reads only comments, and not a quotation in one or words that only sound like a promise', () => {
     const text = [
       "const message = 'Linux on arm is not supported yet'",

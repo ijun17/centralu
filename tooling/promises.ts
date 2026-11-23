@@ -1,7 +1,7 @@
 /**
  * `guard/promises` (#2488 item 2): a code comment that promises work for later ("TODO", "a later release removes …", "not
- * supported yet") names the issue that carries it (#N) or says "dropped: <why>", in the same sentence. An
- * umbrella issue closed with such a sentence in code loses the work without a trace (the plan audit of 2026-11-23).
+ * supported yet") names the issue that carries it (#N) or says "dropped: <why>", in the same sentence: an umbrella issue
+ * closed while such a sentence stands in code loses the work without a trace.
  */
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
@@ -22,23 +22,28 @@ const LATER = new RegExp(
   ].join('|'),
   'i',
 )
-const CARRIED = /#\d+|\bdropped\b/i
+const CARRIED = /#\d+|\bdropped:/i
+/** Where a sentence ends: not inside "e.g.", "i.e.", "etc." or "vs." */
+const END = /(?<!\b(?:e\.g|i\.e|etc|vs))[.!?]\s/g
+
+/** A comment's words, with quoted text taken out: a quotation is not a promise */
+const words = (t: string) => t.replace(/"[^"]*"|`[^`]*`/g, '""').trim()
 
 /**
- * The comment on a line, or null: what follows `//`, `/*`, a leading `*` or (YAML) `#`; quoted text in it is a quotation,
- * not a promise. `starts`: it begins a block of its own (`/*`, or a comment after code)
+ * The comment on a line, or null: what follows `//`, `/*`, a leading `*` or (YAML) `#`. `starts`: it begins a block of its
+ * own (`/*`, or a comment after code)
  */
 function commentOf(line: string, yaml: boolean): { text: string; starts: boolean } | null {
   const own = yaml ? /^\s*#(.*)$/.exec(line) : /^\s*(\/\/|\/\*+|\*(?!\/))(.*)$/.exec(line)
   const after = own || yaml ? null : /\s\/\/(.*)$/.exec(line)
   const text = own ? (yaml ? own[1] : own[2]) : after?.[1]
   if (text === undefined) return null
-  return { text: text.replace(/"[^"]*"|`[^`]*`/g, '""').trim(), starts: !!after || (!!own && !yaml && own[1].startsWith('/*')) }
+  return { text: words(text), starts: !!after || (!!own && !yaml && own[1].startsWith('/*')) }
 }
 
 /**
- * Each promise in `text` (the file at `path`) whose sentence carries no issue and no "dropped", as `<line>: <the words>`. The
- * sentence, not the block: a long comment cites issues of its own, which say nothing of what the promise leaves for later.
+ * Each promise in `text` (the file at `path`) whose sentence carries no issue and no "dropped:", as `<line>: <the words>`.
+ * The sentence, not the block: a long comment cites issues of its own, which say nothing of what the promise leaves for later.
  */
 export function unownedPromises(path: string, text: string): string[] {
   const yaml = /\.ya?ml$/.test(path)
@@ -55,14 +60,17 @@ export function unownedPromises(path: string, text: string): string[] {
       const m = MARKER.exec(l.text) ?? LATER.exec(l.text)
       if (!m) return
       const at = starts[k] + m.index
-      const from = Math.max(0, ...[...joined.slice(0, at).matchAll(/[.!?]\s/g)].map((x) => x.index + 2))
-      const end = joined.slice(at).search(/[.!?]\s/)
+      const from = Math.max(0, ...[...joined.slice(0, at).matchAll(END)].map((x) => x.index + 2))
+      const end = joined.slice(at).search(new RegExp(END.source))
       if (!CARRIED.test(joined.slice(from, end < 0 ? joined.length : at + end + 1))) found.push(`${l.at + 1}: ${m[0]}`)
     })
     block = []
   }
+  // Inside a `/*` opened at the start of a line, a line without a leading `*` is comment too
+  let open = false
   text.split('\n').forEach((line, i) => {
-    const comment = commentOf(line, yaml)
+    const comment = open && !/^\s*\*/.test(line) ? { text: words(line.replace(/\*\/.*$/, '')), starts: false } : commentOf(line, yaml)
+    if (!yaml) open = /^\s*\/\*/.test(line) ? !/\*\//.test(line) : open && !/\*\//.test(line)
     if (comment === null || comment.starts) close()
     if (comment !== null) block.push({ at: i, text: comment.text })
     // A comment after code is a block of its own; a `/*` goes on to the lines under it
