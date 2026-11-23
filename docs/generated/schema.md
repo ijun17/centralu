@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 77, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 78, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -21,7 +21,6 @@ Only foreign keys the schema declares are drawn; references kept by convention (
 ```mermaid
 erDiagram
   sessions |o--o{ grid_layout : "session_id"
-  sessions ||--o{ grid_panels : "session_id"
   projects ||--o{ machine_ask_consents : "project_id"
   linked_machines ||--o{ machine_ask_consents : "machine_id"
   linked_machines ||--o{ machine_headers : "machine_id"
@@ -148,10 +147,6 @@ erDiagram
     TEXT remote_session_id
     TEXT remote_app_id
     TEXT app_machine
-  }
-  grid_panels {
-    TEXT session_id PK, FK
-    INTEGER position
   }
   linked_machines {
     TEXT id PK
@@ -564,15 +559,6 @@ Added in v42.
 | `remote_session_id` | TEXT | yes |  |  | v46 |
 | `remote_app_id` | TEXT | yes |  |  | v47 |
 | `app_machine` | TEXT | yes |  |  | v47 |
-
-### `grid_panels`
-
-Added in v9.
-
-| Column | Type | Null | Default | Key | Added in |
-|---|---|---|---|---|---|
-| `session_id` | TEXT | yes |  | PK, FK → `sessions.id` (cascade) | v9 |
-| `position` | INTEGER | no |  |  | v9 |
 
 ### `linked_machines`
 

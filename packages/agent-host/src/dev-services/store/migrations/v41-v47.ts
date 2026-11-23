@@ -50,7 +50,7 @@ export class StepsV41ToV47 extends MigrationRange {
          * Expand only (#292): `grid_panels` stays as v9 made it for a v41 host, whose insert names neither NOT NULL
          * `panel_key` nor `kind`. Its rows whose session still exists (an orphan would fail the key; listGridView joins
          * `sessions`) are copied once, when this table is created; after that the builds' grids may differ, a layout,
-         * not a record. Dropping `grid_panels` is a later, breaking step.
+         * not a record. Step 78 drops `grid_panels`.
          */
         run: () => {
           const has = (name: string) =>

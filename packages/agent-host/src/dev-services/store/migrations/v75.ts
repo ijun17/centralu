@@ -62,6 +62,29 @@ export class StepsV75 extends MigrationRange {
          */
         run: () => this.addColumn('mail_recipients', 'given_again_at', 'INTEGER'),
       },
+      {
+        to: 78,
+        breaksOlderReaders: true,
+        minReader: 75,
+        /**
+         * Two clean-ups that ran at every start or waited for a breaking step (#2481), done once here.
+         *
+         * `grid_panels` goes: step 47 copied it into the workspace, and only migration steps up to 47 name it. The builds the floor (75) admits
+         * neither read nor write it, so they open the store.
+         *
+         * Every "always allow" rule whose matcher ends in `*` goes (#838; the owner's yes on #1143, 2026-11-12, session-manager-split.md §7). A build
+         * before #908 read such a rule as a prefix; since #908 a rule matches exactly and none of them allows anything. Every start deleted them
+         * until now. Once is enough: the builds before #908 are far below the floor and cannot open the store, so a rule ending in `*` written
+         * later is inert in every build that can.
+         *
+         * Breaking, as a drop and a delete of the person's rules are (rule 2 above `migrationSteps`), so the store is copied first; the floor stays 75:
+         * the builds of v75 to v77 name neither, and open the store.
+         */
+        run: () => {
+          this.db.exec(`DROP TABLE IF EXISTS grid_panels`)
+          this.db.exec(`DELETE FROM approval_rules WHERE substr(matcher, -1) = '*'`)
+        },
+      },
     ]
   }
 
