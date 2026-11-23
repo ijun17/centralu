@@ -38,6 +38,8 @@ export type DriftDeps = {
   env: SurfaceEnv
   record?: boolean
   fileIssue?: boolean
+  /** A tool this run does not read, with the reason said in the log (`--skip tool:reason`): a tool the runner cannot have installed */
+  skip?: ReadonlyMap<string, string>
   gh?: Gh
   /** Writes a baseline file (`--record`) */
   write?: (path: string, text: string) => void
@@ -78,6 +80,11 @@ export async function runSurfaceDrift(deps: DriftDeps): Promise<number> {
   const today = deps.today ?? new Date().toISOString().slice(0, 10)
   let failed = 0
   for (const [tool, adapter] of deps.adapters) {
+    const skipped = deps.skip?.get(tool)
+    if (skipped !== undefined) {
+      log(`[surface] ${tool}: not read: ${skipped}`)
+      continue
+    }
     const surface = adapter.surface
     if (!surface) {
       log(`[surface] ${tool}: declares no surface, so nothing watches what it offers (adapters/contract/surface.ts)`)
@@ -147,6 +154,17 @@ export function latestEnv({ timeoutMs = RUN_LIMIT_MS }: { timeoutMs?: number } =
   return { env, dispose: () => temps.forEach((d) => rmSync(d, { recursive: true, force: true })) }
 }
 
+/** The `--skip tool:reason` arguments, each a tool this run leaves unread, with the reason its log line gives */
+export function skippedTools(argv: readonly string[]): Map<string, string> {
+  const skipped = new Map<string, string>()
+  argv.forEach((arg, i) => {
+    if (arg !== '--skip') return
+    const [tool = '', ...reason] = (argv[i + 1] ?? '').split(':')
+    if (tool) skipped.set(tool, reason.join(':').trim() || 'skipped')
+  })
+  return skipped
+}
+
 if (isMain(import.meta.url)) {
   const { env, dispose } = latestEnv()
   try {
@@ -155,6 +173,7 @@ if (isMain(import.meta.url)) {
       env,
       record: process.argv.includes('--record'),
       fileIssue: process.argv.includes('--file-issue'),
+      skip: skippedTools(process.argv),
     })
   } finally {
     dispose()

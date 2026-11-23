@@ -783,8 +783,8 @@ ourselves:
 - its entry points split stable and unstable features and moved between releases (its 2.0 migration guide); our
   surface is a dozen methods and update kinds.
 
-It stays useful for the drift check: a dev-only step that reads the SDK's published `schema.json` and fails when a
-method or update kind in our contract (`known-updates.ts`, `wire.ts`) leaves it, as `codex:bindings --check` does.
+It is used for the drift check: `pnpm drift:acp-schema` (#2480) reads the SDK's published `schema/v1/schema.unstable.json` and fails when a
+method or update kind in our contract (`schema-contract.ts`, from `known-updates.ts` and `wire.ts`) leaves it, as `codex:bindings --check` does.
 
 ## 12. What the UI needs
 

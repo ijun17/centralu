@@ -5,7 +5,7 @@ import { delimiter, join } from 'node:path'
 import type { AdapterSurface, SurfaceEnv, ToolSurface } from '../packages/agent-host/src/adapters/contract.js'
 import { baselineSource } from '../packages/agent-host/src/adapters/surface-drift.js'
 import { alive, cleanUp, plantTreeScript, settle, treePids } from '../packages/agent-host/src/dev-services/process-tree.test-helpers.js'
-import { latestEnv, runSurfaceDrift, type Gh } from '../scripts/surface-drift.mjs'
+import { latestEnv, runSurfaceDrift, skippedTools, type Gh } from '../scripts/surface-drift.mjs'
 import { SLOW } from './test-timing.js'
 
 /*
@@ -113,6 +113,27 @@ describe('the surface drift run', () => {
     expect(code).toBe(1)
     expect(lines.join('\n')).toContain('broken: ServerRequest declares no methods')
     expect(lines.join('\n')).toContain('codex: 2 finding(s)')
+  })
+
+  it('leaves a skipped tool unread, says why, and stays green when the others are fine', async () => {
+    const lines: string[] = []
+    const code = await runSurfaceDrift({
+      adapters: new Map([
+        ['unreachable', { surface: surfaceOf(new Error('not installed on this machine')) }],
+        ['codex', { surface: surfaceOf({ version: 'codex-cli 0.160.0', offered: baseline.offered }) }],
+      ]),
+      env,
+      skip: new Map([['unreachable', 'unwatched until it can be installed on the runner (#2480)']]),
+      log: (l) => lines.push(l),
+    })
+    expect(code).toBe(0)
+    expect(lines.join('\n')).toContain('unreachable: not read: unwatched until it can be installed on the runner (#2480)')
+    expect(lines.join('\n')).toContain('codex: nothing new since codex-cli 0.160.0')
+  })
+
+  it('reads each --skip tool:reason, keeping a colon inside the reason', () => {
+    expect([...skippedTools(['--file-issue', '--skip', 'agy:no runner: yet (#1)', '--skip', 'other'])]).toEqual([['agy', 'no runner: yet (#1)'], ['other', 'skipped']])
+    expect(skippedTools(['--record']).size).toBe(0)
   })
 
   it('goes red for a shipped adapter that declares no surface', async () => {

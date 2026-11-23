@@ -132,7 +132,7 @@ jobs:
   # not reviewed, or no longer need a limitation it works around?". Every adapter fills in the contract's `surface`, and
   # this job reads it for each, so a new adapter is watched without editing this file. Findings are news, not a break:
   # they go into one issue per tool (left alone while the week finds the same things), and the job stays green. It goes
-  # red when a surface cannot be read, the issue cannot be filed, or a name Cursor's usage read depends on is gone.
+  # red when a surface cannot be read, the issue cannot be filed, a name Cursor's usage read depends on is gone, or the ACP SDK's schema has lost one the ACP adapter uses.
   surface:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -159,16 +159,19 @@ jobs:
         # What runs on a person's machine is their installed CLI, not the SDK, so the CLIs are read too: their
         # --version and --help, and Codex's generated protocol. No session, no turn, no login.
         run: |
-          npm install -g @anthropic-ai/claude-code@latest @openai/codex@latest
+          npm install -g @anthropic-ai/claude-code@latest @openai/codex@latest opencode-ai@latest
           claude --version
           codex --version
+          opencode --version
           # Cursor CLI is not on npm: its own installer puts `cursor-agent` and `agent` in ~/.local/bin. Its surface is
           # read from `--help`, the ACP server's `initialize` (no login needed) and its bundle (adapters/cursor-agent/surface.ts)
           curl https://cursor.com/install -fsS | bash
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/cursor-agent" --version
 
-      - run: pnpm drift:surface --file-issue
+      # Antigravity is installed by Centralu's own managed install (about 700 MB), which this runner does not have, so its surface
+      # cannot be read here; skipping it says so in the log, so a red job means something again (#2480)
+      - run: pnpm drift:surface --file-issue --skip "antigravity:unwatched by drift until it can be installed on the runner (#2480)"
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -176,3 +179,8 @@ jobs:
       # Run whatever the surface step did, so one red step cannot hide the other
       - if: ${{ !cancelled() }}
         run: pnpm drift:cursor-usage
+
+      # Also a break, not news: the ACP SDK's published schema must still carry every method and update kind the ACP adapter uses
+      # (adapters/acp/schema-contract.ts). Installs the SDK at @latest into a temp folder
+      - if: ${{ !cancelled() }}
+        run: pnpm drift:acp-schema
