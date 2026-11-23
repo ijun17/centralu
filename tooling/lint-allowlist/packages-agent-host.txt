@@ -148,7 +148,7 @@ packages/agent-host/src/adapters/local-process.ts @typescript-eslint/no-unsafe-t
 packages/agent-host/src/adapters/surface-read.ts @typescript-eslint/no-non-null-assertion 9
 packages/agent-host/src/adapters/tool-titles.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/agent-versions.ts @typescript-eslint/no-non-null-assertion 1
-packages/agent-host/src/agent-versions.ts @typescript-eslint/no-unsafe-type-assertion 2
+packages/agent-host/src/agent-versions.ts @typescript-eslint/no-unsafe-type-assertion 1
 packages/agent-host/src/app-home-view.test.ts @typescript-eslint/no-base-to-string 1
 packages/agent-host/src/app-home-view.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/app-secrets.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
@@ -261,7 +261,7 @@ packages/agent-host/src/links/update.ts @typescript-eslint/no-unsafe-type-assert
 packages/agent-host/src/log-file.test.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/log-file.ts @typescript-eslint/no-unnecessary-type-assertion 1
 packages/agent-host/src/log-file.ts @typescript-eslint/no-unsafe-type-assertion 4
-packages/agent-host/src/main.ts @typescript-eslint/no-unsafe-type-assertion 6
+packages/agent-host/src/main.ts @typescript-eslint/no-unsafe-type-assertion 5
 packages/agent-host/src/main.ts @typescript-eslint/restrict-template-expressions 2
 packages/agent-host/src/main.ts @typescript-eslint/unbound-method 6
 packages/agent-host/src/rpc.ts @typescript-eslint/no-unsafe-type-assertion 2

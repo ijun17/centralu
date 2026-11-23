@@ -100,8 +100,9 @@ export const HubMailParams = z.object({
 export type HubMailParams = z.infer<typeof HubMailParams>
 /** A refusal writes nothing; `not_yours`: this hub did not start that session (another hub may have) */
 export const HubMailResult = z.union([
-  // `address`: the recipient as the hub names it, which the sender's copy is kept under
-  z.object({ ok: z.literal(true), messageId: z.string().min(1).max(200), to: z.string().max(500), address: z.string().max(300).optional() }),
+  // `address`: the recipient as the hub names it, which the sender's copy is kept under. `quiet` (#2520, additive): the receiver, which owns its wake,
+  // wrote it as an answer that wakes no one (D3); a side from before it never says, and its sender says nothing of it
+  z.object({ ok: z.literal(true), messageId: z.string().min(1).max(200), to: z.string().max(500), address: z.string().max(300).optional(), quiet: z.literal(true).optional() }),
   z.object({ ok: z.literal(false), why: z.string().min(1).max(100), text: z.string().max(4000) }),
 ])
 export type HubMailResult = z.infer<typeof HubMailResult>

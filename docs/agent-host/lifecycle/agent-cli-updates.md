@@ -36,7 +36,6 @@ its background work.
 | The header's action (`agents.applyVersions`) restarts every idle outdated session at once, without the quiet period | The update is app-wide; a person who just updated wants every session on it. A busy one is listed and keeps the line |
 | The restart is the manager's `restartSession` | The same path as "Restart agent": the handle is disposed (stdin closed, then a signal), and the session resumes in a newly spawned process. Nothing is re-attached, so the new process is the new CLI (`sessions/agent-versions-restart.test.ts`) |
 | The conversation gets one line from Centralu, "Claude Code restarted on 2.1.290 (was 2.1.282). The conversation continues." | A process restarted by itself is never silent |
-| The installed versions last seen are kept (`agents.versionsSeen`) | An update made while the app was closed still counts as a change |
 
 **Default tool resolution (#573).**
 
@@ -77,10 +76,6 @@ same safe boundary, and records the new fingerprint.
 Both changed and previously unrecorded launch settings use the `launch_settings` cache rebuild cause
 ("launch settings changed"); the restart log says "launch settings changed or previously unrecorded".
 This is separate from `instructions` ("tools changed").
-
-**The capability check seam** (#270). On every change of an installed CLI's version the service calls
-`capabilityCheck({ tool, from, to })`. #270 proposes re-running the probes for what a tool could not do when its version
-moves; nothing implements that yet, so the default writes one line to host.log saying so. The probes plug in there.
 
 ## Putting idle sessions to sleep (#568)
 

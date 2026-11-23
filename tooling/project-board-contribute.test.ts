@@ -211,7 +211,7 @@ describe('the items an issue plans, and where each went', () => {
       '2. **Doc guard**: later,',
       '   once the rest is in.',
       '3. Templates: dropped: folded into 1.',
-      '4. Read docs/plans/acp-adapter.md#13-the-pull-requests, plans/acp-adapter.md#13-the-pull-requests and &#35;5 first.',
+      '4. Read docs/plans/acp-adapter.md#13-the-pull-requests, plans/acp-adapter.md#13-the-pull-requests, plans/acp-adapter.md#13 and &#35;5 first.',
       '',
       '- [x] ticked',
       '- [ ] an open box',
@@ -221,7 +221,7 @@ describe('the items an issue plans, and where each went', () => {
       '',
       '1. The queue refused it',
       '',
-      '## Repro',
+      '## Steps to reproduce',
       '',
       '1. Open the app',
       '',
@@ -252,7 +252,7 @@ describe('the items an issue plans, and where each went', () => {
       ['1. **Close rule**: built in #2495.', 'carried'],
       ['2. **Doc guard**: later, once the rest is in.', null],
       ['3. Templates: dropped: folded into 1.', 'dropped'],
-      ['4. Read docs/plans/acp-adapter.md#13-the-pull-requests, plans/acp-adapter.md#13-the-pull-requests and &#35;5 first.', null],
+      ['4. Read docs/plans/acp-adapter.md#13-the-pull-requests, plans/acp-adapter.md#13-the-pull-requests, plans/acp-adapter.md#13 and &#35;5 first.', null],
       ['ticked', 'ticked'],
       ['an open box', null],
       ['| 1 | Factories | #2384 |', 'carried'],
@@ -262,6 +262,9 @@ describe('the items an issue plans, and where each went', () => {
     expect(planItems('## To do\n\n1. Built by https://github.com/ijun17/centralu/pull/7')[0].state).toBe('carried')
     // Facts, causes and observations are not work: without a heading of work no numbered line is an item
     expect(planItems('1. The cache is stale\n2. The read races the write')).toEqual([])
+    // A bug's steps to reproduce are not work, but work on making something reproducible is
+    expect(planItems('## Repro steps\n\n1. Open the app')).toEqual([])
+    expect(planItems('## Fix: make the build reproducible\n\n1. Pin the clock')).toHaveLength(1)
   })
 
   it('reads the plan sections an issue cites, in the forms guard/doc-refs reads, and names the plans it cites with no section', () => {

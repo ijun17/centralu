@@ -76,8 +76,6 @@ describe('the agent version service (#297)', () => {
   let installed: string | null = '2.1.290'
   let sessions: FakeSessions
   let published: AgentVersions[]
-  let checks: { tool: string; from: string; to: string }[]
-  let seen: Record<string, string>
   let autoApply = true
 
   const make = () =>
@@ -89,9 +87,6 @@ describe('the agent version service (#297)', () => {
       publish: (s) => published.push(s),
       readAutoApply: () => autoApply,
       writeAutoApply: (v) => (autoApply = v),
-      readSeen: () => seen,
-      writeSeen: (v) => (seen = v),
-      capabilityCheck: (c) => checks.push(c),
       now: () => now,
       quietMs: 60_000,
     })
@@ -103,8 +98,6 @@ describe('the agent version service (#297)', () => {
     autoApply = true
     sessions = new FakeSessions()
     published = []
-    checks = []
-    seen = {}
   })
   afterEach(() => {
     vi.useRealTimers()
@@ -234,16 +227,6 @@ describe('the agent version service (#297)', () => {
     expect(autoApply).toBe(false)
     await advance(120_000)
     expect(sessions.restarted).toEqual([])
-  })
-
-  it('runs the capability check seam once when an installed CLI changes version, also across a host restart (#270)', async () => {
-    seen = { claude: '2.1.282' }
-    const svc = make()
-    await svc.check(true)
-    expect(checks).toEqual([{ tool: 'claude', from: '2.1.282', to: '2.1.290' }])
-    expect(seen).toEqual({ claude: '2.1.290' })
-    await svc.check(true)
-    expect(checks).toHaveLength(1)
   })
 
   it('a focus soon after a reading answers with it; a process reporting a newer CLI than the reading reads again', async () => {

@@ -229,11 +229,11 @@ the dead method it alone called. Line counts are measured and written in each pu
 | 1 | **This document** | `docs/plans/host-big-files.md` | +about 250 |
 | 2 | **`memory.ts` dead code and copies** (§1 dead, `at()`, `statAt`, `runIn`, `nextPid`, `findProgram` returning the entry) | `os/memory.ts` | −45 (landed, §5.1) |
 | 3 | **`messages.ts` dead code** (§2 dead: `turnStarted`, `feed`, `heldByProject`, the alias, stale text; with the store's `markTurn`) | `mail/messages.ts`, `frame.ts`, `asked-by.ts`, three tests | −37 source, −29 test (landed, §5.1) |
-| 4 | `remote-agents.ts` dead code and `patch`/tail helpers (§3) | `sessions/remote-agents.ts`, lint allowlist | about −40 |
-| 5 | `memory.ts` against `real.ts`: the signal gate, `clock.sleep`, the shell choice in shared helpers (not done); the two drifts with contract cases first (#2107) | `os/memory.ts`, `os/real.ts`, `os/rules.ts` | about −25 net; the drifts landed, the helpers did not |
+| 4 | `remote-agents.ts` dead code and `patch`/tail helpers (§3) | `sessions/remote-agents.ts`, lint allowlist | dropped: the file was rewritten since (1,560 to 786 lines, #2436 took its unused exports), so §3 no longer describes it; what is left is for the next change to it |
+| 5 | `memory.ts` against `real.ts`: the signal gate, `clock.sleep`, the shell choice in shared helpers (not done); the two drifts with contract cases first (#2107) | `os/memory.ts`, `os/real.ts`, `os/rules.ts` | the drifts landed; the helpers dropped: a helper shared by the real OS and its fake ties the fake to the code it stands in for, for about 25 lines |
 | 6 | The start gate of a remote agent calls `agentStartGateError` (drift 1), a bug with a failing test | `remote-agents.ts`, test | #2112 (landed, §5.2) |
 | 7 | `delete` clears held notes before it interrupts (drift 2), once a test shows it | `remote-agents.ts`, test | #2109 (landed, §5.2) |
-| 8 | Moves: `memory.ts` into its seven modules; then the `messages.ts` modules after #2067; then the three `remote-agents.ts` modules after turn-owned-by-no-one | | moved, +20–40 per module |
+| 8 | Moves: `memory.ts` into its seven modules; then the `messages.ts` modules after #2067; then the three `remote-agents.ts` modules after turn-owned-by-no-one | | dropped: each move adds 20–40 lines and deletes none, against this plan's deletions first and moves only where they make the code smaller (top) |
 
 This round started with 1–3 and went on with what §5.2 lists.
 

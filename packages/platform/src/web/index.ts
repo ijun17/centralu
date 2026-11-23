@@ -29,6 +29,21 @@ import { SUBAGENT_STEPS_PAGE } from '@cc/protocol/client'
 import { isAppToolResult } from '../app-tool-result.js'
 import { RpcClient } from './rpc-client.js'
 
+/**
+ * A call under the Assistant's name, and the same call under the old one when the host does not know it: a host older
+ * than beta.54 (`assistant.*`, #2140) or beta.57 (the skills, #2166), such as a `centralu serve` the hub installed at
+ * whatever version, answers only the old names (docs/plans/assistant-rename.md §3.3). Matched on the host's own words,
+ * as it answers every method it lacks with the same code.
+ */
+async function renamed<T>(call: () => Promise<T>, old: () => Promise<T>): Promise<T> {
+  try {
+    return await call()
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith('Unknown method:')) return old()
+    throw e
+  }
+}
+
 /** The browser (dev) implementation, which the Tauri one reuses as is (docs/platform-abstraction.md §5) */
 export type WebPlatformOptions = {
   /** A new port and token when the host restarts (from Tauri) */
@@ -80,16 +95,14 @@ class WebAgentPort implements AgentPort {
     return this.rpc.call('sessions.reorder', { projectId, orderedIds })
   }
 
-  // The old names, which every host answers (docs/plans/assistant-rename.md §3.3): the window can reach a host older
-  // than step 3 (an earlier keeper, or on Windows a `centralu serve` the hub installed at whatever version)
   assistant() {
-    return this.rpc.call('orchestrator.get', {})
+    return renamed(() => this.rpc.call('assistant.get', {}), () => this.rpc.call('orchestrator.get', {}))
   }
   assistantPeek() {
-    return this.rpc.call('orchestrator.peek', {})
+    return renamed(() => this.rpc.call('assistant.peek', {}), () => this.rpc.call('orchestrator.peek', {}))
   }
   configureAssistant(tool: ToolName) {
-    return done(this.rpc.call('orchestrator.configure', { tool }))
+    return done(renamed(() => this.rpc.call('assistant.configure', { tool }), () => this.rpc.call('orchestrator.configure', { tool })))
   }
   switchTool(sessionId: string, tool: ToolName) {
     return this.rpc.call('agents.switchTool', { sessionId, tool })
@@ -150,10 +163,10 @@ class WebAgentPort implements AgentPort {
     return done(this.rpc.call('agents.resolveSkillProposal', { name, approve }))
   }
   async assistantSkills() {
-    return this.rpc.call('agents.orchestratorSkills', {})
+    return renamed(() => this.rpc.call('agents.assistantSkills', {}), () => this.rpc.call('agents.orchestratorSkills', {}))
   }
   deleteAssistantSkill(name: string) {
-    return done(this.rpc.call('agents.deleteOrchestratorSkill', { name }))
+    return done(renamed(() => this.rpc.call('agents.deleteAssistantSkill', { name }), () => this.rpc.call('agents.deleteOrchestratorSkill', { name })))
   }
 
   deleteSession(sessionId: string, deleteWorktree = false, deleteExternal = false) {

@@ -604,6 +604,13 @@ By Windows time saved and risk:
 | 3e | Apps runtime | 208 s of real Node processes per app; placement and discovery (files) move, the runtime tests stay |
 | 3f | Keeper-facing parts: `lifecycle/`, `keeper/`, the handover | small (≤ 40 s) and the highest risk; with runtime-unification's steps |
 
+**Where step 3 stands (2026-11-23).** The `Os` interface landed (#1650). 3c goes with the shared session core: its process seam
+is that core's PR 4 (#1654). The owner paused 3a, 3b, 3d, 3e and 3f on 2026-10-27 so that the shared session core (#1654) comes
+first (#1599). The parks that held 3d and 3f back are lifted: #1626 and #1615 are merged. With keeper-removal (#1895
+option C), 3f shrinks to what of `lifecycle/` and `keeper/` stays (keeper-removal.md). The paused steps resume when #1654
+is closed, or earlier when the owner says so. Until then `tooling/os-allowlist.txt` only shrinks (356 lines on main
+today; 384 files on 2026-10-27).
+
 ## 8. Decisions and open questions
 
 Answered by the owner's session, 2026-10-26:

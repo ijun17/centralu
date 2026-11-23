@@ -18,7 +18,8 @@ import type { RefComputers } from './session-refs.js'
  * What a send across came to: the message id on both sides, the recipient's name and computer; or why not, with nothing written. `held`: the link to
  * that computer is down, so the copy here is held for it (`LINK_HOLD`) and nothing went yet (`heldLine` says so)
  */
-export type AcrossSent = { ok: true; messageId: string; to: string; address: string; computer: string; held?: true } | { ok: false; why: string; text: string }
+/** `quiet`: the receiver wrote it as an answer that wakes no one (`HubMailResult.quiet`) */
+export type AcrossSent = { ok: true; messageId: string; to: string; address: string; computer: string; held?: true; quiet?: true } | { ok: false; why: string; text: string }
 
 /**
  * How long what a session did while a link was down still stands once it is back: held mail goes by itself
@@ -120,7 +121,7 @@ const UNSURE_MAX = 500
 export type Kept = { text: string; needsReply: boolean; urgent?: boolean; replyTo?: string; question?: true }
 
 /** The other side's answer to one call (`AcrossCore.ask`): written there, or refused; `maybe`: it may have been written there */
-export type Answer = { ok: true; messageId: string; to: string; address?: string } | { ok: false; why: string; text: string; maybe?: boolean }
+export type Answer = { ok: true; messageId: string; to: string; address?: string; quiet?: true } | { ok: false; why: string; text: string; maybe?: boolean }
 
 /** A send to a side not connected now: not sent */
 export const unreachable = (peer: AcrossPeer) => ({ ok: false as const, why: 'link_down', text: `${peer.name} is not reachable right now, so nothing was sent. Send it again once the link is back.` })
@@ -279,7 +280,7 @@ export class AcrossCore {
     if (!parsed.success) return { ok: false, why: 'link_down', maybe: true, text: `${peer.name} answered in a form this computer does not read, so it is not known whether the message arrived. ${AGAIN}` }
     const r = parsed.data
     if (!r.ok) return { ok: false, why: /^[a-z_]{1,40}$/.test(r.why) ? r.why : 'refused', text: r.text.length > 4000 ? `${r.text.slice(0, 4000)}…` : r.text }
-    return { ok: true, messageId: oneLineText(r.messageId, 200), to: oneLineText(r.to, 120), ...(r.address ? { address: r.address } : {}) }
+    return { ok: true, messageId: oneLineText(r.messageId, 200), to: oneLineText(r.to, 120), ...(r.address ? { address: r.address } : {}), ...(r.quiet ? { quiet: true as const } : {}) }
   }
 
   /** A session here as the other side's answer names it, to `reader` there in its terms; written whatever its label */

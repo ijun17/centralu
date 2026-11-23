@@ -15,6 +15,8 @@ export type ReachHost = {
   hostId: string
   /** A session: its project, the session that started it, whether it is here (not in the trash or deleted), whether its seat has the `mail` tool, and which computer. Undefined: never here */
   session(id: string): { projectId: string | null; askedBy: string | null; here: boolean; canReadMail: boolean; host: 'here' | 'elsewhere'; name?: string } | undefined
+  /** The session on another computer that started session `id` here (a hub's start_agent, #2520), by its address: its parent, as `askedBy` is one here */
+  starterElsewhere?(id: string): string | null
   /** The Assistant's session id, or null before it exists */
   assistantId(): string | null
   appCalledBy(app: string, session: string): boolean
@@ -86,9 +88,11 @@ export function mailReach(host: ReachHost): MailReach {
     askGroupMembers: (address) => host.askGroupMembers(address),
     projectOf: (address) => sessionOf(address)?.info?.projectId ?? null,
     parentOf: (address) => {
-      const parent = sessionOf(address)?.info?.askedBy
+      const s = sessionOf(address)
       const party = parseAddress(address)
-      return parent && party?.kind === 'session' ? sessionAddress(party.host, parent) : null
+      if (!s?.info || party?.kind !== 'session') return null
+      if (s.info.askedBy) return sessionAddress(party.host, s.info.askedBy)
+      return s.info.host === 'here' && party.host === host.hostId ? (host.starterElsewhere?.(s.id) ?? null) : null
     },
     labelOf: (address, reader) => sessionOf(address)?.info?.name ?? shownId(address, reader),
     shownId,
