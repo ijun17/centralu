@@ -118,14 +118,20 @@ describe('a task marked handled by its receiver (#2493)', () => {
     let take = () => {}
     w.behaviour.hold = new Promise<void>((r) => (take = r))
     const a = w.mail.task(A, B, { text: 'and review #13', origin: 'agent_session', delivered: false })
-    const d = w.mail.task(D, B, { text: 'and the changelog', origin: 'agent_session', delivered: false })
     await w.advance(5_000)
+    // d waits behind a's delivery (one in flight per mailbox), and goes into the turn once a's is done, its own waiting for the tool too
+    const d = w.mail.task(D, B, { text: 'and the changelog', origin: 'agent_session', delivered: false })
     expect(await handled(w, a.id)).toContain('is answered by this turn')
-    expect(await handled(w, d.id)).toContain('is answered by this turn')
     w.mail.handOver(A, C, 'all', [B])
     const again = w.store.mailbox.watchedTo(B).find((r) => w.store.mailbox.message(r.messageId)?.sender === C)?.messageId ?? ''
-    w.behaviour.hold = null
+    let takeD = () => {}
+    w.behaviour.hold = new Promise<void>((r) => (takeD = r))
     take()
+    await w.advance(5_000)
+    expect(w.to('b').at(-1)?.input.text).toContain(d.id)
+    expect(await handled(w, d.id)).toContain('is answered by this turn')
+    w.behaviour.hold = null
+    takeD()
     await w.advance(0)
     const given = w.to('b').length
     endAtRest(w)
