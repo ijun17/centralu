@@ -179,6 +179,18 @@ answered by the reply, and the replier's copy does the same on its side. `mail r
 child's message, refused `elsewhere` before, is this. With replies reaching the machine, `hub.mail` honours
 `needsReply` again: the hub no longer writes every message from a machine as a note.
 
+**Whether an answer wakes** (#2520) is the recipient's host's decision, as its delivery is: its send decides the quiet
+answer (D3 of docs/plans/mailbox.md, `quietAnswer`) on its own view, and its answer says `quiet: true` when it took one in
+(`HubMailResult`, `host.mail`; additive, so an older host's answer says nothing and its sender is told the usual wait).
+The sender's tool tells its session then, in the words a quiet answer here gets, that the message reaches the other
+session without waking it. The sender's host decides nothing of it: two hosts deciding on two views is what let a
+parent's reply go in quiet. For that decision a machine reads the parent of a session a hub's session started (which
+has no `askedBy` there) as the sender of its `start_agent` task, the hub session by its address there
+(`ReachHost.starterElsewhere`); a handoff on the hub moves that task to the heir (`host.mailMove`), and so the parent
+with it. So a hub parent's reply to its child's note wakes the child after the task was reported, as a local parent's
+does. `linked-children-mail.test.ts` runs each case on a linked pair and reads the sender's tool, the machine's copy
+and its delivery alike.
+
 **Receipts.** Both hosts hold a row for each recipient of a message that crossed: the recipient's host the real one,
 the sender's host the copy. Each change to one is pushed to the other side over the link (`*.mailRows`), routed by the
 addresses as a send is, and merged there, forward only:

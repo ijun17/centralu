@@ -236,6 +236,74 @@ describe('more work for a child on a linked machine (#1948 step 6)', { timeout: 
   })
 })
 
+/**
+ * #2520: a child on a linked machine waited 4 h for its hub parent's reply, which the machine had taken in as quiet (D3, `quietAnswer`) on its own
+ * view, where that session had no parent. Whether a hub session's reply wakes the child is the machine's decision, and the sender's answer is that
+ * decision (`HubMailResult.quiet`): each row runs on a linked pair and reads it from the sender's tool, the machine's copy and the machine's delivery.
+ * The child writes while its task's turn waits on the person, and the reply goes once the task was reported, so no task is owed
+ */
+describe("whether a hub session's reply wakes its child's session on a linked machine, decided alike on both sides (#2520)", { timeout: 30_000 * SLOW }, () => {
+  const cases: { name: string; to: 'parent' | 'other'; kind?: 'note' | 'question'; handoff?: true; quiet: boolean }[] = [
+    { name: "the parent's reply to what the child wrote it", to: 'parent', quiet: false },
+    { name: "the parent's reply to the child's note", to: 'parent', kind: 'note', quiet: false },
+    { name: "the parent's answer to the child's question", to: 'parent', kind: 'question', quiet: false },
+    { name: "the reply of the session that took the parent's place by a handoff", to: 'parent', handoff: true, quiet: false },
+    { name: "another session's reply to the child's note", to: 'other', kind: 'note', quiet: true },
+  ]
+
+  it.each(cases)('$name: quiet $quiet', async (c) => {
+    const { machine, hub, at, start, copyOf } = await tasksRig()
+    const { r, local } = await start('please approve my command')
+    const task = copyOf('h1', r.sessionId)!
+    const child = () => machine.mgr.listSessions().find((s) => s.id === local)!
+    await eventually(() => child().state === 'waiting_approval')
+    const session = (o: Partial<Parameters<typeof hub.mgr.createSession>[0]> = {}) =>
+      hub.mgr.createSession({ projectId: 'p-hub', cwd: hub.store.projects.listProjects()[0]!.path, tool: 'claude', permissionPreset: 'normal', ...o })
+    let replier = c.to === 'other' ? (await session()).id : 'h1'
+    if (c.handoff) {
+      await writeHandoffNote('p-hub', 'h1', 'NOTE BODY: where things stand')
+      replier = (await session({ initialPrompt: 'You are taking over. Read the note.', handoff: { from: 'h1', note: 'NOTE BODY: where things stand', fromSessionId: 'h1' } })).id
+      await eventually(() => machine.store.mailbox.message(task.id)?.sender === at.hub(replier))
+    }
+    const sent = await machine.mail!.tool.call(local, { action: 'send', to: c.to === 'parent' ? 'parent' : `hub-mac.${replier}`, text: 'Done with A; B is next.', ...(c.kind ? { kind: c.kind } : {}) })
+    const wrote = /^Sent (\S+) /.exec(sent.text)?.[1] ?? ''
+    expect(hub.store.mailbox.recipient(wrote, at.hub(replier)), sent.text).toBeTruthy()
+    machine.mgr.inputs.respondApproval(local, child().pendingApproval!.requestId, 'allow')
+    // A question holds the task's report until it is answered (#2348)
+    if (c.kind !== 'question') await eventually(() => hub.store.mailbox.reportsOn(task.id).length === 1)
+    const reply = await hub.mail!.tool.call(replier, { action: 'reply', thread: wrote, text: 'Go with B.' })
+    expect(reply.isError).toBeFalsy()
+    const id = /^Sent (\S+) /.exec(reply.text)?.[1] ?? ''
+    await eventually(() => !!machine.store.mailbox.message(id))
+    // The sender is told what the machine decided, which is what its delivery does
+    expect(reply.text.includes('without waking it')).toBe(c.quiet)
+    expect(machine.store.mailbox.message(id)?.facts.quiet === true).toBe(c.quiet)
+    await eventually(() => machine.mail!.service.drain(at.machine(local)).messageIds.includes(id))
+    expect(machine.mail!.service.drain(at.machine(local)).wake).toBe(!c.quiet)
+  })
+
+  // The same reply between two sessions of one computer, where the child's parent is its own record's (`askedBy`)
+  it("the parent's reply to what its child on this computer wrote it, after the task was reported, wakes the child", async () => {
+    const { hub, at } = await tasksRig()
+    const r = await hub.mgr.startAgent('h1', { task: 'please approve my command', wait: false })
+    if (!r.ok) throw new Error(r.error)
+    const child = () => hub.mgr.listSessions().find((s) => s.id === r.sessionId)!
+    await eventually(() => child().state === 'waiting_approval')
+    const sent = await hub.mail!.tool.call(r.sessionId, { action: 'send', to: 'parent', text: 'Done with A; B is next.' })
+    const wrote = /^Sent (\S+) /.exec(sent.text)?.[1] ?? ''
+    expect(hub.store.mailbox.message(wrote)).toMatchObject({ needsReply: false })
+    hub.mgr.inputs.respondApproval(r.sessionId, child().pendingApproval!.requestId, 'allow')
+    const task = hub.store.mailbox.feedOf(at.hub(r.sessionId), { limit: 20 }).find((m) => m.kind === 'task')!
+    await eventually(() => hub.store.mailbox.reportsOn(task.id).length === 1)
+    const reply = await hub.mail!.tool.call('h1', { action: 'reply', thread: wrote, text: 'Go with B.' })
+    expect(reply.text).not.toContain('without waking it')
+    const id = /^Sent (\S+) /.exec(reply.text)?.[1] ?? ''
+    expect(hub.store.mailbox.message(id)?.facts.quiet).not.toBe(true)
+    await eventually(() => hub.mail!.service.drain(at.hub(r.sessionId)).messageIds.includes(id))
+    expect(hub.mail!.service.drain(at.hub(r.sessionId))).toMatchObject({ wake: true, text: expect.stringContaining('sender="your parent session"') })
+  })
+})
+
 describe("the Assistant's send_to_session to a session on a linked machine (#1948 step 6)", { timeout: 30_000 * SLOW }, () => {
   it("arrives there as a task the hub says is the Assistant's, for the person, and its end comes back as a report", async () => {
     const { machine, hub, at, delivered } = await tasksRig()

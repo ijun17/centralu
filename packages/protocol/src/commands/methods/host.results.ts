@@ -92,7 +92,7 @@ export const hostResults = {
   }),
   // As `hub.mail` answers (machines-hub.ts `HubMailResult`, which the window's bundle leaves out)
   'host.mail': z.union([
-    z.object({ ok: z.literal(true), messageId: z.string().min(1).max(200), to: z.string().max(500), address: z.string().max(300).optional() }),
+    z.object({ ok: z.literal(true), messageId: z.string().min(1).max(200), to: z.string().max(500), address: z.string().max(300).optional(), quiet: z.literal(true).optional() }),
     z.object({ ok: z.literal(false), why: z.string().min(1).max(100), text: z.string().max(4000) }),
   ]),
   'host.mailRows': z.object({ ok: z.literal(true) }),

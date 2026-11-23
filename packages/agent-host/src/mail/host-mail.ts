@@ -168,6 +168,15 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     },
     // A session of a hub this host is linked to (#2067 item 2), by the name it was last heard by
     foreign: (address) => far.across?.foreignName(address),
+    /*
+     * A session a hub's session started here keeps no parent here (#2520): its start_agent task names that session, by its address there, and a handoff
+     * there moves it (`host.mailMove`). Read as its parent, its replies wake the session as a parent's do (`quietAnswer`)
+     */
+    starterElsewhere: (id) => {
+      const sender = store.mailbox.firstTask(addressOf(id), 'start_agent')?.sender
+      const party = sender ? parseAddress(sender) : null
+      return sender && party?.kind === 'session' && party.host !== hostId ? sender : null
+    },
     hubPerson: (hostId) => far.across?.isHub(hostId) === true,
     shown: (address, reader) => refs.shown(address, reader),
     assistantId: () => sessions.assistantId(),
