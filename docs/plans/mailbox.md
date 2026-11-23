@@ -63,11 +63,13 @@ Each line: what is decided, the alternative not taken, and why. Numbers are cons
     nothing, the text is delivered all the same, and S4 tells the sender it did not wake the receiver and to send
     it again as a question when the receiver must act. An answer to a `needsReply` message, to a task or from the
     person always wakes. **So does an `urgent` answer, and an answer whose sender is the receiver's parent
-    (`askedBy`) or has an unsettled task to the receiver (`newestTask(sender, receiver)`)** (round 5): a worker's "starting
+    (`askedBy`; for a session a hub's session started on a linked machine, the sender of its `start_agent` task, #2520,
+    docs/plans/linked-mail.md §6) or has an unsettled task to the receiver (`newestTask(sender, receiver)`)** (round 5): a worker's "starting
     Y" note answered with "stop, Y breaks Z" by the one who gave it the work wakes it. The rule is one function,
     `rules.ts` `quietAnswer(m, target, receiver)`. The remaining cost: a correction from any other party (a peer, an
     owner whose task is settled and who is not the parent) sent without `urgent` or as a question waits for the
-    receiver's next wake instead of starting one; S4 tells its sender so at send time.
+    receiver's next wake instead of starting one; S4 tells its sender so at send time. Across a link the receiver's
+    host decides it and its answer says so to the sender's (linked-mail.md §6).
   - The field is named `needsReply` in the protocol and the frame, and `needs_reply` in the store; the tool sets it by the kind (`waitsForReply`).
   - Most messages are now watched, so the reminder's budget is shared with the sender's notices and the notices are
     gathered per sender (D24, D25, §10.4).

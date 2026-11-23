@@ -480,7 +480,7 @@ export class MailAcross extends AcrossReceipts {
     if (address) {
       this.names.set(address, `${r.to} on ${computer}`)
       // Kept already: the other side's row of it came while the answer was on its way
-      if (this.d.records.message(r.messageId)) return { ok: true, messageId: r.messageId, to: r.to, address, computer }
+      if (this.d.records.message(r.messageId)) return { ok: true, messageId: r.messageId, to: r.to, address, computer, ...(r.quiet ? { quiet: true as const } : {}) }
       try {
         this.d.service.sentAcross(sender, { id: r.messageId, to: address, ...fields })
       } catch (e) {
@@ -488,7 +488,7 @@ export class MailAcross extends AcrossReceipts {
         this.d.log?.(`[mail] the copy of ${r.messageId}, which ${computer} took, could not be kept here: ${errorMessage(e)}`)
       }
     }
-    return { ok: true, messageId: r.messageId, to: r.to, address: address ?? '', computer }
+    return { ok: true, messageId: r.messageId, to: r.to, address: address ?? '', computer, ...(r.quiet ? { quiet: true as const } : {}) }
   }
 
   // ── Taking from the other side ──
@@ -522,7 +522,7 @@ export class MailAcross extends AcrossReceipts {
       const m = this.peers?.machine?.(route.machineId)
       if (!m) return { ok: false, why: 'link_down', text: `No machine linked to ${this.selfName()} now goes by ${route.machineId}, and no computer that links yours does either, so nothing was sent.` }
       const r = await this.ask(m, 'host.mail', { from: sender, name: this.names.get(sender) ?? p.name, to: route.sessionId, text: p.text, ...pick(p) } satisfies HostMailParams)
-      return r.ok ? { ok: true, messageId: r.messageId, to: `${r.to} on ${m.name}`, address: to } : r
+      return r.ok ? { ok: true, messageId: r.messageId, to: `${r.to} on ${m.name}`, address: to, ...(r.quiet ? { quiet: true as const } : {}) } : r
     }
     return this.write(sender, to, p)
   }
@@ -608,7 +608,7 @@ export class MailAcross extends AcrossReceipts {
       // Sent again after its answer was lost: the message written then is this one
       const had = this.d.records.message(p.id)
       if (had) {
-        if (had.sender === from && this.d.records.recipient(p.id, to)) return { ok: true, messageId: p.id, to: this.label(to, from), address: to }
+        if (had.sender === from && this.d.records.recipient(p.id, to)) return { ok: true, messageId: p.id, to: this.label(to, from), address: to, ...(had.facts.quiet === true ? { quiet: true as const } : {}) }
         return { ok: false, why: 'bad_value', text: `${oneLineText(p.id, 200)} is the id of another message on ${this.selfName()}.` }
       }
     }
@@ -624,7 +624,8 @@ export class MailAcross extends AcrossReceipts {
         return { ok: false, why: 'not_allowed', text: `${oneLineText(this.nameOf(from), 200)} may send a notice only to a session that mailed it, and ${this.label(to, from)} did not, so nothing was written.` }
       }
       const sent = this.d.service.send(from, { to: [to], text: p.text, needsReply: p.notice ? false : (p.needsReply ?? true), ...(p.urgent && !p.notice ? { urgent: true } : {}), ...(p.replyTo && !p.notice ? { replyTo: p.replyTo } : {}), ...(p.id ? { id: p.id } : {}), ...(p.subject ? { subject: p.subject } : {}), ...(p.choices ? { choices: p.choices } : {}) })
-      return { ok: true, messageId: sent.message.id, to: this.label(to), address: to }
+      // This side owns the receiver's wake, so its decision is the one its sender is told
+      return { ok: true, messageId: sent.message.id, to: this.label(to), address: to, ...(sent.quiet ? { quiet: true as const } : {}) }
     } catch (e) {
       const why = refusalReason(e)
       // A reply to a message this side never kept: one that arrived there while the link failed during its send

@@ -431,6 +431,15 @@ export class MailboxRecords {
     return this.messages(`m.sender = ? AND m.legacy_thread IS NOT NULL AND EXISTS (SELECT 1 FROM mail_recipients r WHERE r.message_id = m.id AND r.recipient = ?) LIMIT 1`, sender, recipient).length > 0
   }
 
+  /** The oldest task of `origin` to `recipient`, settled or not: the start_agent task a hub's session started a session here with names that session */
+  firstTask(recipient: string, origin: string): MailRow | undefined {
+    return this.messages(
+      `m.id IN (SELECT message_id FROM mail_recipients WHERE recipient = ?) AND m.kind = 'task' AND m.origin = ? ORDER BY m.created_at, m.id LIMIT 1`,
+      recipient,
+      origin,
+    )[0]
+  }
+
   /** The newest task from `sender` whose row to `recipient` is not settled */
   newestTask(sender: string, recipient: string): MailRow | undefined {
     return this.messages(

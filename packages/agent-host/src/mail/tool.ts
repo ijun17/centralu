@@ -100,6 +100,11 @@ export type MailToolHost = {
   now?: () => number
 }
 
+/** What the sender of an answer that wakes no one is told (D3, `quietAnswer`) */
+function quietLine(name: string): string {
+  return `It answers a message that needed no reply and needs none itself, so it reaches ${name} without waking it, at its next turn. If ${name} must act on it, send it again as a question.`
+}
+
 /**
  * A session's mailbox through the `mail` tool (docs/plans/mailbox.md §11.3): every action runs on the message service. `reply {thread}` answers a message
  * (a task only with `kind: "answer"`, docs/plans/mailbox.md §10.6.3), `handled` is `done`, `read {thread}` reads a message and its chain, `send` sends a new message
@@ -186,7 +191,8 @@ export class MailTool {
       if (!r.ok) return { text: `Refused (${r.why}): ${r.text}`, isError: true }
       const who = far.address === 'parent' ? `your parent ${JSON.stringify(r.to)}` : far.person ? 'the person' : `${JSON.stringify(r.to)}${r.address ? ` (${this.reach.shownId(r.address)})` : ''}`
       const head = r.held ? `Held ${r.messageId} for ${who}: ${heldLine(r.computer)} Drop it with ${mailCalls(this.host.form(sessionId)).done(r.messageId)}.` : `Sent ${r.messageId} to ${who} on ${r.computer}.`
-      const lines = [head, ...(far.replyTo ? [`It answers ${far.replyTo}.`] : []), ...waitLine({ needsReply, answers: far.replyTo !== undefined, clarifies })]
+      // Whether it wakes is the receiver's computer's decision, which its answer says (`quiet`)
+      const lines = [head, ...(far.replyTo ? [`It answers ${far.replyTo}.`] : []), ...(r.quiet ? [quietLine(r.to)] : waitLine({ needsReply, answers: far.replyTo !== undefined, clarifies }))]
       return { text: lines.join(' ') }
     } catch (e) {
       return failed(e)
@@ -390,7 +396,7 @@ export class MailTool {
       lines.push(`It answers ${answered.id} from ${this.reach.labelOf(answered.sender)}${withdrawn ? ` (${isPerson(answered.sender) ? 'the person' : 'its sender'} withdrew it)` : ''}.`)
     }
     if (r.asWork) lines.push(`As an answer to a question about the work you gave ${name}, it is given as work: ${name}'s turn on it is reported to you.`)
-    else if (r.quiet) lines.push(`It answers a message that needed no reply and needs none itself, so it reaches ${name} without waking it, at its next turn. If ${name} must act on it, send it again as a question.`)
+    else if (r.quiet) lines.push(quietLine(name))
     else if (m.kind === 'message') lines.push(...waitLine({ needsReply: m.needsReply, answers: answered !== undefined, clarifies: typeof m.facts.clarifies === 'string' }))
     if (r.held.length > 0) lines.push(this.heldLine(m.senderProject))
     return lines.join(' ')
