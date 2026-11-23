@@ -1170,7 +1170,9 @@ describe('a bare project name that only a down machine holds (#1547)', () => {
       observe: () => {},
       hides: () => false,
     }
-    // A machine that is down and has an attempt under way that takes a while, as a backoff's ssh to a machine that hangs
+    // A machine that is down and has an attempt under way that takes a while, as a backoff's ssh to a machine that hangs;
+    // each wait on it is counted, so a test asks whether a call waited, not how long it took
+    let deadWaits = 0
     const dead: RoutedMachine = {
       ...desk,
       id: 'm3',
@@ -1180,15 +1182,17 @@ describe('a bare project name that only a down machine holds (#1547)', () => {
       attemptUnderWay: true,
       callWindowMs: 15_000,
       settled: async () => {
+        deadWaits++
         await pause(400 * SLOW)
       },
       reachForCall: async () => {
+        deadWaits++
         await pause(400 * SLOW)
       },
       lastKnown: () => null,
     }
     hub.mgr.useLinkedReader(linkedSessions(() => [...hub.links.all(), desk, ...(o.dead ? [dead] : [])], (method, params) => hub.call(method, params)))
-    return { hub, remote, opens: hub.tunnel().opens, deskLists }
+    return { hub, remote, opens: hub.tunnel().opens, deskLists, deadWaits: () => deadWaits }
   }
   const notFound = expect.stringContaining('No project named')
 
@@ -1218,17 +1222,14 @@ describe('a bare project name that only a down machine holds (#1547)', () => {
   })
 
   it('a second unknown name inside the window does not wait again on a machine with an attempt under way', async () => {
-    const { hub } = await rig({ dead: true })
-    const first = Date.now()
+    const { hub, deadWaits } = await rig({ dead: true })
     expect(await hub.mgr.askProject('h1', { project: 'typo1', task: 'say hello' })).toMatchObject({ ok: false, error: notFound })
-    expect(Date.now() - first).toBeGreaterThanOrEqual(300 * SLOW)
-    const at = Date.now()
+    const waited = deadWaits()
+    expect(waited).toBeGreaterThan(0)
     const r = await hub.mgr.askProject('h1', { project: 'typo2', task: 'say hello' })
     expect(r).toMatchObject({ ok: false, error: expect.stringContaining('Dead') })
-    expect(Date.now() - at).toBeLessThan(250 * SLOW)
-    const create = Date.now()
     expect(await hub.mgr.runCentraluTool('orch', 'create_session', { project: 'typo3' })).toMatchObject({ isError: true, text: expect.stringContaining('Dead') })
-    expect(Date.now() - create).toBeLessThan(250 * SLOW)
+    expect(deadWaits()).toBe(waited)
   })
 
   it('a name found nowhere lists a machine that is up once, with a machine down', async () => {

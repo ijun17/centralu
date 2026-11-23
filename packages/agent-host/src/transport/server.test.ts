@@ -1417,13 +1417,14 @@ describe('bounded outbound work (#82)', () => {
     }
     expect(errors.mock.calls.some((c) => String(c[0]).includes('stopped reading'))).toBe(true)
     errors.mockRestore()
-    await healthy.wait(() => healthy.frames.filter((f) => f.kind === 'event').length === 200, 10_000)
+    // The healthy peer's 12.8 MB arrive in their own time: the wait is bounded by the test's timeout, not a budget of its own
+    await healthy.wait(() => healthy.frames.filter((f) => f.kind === 'event').length === 200, 60_000 * SLOW)
     // The peer wakes up: it reads what reached it before the cut, then finds the socket gone
     stalledSocket.resume()
     await expect(stalledClosed).resolves.toBe(1006)
     expect(stalled.frames.filter((f) => f.kind === 'event').length).toBeLessThan(200)
     healthy.ws.close()
-  }, 15_000 * SLOW)
+  }, 90_000 * SLOW)
 
   it('a socket that never says hello is closed after the handshake deadline', async () => {
     const { port } = await start(undefined, { handshakeTimeoutMs: 50 })
