@@ -9,6 +9,7 @@ import { at, hostWorld } from './host-mail.test-helpers.js'
 const A = at('a')
 const B = at('b')
 const C = at('c')
+const D = at('d')
 const inTurn = { kind: 'ready', live: true, quiet: false, joins: true } as const
 let stops: (() => void)[] = []
 afterEach(() => {
@@ -16,7 +17,8 @@ afterEach(() => {
   stops = []
 })
 const started = () => {
-  const w = hostWorld()
+  // d: a second giver, whose claim stands beside one handed over or forgotten
+  const w = hostWorld({ extra: { d: { name: 'delta', projectId: 'p1' } } })
   w.afterReady()
   stops.push(w.stop)
   return w
@@ -77,7 +79,7 @@ describe('a task marked handled by its receiver (#2493)', () => {
     ['its result, without the input', { took: [], finished: true }],
     ['a stop', { took: [], finished: false }],
     ['an error that took the process', { took: undefined, finished: false }],
-  ] as const)('forgets a claim when its turn ends by %s: the input the tool takes after joins the next turn unclaimed (#2497)', async (_, ending) => {
+  ] as const)('forgets a claim when its turn ends by %s: the input the tool takes after joins the next turn unclaimed, and a claim there holds (#2497)', async (_, ending) => {
     const w = started()
     w.mail.task(A, B, { text: 'start on #12', origin: 'agent_session', delivered: false })
     await w.advance(2_000)
@@ -91,14 +93,24 @@ describe('a task marked handled by its receiver (#2493)', () => {
     w.endTurn('b')
     // The tool takes the input into the turn after, which ends having done it: a task that joined it, given again at rest as any (#2369)
     w.turns.beginOther('b', 'person', null)
-    w.behaviour.hold = null
+    // The next turn's own claim, made while its task's delivery waits for the tool too, holds
+    let takeD = () => {}
+    w.behaviour.hold = new Promise<void>((r) => (takeD = r))
+    const d = w.mail.task(D, B, { text: 'and the changelog', origin: 'agent_session', delivered: false })
+    await w.advance(5_000)
     take()
+    await w.advance(5_000)
+    expect(w.to('b').at(-1)?.input.text).toContain(d.id)
+    expect(await handled(w, d.id)).toContain('is answered by this turn')
+    w.behaviour.hold = null
+    takeD()
     await w.advance(0)
     endAtRest(w)
     expect(w.row(a.id, B)).toMatchObject({ settled: null, givenAgainAt: expect.any(Number) })
+    expect(w.row(d.id, B)).toMatchObject({ settled: 'reported', givenAgainAt: null })
   })
 
-  it('answers the heir once when the giver hands over a task claimed while its delivery waited for the tool (#2497)', async () => {
+  it('answers the heir once when the giver hands over a task claimed while its delivery waited for the tool, and keeps the claim of a giver that stayed (#2497)', async () => {
     const w = started()
     w.mail.task(A, B, { text: 'start on #12', origin: 'agent_session', delivered: false })
     await w.advance(2_000)
@@ -106,8 +118,10 @@ describe('a task marked handled by its receiver (#2493)', () => {
     let take = () => {}
     w.behaviour.hold = new Promise<void>((r) => (take = r))
     const a = w.mail.task(A, B, { text: 'and review #13', origin: 'agent_session', delivered: false })
+    const d = w.mail.task(D, B, { text: 'and the changelog', origin: 'agent_session', delivered: false })
     await w.advance(5_000)
     expect(await handled(w, a.id)).toContain('is answered by this turn')
+    expect(await handled(w, d.id)).toContain('is answered by this turn')
     w.mail.handOver(A, C, 'all', [B])
     const again = w.store.mailbox.watchedTo(B).find((r) => w.store.mailbox.message(r.messageId)?.sender === C)?.messageId ?? ''
     w.behaviour.hold = null
@@ -118,6 +132,7 @@ describe('a task marked handled by its receiver (#2493)', () => {
     expect(w.row(again, B)).toMatchObject({ settled: 'reported', givenAgainAt: null })
     expect(w.store.mailbox.recipients(w.store.mailbox.reportsOn(again)[0]?.id ?? '').map((r) => r.recipient)).toEqual([C])
     expect(w.row(a.id, B)).toMatchObject({ settled: 'withdrawn', givenAgainAt: null })
+    expect(w.row(d.id, B)).toMatchObject({ settled: 'reported', givenAgainAt: null })
     await w.advance(60_000)
     expect(w.to('b')).toHaveLength(given)
   })
