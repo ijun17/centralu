@@ -374,6 +374,8 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     const note = readFileSync(handoffNotePath(project.id, parent), 'utf8')
     expect(note).toContain(`"Docs" — working — handle: ${other}. Nothing about it comes to you unless you ask. You did not start it, so agent_session works on it only with the auto preset.`)
     expect(store.sessions.listSessions().find((s) => s.id === other)).toMatchObject({ askedBy: null, parentSessionId: heir })
+    // It was not started by the original, so it is not told that the heir is its parent now (#2474)
+    expect(mailReader(store).to(addressOf(other)).filter((x) => x.message.body.includes('your parent now'))).toEqual([])
   })
 
   it('moves a start queued for memory (#686): it starts as the new session\'s child when memory recovers', async () => {

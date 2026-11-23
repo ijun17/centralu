@@ -1054,6 +1054,7 @@ sender about its messages, that is the sender.
 | A delegation refused for an untrusted project (the record, §7.4) | `refused:<recipient>:<first 16 hex of sha256 of tool, target and text>:<minute>` |
 | A caller told its refused calls may be given again (S16) | `trusted:<recipient>:<project id>:<trust time>` |
 | A handoff or the role's move | `handover:<recipient>:<message id>` |
+| A moved child told its parent now (#2474) | `parent:<recipient>:<new parent>:<handoff time>`: a later handoff back to the same parent is news again |
 | A watch firing (§18) | `watch:<recipient>:<watch id>:<change>` |
 | The person warned about the host's mail-started turns (S19, D32; an earlier build's cap notice used the same key, so the two write one line an hour between them) | `hostcap:person:<the clock hour's start, ms>` |
 | The person warned about a pair (S18, D32) | `pairturns:<a>\|<b>:<the clock hour's start, ms>`, the two addresses sorted |
@@ -1251,9 +1252,10 @@ Since D32 no row of this table holds, defers or refuses mail for how much of it 
   - every unsettled watched row **to** `from` moves to `to`, undelivered again unless read;
   - when `to` already has a row for the same message, `to`'s row stays as it is and `from`'s is deleted;
   - the open tasks `from` gave the `children` that move go again from `to` (§10.6.5, #1936).
-  - each local child that moves gets a quiet Centralu notice naming `to` as its parent now, and `from` (#2474);
-  - of Centralu's unread reports that move, one that a newer report on the same session follows is marked read for `to` (#2474): a
-    handoff moved days of turn-ended reports one by one. The newest says how that session stands, and the notice counts the rest.
+  - each moving child that `from` started (its `askedBy`) gets a quiet Centralu notice naming `to` as its parent now, and `from`
+    (#2474). A session `from` only gave work to, or one across a link, is not told;
+  - of the reports that move, one that a newer report on the same session follows is marked read for `to` (#2474): a session's
+    newest report says how it stands. The move notice names the others by id, since each may carry its own task's answer.
 
   The preview (`handOverPreview`) lists each moved message by id and the first line of its body, quoted.
 - **`partyGone(address)`** (trash):

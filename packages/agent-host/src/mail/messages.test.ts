@@ -678,10 +678,11 @@ describe('reading (§8.4)', () => {
     const w = world()
     const m1 = w.send(A, { to: [B], text: 'one' }).message
     const m2 = w.send(B, { replyTo: m1.id, to: [C], text: 'two' }).message
-    expect(w.mail.read(B, { id: m2.id }).items[0]?.relation).toBe('a session of your project')
+    const m3 = w.send(C, { replyTo: m2.id, to: [B], text: 'three' }).message
+    expect(w.mail.read(B, { id: m3.id }).items.map((i) => i.relation)).toEqual(['a session of your project', 'a session of your project', 'a session of another project'])
     w.sessions.delete('a')
-    expect(w.mail.read(B, { id: m2.id }).items[0]?.relation).toBe('a session of your project')
-    expect(w.mail.read(C, { id: m2.id }).items[1]?.relation).toBe('a session of another project')
+    w.sessions.delete('c')
+    expect(w.mail.read(B, { id: m3.id }).items.map((i) => i.relation)).toEqual(['a session of your project', 'a session of your project', 'a session of another project'])
   })
 
   it('read of a long chain returns the last nine ancestors and where to read on with before; a message that is no longer kept is one line', () => {
