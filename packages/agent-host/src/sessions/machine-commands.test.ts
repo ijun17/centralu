@@ -416,7 +416,7 @@ describe('install_machine', () => {
   })
 
   // #2478: on a host with mail, Centralu's word is a notice in the caller's mail, not text put into its conversation (turn-owned-by-no-one.md P10)
-  it('tells a caller that reads mail by a Centralu notice in its mail, once for each update, and nothing in its conversation', async () => {
+  it('tells a caller that reads mail by a Centralu notice in its mail, once for each update, due to wake it as mail does', async () => {
     wireHostMail(mgr, store)
     ops.running({ working: 2 })
     ops.slowUpdate(200, 40)
@@ -429,7 +429,12 @@ describe('install_machine', () => {
     // The same words again are another update's end, told again
     expect((await answered(orc.id, 'install_machine', { machine: 'laptop', action: 'update' }, 'allow')).r.text).toContain('is still under way')
     await eventually(() => notices().length === 2)
-    expect(claude.handles.get(orc.id)?.sent.some((t) => t.includes('you started did not finish'))).toBe(false)
+    // Due, not held and not quiet: delivery wakes the caller with it as with any mail (`MailDelivery`), and its conversation gets no relayed text
+    const row = store.mailbox.recipient(notices()[0]!.id, addressOf(orc.id))
+    expect(row).toMatchObject({ held: null, deliveredAt: null, settled: null })
+    expect(row!.dueAt).toBeLessThanOrEqual(Date.now() + 60_000)
+    expect(notices()[0]!.facts.quiet).toBeUndefined()
+    expect(store.messages.loadMessages(orc.id, 50).some((m) => JSON.stringify(m.payload).includes('"sourceSessionId":"_centralu"'))).toBe(false)
   })
 
   it('runs nothing when the person denies it', async () => {

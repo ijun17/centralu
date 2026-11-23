@@ -401,9 +401,11 @@ export class ChildReports {
    * Centralu's own word to a session (#1948 B4/B5, turn-owned-by-no-one.md P10): how a request it was answered "pending" or "still under way" for
    * ended. A seat that reads mail gets it as a Centralu notice in its mail, which wakes it as mail does and is kept with its mail; a seat without
    * the mail tool (an older build's coordinator, a builder) is told in its conversation, as before mail. `relayed` is that message's: an Assistant
-   * gets only a pointer to a message that is not relayed. `dedupeKey` names the event, so it is told once
+   * gets only a pointer to a message that is not relayed. `dedupeKey` names the event, so it is told once. Nothing is said while this host leaves,
+   * as `tellSession` says nothing then: a notice kept in the mail would wake the session under the next host with what the leaving cut
    */
   tellFromCentralu(sessionId: string, text: string, dedupeKey: string, relayed: boolean): Promise<boolean> {
+    if (this.host.disposing) return Promise.resolve(false)
     if (this.host.mailNotice(sessionId, text, dedupeKey)) return Promise.resolve(true)
     return this.tellSession(sessionId, text, { sessionId: HOST_SENDER, name: 'Centralu' }, relayed)
   }

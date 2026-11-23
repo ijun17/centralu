@@ -331,17 +331,23 @@ describe('the one hold (D12)', () => {
 
   it('a sender gone to the trash: its held question is withdrawn and leaves the held list, as one not held is; its held message waits for the person and goes on trust', () => {
     const w = world()
+    const asked = w.send(C, { to: [X], text: 'which build?' }).message
+    // A reply that asks back: held, it leaves C's question open until it goes
+    const askedBack = w.send(X, { replyTo: asked.id, text: 'which one do you mean?', needsReply: true }).message
     const question = w.send(X, { to: [C], text: 'which branch?' }).message
     const note = w.send(X, { to: [C], text: 'fyi', needsReply: false }).message
-    expect(w.records.heldRows().map((r) => r.messageId)).toEqual([question.id, note.id])
+    expect(w.records.heldRows().map((r) => r.messageId)).toEqual([askedBack.id, question.id, note.id])
 
     w.mail.stops.partyGone(X)
-    expect(w.rowOf(question.id, C).settled).toBe('withdrawn')
+    expect([w.rowOf(askedBack.id, C).settled, w.rowOf(question.id, C).settled]).toEqual(['withdrawn', 'withdrawn'])
     expect(w.records.heldRows().map((r) => r.messageId)).toEqual([note.id])
+    expect(w.rowOf(asked.id, X).settled).toBe('gone')
 
     w.projects.set('px', { trusted: true })
     w.mail.holds.trustChanged('px')
-    expect(w.records.pendingFor(C, w.clock.t + 10_000).map((p) => p.message.id)).toEqual([note.id])
+    expect(w.records.pendingFor(C, w.clock.t + 10_000).filter((p) => p.message.sender === X).map((p) => p.message.id)).toEqual([note.id])
+    // C's question ended when X went: the withdrawn reply does not answer it afterwards
+    expect(w.rowOf(asked.id, X).settled).toBe('gone')
   })
 
 })

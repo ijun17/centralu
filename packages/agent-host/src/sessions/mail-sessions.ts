@@ -182,8 +182,9 @@ export class MailSessionsView {
    */
   mailNotice(sessionId: string, body: string, dedupeKey: string): boolean {
     const hooks = this.hooks
-    if (!hooks?.notice || !this.canReadMail(sessionId)) return false
+    if (!hooks?.notice) return false
     try {
+      if (!this.canReadMail(sessionId)) return false
       hooks.notice(sessionId, body, dedupeKey)
       return true
     } catch (e) {

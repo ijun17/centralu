@@ -1114,7 +1114,9 @@ the person released has `held = 'released'`; `policy` is read live even then.
 **A sender gone to the trash** (#2478): its held mail follows the rule for its mail not held (`partyGone`, §7.7), as
 mail held for its link does (linked-mail.md §12). A question or task is withdrawn, which takes it off the person's held
 list, and is never delivered: no one is left to hear the answer. Any other message stays held and goes on the person's
-trust as it would have, since the hold is the person's to decide, not the sender's; Dismiss drops it as before.
+trust as it would have, since the hold is the person's to decide, not the sender's; Dismiss drops it as before. A held reply
+withdrawn so answers nothing on the trust: the question it answers was settled `gone` with the sender, and a settled row is
+not settled again.
 
 | Case | Held? |
 |---|---|

@@ -11,6 +11,7 @@ import { START_AGENT_SETUP_MS } from './start-agent-terms.js'
 import { MemoryGate } from './memory-gate.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 import { addressOf, wireHostMail } from './host-mail.test-helpers.js'
+import type { ChildReports } from './child-reports.js'
 
 /**
  * A start_agent card the person has not answered outlives the call and the host (#673): the leaving host keeps the
@@ -129,6 +130,9 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
     const told = () => store.messages.loadMessages(parent, 50).filter((m) => JSON.stringify(m.payload).includes(said))
     await eventually(() => (reads ? mailed() : told()).length === 1)
     expect((reads ? told : mailed)()).toEqual([])
+    // Its key names the request: told again, it is not written twice
+    await (b.mgr as unknown as { reports: ChildReports }).reports.tellFromCentralu(parent, `[Centralu] Your start_agent request ${requestId} did not start a session.`, `agent-start-ended:${requestId}`, false)
+    if (reads) expect(mailed()).toHaveLength(1)
   })
 
   it('is dropped by the next host when the session that asked is gone', async () => {
