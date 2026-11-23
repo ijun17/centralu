@@ -138,7 +138,7 @@ export const HostMailParams = z.object({
   report: TaskReport.optional(),
 })
 export type HostMailParams = z.infer<typeof HostMailParams>
-/** A hub's handoff moved `from`'s tasks here to `to`; the machine moves only tasks that hub's link brought */
+/** A hub's handoff moved `from`'s tasks here to `to`, and messages this machine's sessions sent `from` (#2530); the machine moves only those */
 export const MailMoveParams = z.object({ from: z.string().min(1).max(300), to: z.string().min(1).max(300), ids: z.array(z.string().min(1).max(200)).min(1).max(500) })
 export type MailMoveParams = z.infer<typeof MailMoveParams>
 /** One recipient row of a message that crossed a link, as the sender knows it; the other side only merges it forward */

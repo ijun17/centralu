@@ -1028,11 +1028,11 @@ export class MailboxRecords {
    * A handoff: `from`'s rows that are watched and not settled, or not read (settled or not: a moved `legacy` row too),
    * go to `to`, in `scope`. A row not read is delivered
    * afresh, with the holds about `from`'s delivery let go. Its reminders were `from`'s: their count and clock start again at `to` (docs/plans/mailbox.md §10.11). When `to` already has a row for the message, or sent it, `to`'s
-   * side stays as it is: `from`'s row is deleted, or (for `to`'s own message) left. Returns the ids of the messages moved
+   * side stays as it is: `from`'s row is deleted, or (for `to`'s own message) left. `only`: of those, these messages alone. Returns the ids of the messages moved
    */
-  moveRows(from: string, to: string, scope: HandOverScope): string[] {
+  moveRows(from: string, to: string, scope: HandOverScope, only?: readonly string[]): string[] {
     return this.transaction(() => {
-      const ids = this.movable(from, to, scope)
+      const ids = this.movable(from, to, scope).filter((id) => !only || only.includes(id))
       this.db
         .prepare(
           `UPDATE OR IGNORE mail_recipients SET recipient = @to, turn_seq = NULL, reminded = 0, reminded_at = NULL,

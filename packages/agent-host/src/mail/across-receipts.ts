@@ -61,18 +61,20 @@ export class AcrossReceipts extends AcrossCore {
 
   /**
    * On a hub: a handoff moved tasks it gave linked machines' sessions to another session here (`MessageService.handOver`, #1948 step 6). Each machine is
-   * told, so its copy names the heir and reads as handed over; the report it sends back goes to the heir either way, by this host's task
+   * told, so its copy names the heir and reads as handed over; the report it sends back goes to the heir either way, by this host's task. A message a
+   * machine's session sent that moved goes to that machine (#2530), which gives its row to the heir
    */
   async movedAcross(moves: readonly { from: string; to: string; ids: readonly string[] }[]): Promise<void> {
     for (const move of moves) {
-      const byMachine = new Map<string, string[]>()
+      const byMachine = new Map<string, Set<string>>()
       for (const id of move.ids) {
-        for (const row of this.d.records.recipients(id)) {
-          const r = this.route(row.recipient)
-          if (r?.kind === 'machine') byMachine.set(r.machineId, [...(byMachine.get(r.machineId) ?? []), id])
+        const parties = [...this.d.records.recipients(id).map((row) => row.recipient), this.d.records.message(id)?.sender ?? '']
+        for (const party of parties) {
+          const r = this.route(party)
+          if (r?.kind === 'machine') byMachine.set(r.machineId, (byMachine.get(r.machineId) ?? new Set()).add(id))
         }
       }
-      for (const [machineId, ids] of byMachine) await this.tellMove(machineId, { from: move.from, to: move.to, ids })
+      for (const [machineId, ids] of byMachine) await this.tellMove(machineId, { from: move.from, to: move.to, ids: [...ids] })
     }
   }
 
@@ -95,7 +97,7 @@ export class AcrossReceipts extends AcrossCore {
 
   /**
    * On a machine: a hub's handoff moved the tasks it gave here (`host.mailMove`). Only from and to that hub's own sessions (never this machine's, never
-   * another host's), and only tasks that hub's sessions sent; anything else is refused and logged
+   * another host's), and only tasks that hub's sessions sent and rows of messages this machine's sessions sent `from` (#2530); anything else is refused and logged
    */
   moveFromHub(hub: { id: string; name: string }, p: MailMoveParams): { ok: true; moved: number } | { ok: false; why: string; text: string } {
     const [from, to] = [this.fromHubNames(hub.id, p.from), this.fromHubNames(hub.id, p.to)]
