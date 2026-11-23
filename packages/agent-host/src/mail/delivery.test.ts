@@ -265,7 +265,7 @@ describe('what a host that died left half done', () => {
     expect(w.notes).toEqual([{ sessionId: 'w', text: expect.stringContaining('may not have arrived when Centralu restarted') }])
     expect(w.to('w')[0]!.input.text).toContain('maybeRepeated="1"')
     expect(w.to('w')[0]!.input.text).not.toContain(task.id)
-    expect(w.mail.dismissHeld(W, [task.id])).toBe(1)
+    expect(w.mail.holds.dismissHeld(W, [task.id])).toBe(1)
     expect(w.rowOf(task.id, W).held).toBe('dismissed')
   })
 })
