@@ -480,12 +480,13 @@ export class MailAcross extends AcrossReceipts {
     if (address) {
       this.names.set(address, `${r.to} on ${computer}`)
       // Kept already: the other side's row of it came while the answer was on its way
-      if (this.d.records.message(r.messageId)) return { ok: true, messageId: r.messageId, to: r.to, address, computer, ...(r.quiet ? { quiet: true as const } : {}) }
-      try {
-        this.d.service.sentAcross(sender, { id: r.messageId, to: address, ...fields })
-      } catch (e) {
-        // It arrived there: the copy is what this side lacks, said in the log, never as a failed send
-        this.d.log?.(`[mail] the copy of ${r.messageId}, which ${computer} took, could not be kept here: ${errorMessage(e)}`)
+      if (!this.d.records.message(r.messageId)) {
+        try {
+          this.d.service.sentAcross(sender, { id: r.messageId, to: address, ...fields })
+        } catch (e) {
+          // It arrived there: the copy is what this side lacks, said in the log, never as a failed send
+          this.d.log?.(`[mail] the copy of ${r.messageId}, which ${computer} took, could not be kept here: ${errorMessage(e)}`)
+        }
       }
     }
     return { ok: true, messageId: r.messageId, to: r.to, address: address ?? '', computer, ...(r.quiet ? { quiet: true as const } : {}) }
