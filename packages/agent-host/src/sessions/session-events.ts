@@ -41,6 +41,10 @@ function untrustedSourceSessionNotification(sourceSessionId: string): string {
   )
 }
 
+
+/** Whether a message is the person's (`deliverNow`): typed by them (`true`), or Centralu's fixed text their click sent (`click`) */
+export type PersonInput = boolean | 'click'
+
 /**
  * What a session's events and inputs reach of the session manager (#428), typed as the manager declares each member.
  * The manager builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
@@ -555,8 +559,9 @@ export class SessionEvents {
     relayedText?: string,
     /** The person typed this themselves (the composer, a slash command, Continue): the tool is told so. Never set for a message that has a
      * source, or for words Centralu framed (a report, an app's notice, a builder request). Not stamped either when Centralu puts a line of its
-     * own in front of it (`rootAppsNotice`, once) */
-    fromPerson = false,
+     * own in front of it (`rootAppsNotice`, once). `click`: Centralu's fixed text the person clicked for (the handoff request, #2478), recorded
+     * as theirs (`byPerson`) and not stamped */
+    fromPerson: PersonInput = false,
     /** A script wrote this (a call with the limited credential, `label` from the connection, §8.1): stored and shown as the script's, handed to
      * the session under Centralu's header (`scriptMessageFrame`), never stamped as the person's and never naming the session. Set by the host
      * from the connection, not from a field of the call */
@@ -644,7 +649,7 @@ export class SessionEvents {
     this.host.cardRests.turnAsked(sessionId)
     if (sendInput) sendInput(h, input, inputId)
     // Not with a line of Centralu's in front of it: that message is not only the person's words
-    else if (fromPerson && !notice) h.send(input, { origin: { kind: 'human' }, id: inputId })
+    else if (fromPerson === true && !notice) h.send(input, { origin: { kind: 'human' }, id: inputId })
     else h.send(input, { id: inputId })
     // It takes messages again: what could not be told it before goes in now (#1186)
     this.host.reports.deliverHeld(sessionId)

@@ -7,8 +7,9 @@ which only `agents.send` (the composer, slash commands, the person's Continue) s
 writes `origin: { kind: 'human' }` on that stdin message. A message with a source (a caller's delivery, a report), an app's
 notice or view message, a builder request, a new session's first message (only the UI's handoff opening, which quotes an
 agent's note), a message with a Centralu line in front of it (`rootAppsNotice`) and every note through `sendTracked` carry
-none, as before. One known gap: the handoff request the UI writes for the predecessor goes through `agents.send` and is
-stamped, since the host cannot tell Centralu's text from the person's there. Measured on CLI
+none, as before. The handoff request the window writes for the predecessor also goes through `agents.send`; it is Centralu's
+fixed text (`handoffPrompt()`), which the host knows by its words, so it is recorded as the person's click (`byPerson`, which a
+cited request reads) and not stamped (#2478). Measured on CLI
 2.1.296: the CLI accepts it, echoes it on the replayed user message, and answers the same with or without it, mid-turn
 wording and `/compact` included (`docs/plans/mailbox.md` §7.1).
 
