@@ -186,8 +186,8 @@ The sender's tool tells its session then, in the words a quiet answer here gets,
 session without waking it. The sender's host decides nothing of it: two hosts deciding on two views is what let a
 parent's reply go in quiet. For that decision a machine reads the parent of a session a hub's session started (which
 has no `askedBy` there) as the sender of its `start_agent` task, the hub session by its address there
-(`ReachHost.starterElsewhere`); a handoff on the hub moves that task to the heir (`host.mailMove`), and so the parent
-with it. So a hub parent's reply to its child's note wakes the child after the task was reported, as a local parent's
+(`ReachHost.starterElsewhere`); a handoff on the hub moves that task to the heir (`host.mailMove`), reported or not,
+and so the parent with it. So a hub parent's reply to its child's note wakes the child after the task was reported, as a local parent's
 does. `linked-children-mail.test.ts` runs each case on a linked pair and reads the sender's tool, the machine's copy
 and its delivery alike.
 
