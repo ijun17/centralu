@@ -105,6 +105,12 @@ describe('a task is answered by its reply or by the last response at rest (§10.
     const [report] = reports(later!.id)
     expect(report!.facts.answer).toBeUndefined()
     expect(report!.body).toContain('It wrote no response')
+    // Its words point at read_session: a reader read_session refuses, as one a report was handed over to may be, is told so (#2474)
+    const shown = async () => (await m.tool.call(parent, { action: 'read', thread: report!.id })).text
+    expect(await shown()).not.toContain('does not read')
+    vi.spyOn(m.service, 'readsSession').mockReturnValue(null)
+    expect(await shown()).toContain(`read_session does not read ${child} for you: you may not read it.`)
+    expect(await shown()).not.toContain('Its last response is not shown')
   })
 
   it('H1: two senders whose tasks are in one turn each get their own answer', async () => {
@@ -478,7 +484,7 @@ describe('reading a report shows the last response it kept (#2348 review)', () =
     expect(refused).toContain(report!.id)
     expect(refused).not.toContain('All done: 3 files changed.')
     // The report's words say reading it shows the response: a reader it is not shown to is told why (#2358)
-    expect(refused).toContain(`Its last response is not shown: you may not read ${child}.`)
+    expect(refused).toContain(`Its last response is not shown, and read_session does not read ${child} for you: you may not read it.`)
     // A session of a project nobody trusted is marked as read_session marks it
     asked.mockReturnValue({ untrusted: true })
     expect((await m.tool.call(parent, { action: 'read', thread: report!.id })).text).toContain(UNTRUSTED_LINES)

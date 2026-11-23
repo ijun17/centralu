@@ -796,6 +796,37 @@ describe('a successor reads and recalls its archived handoff lineage (#1487)', (
     expect(await centraluToolsFor(host, '', undefined, false, true).readSession('old1')).toMatchObject({ ok: false })
   })
 
+  it('reads the archived children of itself and of its lineage, by who the host recorded started them, and nothing else of the archive (#2474)', async () => {
+    /** An archived session of `project` that `askedBy` (or, with `viaParent`, its `parent`) started */
+    const child = async (id: string, by: string, viaParent = false, project = 'p1') => {
+      put(id, [['assistant', `${id} finished the gecko step`]], undefined, project)
+      store.sessions.upsertSession({ ...store.sessions.listSessions().find((s) => s.id === id)!, ...(viaParent ? { parentSessionId: by } : { askedBy: by }) })
+      await store.trash.trashSession(id, { projectId: project, projectName: null, projectPath: null, removeExternal: false, removeWorktree: false })
+    }
+    await child('kid1', 'old1')
+    await child('kid0', 'old0', true)
+    await child('mine', 'a')
+    await child('theirs', 'stranger')
+    await child('elsewhere', 'old1', false, 'p2')
+    const reader = centraluToolsFor(host, 'a', undefined, true)
+    for (const id of ['kid1', 'kid0', 'mine']) {
+      const read = await reader.readSession(id)
+      expect(read).toMatchObject({ ok: true, state: 'archived' })
+      expect(read.lines?.join('\n')).toContain(`${id} finished the gecko step`)
+      // The child's own words, not the predecessor's
+      expect(read).not.toHaveProperty('predecessor')
+      expect(read.lines?.some((l) => JSON.parse(l).role === 'assistant')).toBe(true)
+    }
+    // Started by no one of its lineage, or archived in another project: refused as a missing one is
+    for (const id of ['theirs', 'elsewhere']) expect(await reader.readSession(id)).toMatchObject({ ok: false })
+    // Another session's lineage is its own, and a hub's view has no caller
+    expect(await centraluToolsFor(host, 'b', undefined, true).readSession('kid1')).toMatchObject({ ok: false })
+    expect(await centraluToolsFor(host, '', undefined, false, true).readSession('kid1')).toMatchObject({ ok: false })
+    // The store's answer, by its own record: an archived child of that starter; nothing for an id it does not hold
+    expect(store.handoffs.archivedChildOf('kid1', ['old1'])).toBe(true)
+    expect(store.handoffs.archivedChildOf('nobody', ['old1'])).toBe(false)
+  })
+
   it('deleting a session for good ends its part of the chain', async () => {
     await store.trash.purgeSession('old1')
     const reader = centraluToolsFor(host, 'a', undefined, true)

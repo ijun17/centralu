@@ -140,7 +140,8 @@ export function centraluToolsFor(
   const ownCut = () => (assistantId && host.meta.has(assistantId) ? host.store.messages.lastContextCut(assistantId) : null)
   /**
    * The sessions this one took over from (#1487), nearest first, archived ones included: its handoff lineage, read when the
-   * call runs. These, and nothing else of the archive, it reads and searches. A hub's view has no caller, so no lineage.
+   * call runs. These it reads and searches in the archive; it reads also the archived children of itself and of these (`archivedChild`).
+   * A hub's view has no caller, so no lineage.
    */
   const ownLineage = (): string[] => (assistantId && host.meta.has(assistantId) ? host.store.handoffs.lineage(assistantId) : [])
   const inScope = (s: SessionInfo) =>
@@ -163,11 +164,19 @@ export function centraluToolsFor(
   const wide = () => !!ownProject && host.projectTrusted(ownProjectId())
   /** An Assistant's row is never read, even one with a project (a project assistant restored from before #1941) */
   const readable = (s: SessionInfo) => !isAssistantKind(s.kind) && (inScope(s) || wide())
-  /** Another session of this host that `readSession` reads: one of its handoff lineage, or a readable one */
+  /**
+   * An archived session of its own project that it or one of its handoff lineage started (#2474), by the host's own record of who started it,
+   * never by anything the caller says: a successor reads what its predecessor's moved reports point at. The archive is read no further
+   */
+  const archivedChild = (sessionId: string): boolean => {
+    const project = ownProjectId()
+    return !!assistantId && project !== null && host.store.handoffs.projectOf(sessionId) === project && host.store.handoffs.archivedChildOf(sessionId, [assistantId, ...ownLineage()])
+  }
+  /** Another session of this host that `readSession` reads: one of its handoff lineage, an archived child of it or of them, or a readable one */
   const mayRead = (sessionId: string): boolean => {
     if (sessionId === assistantId) return false
     const target = host.meta.get(sessionId)
-    return ownLineage().includes(sessionId) || (!!target && readable(target))
+    return ownLineage().includes(sessionId) || (target ? readable(target) : archivedChild(sessionId))
   }
   /** The links a read reaches: the Assistant's, and a trusted reader's (#984); acting reaches them from the centre only */
   const readLinks = () => (central || wide() ? host.linkedReader() : null)
