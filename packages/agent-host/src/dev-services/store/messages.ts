@@ -331,6 +331,17 @@ export class MessageRecords {
     return row && isObj(payload) ? { seq: row.seq, ts: row.ts, text: typeof payload.text === 'string' ? payload.text : '' } : null
   }
 
+  /** Whether the agent has written anything into this session: an `assistant` row, or a tool step it made (stored as `system`); the person's messages and notices do not count */
+  hasAgentRows(sessionId: string): boolean {
+    return (
+      this.db
+        .prepare<unknown[], { n: number }>(
+          `SELECT 1 AS n FROM messages WHERE session_id = ? AND (role = 'assistant' OR (role <> 'user' AND kind IN ('tool_call', 'tool_result', 'approval', 'image', 'reasoning', 'app_view'))) LIMIT 1`,
+        )
+        .get(sessionId) !== undefined
+    )
+  }
+
   nextSeq(sessionId: string): number {
     const row = oneRow(this.db.prepare<unknown[], { m: number }>(`SELECT COALESCE(MAX(seq), 0) as m FROM messages WHERE session_id = ?`).get(sessionId))
     return row.m + 1
