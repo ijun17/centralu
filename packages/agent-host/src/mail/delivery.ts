@@ -628,6 +628,8 @@ export class MailDelivery {
     try {
       await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line, listed: drained.listed, wanted: () => drained.messageIds.some((id) => this.records.recipient(id, recipient)?.settled !== 'withdrawn'), ...(joins ? { joins, id: inputId } : {}), ...(shown ? { shown } : {}), ...(depth ? { depth } : {}), taken }, (e) => {
         cancelTurn()
+        // The tool never ran it: no turn after takes it either
+        forget()
         if (delivered.at !== undefined) this.takeBack(recipient, drained.messageIds, delivered.at, e)
       })
     } catch (e) {

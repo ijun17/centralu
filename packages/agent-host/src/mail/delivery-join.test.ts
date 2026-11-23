@@ -383,7 +383,6 @@ describe('an input given into a turn that ends without it (#2499)', () => {
     expect(w.rowOf(task.id, B)).toMatchObject({ settled: 'reported', givenAgainAt: null })
   })
 
-
   it('one whose delivery fails after the turn ended without it leaves nothing queued: the wake that tries it again answers it', async () => {
     const w = started()
     w.send(A, { to: [B], text: 'start on #12' })
@@ -406,6 +405,22 @@ describe('an input given into a turn that ends without it (#2499)', () => {
     w.endTurn('b')
     lastResponse(w)
     expect(w.rowOf(task.id, B)).toMatchObject({ settled: 'reported', givenAgainAt: null })
+  })
+
+  it('one the tool fails after it was counted taken leaves nothing queued to hide its task from a later turn: it is held for the person', async () => {
+    const w = started()
+    w.send(A, { to: [B], text: 'start on #12' })
+    await w.advance(2_000)
+    w.states.set('b', inTurn)
+    const task = w.mail.task(A, B, { text: 'and the docs', origin: 'agent_session', delivered: false })
+    await w.advance(5_000)
+    // Counted taken, then failed by the tool: it never ran it
+    w.lates.at(-1)?.(new Error('the process closed with the input still queued'))
+    w.delivery.turnInputs(B, { took: [], finished: true })
+    w.endTurn('b')
+    w.states.set('b', atRest)
+    expect([...w.delivery.queuedFor(B)]).toEqual([])
+    expect(w.rowOf(task.id, B)).toMatchObject({ held: 'uncertain', deliveredAt: null })
   })
 
   it.each([
