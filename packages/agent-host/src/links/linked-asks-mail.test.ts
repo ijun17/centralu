@@ -135,12 +135,22 @@ describe("a hub session's ask_project of a machine's project (#1948 step 6)", { 
   it('cancelled while the turn its task started waits there to be continued after a usage limit: that wait ends, and nothing continues it', async () => {
     const { machine, hub, at, project, taskTo } = await asksRig()
     const ctl = new AbortController()
+    // Cancelled as the machine releases the task to its wait, before the hub hears of that release, which would end the call first; the
+    // machine takes the stop once its wait is set
+    let waited!: () => void
+    machine.holdMethod('host.stopTask', new Promise<void>((resolve) => (waited = resolve)))
+    const release = machine.store.mailbox.markReleased.bind(machine.store.mailbox)
+    vi.spyOn(machine.store.mailbox, 'markReleased').mockImplementation((...args) => {
+      if (args[3] === 'limit') ctl.abort()
+      return release(...args)
+    })
     const call = hub.mgr.askProject('h1', { project, task: 'hit the usage limit' }, ctl.signal)
     await hub.answer('allow')
     const w1 = () => machine.mgr.listSessions().find((s) => s.id === 'w1')!
     await eventually(() => w1().interruption?.autoContinue !== undefined)
+    expect(ctl.signal.aborted).toBe(true)
     expect(inTurn(w1().state)).toBe(false)
-    ctl.abort()
+    waited()
     expect(await call).toEqual({ ok: false, error: `The call was cancelled, so m1/${project}'s session "${w1().name}" was stopped.` })
     expect(w1().interruption?.autoContinue).toBeUndefined()
     expect(machine.store.mailbox.recipient(taskTo(machine, at.machine('w1'), at.hub('h1'))!.id, at.machine('w1'))?.settled).toBe('withdrawn')
