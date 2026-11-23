@@ -33,9 +33,6 @@ type VersionNotes = {
 /** A tool as this service reads it: its adapter's `installedVersion` */
 type VersionedTool = { tool: ToolName; installedVersion?: () => Promise<string | null> }
 
-/** One installed CLI that changed version, for the capability check (#270) */
-type ToolVersionChange = { tool: ToolName; from: string; to: string }
-
 export type AgentVersionDeps = {
   tools: () => VersionedTool[]
   sessions: VersionSessions
@@ -44,15 +41,6 @@ export type AgentVersionDeps = {
   publish: (status: AgentVersions) => void
   readAutoApply?: () => boolean
   writeAutoApply?: (enabled: boolean) => void
-  /** The installed versions last seen, kept across host restarts so an update made while the app was closed counts as a change */
-  readSeen?: () => Record<string, string>
-  writeSeen?: (seen: Record<string, string>) => void
-  /**
-   * The seam for #270's capability check: called once per installed CLI whose version changed (not the first sighting). #270
-   * proposes re-running the probes for what a tool could not do when its version moves; nothing implements it yet, so the
-   * default writes one line to host.log
-   */
-  capabilityCheck?: (change: ToolVersionChange) => void
   now?: () => number
   quietMs?: number
 }
@@ -137,10 +125,6 @@ export class AgentVersionService {
     this.deps = {
       readAutoApply: () => true,
       writeAutoApply: () => {},
-      readSeen: () => ({}),
-      writeSeen: () => {},
-      capabilityCheck: ({ tool, from, to }) =>
-        console.error(`[agent-versions] ${tool} ${from} -> ${to}; no capability check runs yet (#270)`),
       now: Date.now,
       quietMs: QUIET_MS,
       ...deps,
@@ -192,21 +176,6 @@ export class AgentVersionService {
     const tools = this.deps.tools().filter((t) => t.installedVersion)
     const read = await Promise.all(tools.map(async (t) => [t.tool, await t.installedVersion!().catch(() => null)] as const))
     const installed: Record<string, string | null> = Object.fromEntries(read)
-    const seen = this.deps.readSeen()
-    const nextSeen = { ...seen }
-    for (const [tool, version] of read) {
-      if (!version) continue
-      const before = seen[tool]
-      if (before && before !== version) {
-        try {
-          this.deps.capabilityCheck({ tool, from: before, to: version })
-        } catch (err) {
-          console.error(`[agent-versions] the capability check for ${tool} failed: ${(err as Error).message}`)
-        }
-      }
-      nextSeen[tool] = version
-    }
-    if (JSON.stringify(nextSeen) !== JSON.stringify(seen)) this.deps.writeSeen(nextSeen)
     this.status = { ...this.status, installed, checkedAt: this.deps.now() }
     this.deps.publish(this.current())
     if (this.status.autoApply) for (const s of this.deps.sessions.listSessions()) this.lookSoon(s.id)
