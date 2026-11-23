@@ -1994,8 +1994,11 @@ releases it, and that turn is the mail's, as a wake's is (`MailTurns.openedFor`)
 A task a turn took in while it ran came after the work that turn was doing began, so that turn's end does not answer it (#2369), unless the
 session says that turn does it. The frame that gives a task into a running turn says how, in one line per task: `<id> joined your running
 turn: if this turn does it, <handled call> lets this turn's report answer it.` That line is 84 characters around the id and the call (about 30 more for a plain `mail(action="handled", thread=...)`). The
-receiver's `handled` on a task it holds claims it for the running turn (`MailDelivery.claim`, #2493). The claim lives with the turn's joined
-inputs, in memory; a claimed input the turn did not take stays queued in the tool, and the turn after answers it. A task given again and waiting is delivered into that turn. At the turn's end the claimed task is not given again, and the
+receiver's `handled` on a task it holds claims it for the running turn (`MailDelivery.claim`, #2493). The claim is kept by the receiver, in memory,
+beside the turn's joined inputs and not on them, until that turn ends however it ends (#2497): the model can claim a task before the tool
+says it took the input that gives it, since Claude Code names a folded input only in the turn's result (or the host counts it taken after
+90 s). A claim belongs to its turn: a task claimed in one turn whose input the tool takes only in the next, a turn cut to be continued
+included, joins that next turn unclaimed and is given again at its end, unless the claiming turn's report answered it. A claimed input the turn did not take stays queued in the tool, and the turn after answers it. A task given again and waiting is delivered into that turn. At the turn's end the claimed task is not given again, and the
 last response answers it, in the one report per giver. `handled` with no turn running, or on a task queued in the tool for a turn after,
 claims nothing, and says the task is answered by the report of the turn it runs in. Otherwise, when the turn
 ends as a turn does (not stopped, and not cut to be continued), the task is undelivered and given again at rest (`MailboxRecords.undeliver`

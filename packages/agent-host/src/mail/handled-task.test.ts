@@ -9,6 +9,7 @@ import { at, hostWorld } from './host-mail.test-helpers.js'
 const A = at('a')
 const B = at('b')
 const C = at('c')
+const D = at('d')
 const inTurn = { kind: 'ready', live: true, quiet: false, joins: true } as const
 let stops: (() => void)[] = []
 afterEach(() => {
@@ -16,12 +17,23 @@ afterEach(() => {
   stops = []
 })
 const started = () => {
-  const w = hostWorld()
+  // d: a second giver, whose claim stands beside one handed over or forgotten
+  const w = hostWorld({ extra: { d: { name: 'delta', projectId: 'p1' } } })
   w.afterReady()
   stops.push(w.stop)
   return w
 }
 type World = ReturnType<typeof started>
+/** Holds the next delivery until the call it returns, as a tool that takes a folded input only late does; a hold set after it stays */
+function holdDelivery(w: World): () => void {
+  let take = () => {}
+  const hold = new Promise<void>((r) => (take = r))
+  w.behaviour.hold = hold
+  return () => {
+    if (w.behaviour.hold === hold) w.behaviour.hold = null
+    take()
+  }
+}
 const handled = async (w: World, id: string) => (await w.tool.call('b', { action: 'handled', thread: id })).text
 /** The turn ends as turns do, at rest: the tool took what it was given, and the session's last response answers its open tasks */
 function endAtRest(w: World) {
@@ -50,6 +62,88 @@ describe('a task marked handled by its receiver (#2493)', () => {
     endAtRest(w)
     for (const id of [t0.id, a.id, b.id]) expect(w.row(id, B)).toMatchObject({ settled: 'reported', givenAgainAt: null })
     expect(new Set([t0.id, a.id, b.id].map((id) => w.store.mailbox.reportsOn(id)[0]?.id)).size).toBe(1)
+    await w.advance(60_000)
+    expect(w.to('b')).toHaveLength(given)
+  })
+
+  it('keeps a claim made while the delivery that gives the task into the turn waits for the tool to take it (#2497)', async () => {
+    const w = started()
+    w.mail.task(A, B, { text: 'start on #12', origin: 'agent_session', delivered: false })
+    await w.advance(2_000)
+    w.states.set('b', inTurn)
+    // The tool takes a folded input late: Claude Code names it in the turn's result, the host counts it taken after 90 s at most
+    const take = holdDelivery(w)
+    const a = w.mail.task(A, B, { text: 'and review #13', origin: 'agent_session', delivered: false })
+    await w.advance(5_000)
+    expect(w.to('b').at(-1)?.input.text).toContain(a.id)
+    expect(await handled(w, a.id)).toContain('is answered by this turn')
+    take()
+    await w.advance(0)
+    endAtRest(w)
+    expect(w.row(a.id, B)).toMatchObject({ settled: 'reported', givenAgainAt: null })
+  })
+
+  it.each([
+    ['its result, without the input', { took: [], finished: true }],
+    ['a stop', { took: [], finished: false }],
+    ['an error that took the process', { took: undefined, finished: false }],
+  ] as const)('forgets a claim when its turn ends by %s: the input the tool takes after joins the next turn unclaimed, and a claim there holds (#2497)', async (_, ending) => {
+    const w = started()
+    w.mail.task(A, B, { text: 'start on #12', origin: 'agent_session', delivered: false })
+    await w.advance(2_000)
+    w.states.set('b', inTurn)
+    const take = holdDelivery(w)
+    const a = w.mail.task(A, B, { text: 'and review #13', origin: 'agent_session', delivered: false })
+    await w.advance(5_000)
+    expect(await handled(w, a.id)).toContain('is answered by this turn')
+    w.delivery.turnInputs(B, ending)
+    w.endTurn('b')
+    // The tool takes the input into the turn after, which ends having done it: a task that joined it, given again at rest as any (#2369)
+    w.turns.beginOther('b', 'person', null)
+    // The next turn's own claim, made while its task's delivery waits for the tool too, holds
+    const takeD = holdDelivery(w)
+    const d = w.mail.task(D, B, { text: 'and the changelog', origin: 'agent_session', delivered: false })
+    await w.advance(5_000)
+    take()
+    await w.advance(5_000)
+    expect(w.to('b').at(-1)?.input.text).toContain(d.id)
+    expect(await handled(w, d.id)).toContain('is answered by this turn')
+    takeD()
+    await w.advance(0)
+    endAtRest(w)
+    expect(w.row(a.id, B)).toMatchObject({ settled: null, givenAgainAt: expect.any(Number) })
+    expect(w.row(d.id, B)).toMatchObject({ settled: 'reported', givenAgainAt: null })
+  })
+
+  it('answers the heir once when the giver hands over a task claimed while its delivery waited for the tool, and keeps the claim of a giver that stayed (#2497)', async () => {
+    const w = started()
+    w.mail.task(A, B, { text: 'start on #12', origin: 'agent_session', delivered: false })
+    await w.advance(2_000)
+    w.states.set('b', inTurn)
+    const take = holdDelivery(w)
+    const a = w.mail.task(A, B, { text: 'and review #13', origin: 'agent_session', delivered: false })
+    await w.advance(5_000)
+    // d waits behind a's delivery (one in flight per mailbox), and goes into the turn once a's is done, its own waiting for the tool too
+    const waiting = w.to('b').length
+    const d = w.mail.task(D, B, { text: 'and the changelog', origin: 'agent_session', delivered: false })
+    await w.advance(5_000)
+    expect(w.to('b')).toHaveLength(waiting)
+    expect(await handled(w, a.id)).toContain('is answered by this turn')
+    w.mail.handOver(A, C, 'all', [B])
+    const again = w.store.mailbox.watchedTo(B).find((r) => w.store.mailbox.message(r.messageId)?.sender === C)?.messageId ?? ''
+    const takeD = holdDelivery(w)
+    take()
+    await w.advance(5_000)
+    expect(w.to('b').at(-1)?.input.text).toContain(d.id)
+    expect(await handled(w, d.id)).toContain('is answered by this turn')
+    takeD()
+    await w.advance(0)
+    const given = w.to('b').length
+    endAtRest(w)
+    expect(w.row(again, B)).toMatchObject({ settled: 'reported', givenAgainAt: null })
+    expect(w.store.mailbox.recipients(w.store.mailbox.reportsOn(again)[0]?.id ?? '').map((r) => r.recipient)).toEqual([C])
+    expect(w.row(a.id, B)).toMatchObject({ settled: 'withdrawn', givenAgainAt: null })
+    expect(w.row(d.id, B)).toMatchObject({ settled: 'reported', givenAgainAt: null })
     await w.advance(60_000)
     expect(w.to('b')).toHaveLength(given)
   })
