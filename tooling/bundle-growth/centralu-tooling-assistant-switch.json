@@ -1,0 +1,1 @@
+{ "bytes": 1000, "reason": "The window calls the Assistant by its new names and falls back to the old ones on an older host (renamed in platform/src/web/index.ts, #2481): five calls and the fallback, about 400 B." }
