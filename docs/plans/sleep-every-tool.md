@@ -1,6 +1,6 @@
 # Idle sessions of every tool sleep (#2027)
 
-> **Status: Codex built (outcome A, §4a), the ACP tools not yet (§6a), 2026-11-13.** The owner decided on #2027 (2026-11-12): idle sessions of every tool sleep,
+> **Status: Codex built (outcome A, §4a), the ACP tools not yet (§6a, §6b), Cursor's empty-conversation fix built (§6), 2026-11-23.** The owner decided on #2027 (2026-11-12): idle sessions of every tool sleep,
 > not only Claude's; for Codex, measure a resume first (time to first token, cache read on the first request, threads of
 > 1, 50 and 500 MB), then choose between a sleep rule and one shared app-server per account. #1895 option C stands: no
 > new keeper agent-holding code. The setting stays the one of #568, "Put idle sessions to sleep after" (15 minutes).
@@ -360,10 +360,29 @@ wake then fails with "no record of this conversation" (`sessions/session-start.t
 session never typed to after a host restart; with sleep, every such session hits it 15 minutes after it opened. Fixed at
 its owner, the resume's failure path in `session-start.ts`: a session whose store holds no reply from the agent has
 nothing to lose, so a `conversation_gone` wake starts a new conversation for it instead of failing. This fixes the
-restart case too.
+restart case too. **Built (#2479 A9, 2026-11-23)**: `SessionStarts.startOver`, only on the tool's own `conversation_gone` (not the list
+check Claude and Codex have, where "not listed" can mean a moved folder), only when the store holds no `assistant` row
+(`hasAgentRows`) and the session was not imported; the boundary is recorded as a tool switch does. Real Cursor 2026.10.22, a
+session created and never typed to, then `agents.restartSession` twice on a temp data folder: before, `session_live` false with
+reason `restart_failed` and the conversation id unchanged; after, live, on a new conversation id each time. No model turn was
+needed, so no quota. A session where the person's message was sent and Cursor never answered also starts over; only the
+agent's rows count.
 
 **Order per tool**: OpenCode first (load measured fast and whole), then Antigravity, then Cursor (needs the fix above and
 the subagent check). Each tool's PR carries its M3 numbers.
+
+### 6b. Where each ACP tool stands (2026-11-23)
+
+Every profile keeps `sleep: false`: a tool sleeps once its own M3 shows a wake that loses nothing and no background work
+kept past a turn (§6), and none has both. What is known, and what is not:
+
+| Tool | Resume (M3) | Background past a turn | Decision |
+|---|---|---|---|
+| OpenCode 1.19.4 | `session/load` ~1 s and whole, but the prompt cache is lost (.08 read after a load, .996 live, §6a) | inconclusive | awake; the owner weighs ~20k tokens per wake against 150-260 MB idle (§6a). Not re-measured on a free provider: one that cannot report cache proves nothing |
+| Antigravity 1.5.2 | loads with a replay (1.4.3); no M3 run | not measured | awake until a signed-in session runs M3. It signs in through Centralu's own state folder, so it cannot be measured without a sign-in |
+| Cursor 2026.10.22 | the empty-conversation case is fixed (§6); a real resume after a model turn is not recorded: the measuring account is out of plan quota | a subagent may outlive the turn, not measured | awake; Cursor sends no usage, so its cache cannot be read and only the time to the first token could be compared |
+
+Each flips in the PR of the session that measures it, with the numbers.
 
 ### 6a. OpenCode does not sleep yet (decided with the Codex PR, 2026-11-13)
 
@@ -426,7 +445,7 @@ sleeps again 15 minutes after the new host started (`sleep.ts`: the quiet period
 - **Q2.** An ACP tool found to keep a shell (or a subagent) past its turn that it does not report: it never sleeps
   (keeps 150-260 MB plus its bridge per session) until its adapter can report that work, or it sleeps and that work is
   lost. Recommendation: never sleeps; silently losing the person's running work is worse than the memory.
-- **Q3, a follow-up, not this work.** Once every tool sleeps and wakes on use, drop the windows' revive after a
+- **Q3, a follow-up, not this work (#2538).** Once every tool sleeps and wakes on use, drop the windows' revive after a
   reconnect (`recoverAfterReconnect`, `machines.ts`), so after an update sessions stay asleep until typed to: less code
   and no resume burst; the cost is that the first message after an update always pays a wake. Recommendation: yes, in a
   later PR once Codex sleeps.
