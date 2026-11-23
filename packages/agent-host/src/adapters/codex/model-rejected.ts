@@ -21,8 +21,7 @@ export function modelRejection(message: string, errorInfo?: unknown): { model: s
   /*
    * Codex's own classification (`TurnError.codexErrorInfo`, a bare string such as "badRequest" or an object keyed by the
    * kind) when it gives one: another kind (a usage limit, a context window, a dropped stream) is never a refused model,
-   * whatever the sentence says, and "badRequest" is the 400 the provider's body would otherwise have to prove. "modelNotFound"
-   * (`CodexErrorInfo`, codex-cli 0.171.0) names the case itself, so it stands for the provider's refusal (a 400, or a 404 as OpenAI sends it) as well; the sentence must still name the model.
+   * whatever the sentence says, and "badRequest" or "modelNotFound" (0.171.0) stands for the refusal the provider's body would otherwise have to prove.
    */
   const kind = typeof errorInfo === 'string' ? errorInfo : errorInfo !== null && typeof errorInfo === 'object' ? Object.keys(errorInfo)[0] : undefined
   // "other" is the catch-all: it says nothing, so the sentence decides as it does with no kind
@@ -34,7 +33,7 @@ export function modelRejection(message: string, errorInfo?: unknown): { model: s
     .split('\n')
     .filter((line) => line.trim() !== 'invalid_request_error')
     .join('\n')
-  // A 400 (Codex's "badRequest" or "modelNotFound", else the provider's invalid_request_error), naming a model it will not serve. Other 400s are not this one
+  // A refusal (those kinds, else a 400 invalid_request_error) naming a model it will not serve; other 400s are not this one
   if (kind !== 'badRequest' && kind !== 'modelNotFound') {
     if (body.status !== undefined && body.status !== 400) return null
     if (str(error.type) !== 'invalid_request_error' && !/invalid_request_error/.test(message)) return null
