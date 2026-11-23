@@ -14,8 +14,8 @@ const TABLE_RULE = /^\s*\|[\s:|-]+\|\s*$/
 const WORK_TABLE = /^(?:#|no\.?|steps?|units?|prs?|pull requests?|items?|phases?|parts?)$/i
 // Numbered lines are as often facts, causes, options, a bug's steps or a plan's rules: only those under a heading of work are planned
 const WORK = /pull requests?|\bPRs?\b|\bsteps\b|work units?|follow-?ups?|\blater\b|\bphases\b|what is left|\bproposals?\b|\bto ?do\b|\bfix(?:es)?\b|\bplan\b|\bchanges\b|\bscope\b|what to do/i
-// …but not alternatives to pick from: one is built, the rest are not left over
-const CHOICE = /pick one|\boptions?\b|alternatives|\beither\b/i
+// …but not alternatives to pick from (one is built, the rest are not left over), nor a bug's steps to reproduce it
+const CHOICE = /pick one|\boptions?\b|alternatives|\beither\b|to reproduce|\brepro\b/i
 
 const firstCell = (row) => row.replace(TABLE_ROW, '').split('|')[0].replace(/[*_`]/g, '').trim()
 

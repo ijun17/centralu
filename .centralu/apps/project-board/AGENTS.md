@@ -1083,7 +1083,7 @@ and refuses with every reason at once, sending nothing.
 - **`close_issue`** (`item`, `comment`, `reason?`, `items?`, `dryRun?`; `close-tools.mjs`, the reading in `plan-items.mjs`, #2488):
   the one way agents close an issue. Umbrella issues closed by hand left planned items that no pull request built and no issue
   carried, and nobody owned them after. The items an issue plans are its task-list boxes, and, under a heading of work (proposal,
-  to do, steps, fix, plan, changes, scope, pull requests, follow-ups, later, phases; not one of options to pick from), its numbered
+  to do, steps, fix, plan, changes, scope, pull requests, follow-ups, later, phases; not one of options to pick from, nor a bug's steps to reproduce), its numbered
   lines and the numbered rows of a table whose first column is `#`, Step, Unit, PR, Item or Phase. Elsewhere numbered lines are
   facts, causes, observations, a bug's steps or a plan's rules: counted everywhere, the last 200 issues closed as completed would
   have refused 45 of their fixes (9 under this rule, each a to-do or proposal a later pull request could have left half done).
@@ -1092,7 +1092,7 @@ and refuses with every reason at once, sending nothing.
   (an issue may name a plan in passing, and every step of mailbox.md would then hold it open), and the answer warns of it. `§n`
   names a heading by its number, compared whole (`§1` is not `1.2`); a numbered list item is no section here. An item went
   somewhere when it is ticked, names an issue or pull request (`#N`, `owner/repo#N`, an address; not a file's anchor such as
-  `plans/x.md#13-…`) or says `dropped: <why>`, or when `items` gives it one of the last two by the number the refusal lists. Refused,
+  `plans/x.md#13`) or says `dropped: <why>`, or when `items` gives it one of the last two by the number the refusal lists. Refused,
   with nothing sent, while one went nowhere, also when closing as not planned (an item is dropped with its own reason, or switching
   the reason would get past the rule), while a cited section does not read (the issue's citation is corrected first, else its plan
   would close unchecked), on an empty or non-English comment, on a pull request, or on a closed issue. The comment, posted before
