@@ -80,6 +80,11 @@ export type MailHooks = {
   openTasks?(sessionId: string, side: 'to' | 'from'): string[]
   /** A session's cards and the givers of its open work (docs/plans/mailbox.md §10.6.4) */
   cards?: CardHooks
+  /**
+   * The giver's call that gave task `taskId` was cancelled (#2485): the task is withdrawn, so a stop of its turn tells the giver nothing more, and the
+   * answer is whether the session's latest turn is that task's alone (`StopNotices.alone`), one the call may stop
+   */
+  cancelGiven?(sessionId: string, giver: string, taskId: string): boolean
   /** What the tool said of the inputs given it (`MailDelivery.turnInputs`): which the turn that ended took, or which the turn opening runs for */
   turnInputs?(sessionId: string, turn: TurnInputs): void
   /** The Assistant's turn ended as a turn does: each session whose request it carried is told what it gets back, and those requests are settled (S12, §7.6) */
@@ -351,6 +356,11 @@ export class MailSessionsView {
   /** The caller's tasks to the session that are not delivered yet, withdrawn (`agent_session stop`); how many */
   withdrawTasks(callerId: string, sessionId: string): number {
     return this.hooks?.withdrawTasks?.(callerId, sessionId) ?? 0
+  }
+
+  /** `MailHooks.cancelGiven`; false without a mailbox */
+  cancelGiven(sessionId: string, giver: string, taskId: string): boolean {
+    return this.hooks?.cancelGiven?.(sessionId, giver, taskId) ?? false
   }
 
   /** The session still takes mail as the delivery planned it: woken at rest, or joining its turn. Otherwise the mail waits (`MailNotAtRest`) and is planned again */

@@ -231,6 +231,8 @@ export const hostParams = {
    */
   'host.cards': z.object({ sessionId: SessionId, caller: HubCaller }),
   'host.answerCard': z.object({ sessionId: SessionId, caller: HubCaller, card: z.string().min(1).max(200), text: z.string().max(20_000) }),
+  /** The call of the hub's session `caller` that gave task `task` was cancelled: this host stops the turn that task alone started (#2485) */
+  'host.stopTask': z.object({ sessionId: SessionId, caller: HubCaller, task: z.string().min(1).max(200) }),
   /** docs/plans/remote-hub.md §13. Only on a connection a hub offered apps on; never routed */
   'host.apps': LinkedAppsParams,
   'host.appCall': LinkedAppCallParams,

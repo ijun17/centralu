@@ -171,25 +171,24 @@ export class StopNotices {
   }
 
   /**
-   * Whether `session`'s turn `turnSeq` (its latest when absent) is `sender`'s alone: what a stop notice may quote to it
-   * (`quotes`), and whether it may answer the session's cards as its work's giver (docs/plans/mailbox.md §10.6.4). All of it
-   * must hold: the turn is the session's latest and `sender`'s own message started it (a mail the mailbox delivered, or work
-   * `sender` gave it); a turn the CLI started by itself (`cli`), or the person's, is never `sender`'s alone, even when it goes
-   * on with a task's work; every message the mailbox gave into it is from `sender`; and everything else that may have entered
-   * it (`turnInputs`: each user row stored since the turn before began, and a question card answered since) was sent by
-   * `sender`, none from the person, an app, a script, a relayed report or another session. A turn anyone else had a part in, or
-   * one these records cannot tell, is no one's alone. `gaveIt`: only work `sender` gave it started the turn: `send`, its send
-   * (a `caller` turn); `work`, that or its task the mailbox delivered to start one (the session was busy at the send, or the
-   * task came from another computer), never a mail of another kind, nor a task that joined a turn already running.
+   * Whether `session`'s turn `turnSeq` (its latest when absent) is `sender`'s alone: what a stop notice may quote to it (`quotes`), whether it may
+   * answer the session's cards as its work's giver (docs/plans/mailbox.md §10.6.4), and whether its cancelled ask stops the turn (`starter`, #2485).
+   * All of it must hold: the turn is the session's latest and `sender`'s own message started it (a mail the mailbox delivered, or work `sender` gave
+   * it); a turn the CLI started by itself (`cli`), or the person's, is never `sender`'s alone, even when it goes on with a task's work; every message
+   * the mailbox gave into it is from `sender`; and everything else that may have entered it (`turnInputs`: each user row stored since the turn before
+   * began, and a question card answered since) was sent by `sender`, none from the person, an app, a script, a relayed report or another session.
+   * A turn anyone else had a part in, or one these records cannot tell, is no one's alone. `gaveIt`: only work `sender` gave it started the turn:
+   * `send`, its send (a `caller` turn); `work`, that or its task the mailbox delivered to start one (the session was busy at the send, or the task
+   * came from another computer), never a mail of another kind, nor a task that joined a turn already running. `starter`: that message alone did.
    */
-  alone(session: string, sender: string, { turnSeq, gaveIt }: { turnSeq?: number; gaveIt?: 'send' | 'work' } = {}): boolean {
+  alone(session: string, sender: string, { turnSeq, gaveIt, starter: only }: { turnSeq?: number; gaveIt?: 'send' | 'work'; starter?: string } = {}): boolean {
     const [party, from] = [parseAddress(session), parseAddress(sender)]
     if (party?.kind !== 'session' || from?.kind !== 'session') return false
     const seq = turnSeq ?? this.d.records.nextTurnSeq(party.sessionId) - 1
     if (this.d.records.nextTurnSeq(party.sessionId) !== seq + 1) return false
     const turn = this.d.records.turn(party.sessionId, seq)
     const starter = turn?.starterId == null ? undefined : this.d.records.message(turn.starterId)
-    if (!turn || starter?.sender !== sender) return false
+    if (!turn || starter?.sender !== sender || (only !== undefined && starter.id !== only)) return false
     if (turn.startedBy !== 'caller' && (turn.startedBy !== 'mail' || gaveIt === 'send' || (gaveIt === 'work' && starter.kind !== 'task'))) return false
     if (this.d.records.inTurn(session, seq).some((r) => r.message.sender !== sender)) return false
     const given = this.d.turnInputs?.(party.sessionId)

@@ -90,15 +90,17 @@ describe("a machine's cards, as a hub's giver of work there reads them (#1948 st
     await eventually(() => hello)
     await expect(other.call('host.cards', { sessionId: 'w1', caller: 'h1' })).rejects.toThrow('Only a hub that offered on this connection reads')
     await expect(other.call('host.answerCard', { sessionId: 'w1', caller: 'h1', card: `x:${requestId}`, text: 'Yes' })).rejects.toThrow('Only a hub that offered on this connection answers')
+    await expect(other.call('host.stopTask', { sessionId: 'w1', caller: 'h1', task: 'm_any' })).rejects.toThrow('Only a hub that offered on this connection stops')
     expect(standing().pendingQuestions.map((q) => q.requestId)).toEqual([requestId])
   })
 
   it('a machine from before the calls is named as needing an update', async () => {
-    const machine = await machineHost({ sessions: ['w1'], mail: true, without: ['host.cards', 'host.answerCard'] })
+    const machine = await machineHost({ sessions: ['w1'], mail: true, without: ['host.cards', 'host.answerCard', 'host.stopTask'] })
     const hub = await hubHost(machine.port, { mail: true })
     await eventually(() => hub.machine().status === 'connected')
     const reader = linkedSessions(() => hub.links.all(), (method, params) => hub.router.handle(method, params))
     expect(await reader.cards('m1.w1', 'h1')).toEqual({ ok: false, error: 'Remote box runs an older Centralu, which takes no work from this computer. Update Centralu on Remote box.' })
     expect(await reader.answerCard('m1.w1', 'h1', 'c', 'Yes')).toEqual({ ok: false, error: 'Remote box runs an older Centralu, which takes no work from this computer. Update Centralu on Remote box.' })
+    expect(await reader.stopTask!('m1.w1', 'h1', 'm_any')).toEqual({ ok: false, error: 'Remote box runs an older Centralu, which cannot stop work from this computer. Update Centralu on Remote box' })
   })
 })

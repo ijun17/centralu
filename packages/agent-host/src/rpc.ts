@@ -970,6 +970,11 @@ export function createRpcHandler(
       if (!hub) throw rpcError('Only a hub that offered on this connection answers the cards of work it gave here')
       return mgr.linkedHost.hubAnswer(p.sessionId, sessionAddress(hub.id, p.caller), p.card, p.text)
     },
+    'host.stopTask': async (p, ctx) => {
+      const hub = ctx ? hubs?.on?.(ctx.client) : undefined
+      if (!hub) throw rpcError('Only a hub that offered on this connection stops the work it gave here')
+      return mgr.linkedHost.hubStopTask(p.sessionId, sessionAddress(hub.id, p.caller), p.task)
+    },
     'host.apps': async (p, ctx) => {
       const { hub, calls } = appsHub(ctx)
       return { apps: await calls.list(hub, p.session, p.start) }

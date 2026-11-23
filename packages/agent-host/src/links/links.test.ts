@@ -2624,15 +2624,16 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     expect(never.error).toContain(', so "m1/never-seen" cannot be asked there')
   })
 
-  it('waits while the session there waits on the person, and tells the same caller asking again with a task to wait for it', async () => {
+  it('answers asking while the session there waits on the person (#2485), tells the same caller asking again with a task to wait for it, and answers once allowed', async () => {
     const { remote, name, ask, answer } = await rig()
     const first = ask({ project: name, task: 'please approve the command' })
     await answer('allow')
-    await eventually(() => !!remote.mgr.listSessions().find((s) => s.id === 'w1')?.pendingApproval)
+    // The approval is the person's there: the caller reads it and cannot answer it
+    expect(await first).toMatchObject({ ok: true, state: 'asking', sessionId: 'm1.w1', cards: [expect.objectContaining({ kind: 'approval', answerable: false })] })
     // The same caller asking again with a task is told to wait, not to start a second one
     expect(await ask({ project: name, task: 'again' })).toMatchObject({ ok: false, error: expect.stringContaining('still working on your last task') })
     await remote.mgr.inputs.respondApproval('w1', remote.mgr.listSessions().find((s) => s.id === 'w1')!.pendingApproval!.requestId, 'allow')
-    expect(await first).toMatchObject({ ok: true, state: 'done', sessionId: 'm1.w1', answer: 'approved' })
+    expect(await ask({ project: name, session: 'm1.w1' })).toMatchObject({ ok: true, state: 'done', sessionId: 'm1.w1', answer: 'approved' })
   })
 
   it("withdraws the card when the caller's project loses trust, and sends nothing to the machine", async () => {

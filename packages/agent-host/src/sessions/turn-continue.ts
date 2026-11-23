@@ -263,6 +263,15 @@ export class TurnContinue {
   }
 
   /**
+   * Whether the session's turn waits to be continued, with nothing running: a held retry, a network or limit stop's wait, or a turn an update cut. A
+   * Stop ends that wait and the turn (`TurnInputs.interrupt`, `cancel`)
+   */
+  waitsToContinue(sessionId: string): boolean {
+    const u = this.updates.get(sessionId)
+    return this.stops.has(sessionId) || this.held.has(sessionId) || (!!u && u.phase !== 'waking' && !!u.turn)
+  }
+
+  /**
    * The person's Stop, or an end of the turn: takes the session's waits away. Returns where a held retry was, or null when none
    * stood. Handed, the tool's turn is running and is the caller's to stop
    */

@@ -48,7 +48,7 @@ async function hub(away?: string) {
       movedReads++
       return { 'm1.w1': '2026-01-02 03:04' }
     },
-    describe: () => ({ name: 'Worker', project: 'api on Box' }),
+    describe: () => ({ name: 'Worker', project: 'api on Box', projectName: 'api' }),
     lastWords: async () => ({ ok: true as const, text: 'done', length: 4, seq: 1 }),
     machineLinked: () => true,
     backgroundTasks: async () => [],

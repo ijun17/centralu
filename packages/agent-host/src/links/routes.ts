@@ -385,6 +385,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'host.mailMove': HUB,
   'host.cards': HUB,
   'host.answerCard': HUB,
+  'host.stopTask': HUB,
   // A project's app here used by the hub's sessions (#1938): answered here, never passed on
   'host.apps': HUB,
   'host.appCall': HUB,

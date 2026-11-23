@@ -1,6 +1,7 @@
 import type { OrchestratedSession, RecallHit } from '../adapters/contract.js'
 import { oneLineText, isAssistantKind, isAssistantOrCoordinator } from '@cc/protocol'
 import { rpcError } from '../rpc-error.js'
+import { inTurn } from '../idle.js'
 import { hubAskDepthKey } from './agent-depth.js'
 import { budgetOf } from './session-lines.js'
 import type { DelegationHost } from './delegation-flow.js'
@@ -8,6 +9,8 @@ import type { HandoffFlowHost } from './handoff-flow.js'
 import { HUB_SENDER } from './hub-sender.js'
 import type { LinkedEvent, LinkedReports } from './linked-reports.js'
 import type { TurnContinue } from './turn-continue.js'
+import type { TurnInputs } from './turn-inputs.js'
+import type { MailSessionsView } from './mail-sessions.js'
 import type { SessionTrashHost } from './session-trash.js'
 import type { SessionToolsHost } from './session-tools.js'
 import { lastResponse, lastResponseSeq } from './turn-answer.js'
@@ -33,7 +36,9 @@ export type LinkedHostHost = Pick<DelegationHost, 'meta' | 'store' | 'children' 
     /** Each linked machine's session's own background work, as the hub last heard it (linked-reports.ts) */
     readonly linkedReports: LinkedReports
     /** A turn the provider ended for want of capacity, kept waiting to be continued (turn-continue.ts) */
-    readonly turnContinue: Pick<TurnContinue, 'stands'>
+    readonly turnContinue: Pick<TurnContinue, 'stands' | 'waitsToContinue'>
+    readonly mail: Pick<MailSessionsView, 'cancelGiven'>
+    readonly inputs: Pick<TurnInputs, 'interrupt'>
   }
 
 /**
@@ -88,6 +93,16 @@ export class LinkedHost {
     const r = await this.host.answerRoutedCard(giver, sessionId, card, text)
     if (!r.ok) throw rpcError(r.error)
     return { ok: true }
+  }
+
+  /** `host.stopTask` (#2485), as `MailHooks.cancelGiven` decides */
+  hubStopTask(sessionId: string, giver: string, taskId: string): { stopped: boolean } {
+    this.directedFromHub(sessionId)
+    const running = inTurn(this.host.meta.get(sessionId)?.state ?? 'idle') || this.host.turnContinue.waitsToContinue(sessionId)
+    const alone = this.host.mail.cancelGiven(sessionId, giver, taskId)
+    if (!running || !alone) return { stopped: false }
+    this.host.inputs.interrupt(sessionId)
+    return { stopped: true }
   }
 
   /**

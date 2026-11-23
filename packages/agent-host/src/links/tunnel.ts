@@ -9,6 +9,7 @@ import type { InstallSource, RemoteShell } from '@cc/protocol'
 import { Tail } from '../stream-text.js'
 import { endChild, runSsh, SshRunFailure, type SshExpectedLine, type SshRunResult } from './ssh-run.js'
 import { isHostCrash, NodeTooOld } from './node-floor.js'
+import { CONNECT_FAILED } from './away.js'
 import { systemTool } from '../os.js'
 import { durationText, sleep } from '../timing.js'
 
@@ -875,7 +876,7 @@ export class SshTunnel implements Tunnel {
     const remote = this.opts.remote ?? { shell: 'posix' }
     const r = await this.run([...this.config(), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', this.opts.target, detachCommand(remote, this.opts.hubName ?? hostname())], undefined, this.opts.detachTimeoutMs ?? SSH_DETACH_TIMEOUT_MS)
     this.ifClosed()
-    if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
+    if (r.code === 255) throw new Error(sshFailure(this.opts.target, r.stderr))
     if (r.stdout.includes(NOT_FOUND)) throw notInstalled(this.where, remote)
     let answer: DetachAnswer
     try {
@@ -950,7 +951,7 @@ export class SshTunnel implements Tunnel {
         throw again
       }
     }
-    if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
+    if (r.code === 255) throw new Error(sshFailure(this.opts.target, r.stderr))
     // The reader's lines are not the step's output
     return markers.length ? { ...r, stdout: r.stdout.split(/\r?\n/).filter((l) => !markers.includes(l.trim())).join('\n') } : r
   }
@@ -1035,7 +1036,7 @@ export class SshTunnel implements Tunnel {
       this.pairs = true
       return this.connectionLine()
     }
-    if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
+    if (r.code === 255) throw new Error(sshFailure(this.opts.target, r.stderr))
     if (r.stdout.includes(NOT_FOUND)) throw notInstalled(this.where, remote)
     try {
       const line = parseConnectionLine(r.stdout, remote)
@@ -1240,6 +1241,12 @@ function withoutClixml(s: string): string[] {
 }
 
 /**
+ * A line that says why. ssh's words for a connect that got no answer count too: through a jump host ssh ends with
+ * `Connection closed by UNKNOWN port 65535` whatever went wrong behind it, and the line before says what (#1426)
+ */
+const NAMES_AN_ERROR = new RegExp(`error|denied|refused|timed out|not found|cannot|could not|${CONNECT_FAILED}`, 'i')
+
+/**
  * The one line of a remote's stderr that says why, for the person. Measured on a Windows laptop
  * (2026-10-05): ssh prefixes its own `** WARNING` lines about key exchange, PowerShell wraps an
  * error in CLIXML when its output is not a console (read by `withoutClixml`), and a Node crash ends
@@ -1250,8 +1257,13 @@ export function lastLine(s: string, ansi: (bytes: Buffer) => string | null = ans
   const lines = withoutClixml(s)
     .map((l) => l.trim())
     .filter((l) => l && !l.startsWith('**') && !/^Node\.js v\d/.test(l) && !/^at /.test(l))
-  const line = [...lines].reverse().find((l) => /error|denied|refused|timed out|not found|cannot|could not/i.test(l)) ?? lines.at(-1) ?? ''
+  const line = [...lines].reverse().find((l) => NAMES_AN_ERROR.test(l)) ?? lines.at(-1) ?? ''
   return unescapeBytes(line, ansi)
+}
+
+/** What a failed ssh (exit 255) to `target` is reported as; `isNoAnswer` reads it for whether the machine answered at all */
+export function sshFailure(target: string, stderr: string): string {
+  return `ssh could not reach ${target}: ${lastLine(stderr) || 'no answer'}`
 }
 
 /**

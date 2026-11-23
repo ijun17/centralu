@@ -107,6 +107,10 @@ describe('what a stop notice quotes of the cut turn', () => {
     const { turnSeq } = s.w.startTurn(B, task.id)
     s.w.store.mailbox.markDelivered(B, [task.id], s.w.clock.t, turnSeq)
     expect(s.mail.stops.alone(B, giver, { gaveIt: 'work' })).toBe(true)
+    // Named by the task that started it, as a cancelled ask stops it (#2485); another task of the same giver's did not
+    const other = s.mail.task(giver, B, { text: 'and the docs', origin: 'ask_project', delivered: false, across: { id: 'hub-0000000b.m_01JX000000000000000000001T' } })
+    expect(s.mail.stops.alone(B, giver, { gaveIt: 'work', starter: task.id })).toBe(true)
+    expect(s.mail.stops.alone(B, giver, { gaveIt: 'work', starter: other.id })).toBe(false)
     // A here writes into the turn: its row names A's id, which is not the giver
     s.entered.set(idOf(B), [idOf(A)])
     expect(s.mail.stops.alone(B, giver, { gaveIt: 'work' })).toBe(false)

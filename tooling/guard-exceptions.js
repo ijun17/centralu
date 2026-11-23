@@ -405,7 +405,7 @@ export const COMMENT_SHARE_HELD = {
     'packages/agent-host/src/sessions/host-tenure.ts': 38,
     'packages/agent-host/src/sessions/hub-preset.ts': 43,
     'packages/agent-host/src/sessions/launch-inputs.ts': 51,
-    'packages/agent-host/src/sessions/linked-host.ts': 42,
+    'packages/agent-host/src/sessions/linked-host.ts': 39,
     'packages/agent-host/src/sessions/merge-checks.ts': 52,
     'packages/agent-host/src/sessions/opened-settings.ts': 36,
     'packages/agent-host/src/sessions/own-agents.ts': 48,

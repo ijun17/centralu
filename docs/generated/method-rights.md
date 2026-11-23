@@ -261,6 +261,7 @@ With the limited credential: refused: a hub linked to this host calls it, with t
 - `host.send`
 - `host.sessions`
 - `host.setHubAuto`
+- `host.stopTask`
 
 ## bridge
 

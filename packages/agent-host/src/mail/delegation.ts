@@ -70,8 +70,8 @@ export type LinkedTasks = {
   withdrawAsks(prefix: string): number
   /** The answer the newest report on the caller's tasks to the child kept, if one came back */
   lastAnswer(callerId: string, childId: string): string | undefined
-  /** The caller withdraws its open tasks to the child (`agent_session stop`); the withdrawal crosses by the receipts. How many */
-  withdraw(callerId: string, childId: string): number
+  /** The caller withdraws its open tasks to the child (`agent_session stop`), or only `taskId` (a cancelled ask_project); the withdrawal crosses by the receipts. How many */
+  withdraw(callerId: string, childId: string, taskId?: string): number
   /** The child is gone for good with its machine (removed from Centralu): its tasks are released `gone`, so the stop notice tells their senders */
   gone(childId: string): void
 }
@@ -145,9 +145,9 @@ export function linkedTasksOf(mail: MessageService, records: MailboxRecords, acr
       const answer = task ? records.reportsOn(task.id).at(-1)?.facts.answer : undefined
       return typeof answer === 'string' ? answer : undefined
     },
-    withdraw: (callerId, childId) => {
+    withdraw: (callerId, childId, taskId) => {
       const caller = mail.sessionAddress(callerId)
-      return tasksTo(caller, mail.sessionAddress(childId)).reduce((n, r) => n + mail.done(caller, r.messageId).settled, 0)
+      return tasksTo(caller, mail.sessionAddress(childId)).filter((r) => taskId === undefined || r.messageId === taskId).reduce((n, r) => n + mail.done(caller, r.messageId).settled, 0)
     },
     gone: (childId) => mail.stops.partyGone(mail.sessionAddress(childId)),
   }
