@@ -455,8 +455,9 @@ export class AskProjectFlow {
    */
   private async cancelAsk(callerId: string, ask: AskAcross, reader: LinkedSessions): Promise<AskProjectResult> {
     const where = `${ask.project}'s session "${ask.sessionName}"`
-    if (this.host.closing || !reader.stopTask) return { ok: false, error: `The call was cancelled; ${where} was left running.` }
-    this.host.linkedTasks!.withdraw(callerId, ask.sessionId, ask.taskId)
+    const tasks = this.host.linkedTasks
+    if (this.host.closing || !reader.stopTask || !tasks) return { ok: false, error: `The call was cancelled; ${where} was left running.` }
+    tasks.withdraw(callerId, ask.sessionId, ask.taskId)
     const r = await reader.stopTask(ask.sessionId, callerId, ask.taskId)
     if (!r.ok) return { ok: false, error: `The call was cancelled and its task withdrawn, but ${where} could not be stopped: ${r.error}.` }
     if (r.stopped) return { ok: false, error: `The call was cancelled, so ${where} was stopped.` }
