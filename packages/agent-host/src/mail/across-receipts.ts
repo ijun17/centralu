@@ -89,7 +89,7 @@ export class AcrossReceipts extends AcrossCore {
       const part = { ...params, ids: params.ids.slice(i, i + MOVE_IDS_PER_CALL) }
       const r = m?.reachable ? await m.call('host.mailMove', part).then(() => null, (e: unknown) => errorMessage(e)) : 'not reachable'
       if (!r) continue
-      this.d.log?.(`[mail] ${m?.name ?? machineId} could not be told that ${part.ids.length} task(s) went from ${params.from} to ${params.to} in a handoff: ${r}; told again later`)
+      this.d.log?.(`[mail] ${m?.name ?? machineId} could not be told that ${part.ids.length} message(s) went from ${params.from} to ${params.to} in a handoff: ${r}; told again later`)
       // A machine from before `host.mailMove` never takes it
       if (!older(r)) this.untoldMoves.set(machineId, [...(this.untoldMoves.get(machineId) ?? []), part])
     }
@@ -110,7 +110,7 @@ export class AcrossReceipts extends AcrossCore {
       return { ok: false, why: 'not_allowed', text: `${hub.name} may move only work its own sessions gave here.` }
     }
     const moved = this.d.service.moveAcross(from, to, p.ids)
-    if (moved < p.ids.length) this.d.log?.(`[mail] ${hub.name} moved ${moved} of ${p.ids.length} task(s) from ${from}: the rest are not open tasks it gave here`)
+    if (moved < p.ids.length) this.d.log?.(`[mail] ${hub.name} moved ${moved} of ${p.ids.length} message(s) from ${from}: the rest are no open task it gave here, nor unread or open mail a session here sent it`)
     return { ok: true, moved }
   }
 

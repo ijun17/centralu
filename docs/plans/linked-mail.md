@@ -189,7 +189,7 @@ has no `askedBy` there) as the sender of its `start_agent` task, the hub session
 (`ReachHost.starterElsewhere`); a handoff on the hub moves that task to the heir (`host.mailMove`), reported or not,
 and so the parent with it. So a hub parent's reply to its child's note wakes the child after the task was reported, as a local parent's
 does. The same parent makes the child's delivery name the sender as `your parent session`, as a local parent's does,
-and a plain message of the parent's goes in as a parent's does, inline. The note a child wrote the original before
+and a plain message of the parent's goes in as a parent's does, inline. The note a child wrote to the original before
 a handoff that followed the report moves too (#2530): the hub lists it in `host.mailMove`, and the machine gives its
 row there to the heir, whose reply the machine checks against its own copy's rows. `linked-children-mail.test.ts`
 runs each case on a linked pair and reads the sender's tool, the machine's copy and its delivery alike.

@@ -954,7 +954,7 @@ export class MessageService {
       let moved = 0
       for (const id of new Set(ids)) {
         const m = this.records.message(id)
-        if (m && m.sender !== from && !this.across(m.sender)) {
+        if (m && m.sender !== from && parseAddress(m.sender)?.kind === 'session' && !this.across(m.sender)) {
           moved += this.records.moveRows(from, to, 'all', [id]).length
           continue
         }

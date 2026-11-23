@@ -330,7 +330,7 @@ describe("whether a hub session's reply wakes its child's session on a linked ma
     expect(hub.mail!.service.drain(at.hub(r.sessionId))).toMatchObject({ wake: true, text: expect.stringContaining('sender="your parent session"') })
   })
 
-  // #2530 on one computer: the child's note to its parent, the report, then a handoff of the parent; the heir answers that note
+  // #2530's steps on one computer, where the handoff always gave the heir the note's row: the linked rows above must match it
   it("the reply of the session that took the parent's place by a handoff after the report, to the note its child on this computer wrote the parent before it, wakes the child", async () => {
     const { hub, at } = await tasksRig()
     const r = await hub.mgr.startAgent('h1', { task: 'please approve my command', wait: false })
