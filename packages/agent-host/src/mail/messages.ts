@@ -206,7 +206,7 @@ export class MessageService {
   private running = false
   /** Who hears that a session stopped or went (mailbox.md §10.6.1) */
   readonly stops: StopNotices
-  /** Mail held for the person: the delivery's holds and the person's acts on them, trusting or dismissing a project (§7.4, §7.6.5) */
+  /** Mail held for the person: the delivery's holds and the person's acts on them, trusting or dismissing a project (§7.4) */
   readonly holds: HeldMail
 
   constructor(

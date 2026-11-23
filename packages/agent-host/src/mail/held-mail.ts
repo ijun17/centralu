@@ -1,5 +1,5 @@
 /**
- * Mail held for the person (docs/plans/mailbox.md §7.4, §7.6.5): their acts on it (trusting or dismissing a project, resuming what an earlier build
+ * Mail held for the person (docs/plans/mailbox.md §7.4): their acts on it (trusting or dismissing a project, resuming what an earlier build
  * held, sending or dismissing what the delivery held) and the delivery's holds (`MessageService.holds`). Each runs in the service's transaction
  * (`run`), since what `changed` queues goes to the listeners only once that commits
  */
