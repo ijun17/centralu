@@ -100,12 +100,13 @@ export class HandoffMarkers {
 
   /**
    * Whether a session in the session archive was started by one of `starters`, by the record archiving keeps (its `asked_by` or its
-   * `parent`, which a handoff does not rewrite for an archived child) (#2474). False for a live session or one deleted for good
+   * `parent`, which a handoff does not rewrite for an archived child) (#2474). False for a live session, one deleted for good, and an Assistant's,
+   * which no session reads
    */
   archivedChildOf(sessionId: string, starters: readonly string[]): boolean {
     if (starters.length === 0) return false
     const row = this.db
-      .prepare<unknown[], { askedBy: unknown; parent: unknown }>(`SELECT asked_by_session_id as askedBy, parent_session_id as parent FROM sessions WHERE id = ? AND deleted_at IS NOT NULL`)
+      .prepare<unknown[], { askedBy: unknown; parent: unknown }>(`SELECT asked_by_session_id as askedBy, parent_session_id as parent FROM sessions WHERE id = ? AND deleted_at IS NOT NULL AND is_assistant = 0`)
       .get(sessionId)
     return !!row && [row.askedBy, row.parent].some((by) => typeof by === 'string' && starters.includes(by))
   }
