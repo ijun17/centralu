@@ -39,6 +39,8 @@ export const GUARDS: readonly Guard[] = [
     reads: [OS_ALLOWLIST, 'tooling/os-layer.js', 'tooling/os-tests.ts', 'tooling/eslint-platform-checks.js'],
   },
   { test: 'tooling/brand.test.ts', tests: 'the old name is not left anywhere', reads: [] },
+  // Every comment of every tracked code file: a promise another pull request adds without its issue fails it
+  { test: 'tooling/promises.test.ts', tests: 'finds no promise of later work', reads: ['tooling/promises.ts'] },
   {
     test: 'tooling/build-workflow.test.ts',
     tests: 'render or read reaches the screen|the Rust tests include',
