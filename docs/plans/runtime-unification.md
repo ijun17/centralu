@@ -1,6 +1,14 @@
 # One process runtime on every platform: target and path
 
-> **Status: proposed, 2026-10-08.** The owner decided on 2026-10-08 that the process runtime gets a full redesign,
+> **Status: superseded by [keeper-removal.md](keeper-removal.md)** (#1895 option C, owner, 2026-11-03): agents are no
+> longer held across an update, every update is stop-and-continue, and Linux and Windows stay direct (keeper-removal.md
+> "Short version" item 3). Built: steps 0 to 4 and 11. Cancelled: 4b, 5 and 8 with the keeper's agent-holding, 9 and 10 with
+> [remote-keeper.md](remote-keeper.md), and 6, 7 and 12, which assume a release with no direct start (#2484). Of §7, item 2
+> (no platform check left outside the OS layer) carries on in #2522, and item 4 (the work list) in
+> [runtime-lessons/work-list.md](../runtime-lessons/work-list.md); the other items no longer apply. What follows is the
+> plan as it stood.
+>
+> It was proposed on 2026-10-08: the owner decided that the process runtime gets a full redesign,
 > delivered in targeted steps: each step replaces one module wholesale with the target design, and the end result is the
 > architecture as it would be written from scratch. The precondition is that every lesson already paid for is written
 > down and guarded by a test: [../runtime-lessons/](../runtime-lessons/README.md), whose work list (75 rules) this plan
