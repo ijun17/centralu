@@ -24,7 +24,7 @@
  * what it started.
  *
  * What is checked: the method, notification, item-type and value names we use; the arguments we send to each request
- * (both ways, see below); the fields we read from an answer (`responseFields`); and the enum words we send or compare
+ * (both ways, see below); the fields we read from an answer (`responseFields`, and `variantFields` for one variant of a union); and the enum words we send or compare
  * (`enumValues`).
  */
 import { createHash } from 'node:crypto'
@@ -32,6 +32,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { paramFields, variantFields } from '../src/adapters/codex/type-fields.js'
 import { execTool } from '../src/tool-run.js'
 
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url))
@@ -112,30 +113,6 @@ for (const [key, label] of groups) {
  *   - a field required by the type that we do not send  → the server rejects it (that bug)
  *   - a field we send that is not in the type            → its name changed (silently ignored)
  */
-function paramFields(src) {
-  const open = src.indexOf('= {')
-  if (open < 0) return null
-  const body = src.slice(open + 3, src.lastIndexOf('}')).replace(/\/\*[\s\S]*?\*\//g, '')
-  const fields = []
-  let depth = 0
-  let start = 0
-  const push = (seg) => {
-    const m = /^\s*(\w+)(\??)\s*:/.exec(seg)
-    if (m) fields.push({ name: m[1], required: m[2] !== '?' })
-  }
-  for (let i = 0; i < body.length; i++) {
-    const c = body[i]
-    if ('{[(<'.includes(c)) depth++
-    else if ('}])>'.includes(c)) depth--
-    else if (c === ',' && depth === 0) {
-      push(body.slice(start, i))
-      start = i + 1
-    }
-  }
-  push(body.slice(start))
-  return fields
-}
-
 const sources = new Map()
 const collect = (d) => {
   for (const entry of readdirSync(d, { withFileTypes: true })) {
@@ -183,6 +160,25 @@ for (const [type, names] of Object.entries(contract.responseFields ?? {})) {
   const known = new Set(fields.map((f) => f.name))
   for (const name of names) {
     if (!known.has(name)) missing.push(`${type}: no field '${name}' (did the name change?)`)
+  }
+}
+// A field of one variant of a union (`ThreadItem`'s `userMessage`), read by its `type` tag: the union's shape may change (#2513)
+for (const [type, variants] of Object.entries(contract.variantFields ?? {})) {
+  const src = sources.get(type)
+  if (!src) {
+    missing.push(`response type: ${type}`)
+    continue
+  }
+  for (const [tag, names] of Object.entries(variants)) {
+    const fields = variantFields(src, tag)
+    if (!fields) {
+      missing.push(`${type}: no variant "${tag}"`)
+      continue
+    }
+    const known = new Set(fields.map((f) => f.name))
+    for (const name of names) {
+      if (!known.has(name)) missing.push(`${type} "${tag}": no field '${name}' (did the name change?)`)
+    }
   }
 }
 for (const [type, values] of Object.entries(contract.enumValues ?? {})) {
@@ -296,7 +292,7 @@ if (WRITE) {
   console.log(
     `[codex] contract verified (${version}) — all ${groups.reduce((n, [k]) => n + contract[k].length, 0)} dependent item(s) + ` +
       `${Object.keys(contract.requestParams ?? {}).length} request param set(s) + ` +
-      `${Object.keys(contract.responseFields ?? {}).length} response type(s) + ` +
+      `${Object.keys(contract.responseFields ?? {}).length + Object.keys(contract.variantFields ?? {}).length} response type(s) + ` +
       `${Object.keys(contract.enumValues ?? {}).length} enum(s) match` +
       (CHECK_TYPES ? `, and generated/ holds the ${committed.size} types the adapter reads as Codex makes them` : ''),
   )
