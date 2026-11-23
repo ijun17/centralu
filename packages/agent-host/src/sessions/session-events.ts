@@ -41,7 +41,6 @@ function untrustedSourceSessionNotification(sourceSessionId: string): string {
   )
 }
 
-
 /** Whether a message is the person's (`deliverNow`): typed by them (`true`), or Centralu's fixed text their click sent (`click`) */
 export type PersonInput = boolean | 'click'
 
