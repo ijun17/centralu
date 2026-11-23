@@ -198,22 +198,33 @@ describe('pre-pr on a stack of two pull requests', () => {
     expect(logged.filter((m) => /^[\w-]+: \d+ s$/.test(m)).map((m) => m.split(':')[0])).toEqual(['lint', 'lint', 'tsc', 'dependency-cruiser', 'repo-guards', 'store-step', 'readers', 'guards'])
   })
 
-  it('takes the sentences out of removed quoted strings of files that are not tests, and only those the file no longer holds', () => {
+  it('takes the sentences out of removed quoted strings of files that are not tests', () => {
     const diff = [
+      'diff --git a/src/defs.ts b/src/defs.ts',
+      'index 1111111..2222222 100644',
       '--- a/src/defs.ts',
       '+++ b/src/defs.ts',
+      '@@ -1,6 +1,1 @@',
       // #2494's description: the test quoted one sentence of it
       '-    description: `Work and messages; cite=${cite} only when asked. Ask the person with kind: "question". In a report, say what it rests on.`,',
       "+    description: 'Work and messages. Ask the person with kind: \"question\" (or a choice).',",
       "-  short: 'a key',",
-      "-  kept: 'This sentence stays in the file at the head',",
+      "-import { box } from '../dev-services/store/mailbox-and-more.js'",
+      "-  escaped: 'It\\'s a sentence a test spells its own way, whole',",
+      // A removed SQL comment reads as a header line only inside a header
+      '--- drop the table, then the rows of the old rules',
+      "-  after: 'A sentence after the SQL comment still counts'",
+      'diff --git a/src/defs.test.ts b/src/defs.test.ts',
       '--- a/src/defs.test.ts',
-      "-  expect(x).toBe('A test of its own is the revert check\\'s')",
+      '+++ b/src/defs.test.ts',
+      '@@ -1 +0,0 @@',
+      "-  expect(x).toBe('A test of its own is the one the revert check judges')",
     ].join('\n')
-    const sentences = removedSentences(diff, () => "kept: 'This sentence stays in the file at the head'")
+    const sentences = removedSentences(diff)
     expect(sentences).toContain('Ask the person with kind: "question".')
     expect(sentences).toContain('In a report, say what it rests on.')
-    expect(sentences.some((s: string) => s.includes('a key') || s.includes('stays in the file') || s.includes('revert check'))).toBe(false)
+    expect(sentences).toContain('A sentence after the SQL comment still counts')
+    expect(sentences.filter((x: string) => /a key|mailbox|spells|revert check/.test(x))).toEqual([])
   })
 
   // #2495: a sentence taken out of a module, which a test the branch did not touch still quotes, fails only in CI otherwise
@@ -232,6 +243,23 @@ describe('pre-pr on a stack of two pull requests', () => {
     write('src/far.test.mjs', 'quotes the sentence :: src/defs.mjs :: before an act you cannot undo\n')
     commit('reword: the test too')
     expect(run({ head: 'reword', main: 'main', exempt: { revert: 'x' } }).findings).toEqual([])
+  })
+
+  it('leaves out a sentence the head still holds in another file, and reads its patterns from a file, not the command line', () => {
+    git(repo, 'checkout', '-q', 'main')
+    // Windows ends a command line at 32,767 characters: 1,500 sentences of 40 characters, as -e arguments, pass it (#2531)
+    const many = Array.from({ length: 1500 }, (_, i) => `  '${String(i).padStart(4, '0')} is a sentence a tool once described',`)
+    write('src/defs.mjs', `export const all = [\n${many.join('\n')}\n  'Ask the person before you delete anything',\n]\n`)
+    write('src/far.test.mjs', 'quotes the sentence :: src/defs.mjs :: 0007 is a sentence a tool once described\n')
+    commit('main: many definitions and a test far from them')
+    git(repo, 'checkout', '-q', '-b', 'move')
+    write('src/defs.mjs', "export const all = ['Ask the person before you delete anything']\n")
+    commit('move: the sentences go')
+    expect(run({ head: 'move', main: 'main' }).calls.vitest).toEqual([['src/far.test.mjs']])
+    // Moved, not removed: the head holds it in a file that is not a test
+    write('src/moved.mjs', "export const one = '0007 is a sentence a tool once described'\n")
+    commit('move: one lands elsewhere')
+    expect(run({ head: 'move', main: 'main' }).calls.vitest ?? []).toEqual([])
   })
 
   it('runs only the checks --only names, and none the run would stop on before them', () => {

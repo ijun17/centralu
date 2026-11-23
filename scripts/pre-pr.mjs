@@ -29,7 +29,7 @@
 //             same number each pass CI alone and clash only when the second lands. `gh` lists the open pull
 //             requests; the stack's own are left out. The Assistant assigns the numbers; this is the backstop.
 //   readers   the vitest files the branch did not change that quote, word for word, a sentence it took out of a file that is
-//             not a test (a quoted string of SENTENCE_MIN characters or more, on a removed line, no longer in that file), run at the
+//             not a test (a quoted string of SENTENCE_MIN characters or more, on a removed line, in no file but a test), run at the
 //             head: a test in another folder that asserts on a tool definition's old sentence failed only in CI (#2494, #2495).
 //   revert    each new or changed vitest file is run at the head with every other change of the pull
 //             request reverted to its base: a new test that passes there protects nothing
@@ -385,58 +385,82 @@ export const SENTENCE_MIN = 24
 
 /**
  * The sentences a branch takes out of files that are not tests (#2495): each quoted string on a removed line of `diff` (git's,
- * with its `--- a/<path>` lines), and each sentence of it, of at least SENTENCE_MIN characters, that the file's text at the head
- * (`read(path)`, null when it is gone) no longer holds. A test quotes one sentence of a tool's description as often as the whole
- * (#2494: 'Ask the person with kind: "question".'); a template's `${…}` splits it. A string with an escape in it is left out: a
- * test spells it its own way.
+ * with its `diff --git` headers), and each sentence of it, of at least SENTENCE_MIN characters and with a space in it (an import
+ * path has none). A test quotes one sentence of a tool's description as often as the whole (#2494: 'Ask the person with kind:
+ * "question".'); a template's `${…}` splits it. A string with an escape in it is left out whole: a test spells it its own way.
+ * Whether the head still holds one somewhere (moved code) is readersStep's to ask.
  */
-export function removedSentences(diff, read) {
-  const found = new Map()
+export function removedSentences(diff) {
+  const found = new Set()
   let file = null
+  let header = false
   for (const line of String(diff).split('\n')) {
-    if (line.startsWith('--- ')) {
-      file = line.startsWith('--- a/') ? line.slice(6) : null
+    if (line.startsWith('diff --git ')) {
+      header = true
+      file = null
+      continue
+    }
+    if (header) {
+      if (line.startsWith('--- ')) file = line.startsWith('--- a/') ? line.slice(6) : null
+      if (line.startsWith('@@')) header = false
       continue
     }
     if (!file || isTestFile(file) || !line.startsWith('-')) continue
-    for (const m of line.slice(1).matchAll(/'([^'\\\n]+)'|"([^"\\\n]+)"|`([^`\\\n]+)`/g)) {
-      for (const piece of (m[1] ?? m[2] ?? m[3]).split(/\$\{[^}]*\}/)) {
-        for (const text of [piece, ...piece.split(/(?<=[.!?])\s+/)]) if (text.trim().length >= SENTENCE_MIN) found.set(text.trim(), file)
+    for (const m of line.slice(1).matchAll(/'((?:[^'\\\n]|\\.)+)'|"((?:[^"\\\n]|\\.)+)"|`((?:[^`\\\n]|\\.)+)`/g)) {
+      const quoted = m[1] ?? m[2] ?? m[3]
+      if (quoted.includes('\\')) continue
+      for (const piece of quoted.split(/\$\{[^}]*\}/)) {
+        for (const text of [piece, ...piece.split(/(?<=[.!?])\s+/)].map((t) => t.trim())) {
+          if (text.length >= SENTENCE_MIN && text.includes(' ')) found.add(text)
+        }
       }
     }
   }
-  const heads = new Map()
-  const at = (path) => (heads.has(path) ? heads.get(path) : heads.set(path, read(path) ?? '').get(path))
-  return [...found].filter(([text, path]) => !at(path).includes(text)).map(([text]) => text)
+  return [...found]
 }
 
 /**
  * The tests that read what the branch took out (#2495, removedSentences), run at the head before the revert step puts it back:
- * a vitest file the branch did not change, holding one of the sentences word for word. One that fails is a finding.
+ * a vitest file the branch did not change, holding word for word a removed sentence that no file at the head other than a test
+ * holds (moved code keeps it). One that fails is a finding. One git grep, its patterns from a file: on Windows a command line
+ * stops at 32,767 characters, which a large branch's sentences pass.
  */
 function readersStep(c) {
-  const top = c.top()
-  const sentences = removedSentences(git(c.root, ['diff', '--no-renames', '-U0', c.fork, c.at.head]), (path) => textIn(top, path))
+  const sentences = removedSentences(git(c.root, ['diff', '--no-renames', '-U0', c.fork, c.at.head]))
   if (!sentences.length) {
     c.notes.push(`No sentence of ${SENTENCE_MIN} characters or more taken out of a file that is not a test.`)
     return
   }
-  const changed = new Set(c.changed.map((x) => x.path))
+  const dir = mkdtempSync(join(tmpdir(), 'cc-prepr-readers-'))
   let listed = ''
   try {
-    listed = git(c.root, ['grep', '-l', '-F', ...sentences.flatMap((s) => ['-e', s]), c.at.head, '--'])
+    writeFileSync(join(dir, 'sentences'), sentences.join('\n') + '\n')
+    listed = git(c.root, ['grep', '-z', '-o', '-F', '-f', join(dir, 'sentences'), c.at.head, '--'])
   } catch (e) {
     // git grep's exit code 1 is "nothing found"
-    if (e.status !== 1) throw e
+    if (e.status !== 1) {
+      c.notRun('readers', `git grep for the ${sentences.length} removed sentence(s)`, tail(`${e.stderr ?? ''}${e.message}`, 3))
+      return
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
   }
-  const files = [...new Set(listed.split('\n').map((l) => l.slice(l.indexOf(':') + 1)).filter((f) => f && isVitestFile(f) && !changed.has(f)))]
+  const hits = listed.split('\n').filter(Boolean).map((l) => {
+    const [name, text] = l.split('\0')
+    return { path: name.slice(name.indexOf(':') + 1), text }
+  })
+  const kept = hits.filter((h) => !isTestFile(h.path)).map((h) => h.text)
+  const gone = new Set(sentences.filter((x) => !kept.some((t) => t.includes(x))))
+  const changed = new Set(c.changed.map((x) => x.path))
+  const files = [...new Set(hits.filter((h) => isVitestFile(h.path) && !changed.has(h.path) && [...gone].some((x) => h.text.includes(x))).map((h) => h.path))]
   if (!files.length) {
-    c.notes.push(`No test the branch left as it was quotes the ${sentences.length} sentence(s) it took out.`)
+    c.notes.push(`No test the branch left as it was quotes the ${gone.size} sentence(s) it took out.`)
     return
   }
   if (c.outOfTime('readers', `The tests quoting a removed sentence (${files.join(', ')})`)) return
   c.log(`Running ${files.length} test file(s) that quote a sentence the branch took out`)
   c.check()
+  const top = c.top()
   const limitMs = Math.max(1000, c.left())
   const pass = c.runners.vitest(top, files, { timeoutMs: limitMs })
   if (!pass.report) {
@@ -445,7 +469,7 @@ function readersStep(c) {
   }
   const failures = failuresOf(pass.report, top)
   for (const f of failures) {
-    c.findings.push({ check: 'readers', message: `${f.file}${f.name ? `: "${f.name}"` : ''} fails at the head: it quotes a sentence this pull request took out of a file that is not a test (${f.line}). Change the test with the sentence.` })
+    c.findings.push({ check: 'readers', message: `${f.file}${f.name ? `: "${f.name}"` : ''} fails at the head, and it quotes a sentence this pull request took out of a file that is not a test (${f.line}). Change the test with the sentence; if it fails on main as well, exempt readers with that reason.` })
   }
   if (!failures.length) c.notes.push(`${files.length} test file(s) quote a removed sentence and pass at the head.`)
 }
