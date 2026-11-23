@@ -28,6 +28,9 @@
 //             already has, or that another open pull request adds (#1203): two parallel changes picking the
 //             same number each pass CI alone and clash only when the second lands. `gh` lists the open pull
 //             requests; the stack's own are left out. The Assistant assigns the numbers; this is the backstop.
+//   readers   the vitest files the branch did not change that quote, word for word, a sentence it took out of a code file that is
+//             not a test (a quoted string of SENTENCE_MIN characters or more, on a removed line, in no other code file), run at the
+//             head: a test in another folder that asserts on a tool definition's old sentence failed only in CI (#2494, #2495).
 //   revert    each new or changed vitest file is run at the head with every other change of the pull
 //             request reverted to its base: a new test that passes there protects nothing
 //             (CONTRIBUTING.md: a test must fail without its fix). Only tests new in this pull
@@ -377,6 +380,106 @@ export function revertedChanges(changed, read) {
   return changed.filter((x) => !isTestFile(x.path) || (x.path.startsWith('e2e/') && reached.has(x.path)))
 }
 
+/** A quoted string this long is a sentence a test may quote; shorter ones (a key, a word) match tests that never read the file */
+export const SENTENCE_MIN = 24
+
+/**
+ * The files a removed sentence is read from, and where one that moved goes on being said: code. A recording (.jsonl) or a
+ * document keeps old words, and a test seldom quotes one
+ */
+const CODE_FILE = /\.(?:[cm]?[jt]sx?|rs)$/
+
+/**
+ * The sentences a branch takes out of code files that are not tests (#2495): each quoted string on a removed line of `diff` (git's,
+ * with its `diff --git` headers), and each sentence of it, of at least SENTENCE_MIN characters and with a space in it (an import
+ * path has none). A test quotes one sentence of a tool's description as often as the whole (#2494: 'Ask the person with kind:
+ * "question".'); a template's `${…}` splits it. A string with an escape in it is left out whole: a test spells it its own way.
+ * Whether the head still holds one somewhere (moved code) is readersStep's to ask.
+ */
+export function removedSentences(diff) {
+  const found = new Set()
+  let file = null
+  let header = false
+  for (const line of String(diff).split('\n')) {
+    if (line.startsWith('diff --git ')) {
+      header = true
+      file = null
+      continue
+    }
+    if (header) {
+      if (line.startsWith('--- ')) file = line.startsWith('--- a/') ? line.slice(6) : null
+      if (line.startsWith('@@')) header = false
+      continue
+    }
+    if (!file || !CODE_FILE.test(file) || isTestFile(file) || !line.startsWith('-')) continue
+    for (const m of line.slice(1).matchAll(/'((?:[^'\\\n]|\\.)+)'|"((?:[^"\\\n]|\\.)+)"|`((?:[^`\\\n]|\\.)+)`/g)) {
+      const quoted = m[1] ?? m[2] ?? m[3]
+      if (quoted.includes('\\')) continue
+      for (const piece of quoted.split(/\$\{[^}]*\}/)) {
+        for (const text of [piece, ...piece.split(/(?<=[.!?])\s+/)].map((t) => t.trim())) {
+          if (text.length >= SENTENCE_MIN && text.includes(' ')) found.add(text)
+        }
+      }
+    }
+  }
+  return [...found]
+}
+
+/**
+ * The tests that read what the branch took out (#2495, removedSentences), run at the head before the revert step puts it back:
+ * a vitest file the branch did not change, holding word for word a removed sentence that no code file at the head other than a
+ * test holds (moved code keeps it; a recording or a document that still holds it does not). One that fails is a finding. One git
+ * grep, its patterns from a file: on Windows a command line stops at 32,767 characters, which a large branch's sentences pass.
+ */
+function readersStep(c) {
+  const sentences = removedSentences(git(c.root, ['diff', '--no-renames', '-U0', c.fork, c.at.head]))
+  if (!sentences.length) {
+    c.notes.push(`No sentence of ${SENTENCE_MIN} characters or more taken out of a file that is not a test.`)
+    return
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'cc-prepr-readers-'))
+  let listed = ''
+  try {
+    writeFileSync(join(dir, 'sentences'), sentences.join('\n') + '\n')
+    listed = git(c.root, ['grep', '-z', '-o', '-F', '-f', join(dir, 'sentences'), c.at.head, '--'])
+  } catch (e) {
+    // git grep's exit code 1 is "nothing found"
+    if (e.status !== 1) {
+      c.notRun('readers', `git grep for the ${sentences.length} removed sentence(s)`, tail(`${e.stderr ?? ''}${e.message}`, 3))
+      return
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+  const hits = listed.split('\n').filter(Boolean).map((l) => {
+    const [name, text] = l.split('\0')
+    return { path: name.slice(name.indexOf(':') + 1), text }
+  })
+  const kept = hits.filter((h) => CODE_FILE.test(h.path) && !isTestFile(h.path)).map((h) => h.text)
+  const gone = new Set(sentences.filter((x) => !kept.some((t) => t.includes(x))))
+  const changed = new Set(c.changed.map((x) => x.path))
+  const files = [...new Set(hits.filter((h) => isVitestFile(h.path) && !changed.has(h.path) && [...gone].some((x) => h.text.includes(x))).map((h) => h.path))]
+  if (!files.length) {
+    c.notes.push(`No test the branch left as it was quotes the ${gone.size} sentence(s) it took out.`)
+    return
+  }
+  if (c.outOfTime('readers', `The tests quoting a removed sentence (${files.join(', ')})`)) return
+  c.log(`Running ${files.length} test file(s) that quote a sentence the branch took out`)
+  c.check()
+  const top = c.top()
+  const limitMs = Math.max(1000, c.left())
+  const pass = c.runners.vitest(top, files, { timeoutMs: limitMs })
+  if (!pass.report) {
+    c.notRun('readers', `The tests quoting a removed sentence (${files.join(', ')})`, noReport(pass.timedOut, limitMs))
+    return
+  }
+  const failures = failuresOf(pass.report, top)
+  for (const f of failures) {
+    c.findings.push({ check: 'readers', message: `${f.file}${f.name ? `: "${f.name}"` : ''} fails at the head, and it quotes a sentence this pull request took out of a file that is not a test (${f.line}). Change the test with the sentence; if it fails on main as well, exempt readers with that reason.` })
+  }
+  if (!failures.length) c.notes.push(`${files.length} test file(s) quote a removed sentence and pass at the head.`)
+}
+
 /**
  * The changed tests, at the head, with everything else the pull request changed put back to where it left its base. The base's
  * version of each changed file is asked first which tests it had, by a pass that runs none (it names the skipped and todo ones
@@ -497,6 +600,7 @@ const STEPS = [
   { name: 'dependency-cruiser', checks: ['orphans', 'deps'], run: depsStep },
   { name: 'repo-guards', checks: ['repo-guards'], run: repoGuardsStep },
   { name: 'store-step', checks: ['store-step'], run: storeStepStep },
+  { name: 'readers', checks: ['readers'], run: readersStep },
   { name: 'revert', checks: ['revert'], run: revertStep },
   { name: 'guards', checks: ['guards'], run: guardsStep },
 ]
@@ -529,6 +633,7 @@ const PASSED = {
   orphans: () => 'no orphans',
   deps: () => 'no dependency errors',
   'repo-guards': () => 'the repository-wide guards',
+  readers: () => 'no unchanged test quoting a removed sentence fails',
   revert: (_heads, warnings) => {
     const leftOut = warnings.filter((w) => w.check === 'revert').length
     return `no new test passes without the change${leftOut ? `, in the test files judged (${leftOut} left out: see the warnings)` : ''}`

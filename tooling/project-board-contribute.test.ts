@@ -1600,7 +1600,7 @@ describe('open_pr\'s pre-pr: exemptions, warnings, cancellation and time', { tim
     )
   })
 
-  it.each(['tsc', 'orphans', 'deps', 'lint', 'repo-guards', 'store-step', 'guards', 'revert'])('passes an exemption from %s on to pre-pr', async (check) => {
+  it.each(['tsc', 'orphans', 'deps', 'lint', 'repo-guards', 'store-step', 'readers', 'guards', 'revert'])('passes an exemption from %s on to pre-pr', async (check) => {
     const c = prePrCheckout()
     prePrAnswers({ ok: true, findings: [], notes: [], passed: [], heads: [{ sha: c.tools }], head: c.tools, warnings: [], exempted: [{ check, reason: 'The reason it stands.' }] })
     runtime()

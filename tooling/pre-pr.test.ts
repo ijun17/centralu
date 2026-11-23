@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { SLOW } from './test-timing.js'
 // @ts-expect-error — a plain .mjs script, so the board app can start it with Node alone
-import { isTestFile, isVitestFile, nodeBin, parseArgs, prePr, stackHeads } from '../scripts/pre-pr.mjs'
+import { isTestFile, isVitestFile, nodeBin, parseArgs, prePr, removedSentences, stackHeads } from '../scripts/pre-pr.mjs'
 // @ts-expect-error — a plain .mjs script, as above
 import { GUARD_REFS, removeRun, runDir, sweepStale } from '../scripts/pre-pr-worktrees.mjs'
 // @ts-expect-error — a plain .mjs script, as above
@@ -188,14 +188,88 @@ describe('pre-pr on a stack of two pull requests', () => {
     expect(r.findings.map((f: { check: string }) => f.check)).toEqual(['lint'])
     expect(r.calls.tsc).toEqual([])
     expect(r.calls.vitest).toEqual([])
-    expect(r.notes).toContain('Not run, since lint found something: tsc, orphans, deps, repo-guards, store-step, revert, guards. Fix it, then run the one that failed with pnpm pre-pr --only <check>, and the whole run once more before the pull request.')
+    expect(r.notes).toContain('Not run, since lint found something: tsc, orphans, deps, repo-guards, store-step, readers, revert, guards. Fix it, then run the one that failed with pnpm pre-pr --only <check>, and the whole run once more before the pull request.')
     expect(logged.filter((m) => /^lint: \d+ s$/.test(m))).toHaveLength(1)
     // Nothing found: every step runs, and each says its time
     const ok = run({ log: (m: string) => logged.push(m), exempt: { revert: 'x' } })
     expect(ok.ok).toBe(true)
     // What held, in the words the pull request's Verified gives it; the exempted check is not among them
-    expect(ok.passed).toEqual(['lint on the changed files', 'tsc at 2 head(s)', 'no orphans', 'no dependency errors', 'the repository-wide guards'])
-    expect(logged.filter((m) => /^[\w-]+: \d+ s$/.test(m)).map((m) => m.split(':')[0])).toEqual(['lint', 'lint', 'tsc', 'dependency-cruiser', 'repo-guards', 'store-step', 'guards'])
+    expect(ok.passed).toEqual(['lint on the changed files', 'tsc at 2 head(s)', 'no orphans', 'no dependency errors', 'the repository-wide guards', 'no unchanged test quoting a removed sentence fails'])
+    expect(logged.filter((m) => /^[\w-]+: \d+ s$/.test(m)).map((m) => m.split(':')[0])).toEqual(['lint', 'lint', 'tsc', 'dependency-cruiser', 'repo-guards', 'store-step', 'readers', 'guards'])
+  })
+
+  it('takes the sentences out of removed quoted strings of files that are not tests', () => {
+    const diff = [
+      'diff --git a/src/defs.ts b/src/defs.ts',
+      'index 1111111..2222222 100644',
+      '--- a/src/defs.ts',
+      '+++ b/src/defs.ts',
+      '@@ -1,6 +1,1 @@',
+      // #2494's description: the test quoted one sentence of it
+      '-    description: `Work and messages; cite=${cite} only when asked. Ask the person with kind: "question". In a report, say what it rests on.`,',
+      "+    description: 'Work and messages. Ask the person with kind: \"question\" (or a choice).',",
+      "-  short: 'a key',",
+      "-import { box } from '../dev-services/store/mailbox-and-more.js'",
+      "-  escaped: 'It\\'s a sentence a test spells its own way, whole',",
+      // A removed SQL comment reads as a header line only inside a header
+      '--- drop the table, then the rows of the old rules',
+      "-  after: 'A sentence after the SQL comment still counts'",
+      // A document's words: a test seldom quotes one, and reading them ran 60 unrelated test files on a large branch (#2188)
+      'diff --git a/docs/rules.md b/docs/rules.md',
+      '--- a/docs/rules.md',
+      '+++ b/docs/rules.md',
+      '@@ -1 +0,0 @@',
+      '-The window calls "the old names when the host does not know the new ones".',
+      'diff --git a/src/defs.test.ts b/src/defs.test.ts',
+      '--- a/src/defs.test.ts',
+      '+++ b/src/defs.test.ts',
+      '@@ -1 +0,0 @@',
+      "-  expect(x).toBe('A test of its own is the one the revert check judges')",
+    ].join('\n')
+    const sentences = removedSentences(diff)
+    expect(sentences).toContain('Ask the person with kind: "question".')
+    expect(sentences).toContain('In a report, say what it rests on.')
+    expect(sentences).toContain('A sentence after the SQL comment still counts')
+    expect(sentences.filter((x: string) => /a key|mailbox|spells|old names|revert check/.test(x))).toEqual([])
+  })
+
+  // #2495: a sentence taken out of a module, which a test the branch did not touch still quotes, fails only in CI otherwise
+  it('runs the unchanged tests that quote a sentence the branch took out, at the head, and names the ones that fail', () => {
+    git(repo, 'checkout', '-q', 'main')
+    write('src/defs.mjs', "export const ask = 'Ask the person before you delete anything'\n")
+    write('src/far.test.mjs', 'quotes the sentence :: src/defs.mjs :: Ask the person before you delete anything\n')
+    commit('main: a definition and a test far from it')
+    git(repo, 'checkout', '-q', '-b', 'reword')
+    write('src/defs.mjs', "export const ask = 'Ask the person only before an act you cannot undo'\n")
+    commit('reword')
+    const r = run({ head: 'reword', main: 'main' })
+    expect(r.calls.vitest).toEqual([['src/far.test.mjs']])
+    expect(r.findings.map((f: { check: string; message: string }) => [f.check, f.message.split(' fails at the head')[0]])).toEqual([['readers', 'src/far.test.mjs: "quotes the sentence"']])
+    // The test changed with the sentence: it is the branch's own, which the revert check judges
+    write('src/far.test.mjs', 'quotes the sentence :: src/defs.mjs :: before an act you cannot undo\n')
+    commit('reword: the test too')
+    expect(run({ head: 'reword', main: 'main', exempt: { revert: 'x' } }).findings).toEqual([])
+  })
+
+  it('leaves out a sentence the head still holds in another file, and reads its patterns from a file, not the command line', () => {
+    git(repo, 'checkout', '-q', 'main')
+    // Windows ends a command line at 32,767 characters: 1,500 sentences of 40 characters, as -e arguments, pass it (#2531)
+    const many = Array.from({ length: 1500 }, (_, i) => `  '${String(i).padStart(4, '0')} is a sentence a tool once described',`)
+    write('src/defs.mjs', `export const all = [\n${many.join('\n')}\n  'Ask the person before you delete anything',\n]\n`)
+    write('src/far.test.mjs', 'quotes the sentence :: src/defs.mjs :: 0007 is a sentence a tool once described\n')
+    commit('main: many definitions and a test far from them')
+    git(repo, 'checkout', '-q', '-b', 'move')
+    write('src/defs.mjs', "export const all = ['Ask the person before you delete anything']\n")
+    commit('move: the sentences go')
+    expect(run({ head: 'move', main: 'main' }).calls.vitest).toEqual([['src/far.test.mjs']])
+    // A recording that still holds it does not keep it
+    write('src/recordings/old.jsonl', '{"description":"0007 is a sentence a tool once described"}\n')
+    commit('move: a recording keeps the old words')
+    expect(run({ head: 'move', main: 'main' }).calls.vitest).toEqual([['src/far.test.mjs']])
+    // Moved, not removed: the head holds it in a file that is not a test
+    write('src/moved.mjs', "export const one = '0007 is a sentence a tool once described'\n")
+    commit('move: one lands elsewhere')
+    expect(run({ head: 'move', main: 'main' }).calls.vitest ?? []).toEqual([])
   })
 
   it('runs only the checks --only names, and none the run would stop on before them', () => {
@@ -211,7 +285,7 @@ describe('pre-pr on a stack of two pull requests', () => {
     expect(tsc.calls.tsc).toHaveLength(2)
     expect(tsc.calls.lint).toEqual([])
     expect(tsc.ok).toBe(true)
-    expect(() => run({ only: ['all'] })).toThrow('No check is called all; the checks are lint, tsc, orphans, deps, repo-guards, store-step, revert, guards.')
+    expect(() => run({ only: ['all'] })).toThrow('No check is called all; the checks are lint, tsc, orphans, deps, repo-guards, store-step, readers, revert, guards.')
     expect(() => run({ only: ['lint'], exempt: { lint: 'x' } })).toThrow('lint is both run alone (--only) and exempted: one or the other.')
   })
 
@@ -569,7 +643,7 @@ describe('pre-pr on a stack of two pull requests', () => {
     expect(t.calls.tsc).toEqual([])
     expect(t.findings.map((f: { check: string }) => f.check)).toEqual(['revert'])
     expect(() => run({ exempt: { revert: '  ' } })).toThrow('An exemption from revert needs its reason.')
-    expect(() => run({ exempt: { main: 'x' } })).toThrow('No check is called main; the checks are lint, tsc, orphans, deps, repo-guards, store-step, revert, guards.')
+    expect(() => run({ exempt: { main: 'x' } })).toThrow('No check is called main; the checks are lint, tsc, orphans, deps, repo-guards, store-step, readers, revert, guards.')
   })
 
   it('knows an interrupt by how the tool it ended ended, and says that, not the failure the tool then gave', () => {

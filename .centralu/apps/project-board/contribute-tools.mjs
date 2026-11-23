@@ -456,7 +456,7 @@ async function restack({ pr, lower, path, push }) {
 /** What open_pr and pre_pr take to leave pre-pr's checks out */
 const PRE_PR_INPUT = {
   skipPrePr: z.string().max(2000).optional().describe('Without running pnpm pre-pr at all: the reason, which goes into Verified and the pre-pr status'),
-  prePrExempt: z.object({ tsc: z.string().max(2000), orphans: z.string().max(2000), deps: z.string().max(2000), lint: z.string().max(2000), 'repo-guards': z.string().max(2000), 'store-step': z.string().max(2000), guards: z.string().max(2000), revert: z.string().max(2000) }).partial().strict().optional().describe('Leave one of pnpm pre-pr\'s checks out, by name, with the reason (it goes into Verified): e.g. { "revert": "the new test guards a Windows path this branch only documents" }'),
+  prePrExempt: z.object({ tsc: z.string().max(2000), orphans: z.string().max(2000), deps: z.string().max(2000), lint: z.string().max(2000), 'repo-guards': z.string().max(2000), 'store-step': z.string().max(2000), readers: z.string().max(2000), guards: z.string().max(2000), revert: z.string().max(2000) }).partial().strict().optional().describe('Leave one of pnpm pre-pr\'s checks out, by name, with the reason (it goes into Verified): e.g. { "revert": "the new test guards a Windows path this branch only documents" }'),
 }
 
 export const tools = {
