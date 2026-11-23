@@ -75,7 +75,7 @@ export class Store extends MigrationRunner {
   /** The records of deleted app-agent sessions, kept in the session archive (#378) */
   readonly keptRuns: KeptRuns
   readonly children: ChildOwnershipRecords
-  /** Mail without threads: messages and each recipient's row (#1684, v65). Read by nothing yet (docs/plans/mailbox.md M1) */
+  /** Mail without threads: messages and each recipient's row (#1684, v65) */
   readonly mailbox: MailboxRecords
   readonly machines: LinkedMachineRecords
   /** Limit readings and tokens per hour, kept for the usage history (docs/agent-host/usage.md "Usage over time") */

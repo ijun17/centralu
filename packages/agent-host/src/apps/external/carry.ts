@@ -10,9 +10,9 @@ import { VERSIONS_REL } from './versions.js'
  * What an app keeps on disk, carried from one app key to another (#1141): a user-folder app (`_user/<id>`) registered as a
  * project in place becomes `<project id>/<id>`, and its data folder, log (and the older `.log.1`) and kept versions follow it.
  * **Copied, never moved**: a previous build serving during a host swap (docs/agent-host/store-migrations.md "Migration steps:
- * expand, then contract") still reads and writes the old key, and must not find its app's data gone; a later release removes
- * the old copies. Only where the new key has nothing yet, so running it again after an interruption changes nothing and never
- * writes over what the app has written under its new key; a folder is copied beside its place and renamed into it, so an
+ * expand, then contract") still reads and writes the old key, and must not find its app's data gone. The old copies stay:
+ * Centralu does not delete them from the person's disk (docs/plans/root-apps.md). Only where the new key has nothing yet, so
+ * running it again after an interruption changes nothing and never writes over what the app has written under its new key; a folder is copied beside its place and renamed into it, so an
  * interrupted copy never stands as a whole one the next run would skip. Off the event loop (#1707): an app writes its data
  * folder, so it may hold a link into a share that does not answer, and Windows waits about 21 s for the first stat of one; a
  * step that does not answer within `CARRY_STEP_MS` fails the carry (the app stays in the user folder, as for any failed carry)

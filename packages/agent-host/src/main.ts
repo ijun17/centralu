@@ -78,8 +78,6 @@ import { reverseCalls } from './links/reverse-calls.js'
 import { LinkedApps } from './links/linked-apps.js'
 import { appsBackNotice, appsBackOn, appsPeers, hubAppCalls, linkedNotices, machineAppCalls } from './links/apps-across.js'
 import { projectsHome } from './dev-services/project-folder.js'
-import { parseJson } from './dev-services/store/json.js'
-import { asObj } from './json-value.js'
 import { flagSetting } from './dev-services/store/settings.js'
 import { joinWorkJob, workJobLine, workJobWanted } from './lifecycle/work-job.js'
 import { PtyBroker, brokerPtyModule, personOpener } from './dev-services/broker-pty.js'
@@ -534,7 +532,6 @@ mgr.useUpdateApply(updateApply)
  * the session would be lost, the conversation continues through resume, and a line in the conversation says so.
  */
 const AUTO_APPLY_AGENT_VERSIONS_KEY = 'agents.autoApplyVersions'
-const AGENT_VERSIONS_SEEN_KEY = 'agents.versionsSeen'
 const autoApplyAgentVersions = flagSetting(store.settings, AUTO_APPLY_AGENT_VERSIONS_KEY, true)
 const agentVersions = new AgentVersionService({
   tools: () => [...adapters.values()].map((a) => ({ tool: a.tool, installedVersion: a.installedVersion?.bind(a) })),
@@ -545,8 +542,6 @@ const agentVersions = new AgentVersionService({
   publish: (status) => events.push({ type: 'agent_versions', status }),
   readAutoApply: autoApplyAgentVersions.read,
   writeAutoApply: autoApplyAgentVersions.write,
-  readSeen: () => asObj(parseJson(store.settings.appSetting(AGENT_VERSIONS_SEEN_KEY))) as Record<string, string>,
-  writeSeen: (seen) => store.settings.setAppSetting(AGENT_VERSIONS_SEEN_KEY, JSON.stringify(seen)),
 })
 // A tool's own install and sign-in (#59) tell every window as they go: no RPC is waiting when a download ends
 for (const a of adapters.values()) a.setup?.onChange((setup) => events.push({ type: 'tool_setup', tool: a.tool, setup }))
