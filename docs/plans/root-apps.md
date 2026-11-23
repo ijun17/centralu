@@ -88,8 +88,8 @@ the user folder has no app of that id and the project still exists; it answered 
 
 **A previous build during a swap** (agent-host/store-migrations.md "Migration steps: expand, then contract") still finds the folder in `<data>/apps/` and
 keeps working on the `_user` copies, which this build leaves in place; it shows the app's sessions under
-the new project and misses the runs moved to it. No table or column changes. Removing the `_user`
-copies is a later release's step.
+the new project and misses the runs moved to it. No table or column changes. The `_user`
+copies stay: Centralu does not delete them from the person's disk (owner, 2026-11-23, #2481).
 
 ## 5. Which sessions get its tools
 
@@ -151,4 +151,3 @@ sessions, as for any project app and as the permission card says; `git.status` r
   sends user-folder apps: the hub lists them in the sidebar's leftover "Other apps" list (only shown
   when there is one), with no New app or Import there. New app and Import make the folder on this
   computer only.
-- The `_user` copies the migration leaves are not removed yet.
