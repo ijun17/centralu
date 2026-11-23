@@ -5,6 +5,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { answerRecorder } from './delegation.js'
 import { deliveryWorld, settle } from './delivery.test-helpers.js'
+import { hostWorld } from './host-mail.test-helpers.js'
 import { A, B, C, ORC } from './messages.test-helpers.js'
 import { turnsOf as turnRows } from '../dev-services/store/mailbox-turns.test-helpers.js'
 
@@ -319,5 +320,172 @@ describe('mail joins a running turn (§10.6.2)', () => {
     expect(turnRows(w.store, 'b').at(-1)).toMatchObject({ turnSeq: 2, startedBy: 'mail', starterId: task.id, messageId: task.id })
     expect(w.rowOf(task.id, B).turnSeq).toBe(2)
     expect(w.turns.current('b')).toMatchObject({ by: 'mail', starter: task.id, messageId: task.id })
+  })
+})
+
+/** Holds the next delivery until the call it returns, as Claude Code takes an input it did not fold into the turn only as that input's own turn opens */
+function holdDelivery(w: ReturnType<typeof started>): () => void {
+  let take = () => {}
+  const hold = new Promise<void>((r) => (take = r))
+  w.behaviour.hold = hold
+  return () => {
+    if (w.behaviour.hold === hold) w.behaviour.hold = null
+    take()
+  }
+}
+
+describe('an input given into a turn that ends without it (#2499)', () => {
+  const atRest = { kind: 'ready', live: true, quiet: false } as const
+  const lastResponse = (w: ReturnType<typeof started>) => w.mail.lastResponse(B, { body: () => 'Done.', released: false, answers: () => true, queued: w.delivery.queuedFor(B) })
+
+  it.each([
+    ['given once', false],
+    ['given again after a delivery that failed', true],
+  ])('%s, and taken only as its own turn opens, after a turn the tool ran on its own: that turn answers it, and it is not given again', async (_, failedFirst) => {
+    const w = started()
+    w.send(A, { to: [B], text: 'start on #12' })
+    await w.advance(2_000)
+    w.states.set('b', inTurn)
+    if (failedFirst) w.behaviour.fail = new Error('the tool refused it')
+    let take = holdDelivery(w)
+    const task = w.mail.task(A, B, { text: 'and the docs', origin: 'agent_session', delivered: false })
+    await w.advance(5_000)
+    if (failedFirst) {
+      // The first try fails before the tool took it: nothing of it is left in the turn, and the try after goes into it again
+      take()
+      await w.advance(0)
+      w.behaviour.fail = null
+      take = holdDelivery(w)
+      await w.advance(5_000)
+      expect(w.to('b').filter((d) => d.input.text.includes(task.id))).toHaveLength(2)
+    }
+    const input = w.to('b').at(-1)!.input.id!
+    // The turn ends naming only what it began with: the tool holds the input queued, and has not said it took it
+    w.delivery.turnInputs(B, { took: [], finished: true })
+    w.endTurn('b')
+    w.states.set('b', atRest)
+    lastResponse(w)
+    expect(w.rowOf(task.id, B)).toMatchObject({ settled: null, deliveredAt: null, givenAgainAt: null })
+    expect([...w.delivery.queuedFor(B)]).toEqual([task.id])
+    // A turn the tool runs on its own (#2318) names none of it
+    w.turns.beginOther('b', 'cli', null)
+    w.delivery.turnInputs(B, { took: [], finished: false })
+    w.endTurn('b')
+    // The input's own turn: its opening names it, and the tool says it took it as that turn opens
+    w.turns.beginOther('b', 'cli', null)
+    w.delivery.turnInputs(B, { opened: [input] })
+    take()
+    await w.advance(0)
+    expect(w.turns.current('b')).toMatchObject({ by: 'mail', starter: task.id })
+    w.delivery.turnInputs(B, { took: [input], finished: true })
+    w.endTurn('b')
+    lastResponse(w)
+    expect(w.rowOf(task.id, B)).toMatchObject({ settled: 'reported', givenAgainAt: null })
+  })
+
+  it("one the turn folded in, named in its result before the tool says it took it, is that turn's: given again at rest (#2369)", async () => {
+    const w = started()
+    w.send(A, { to: [B], text: 'start on #12' })
+    await w.advance(2_000)
+    w.states.set('b', inTurn)
+    const take = holdDelivery(w)
+    const task = w.mail.task(A, B, { text: 'and the docs', origin: 'agent_session', delivered: false })
+    await w.advance(5_000)
+    const input = w.to('b').at(-1)!.input.id!
+    // Claude Code's result names the folded input; the host handles that end before the tool's word that it took it
+    w.delivery.turnInputs(B, { took: [input], finished: true })
+    w.endTurn('b')
+    w.states.set('b', atRest)
+    take()
+    await w.advance(0)
+    lastResponse(w)
+    expect(w.rowOf(task.id, B)).toMatchObject({ settled: null, deliveredAt: null, givenAgainAt: expect.any(Number) })
+    await w.advance(60_000)
+    expect(w.to('b').filter((d) => d.input.text.includes(task.id))).toHaveLength(2)
+  })
+
+  it('one a stopped turn folded in, named before the tool says it took it, stays in that turn, whose stop its giver is told of', async () => {
+    const w = started()
+    w.send(A, { to: [B], text: 'start on #12' })
+    await w.advance(2_000)
+    w.states.set('b', inTurn)
+    const seq = w.turns.current('b')?.turnSeq
+    const take = holdDelivery(w)
+    const task = w.mail.task(A, B, { text: 'and the docs', origin: 'agent_session', delivered: false })
+    await w.advance(5_000)
+    const input = w.to('b').at(-1)!.input.id!
+    w.delivery.turnInputs(B, { took: [input], finished: false })
+    expect(w.rowOf(task.id, B)).toMatchObject({ turnSeq: seq, deliveredAt: expect.any(Number), givenAgainAt: null })
+    take()
+  })
+
+  it('one whose delivery fails after the turn ended without it leaves nothing queued: the wake that tries it again answers it', async () => {
+    const w = started()
+    w.send(A, { to: [B], text: 'start on #12' })
+    await w.advance(2_000)
+    w.states.set('b', inTurn)
+    const take = holdDelivery(w)
+    const task = w.mail.task(A, B, { text: 'and the docs', origin: 'agent_session', delivered: false })
+    await w.advance(5_000)
+    w.delivery.turnInputs(B, { took: [], finished: true })
+    w.endTurn('b')
+    w.states.set('b', atRest)
+    expect([...w.delivery.queuedFor(B)]).toEqual([task.id])
+    w.behaviour.fail = new Error('the tool refused it')
+    take()
+    await w.advance(0)
+    expect([...w.delivery.queuedFor(B)]).toEqual([])
+    w.behaviour.fail = null
+    await w.advance(60_000)
+    expect(w.to('b').filter((d) => d.input.text.includes(task.id))).toHaveLength(2)
+    w.endTurn('b')
+    lastResponse(w)
+    expect(w.rowOf(task.id, B)).toMatchObject({ settled: 'reported', givenAgainAt: null })
+  })
+
+  it('one the tool fails after it was counted taken leaves nothing queued to hide its task from a later turn: it is held for the person', async () => {
+    const w = started()
+    w.send(A, { to: [B], text: 'start on #12' })
+    await w.advance(2_000)
+    w.states.set('b', inTurn)
+    const task = w.mail.task(A, B, { text: 'and the docs', origin: 'agent_session', delivered: false })
+    await w.advance(5_000)
+    // Counted taken, then failed by the tool: it never ran it
+    w.lates.at(-1)?.(new Error('the process closed with the input still queued'))
+    w.delivery.turnInputs(B, { took: [], finished: true })
+    w.endTurn('b')
+    w.states.set('b', atRest)
+    expect([...w.delivery.queuedFor(B)]).toEqual([])
+    expect(w.rowOf(task.id, B)).toMatchObject({ held: 'uncertain', deliveredAt: null })
+  })
+
+  it.each([
+    ['before the tool took it: held for the person, who sends it again or dismisses it', false],
+    ['after the tool took it: answered by the turn it joined, as its rows say', true],
+  ])("a host that restarts between the hand-off and the turn's end leaves the task neither lost nor given twice, %s", async (_, takenFirst) => {
+    const first = hostWorld({ kept: new Set(['b']) })
+    first.afterReady()
+    stop = first.stop
+    first.mail.task(A, B, { text: 'start on #12', origin: 'agent_session', delivered: false })
+    await first.advance(2_000)
+    first.states.set('b', inTurn)
+    if (!takenFirst) first.behaviour.hold = new Promise<void>(() => {})
+    const task = first.mail.task(A, B, { text: 'and the docs', origin: 'agent_session', delivered: false })
+    await first.advance(5_000)
+    const input = first.to('b').at(-1)!.input.id!
+    first.stop()
+    // What the host held in memory of the turn is gone; the rows say what was tried and what was taken
+    const next = hostWorld({ store: first.store, clock: first.clock, kept: new Set(['b']) })
+    next.states.set('b', inTurn)
+    next.afterReady()
+    stop = next.stop
+    await next.advance(5_000)
+    next.delivery.turnInputs(B, { took: [input], finished: true })
+    next.endTurn('b')
+    next.states.set('b', atRest)
+    next.mail.lastResponse(B, { body: () => 'Done.', released: false, answers: () => true, queued: next.delivery.queuedFor(B) })
+    await next.advance(60_000)
+    expect(next.to('b')).toEqual([])
+    expect(next.row(task.id, B)).toMatchObject(takenFirst ? { settled: 'reported', givenAgainAt: null } : { held: 'uncertain', settled: null, deliveredAt: null })
   })
 })
