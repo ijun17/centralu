@@ -143,8 +143,6 @@ export type InboxView = {
 /** Work given a session on another computer, as it crosses (`MailAcross.sendTask`) and its copy here keeps it */
 export type TaskAcross = { origin: DelegationOrigin; note?: true; forPerson?: true; depth?: number }
 
-
-
 export type DrainOptions = {
   /** Mail that is told of once more, delivered and still unread */
   again?: boolean

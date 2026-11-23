@@ -137,7 +137,6 @@ export class Handoffs {
     })
   }
 
-
   /**
    * Of the reports among `ids` just moved to `to` (Centralu's, and unread: only a watched row moves read, and a report is not watched), each that a
    * newer one on the same session follows is marked read (#2474): a handoff moves one report per turn ended, days of them, and the newest says how
