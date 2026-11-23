@@ -486,6 +486,8 @@ describe('starting another agent in the same project', () => {
     expect(handleOf(s)!.sent.find((t) => t.includes(requestId))).toContain('did not allow')
     expect(childrenOf(s)).toEqual([])
     expect(await w.mgr.agentSession(s, { sessionId: requestId, action: 'status' })).toMatchObject({ ok: false, error: expect.stringContaining('did not allow') })
+    // Work by the handle is told why no session took it (#2497)
+    expect(await sendWork(w.mgr, s, requestId, 'x')).toMatchObject({ ok: false, error: expect.stringContaining(`Request ${requestId} started no session`) })
     expect(w.store.children.listAgentStartRequests()).toEqual([])
   })
 
@@ -506,6 +508,8 @@ describe('starting another agent in the same project', () => {
 
     // Answered during a wait, the wait returns with the child
     const second = await session('safe')
+    // Another session's handle is no child of this one: plain mail, not that request's state (#2497)
+    expect(await sendWork(w.mgr, second, requestId, 'x')).toBeNull()
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const q = w.mgr.startAgent(second, { task: 'another', wait: false })
     for (let i = 0; i < 50 && !agentCard(second); i++) await vi.advanceTimersByTimeAsync(0)

@@ -54,6 +54,74 @@ describe('a task marked handled by its receiver (#2493)', () => {
     expect(w.to('b')).toHaveLength(given)
   })
 
+  it('keeps a claim made while the delivery that gives the task into the turn waits for the tool to take it (#2497)', async () => {
+    const w = started()
+    w.mail.task(A, B, { text: 'start on #12', origin: 'agent_session', delivered: false })
+    await w.advance(2_000)
+    w.states.set('b', inTurn)
+    // The tool takes a folded input late: Claude Code names it in the turn's result, the host counts it taken after 90 s at most
+    let take = () => {}
+    w.behaviour.hold = new Promise<void>((r) => (take = r))
+    const a = w.mail.task(A, B, { text: 'and review #13', origin: 'agent_session', delivered: false })
+    await w.advance(5_000)
+    expect(w.to('b').at(-1)?.input.text).toContain(a.id)
+    expect(await handled(w, a.id)).toContain('is answered by this turn')
+    w.behaviour.hold = null
+    take()
+    await w.advance(0)
+    endAtRest(w)
+    expect(w.row(a.id, B)).toMatchObject({ settled: 'reported', givenAgainAt: null })
+  })
+
+  it.each([
+    ['its result, without the input', { took: [], finished: true }],
+    ['a stop', { took: [], finished: false }],
+    ['an error that took the process', { took: undefined, finished: false }],
+  ] as const)('forgets a claim when its turn ends by %s: the input the tool takes after joins the next turn unclaimed (#2497)', async (_, ending) => {
+    const w = started()
+    w.mail.task(A, B, { text: 'start on #12', origin: 'agent_session', delivered: false })
+    await w.advance(2_000)
+    w.states.set('b', inTurn)
+    let take = () => {}
+    w.behaviour.hold = new Promise<void>((r) => (take = r))
+    const a = w.mail.task(A, B, { text: 'and review #13', origin: 'agent_session', delivered: false })
+    await w.advance(5_000)
+    expect(await handled(w, a.id)).toContain('is answered by this turn')
+    w.delivery.turnInputs(B, ending)
+    w.endTurn('b')
+    // The tool takes the input into the turn after, which ends having done it: a task that joined it, given again at rest as any (#2369)
+    w.turns.beginOther('b', 'person', null)
+    w.behaviour.hold = null
+    take()
+    await w.advance(0)
+    endAtRest(w)
+    expect(w.row(a.id, B)).toMatchObject({ settled: null, givenAgainAt: expect.any(Number) })
+  })
+
+  it('answers the heir once when the giver hands over a task claimed while its delivery waited for the tool (#2497)', async () => {
+    const w = started()
+    w.mail.task(A, B, { text: 'start on #12', origin: 'agent_session', delivered: false })
+    await w.advance(2_000)
+    w.states.set('b', inTurn)
+    let take = () => {}
+    w.behaviour.hold = new Promise<void>((r) => (take = r))
+    const a = w.mail.task(A, B, { text: 'and review #13', origin: 'agent_session', delivered: false })
+    await w.advance(5_000)
+    expect(await handled(w, a.id)).toContain('is answered by this turn')
+    w.mail.handOver(A, C, 'all', [B])
+    const again = w.store.mailbox.watchedTo(B).find((r) => w.store.mailbox.message(r.messageId)?.sender === C)?.messageId ?? ''
+    w.behaviour.hold = null
+    take()
+    await w.advance(0)
+    const given = w.to('b').length
+    endAtRest(w)
+    expect(w.row(again, B)).toMatchObject({ settled: 'reported', givenAgainAt: null })
+    expect(w.store.mailbox.recipients(w.store.mailbox.reportsOn(again)[0]?.id ?? '').map((r) => r.recipient)).toEqual([C])
+    expect(w.row(a.id, B)).toMatchObject({ settled: 'withdrawn', givenAgainAt: null })
+    await w.advance(60_000)
+    expect(w.to('b')).toHaveLength(given)
+  })
+
   it('takes a task given again and waiting into the turn that marks it handled, and refuses with no turn running', async () => {
     const w = started()
     w.mail.task(A, B, { text: 'start on #12', origin: 'agent_session', delivered: false })
