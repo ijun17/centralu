@@ -595,10 +595,11 @@ describe('migration v42 — the grid holds apps as well as sessions', () => {
       fresh.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
       for (const id of ['s1', 's2', 's3']) gridSession(fresh, id, 'p1')
       fresh.close()
-      // Take the grid back to v41: one row per session id
+      // Take the grid back to v41: one row per session id, in the table as v9 made it (step 78 dropped it)
       const raw = new Database(file)
       raw.exec(`
         DROP TABLE grid_layout;
+        CREATE TABLE grid_panels (session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE, position INTEGER NOT NULL);
         INSERT INTO grid_panels (session_id, position) VALUES ('s3', 0), ('s1', 1), ('s2', 2);
       `)
       // A row whose session is gone, written with the key unenforced: never shown, and it must not stop the copy
@@ -615,46 +616,6 @@ describe('migration v42 — the grid holds apps as well as sessions', () => {
       s.grid.setGridView([sp('s3'), ap('p1', 'slider'), sp('s1')])
       expect(s.grid.listGridView()).toEqual([sp('s3'), ap('p1', 'slider'), sp('s1')])
       s.close()
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-
-  /*
-   * #292's rule: v42 only expands. A v41 host opening the same store still reads and rewrites `grid_panels` with its own
-   * statements (copied here from that build's listGridView and setGridView), and this build's list is untouched by it.
-   */
-  it('leaves grid_panels as a v41 host reads and writes it, and this build’s list apart from it', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cc-v42-old-'))
-    const file = join(dir, 'store.db')
-    try {
-      const s = newestStore(file)
-      s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
-      for (const id of ['s1', 's2']) gridSession(s, id, 'p1')
-      s.grid.setGridView([ap('p1', 'slider'), sp('s1')])
-      s.close()
-
-      const older = new Database(file)
-      older.pragma('foreign_keys = ON')
-      older.transaction(() => {
-        older.prepare(`DELETE FROM grid_panels`).run()
-        const ins = older.prepare(`INSERT INTO grid_panels (session_id, position) VALUES (?, ?)`)
-        ;['s2', 's1'].forEach((id, i) => ins.run(id, i))
-      })()
-      const read = older
-        .prepare(
-          `SELECT g.session_id FROM grid_panels g JOIN sessions s ON s.id = g.session_id
-           WHERE s.deleted_at IS NULL ORDER BY g.position`,
-        )
-        .all() as { session_id: string }[]
-      expect(read.map((r) => r.session_id)).toEqual(['s2', 's1'])
-      // That v42 does not raise min_reader_version is the step's flag, checked in store-min-reader.test.ts: the
-      // record of this newest store is v56's (#423), which says nothing about v42
-      older.close()
-
-      const again = new Store(file)
-      expect(again.grid.listGridView()).toEqual([ap('p1', 'slider'), sp('s1')])
-      again.close()
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
