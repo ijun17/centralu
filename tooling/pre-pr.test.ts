@@ -214,6 +214,12 @@ describe('pre-pr on a stack of two pull requests', () => {
       // A removed SQL comment reads as a header line only inside a header
       '--- drop the table, then the rows of the old rules',
       "-  after: 'A sentence after the SQL comment still counts'",
+      // A document's words: a test seldom quotes one, and reading them ran 60 unrelated test files on a large branch (#2188)
+      'diff --git a/docs/rules.md b/docs/rules.md',
+      '--- a/docs/rules.md',
+      '+++ b/docs/rules.md',
+      '@@ -1 +0,0 @@',
+      '-The window calls "the old names when the host does not know the new ones".',
       'diff --git a/src/defs.test.ts b/src/defs.test.ts',
       '--- a/src/defs.test.ts',
       '+++ b/src/defs.test.ts',
@@ -224,7 +230,7 @@ describe('pre-pr on a stack of two pull requests', () => {
     expect(sentences).toContain('Ask the person with kind: "question".')
     expect(sentences).toContain('In a report, say what it rests on.')
     expect(sentences).toContain('A sentence after the SQL comment still counts')
-    expect(sentences.filter((x: string) => /a key|mailbox|spells|revert check/.test(x))).toEqual([])
+    expect(sentences.filter((x: string) => /a key|mailbox|spells|old names|revert check/.test(x))).toEqual([])
   })
 
   // #2495: a sentence taken out of a module, which a test the branch did not touch still quotes, fails only in CI otherwise

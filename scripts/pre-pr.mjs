@@ -28,7 +28,7 @@
 //             already has, or that another open pull request adds (#1203): two parallel changes picking the
 //             same number each pass CI alone and clash only when the second lands. `gh` lists the open pull
 //             requests; the stack's own are left out. The Assistant assigns the numbers; this is the backstop.
-//   readers   the vitest files the branch did not change that quote, word for word, a sentence it took out of a file that is
+//   readers   the vitest files the branch did not change that quote, word for word, a sentence it took out of a code file that is
 //             not a test (a quoted string of SENTENCE_MIN characters or more, on a removed line, in no file but a test), run at the
 //             head: a test in another folder that asserts on a tool definition's old sentence failed only in CI (#2494, #2495).
 //   revert    each new or changed vitest file is run at the head with every other change of the pull
@@ -383,11 +383,14 @@ export function revertedChanges(changed, read) {
 /** A quoted string this long is a sentence a test may quote; shorter ones (a key, a word) match tests that never read the file */
 export const SENTENCE_MIN = 24
 
-/** Where a sentence that moved goes on being said: not a recording (.jsonl) or a document, which keep old words */
+/**
+ * The files a removed sentence is read from, and where one that moved goes on being said: code. A recording (.jsonl) or a
+ * document keeps old words, and a test seldom quotes one
+ */
 const CODE_FILE = /\.(?:[cm]?[jt]sx?|rs)$/
 
 /**
- * The sentences a branch takes out of files that are not tests (#2495): each quoted string on a removed line of `diff` (git's,
+ * The sentences a branch takes out of code files that are not tests (#2495): each quoted string on a removed line of `diff` (git's,
  * with its `diff --git` headers), and each sentence of it, of at least SENTENCE_MIN characters and with a space in it (an import
  * path has none). A test quotes one sentence of a tool's description as often as the whole (#2494: 'Ask the person with kind:
  * "question".'); a template's `${…}` splits it. A string with an escape in it is left out whole: a test spells it its own way.
@@ -408,7 +411,7 @@ export function removedSentences(diff) {
       if (line.startsWith('@@')) header = false
       continue
     }
-    if (!file || isTestFile(file) || !line.startsWith('-')) continue
+    if (!file || !CODE_FILE.test(file) || isTestFile(file) || !line.startsWith('-')) continue
     for (const m of line.slice(1).matchAll(/'((?:[^'\\\n]|\\.)+)'|"((?:[^"\\\n]|\\.)+)"|`((?:[^`\\\n]|\\.)+)`/g)) {
       const quoted = m[1] ?? m[2] ?? m[3]
       if (quoted.includes('\\')) continue
