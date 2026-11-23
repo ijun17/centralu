@@ -92,7 +92,8 @@ export function mailReach(host: ReachHost): MailReach {
       const party = parseAddress(address)
       if (!s?.info || party?.kind !== 'session') return null
       if (s.info.askedBy) return sessionAddress(party.host, s.info.askedBy)
-      return s.info.host === 'here' && party.host === host.hostId ? (host.starterElsewhere?.(s.id) ?? null) : null
+      // Only a session of this host: one of another (`foreign`) or a linked machine's that this host started reads as `elsewhere`
+      return s.info.host === 'here' ? (host.starterElsewhere?.(s.id) ?? null) : null
     },
     labelOf: (address, reader) => sessionOf(address)?.info?.name ?? shownId(address, reader),
     shownId,

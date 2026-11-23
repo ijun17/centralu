@@ -872,6 +872,8 @@ export class MessageService {
         this.records.repoint(first.id, to, this.reach.projectOf(to), { ...first.facts, handedOver: true })
         across.push(first.id)
       }
+      // What a session across a link wrote `from` and moved here: its host checks a reply against its own copy's rows, so they move there too (#2530)
+      for (const p of plan) if (this.across(this.records.message(p.messageId)?.sender ?? '')) across.push(p.messageId)
       if (across.length) this.queuedMoves.push({ from, to, ids: across })
       return plan
     })
@@ -880,13 +882,18 @@ export class MessageService {
   /**
    * On a machine: a hub's handoff gave the tasks it sent here (`ids`) from its session `from` to its session `to` (`host.mailMove`, #1948 step 6). Only an
    * open task of this host's that `from` sent is moved, and its start_agent task, settled or not, which names a session's parent here (#2520); it keeps its rows, its delivery and the turn it runs in, and reads as handed over (fact
-   * `handedOver`), so an heir's words never pass for the Assistant's. The caller checks that both are that hub's. Returns how many moved
+   * `handedOver`), so an heir's words never pass for the Assistant's. A message a session here sent `from` that the hub moved gives its row to `to`
+   * (#2530), so the heir's reply answers one it may read. The caller checks that both are that hub's. Returns how many moved
    */
   moveAcross(from: string, to: string, ids: readonly string[]): number {
     return this.run(() => {
       let moved = 0
       for (const id of new Set(ids)) {
         const m = this.records.message(id)
+        if (m && m.sender !== from && parseAddress(m.sender)?.kind === 'session' && !this.across(m.sender)) {
+          moved += this.records.moveRows(from, to, 'all', [id]).length
+          continue
+        }
         if (!m || m.sender !== from || (m.kind !== 'task' && m.kind !== 'message')) continue
         if (m.origin !== 'start_agent' && !this.records.recipients(id).some((r) => r.settled === null)) continue
         this.records.repoint(id, to, null, { ...m.facts, handedOver: true })

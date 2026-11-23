@@ -61,18 +61,20 @@ export class AcrossReceipts extends AcrossCore {
 
   /**
    * On a hub: a handoff moved tasks it gave linked machines' sessions to another session here (`MessageService.handOver`, #1948 step 6). Each machine is
-   * told, so its copy names the heir and reads as handed over; the report it sends back goes to the heir either way, by this host's task
+   * told, so its copy names the heir and reads as handed over; the report it sends back goes to the heir either way, by this host's task. A message a
+   * machine's session sent that moved goes to that machine (#2530), which gives its row to the heir
    */
   async movedAcross(moves: readonly { from: string; to: string; ids: readonly string[] }[]): Promise<void> {
     for (const move of moves) {
-      const byMachine = new Map<string, string[]>()
+      const byMachine = new Map<string, Set<string>>()
       for (const id of move.ids) {
-        for (const row of this.d.records.recipients(id)) {
-          const r = this.route(row.recipient)
-          if (r?.kind === 'machine') byMachine.set(r.machineId, [...(byMachine.get(r.machineId) ?? []), id])
+        const parties = [...this.d.records.recipients(id).map((row) => row.recipient), this.d.records.message(id)?.sender ?? '']
+        for (const party of parties) {
+          const r = this.route(party)
+          if (r?.kind === 'machine') byMachine.set(r.machineId, (byMachine.get(r.machineId) ?? new Set()).add(id))
         }
       }
-      for (const [machineId, ids] of byMachine) await this.tellMove(machineId, { from: move.from, to: move.to, ids })
+      for (const [machineId, ids] of byMachine) await this.tellMove(machineId, { from: move.from, to: move.to, ids: [...ids] })
     }
   }
 
@@ -87,7 +89,7 @@ export class AcrossReceipts extends AcrossCore {
       const part = { ...params, ids: params.ids.slice(i, i + MOVE_IDS_PER_CALL) }
       const r = m?.reachable ? await m.call('host.mailMove', part).then(() => null, (e: unknown) => errorMessage(e)) : 'not reachable'
       if (!r) continue
-      this.d.log?.(`[mail] ${m?.name ?? machineId} could not be told that ${part.ids.length} task(s) went from ${params.from} to ${params.to} in a handoff: ${r}; told again later`)
+      this.d.log?.(`[mail] ${m?.name ?? machineId} could not be told that ${part.ids.length} message(s) went from ${params.from} to ${params.to} in a handoff: ${r}; told again later`)
       // A machine from before `host.mailMove` never takes it
       if (!older(r)) this.untoldMoves.set(machineId, [...(this.untoldMoves.get(machineId) ?? []), part])
     }
@@ -95,7 +97,7 @@ export class AcrossReceipts extends AcrossCore {
 
   /**
    * On a machine: a hub's handoff moved the tasks it gave here (`host.mailMove`). Only from and to that hub's own sessions (never this machine's, never
-   * another host's), and only tasks that hub's sessions sent; anything else is refused and logged
+   * another host's), and only tasks that hub's sessions sent and rows of messages this machine's sessions sent `from` (#2530); anything else is refused and logged
    */
   moveFromHub(hub: { id: string; name: string }, p: MailMoveParams): { ok: true; moved: number } | { ok: false; why: string; text: string } {
     const [from, to] = [this.fromHubNames(hub.id, p.from), this.fromHubNames(hub.id, p.to)]
@@ -108,7 +110,7 @@ export class AcrossReceipts extends AcrossCore {
       return { ok: false, why: 'not_allowed', text: `${hub.name} may move only work its own sessions gave here.` }
     }
     const moved = this.d.service.moveAcross(from, to, p.ids)
-    if (moved < p.ids.length) this.d.log?.(`[mail] ${hub.name} moved ${moved} of ${p.ids.length} task(s) from ${from}: the rest are not open tasks it gave here`)
+    if (moved < p.ids.length) this.d.log?.(`[mail] ${hub.name} moved ${moved} of ${p.ids.length} message(s) from ${from}: the rest are no open task it gave here, nor unread or open mail a session here sent it`)
     return { ok: true, moved }
   }
 

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CentraluTools } from '../adapters/contract.js'
 import { writeHandoffNote } from '../dev-services/handoff-notes.js'
 import { sessionAddress } from '../mail/address.js'
@@ -243,13 +243,19 @@ describe('more work for a child on a linked machine (#1948 step 6)', { timeout: 
  * in the row whose handoff follows the report), and the reply goes once the task was reported, so no task is owed
  */
 describe("whether a hub session's reply wakes its child's session on a linked machine, decided alike on both sides (#2520)", { timeout: 30_000 * SLOW }, () => {
-  const cases: { name: string; to: 'parent' | 'other'; kind?: 'note' | 'question'; handoff?: 'open' | 'reported'; quiet: boolean }[] = [
+  /*
+   * `wroteFirst`: the child wrote before the handoff that followed the report, to the session the heir took over from (#2530). `older`: the machine's
+   * build moves only what the old parent sent (`host.mailMove` before #2530), so the heir's reply to that note is still refused there
+   */
+  const cases: { name: string; to: 'parent' | 'other'; kind?: 'note' | 'question'; handoff?: 'open' | 'reported'; wroteFirst?: true; older?: true; quiet: boolean }[] = [
     { name: "the parent's reply to what the child wrote it", to: 'parent', quiet: false },
     { name: "the parent's reply to the child's note", to: 'parent', kind: 'note', quiet: false },
     { name: "the parent's answer to the child's question", to: 'parent', kind: 'question', quiet: false },
     { name: "the reply of the session that took the parent's place by a handoff", to: 'parent', handoff: 'open', quiet: false },
     { name: "the reply of the session that took the parent's place by a handoff after the report, to the child's note", to: 'parent', kind: 'note', handoff: 'reported', quiet: false },
     { name: "another session's reply to the child's note", to: 'other', kind: 'note', quiet: true },
+    { name: "the reply of the session that took the parent's place by a handoff after the report, to the note the child wrote the parent before it", to: 'parent', kind: 'note', handoff: 'reported', wroteFirst: true, quiet: false },
+    { name: 'the same reply, to a machine of an older build', to: 'parent', kind: 'note', handoff: 'reported', wroteFirst: true, older: true, quiet: false },
   ]
 
   for (const c of cases) {
@@ -257,6 +263,10 @@ describe("whether a hub session's reply wakes its child's session on a linked ma
       const { machine, hub, at, start, copyOf } = await tasksRig()
       const { r, local } = await start('please approve my command')
       const task = copyOf('h1', r.sessionId)!
+      if (c.older) {
+        const moveAcross = machine.mail!.service.moveAcross.bind(machine.mail!.service)
+        vi.spyOn(machine.mail!.service, 'moveAcross').mockImplementation((from, to, ids) => moveAcross(from, to, ids.filter((id) => machine.store.mailbox.message(id)?.sender === from)))
+      }
       const child = () => machine.mgr.listSessions().find((s) => s.id === local)!
       await eventually(() => child().state === 'waiting_approval')
       const session = (o: Partial<Parameters<typeof hub.mgr.createSession>[0]> = {}) =>
@@ -275,16 +285,20 @@ describe("whether a hub session's reply wakes its child's session on a linked ma
         expect(hub.store.mailbox.recipient(wrote, at.hub(replier)), sent.text).toBeTruthy()
       }
       if (c.handoff === 'open') await handOff()
-      if (c.handoff !== 'reported') await write()
+      if (c.handoff !== 'reported' || c.wroteFirst) await write()
       machine.mgr.inputs.respondApproval(local, child().pendingApproval!.requestId, 'allow')
       // A question holds the task's report until it is answered (#2348)
       if (c.kind !== 'question') await eventually(() => hub.store.mailbox.reportsOn(task.id).length === 1)
-      if (c.handoff === 'reported') {
-        await handOff()
-        await write()
-      }
+      if (c.handoff === 'reported') await handOff()
+      if (c.handoff === 'reported' && !c.wroteFirst) await write()
       const reply = await hub.mail!.tool.call(replier, { action: 'reply', thread: wrote, text: 'Go with B.' })
-      expect(reply.isError).toBeFalsy()
+      if (c.older) {
+        // Refused as before, and the handoff's other moves are made: the task the child was started with names the heir
+        expect(reply).toMatchObject({ isError: true, text: expect.stringContaining('Refused (unknown_message)') })
+        expect(machine.store.mailbox.message(task.id)?.sender).toBe(at.hub(replier))
+        return
+      }
+      expect(reply.isError, reply.text).toBeFalsy()
       const id = /^Sent (\S+) /.exec(reply.text)?.[1] ?? ''
       await eventually(() => !!machine.store.mailbox.message(id))
       // The sender is told what the machine decided, which is what its delivery does
@@ -314,6 +328,30 @@ describe("whether a hub session's reply wakes its child's session on a linked ma
     expect(hub.store.mailbox.message(id)?.facts.quiet).not.toBe(true)
     await eventually(() => hub.mail!.service.drain(at.hub(r.sessionId)).messageIds.includes(id))
     expect(hub.mail!.service.drain(at.hub(r.sessionId))).toMatchObject({ wake: true, text: expect.stringContaining('sender="your parent session"') })
+  })
+
+  // #2530's steps on one computer, where the handoff always gave the heir the note's row: the linked rows above must match it
+  it("the reply of the session that took the parent's place by a handoff after the report, to the note its child on this computer wrote the parent before it, wakes the child", async () => {
+    const { hub, at } = await tasksRig()
+    const r = await hub.mgr.startAgent('h1', { task: 'please approve my command', wait: false })
+    if (!r.ok) throw new Error(r.error)
+    const child = () => hub.mgr.listSessions().find((s) => s.id === r.sessionId)!
+    await eventually(() => child().state === 'waiting_approval')
+    const sent = await hub.mail!.tool.call(r.sessionId, { action: 'send', to: 'parent', text: 'Done with A; B is next.', kind: 'note' })
+    const wrote = /^Sent (\S+) /.exec(sent.text)?.[1] ?? ''
+    hub.mgr.inputs.respondApproval(r.sessionId, child().pendingApproval!.requestId, 'allow')
+    const task = hub.store.mailbox.feedOf(at.hub(r.sessionId), { limit: 20 }).find((m) => m.kind === 'task')!
+    await eventually(() => hub.store.mailbox.reportsOn(task.id).length === 1)
+    await writeHandoffNote('p-hub', 'h1', 'NOTE BODY: where things stand')
+    const heir = await hub.mgr.createSession({
+      projectId: 'p-hub', cwd: hub.store.projects.listProjects()[0]!.path, tool: 'claude', permissionPreset: 'normal',
+      initialPrompt: 'You are taking over. Read the note.', handoff: { from: 'h1', note: 'NOTE BODY: where things stand', fromSessionId: 'h1' },
+    })
+    const reply = await hub.mail!.tool.call(heir.id, { action: 'reply', thread: wrote, text: 'Go with B.' })
+    expect(reply.isError, reply.text).toBeFalsy()
+    const id = /^Sent (\S+) /.exec(reply.text)?.[1] ?? ''
+    await eventually(() => hub.mail!.service.drain(at.hub(r.sessionId)).messageIds.includes(id))
+    expect(hub.mail!.service.drain(at.hub(r.sessionId)).wake).toBe(true)
   })
 })
 

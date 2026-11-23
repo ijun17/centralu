@@ -134,6 +134,28 @@ describe('the one hold (§7.4)', () => {
 })
 
 describe('what the service reads of a session', () => {
+  it("a session of this host with no starter here has the session of another computer that started it as its parent; none elsewhere does (#2520)", async () => {
+    const { mailReach } = await import('./reach.js')
+    const starter = sessionAddress('hub-bbbbbbbb', 'h1')
+    const session = (host: 'here' | 'elsewhere', askedBy: string | null = null) => ({ projectId: 'p1', askedBy, here: true, canReadMail: true, host })
+    const reach = mailReach({
+      hostId: 'hub-aaaaaaaa',
+      session: (id) => ({ w: session('here'), asked: session('here', 'a'), 'm1.x': session('elsewhere') })[id],
+      starterElsewhere: () => starter,
+      foreign: (a) => (a === sessionAddress('hub-cccccccc', 'w') ? { name: 'there' } : undefined),
+      assistantId: () => null,
+      appCalledBy: () => false,
+      project: () => ({ trusted: true }),
+      askGroupMembers: () => [],
+      shown: (a) => a,
+    })
+    expect(reach.parentOf(sessionAddress('hub-aaaaaaaa', 'w'))).toBe(starter)
+    // Its own starter here comes first
+    expect(reach.parentOf(sessionAddress('hub-aaaaaaaa', 'asked'))).toBe(sessionAddress('hub-aaaaaaaa', 'a'))
+    expect(reach.parentOf(sessionAddress('hub-aaaaaaaa', 'm1.x'))).toBeNull()
+    expect(reach.parentOf(sessionAddress('hub-cccccccc', 'w'))).toBeNull()
+  })
+
   it('knows the Assistant, a session’s project, parent and name, and its group', () => {
     const { reach } = world()
     expect(reach.isAssistant(ORC)).toBe(true)

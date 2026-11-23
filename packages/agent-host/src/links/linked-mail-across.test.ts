@@ -379,6 +379,22 @@ describe('what a linked machine may say about who wrote what (#2067 review)', ()
     const r = machine.mail!.across.fromHub(from, { from: at(hub, 'h1'), to: 'w1', text: 'noted', notice: true })
     expect(machine.store.mailbox.message((r as { messageId: string }).messageId)).toMatchObject({ sender: at(hub, 'h1'), kind: 'message' })
   })
+
+  // The machine it goes to decides whether it wakes the session (#2520): the hub passes that on to the machine it came from
+  it("another machine's quiet answer the hub passes on says so to the machine it came from", async () => {
+    const { machine, hub } = await rig()
+    // What w1 told the session on the other machine, which needed no reply
+    const note = machine.store.mailbox.insert(
+      {
+        id: `${machine.id}.m_01JZZZZZZZZZZZZZZZZZZZZZZ1`, sender: at(machine, 'w1'), senderProject: 'p-remote', kind: 'message', body: 'Done with A.', origin: 'mail',
+        needsReply: false, replyTo: null, causeId: null, depth: 0, urgent: false, facts: {}, choices: null, subject: null, dedupeKey: null, legacyThread: null, createdAt: Date.now(),
+      },
+      [{ recipient: at(hub, 'm2.z'), recipientProject: null, dueAt: Date.now(), deliveredAt: Date.now() }],
+    )
+    const r = await hub.mail!.across.fromMachine({ id: 'm2', name: 'Other box' }, { sessionId: 'z', to: at(hub, 'm1.w1'), text: 'Thanks.', needsReply: false, replyTo: note.id })
+    expect(r).toMatchObject({ ok: true, quiet: true })
+    expect(machine.store.mailbox.message(r.ok ? r.messageId : '')?.facts.quiet).toBe(true)
+  })
 })
 
 describe('what became of crossing mail is told after the link or the host was away (#2067 review)', () => {
@@ -510,6 +526,17 @@ describe('a send that arrived but whose answer was lost (#2067 review)', () => {
     expect(reply.text).toMatch(/^Sent /)
     expect(hub.store.mailbox.message(question!.id)).toMatchObject({ sender: at(hub, 'h1'), body: 'which port?' })
     expect(hub.store.mailbox.message(idOf(reply))).toMatchObject({ replyTo: question!.id, body: '8080' })
+  })
+
+  // The machine took the first in as a quiet answer: the send again is told so too, by the message it has (#2520)
+  it("a quiet answer sent again is said to wake no one, as the first was taken in", async () => {
+    const { machine, hub } = await rig()
+    const note = await tool(machine, 'w1', { action: 'send', to: 'hub-mac.h1', text: 'Done with A.', kind: 'note' })
+    losesNextAnswer(hub)
+    expect((await tool(hub, 'h1', { action: 'reply', thread: idOf(note), text: 'Thanks.' })).isError).toBe(true)
+    const again = await tool(hub, 'h1', { action: 'reply', thread: idOf(note), text: 'Thanks.' })
+    expect(again.text).toMatch(/^Sent .*without waking it/s)
+    expect(machine.store.mailbox.message(idOf(again))?.facts.quiet).toBe(true)
   })
 
   it('a reply to a message this side has no record of says what most likely happened', async () => {
