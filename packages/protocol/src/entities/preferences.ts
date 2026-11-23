@@ -82,6 +82,8 @@ export const MIN_IDLE_COMPACT_SHARE = 0.1
 export const MAX_AUTO_COMPACT_SHARE = 0.95
 export const MIN_NUDGE_SHARE = 0.1
 export const MAX_NUDGE_SHARE = 0.9
+/** The lowest second reminder: the first sits `NUDGE_MARGIN` under it and not under `MIN_NUDGE_SHARE`; one stored lower reads as this */
+export const MIN_NUDGE_SECOND = 0.15
 export const NUDGE_SECOND_GAP = 0.1
 export const NUDGE_MARGIN = 0.05
 export const DEFAULT_AUTO_COMPACT: AutoCompact = {
@@ -106,7 +108,7 @@ export function nudgeShares(c: Pick<AutoCompact, 'share' | 'nudgeFirst' | 'nudge
 } {
   const ceiling = hundredths(c.share - NUDGE_MARGIN)
   const second = hundredths(c.nudgeSecond ?? c.share - NUDGE_SECOND_GAP)
-  const held = Math.min(ceiling, Math.max(MIN_NUDGE_SHARE, second))
+  const held = Math.min(ceiling, Math.max(MIN_NUDGE_SECOND, second))
   return { first: Math.max(MIN_NUDGE_SHARE, Math.min(c.nudgeFirst, hundredths(held - NUDGE_MARGIN))), second: held }
 }
 
@@ -128,7 +130,7 @@ export function readAutoCompactChosen(raw: unknown): AutoCompact {
   if ('nudgeFirst' in raw && typeof raw.nudgeFirst === 'number' && Number.isFinite(raw.nudgeFirst))
     out.nudgeFirst = Math.min(MAX_NUDGE_SHARE, Math.max(MIN_NUDGE_SHARE, raw.nudgeFirst))
   if ('nudgeSecond' in raw && typeof raw.nudgeSecond === 'number' && Number.isFinite(raw.nudgeSecond))
-    out.nudgeSecond = Math.min(MAX_NUDGE_SHARE, Math.max(MIN_NUDGE_SHARE, raw.nudgeSecond))
+    out.nudgeSecond = Math.min(MAX_NUDGE_SHARE, Math.max(MIN_NUDGE_SECOND, raw.nudgeSecond))
   return out
 }
 

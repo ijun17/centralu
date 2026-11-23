@@ -107,8 +107,8 @@ export class ChangeReflector {
    * A scan saw that the app folder changed (C-4). If a building session is mid-turn, this does
    * nothing — turn end reflects it instead. If there is none, or it is idle (edited from an editor),
    * this waits for things to go quiet after the last change, and reflects it if the building session
-   * is still not mid-turn at that point. This path only ever restarts a running app — an app no one is
-   * using is never woken up by an edit (the performance budget).
+   * is still not mid-turn at that point. This path restarts a running app, or one that gave up and was changed since
+   * (#2487), once until it runs again; an app no one is using is never woken up by an edit (the performance budget).
    */
   folderChanged(e: AppEntry): void {
     if (this.host.builderBusy(e.ref)) return
@@ -118,7 +118,10 @@ export class ChangeReflector {
     const t = setTimeout(() => {
       this.quietTimers.delete(key)
       if (this.host.builderBusy(ref)) return
-      void this.reloadIfChanged(ref, { startIfStopped: false, why: 'the app folder changed and stayed quiet' })
+      const found = this.host.find(ref)
+      const revive = found !== undefined && found.life.gaveUp && !found.life.revivedBySave && folderFingerprint(found.dir) !== found.life.gaveUpStamp
+      if (found && revive) found.life.revivedBySave = true
+      void this.reloadIfChanged(ref, { startIfStopped: revive, why: 'the app folder changed and stayed quiet' })
     }, this.host.timing.reloadQuietMs)
     t.unref()
     this.quietTimers.set(key, t)

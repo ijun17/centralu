@@ -1,7 +1,7 @@
 {
   "name": "centralu",
   "version": "0.0.0-dev",
-  "description": "Run, watch and steer several Claude Code and Codex CLI sessions from one window",
+  "description": "Run, watch and steer Claude Code, Codex and other coding agents from one window",
   "license": "MIT",
   "author": "ijun17",
   "homepage": "https://github.com/ijun17/centralu",

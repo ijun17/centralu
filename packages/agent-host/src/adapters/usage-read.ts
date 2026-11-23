@@ -82,8 +82,8 @@ export function softRead<T>(o: SoftReadOptions<T>): (ask?: SoftAsk<T>) => Promis
 
   return async (ask = {}) => {
     const t = now()
-    // Nothing read in this process yet: the answer a former one kept stands in, as a stale one does (read again behind it)
-    if (!value && ask.seed) value = { at: ask.seed.at, v: ask.seed.value, tookMs: 0 }
+    // Nothing read in this process yet: the answer a former one kept stands in, as a stale one does; not one dated in the future (#1702)
+    if (!value && ask.seed && !isFromTheFuture(ask.seed.at, t)) value = { at: ask.seed.at, v: ask.seed.value, tookMs: 0 }
     if (value && !isFromTheFuture(value.at, t) && t - value.at < freshFor(value)) return { value: value.v, provisional: false }
     if (failedAt !== null && !isFromTheFuture(failedAt, t) && t - failedAt < o.failMs) return { value: standIn(), provisional: false }
     const run = start()

@@ -309,7 +309,7 @@ export const CENTRALU_TOOLS = [
             idleShare: z.number().optional().describe('Share over which a session at rest for 10 minutes is compacted by Centralu, 0.1 to 0.95 (default 0.4).'),
             nudge: z.boolean().optional().describe('Whether Centralu quietly tells a session to call compact_self as its context grows (default on).'),
             nudgeFirst: z.number().optional().describe('Share of the window for the first notice, 0.1 to 0.9 (default 0.45).'),
-            nudgeSecond: z.number().nullable().optional().describe('Share for the second notice, 0.1 to 0.9 and 5+ points below share; null for the default, 10 points below share.'),
+            nudgeSecond: z.number().nullable().optional().describe('Share for the second notice, 0.15 to 0.9 and 5+ points below share; null for the default, 10 points below share.'),
           })
           .strict()
           .optional()

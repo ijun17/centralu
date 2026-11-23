@@ -106,6 +106,33 @@ describe('screen preferences across builds', () => {
     expect(row().autoCompactNudgeFirst).toBe(0.4)
   })
 
+  it('refuses a chosen second share under 15%: the first one sits 5 points under it and not under 10% (#2487)', () => {
+    const { mgr } = setup(JSON.stringify({ textSize: 1 }))
+    // At 10% both reminders would sit at the floor, a pair a linked machine refuses as a whole
+    expect(() => mgr.prefs.setUiPreferences({ autoCompact: { nudgeSecond: 0.1 } })).toThrow(/must be at least 15%/)
+    expect(() => mgr.prefs.setUiPreferences({ autoCompact: { nudgeSecond: 0.14 } })).toThrow(/must be at least 15%/)
+    expect(mgr.prefs.uiPreferences().autoCompact).toBeUndefined()
+    const saved = mgr.prefs.setUiPreferences({ autoCompact: { nudgeSecond: 0.15 } }).autoCompact
+    expect(saved?.nudgeSecond).toBe(0.15)
+    expect(nudgeShares(saved!)).toEqual({ first: 0.1, second: 0.15 })
+  })
+
+  it('holds the second share at 15% at the lowest tool share, when it follows the share (#2487)', () => {
+    const { mgr } = setup(JSON.stringify({ textSize: 1, autoCompact: { controlled: true, share: 0.2 } }))
+    expect(nudgeShares(mgr.prefs.uiPreferences().autoCompact!)).toEqual({ first: 0.1, second: 0.15 })
+  })
+
+  it('reads a second share stored under 15% as 15%, so a hub pushes a setting every linked machine takes (#2487)', () => {
+    for (const stored of [0.1, 0.12, 0.14]) {
+      const hub = setup(JSON.stringify({ textSize: 1, autoCompactNudgeSecond: stored })).mgr
+      expect(hub.prefs.uiPreferences().autoCompact).toMatchObject({ nudgeSecond: 0.15 })
+      expect(nudgeShares(hub.prefs.uiPreferences().autoCompact!)).toEqual({ first: 0.1, second: 0.15 })
+      // The push is the whole setting as read, sent to a machine that holds something else
+      const machine = setup(JSON.stringify({ textSize: 1, autoCompactNudgeSecond: 0.4 })).mgr
+      expect(machine.prefs.setUiPreferences({ autoCompact: hub.prefs.uiPreferences().autoCompact! }).autoCompact).toMatchObject({ nudgeFirst: 0.1, nudgeSecond: 0.15 })
+    }
+  })
+
   it('refuses a second share at or above the share agents compact at, judging a patch that moves both on the new share (#1492)', () => {
     const { mgr } = setup(JSON.stringify({ textSize: 1 }))
     // The share is 65% unless changed

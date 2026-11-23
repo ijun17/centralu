@@ -31,18 +31,36 @@ type Deps = {
   runJs?: (script: string) => string | null
 }
 
+/**
+ * A script run, its answer remembered per script for `ttlMs`; a miss (null) is asked again. The one script that is run this way
+ * asks npm's shim for the global prefix, and each ask starts a Node process the host waits for on its event loop (#2487); the
+ * prefix changes only when the person moves it, so a few minutes of memory is no stale answer anyone would see
+ */
+export function rememberedRunJs(run: (script: string) => string | null, ttlMs: number, now: () => number = Date.now): (script: string) => string | null {
+  const seen = new Map<string, { at: number; out: string }>()
+  return (script) => {
+    const hit = seen.get(script)
+    if (hit && now() - hit.at < ttlMs) return hit.out
+    const out = run(script)
+    if (out !== null) seen.set(script, { at: now(), out })
+    return out
+  }
+}
+
+const runNodeScript = rememberedRunJs((script) => {
+  try {
+    return execFileSync(process.execPath, [script], { encoding: 'utf8', timeout: 10_000, windowsHide: true })
+  } catch {
+    return null
+  }
+}, 5 * 60_000)
+
 const realDeps = (): Deps => ({
   platform: process.platform,
   read: (path) => readFileSync(path, 'utf8'),
   exists: existsSync,
   node: process.execPath,
-  runJs: (script) => {
-    try {
-      return execFileSync(process.execPath, [script], { encoding: 'utf8', timeout: 10_000, windowsHide: true })
-    } catch {
-      return null
-    }
-  },
+  runJs: runNodeScript,
 })
 
 const ruleDeps = (deps: Deps): LaunchDeps => ({ ...deps, family: familyOf(deps.platform) })

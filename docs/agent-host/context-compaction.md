@@ -157,7 +157,7 @@
     context would be refused), and a share under the tool's own. The window's conversation says each one as a
     line from Centralu ("Centralu told it its context is 33% full: call compact_self with then set to its next step"). Settings (Compaction) and `set_preferences`
     take `nudge`, `nudgeFirst` and `nudgeSecond` (`null` is back to following the tool's share); a second share at or above the tool's own, or less than
-    5 points below it, is refused by the host with the reason, a first share the person chose that is not below a chosen second one is refused too (`refused`, `data.reason` `bad_value`, not `internal`), a patch that moves
+    5 points below it, is refused by the host with the reason, so is a second share under 15% (`MIN_NUDGE_SECOND`: the first sits 5 points under it and not under 10%; one stored lower reads as 15%, so the setting a hub pushes is always one a machine takes), a first share the person chose that is not below a chosen second one is refused too (`refused`, `data.reason` `bad_value`, not `internal`), a patch that moves
     several is judged as the whole setting that results, and a tool's share lowered under a second share chosen before **takes it down** (to 5 points below the
     share), in what is stored and in what `prefs.get` reads (`settledAutoCompact`), so the setting
     as read can always be sent back whole: it is what a hub pushes to every linked machine, and a refusal there would have kept the machine from taking the

@@ -1,7 +1,7 @@
 import { TrustProjectButton } from '../project/TrustCard.jsx'
 import { usePresence } from '../../components/presence.js'
 import { useEffect, useRef, useState } from 'react'
-import { errorMessage, MAX_AGENT_DEPTH, MAX_AUTO_COMPACT_SHARE, MAX_NUDGE_SHARE, MIN_AUTO_COMPACT_SHARE, MIN_IDLE_COMPACT_SHARE, MIN_NUDGE_SHARE, NUDGE_MARGIN, agentDepthOf, autoCompactOf, hubAutoOf, notifyPolicyOf, nudgeShares, type ToolName, type ToolStatus, type UiPreferencesPatch } from '@cc/protocol/client'
+import { errorMessage, MAX_AGENT_DEPTH, MAX_AUTO_COMPACT_SHARE, MAX_NUDGE_SHARE, MIN_AUTO_COMPACT_SHARE, MIN_IDLE_COMPACT_SHARE, MIN_NUDGE_SECOND, MIN_NUDGE_SHARE, NUDGE_MARGIN, agentDepthOf, autoCompactOf, hubAutoOf, notifyPolicyOf, nudgeShares, type ToolName, type ToolStatus, type UiPreferencesPatch } from '@cc/protocol/client'
 import { appKeyOf, explainGridSpan, type NotifyPolicy } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -931,7 +931,7 @@ function AutoCompactSetting({ setPrefs }: { setPrefs: (patch: UiPreferencesPatch
               <input
                 id="settings-auto-compact-nudge-second"
                 type="range"
-                min={Math.min(secondMax, Math.max(Math.round(MIN_NUDGE_SHARE * 100), firstPercent + Math.round(NUDGE_MARGIN * 100)))}
+                min={Math.min(secondMax, Math.max(Math.round(MIN_NUDGE_SECOND * 100), firstPercent + Math.round(NUDGE_MARGIN * 100)))}
                 // Above the first share, and below the share agents compact at: a second reminder after the tool's own compaction would say nothing
                 max={secondMax}
                 step={5}
