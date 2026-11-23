@@ -30,9 +30,10 @@ import { isAppToolResult } from '../app-tool-result.js'
 import { RpcClient } from './rpc-client.js'
 
 /**
- * A call under the Assistant's name, and the same call under the old one when the host does not know it: a host older than
- * beta.54 (`assistant.*`, #2140) or beta.57 (the skills, #2166), such as a `centralu serve` the hub installed at whatever version, answers only `orchestrator.*`
- * (docs/plans/assistant-rename.md §3.3). Matched on the host's own words, as it answers every method it lacks.
+ * A call under the Assistant's name, and the same call under the old one when the host does not know it: a host older
+ * than beta.54 (`assistant.*`, #2140) or beta.57 (the skills, #2166), such as a `centralu serve` the hub installed at
+ * whatever version, answers only the old names (docs/plans/assistant-rename.md §3.3). Matched on the host's own words,
+ * as it answers every method it lacks with the same code.
  */
 async function renamed<T>(call: () => Promise<T>, old: () => Promise<T>): Promise<T> {
   try {
