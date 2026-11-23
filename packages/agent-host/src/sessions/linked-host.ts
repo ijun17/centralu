@@ -95,11 +95,7 @@ export class LinkedHost {
     return { ok: true }
   }
 
-  /**
-   * A hub's session's call that gave this task was cancelled (`host.stopTask`, #2485): the task is withdrawn here, and the session's turn, while it
-   * runs or waits to be continued, is stopped when that task alone started it and nothing else had a part in it (`StopNotices.alone`), as a
-   * cancelled ask_project stops its turn here. A turn of the person's, or one the task only joined, runs on. Whether the turn was stopped
-   */
+  /** `host.stopTask` (#2485), as `MailHooks.cancelGiven` decides */
   hubStopTask(sessionId: string, giver: string, taskId: string): { stopped: boolean } {
     this.directedFromHub(sessionId)
     const running = inTurn(this.host.meta.get(sessionId)?.state ?? 'idle') || this.host.turnContinue.waitsToContinue(sessionId)
