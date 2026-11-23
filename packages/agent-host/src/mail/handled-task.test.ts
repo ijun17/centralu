@@ -87,7 +87,7 @@ describe('a task marked handled by its receiver (#2493)', () => {
     ['its result, without the input', { took: [], finished: true }],
     ['a stop', { took: [], finished: false }],
     ['an error that took the process', { took: undefined, finished: false }],
-  ] as const)('forgets a claim when its turn ends by %s: the input the tool takes after joins the next turn unclaimed, and a claim there holds (#2497)', async (_, ending) => {
+  ] as const)('answers once a task claimed while its delivery waited, when its turn ends by %s without the input: the turn after that takes it answers it, and a claim there holds (#2497, #2499)', async (_, ending) => {
     const w = started()
     w.mail.task(A, B, { text: 'start on #12', origin: 'agent_session', delivered: false })
     await w.advance(2_000)
@@ -98,7 +98,7 @@ describe('a task marked handled by its receiver (#2493)', () => {
     expect(await handled(w, a.id)).toContain('is answered by this turn')
     w.delivery.turnInputs(B, ending)
     w.endTurn('b')
-    // The tool takes the input into the turn after, which ends having done it: a task that joined it, given again at rest as any (#2369)
+    // The tool holds the input queued for a turn after, or lost it with its process: the turn after that takes it answers it, as its own work
     w.turns.beginOther('b', 'person', null)
     // The next turn's own claim, made while its task's delivery waits for the tool too, holds
     const takeD = holdDelivery(w)
@@ -111,7 +111,7 @@ describe('a task marked handled by its receiver (#2493)', () => {
     takeD()
     await w.advance(0)
     endAtRest(w)
-    expect(w.row(a.id, B)).toMatchObject({ settled: null, givenAgainAt: expect.any(Number) })
+    expect(w.row(a.id, B)).toMatchObject({ settled: 'reported', givenAgainAt: null })
     expect(w.row(d.id, B)).toMatchObject({ settled: 'reported', givenAgainAt: null })
   })
 

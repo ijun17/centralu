@@ -1990,6 +1990,11 @@ At the turn's end the tool says which inputs that turn took (`SessionHandle.turn
 neither releases it nor names it. When the tool opens a turn for it (`turnStartInputs`), it is filed under that turn, whose end answers or
 releases it, and that turn is the mail's, as a wake's is (`MailTurns.openedFor`): `started_by` `mail`, its task the work message and the starter
 (C8 below). This closes step 2's open low: a message that needs a reply, taken only after the turn ended, was filed under the turn before.
+An input is the turn's from its hand-off, not from the tool's word that it took it (#2499): Claude Code takes an input it did not fold in
+only as that input's own turn opens, so an input the turn ended without is queued at that end whether or not the tool has said so, and the
+opening files it as that turn's work instead of a turn it joined. A delivery that fails before the tool took it leaves nothing queued.
+After a host restart nothing of this is in memory: an input not yet taken is held `uncertain` for the person (§7.6.5), and one taken is
+answered or filed as its rows say.
 
 A task a turn took in while it ran came after the work that turn was doing began, so that turn's end does not answer it (#2369), unless the
 session says that turn does it. The frame that gives a task into a running turn says how, in one line per task: `<id> joined your running
@@ -1997,8 +2002,8 @@ turn: if this turn does it, <handled call> lets this turn's report answer it.` T
 receiver's `handled` on a task it holds claims it for the running turn (`MailDelivery.claim`, #2493). The claim is kept by the receiver, in memory,
 beside the turn's joined inputs and not on them, until that turn ends however it ends (#2497): the model can claim a task before the tool
 says it took the input that gives it, since Claude Code names a folded input only in the turn's result (or the host counts it taken after
-90 s). A claim belongs to its turn: a task claimed in one turn whose input the tool takes only in the next, a turn cut to be continued
-included, joins that next turn unclaimed and is given again at its end, unless the claiming turn's report answered it. A claimed input the turn did not take stays queued in the tool, and the turn after answers it. A task given again and waiting is delivered into that turn. At the turn's end the claimed task is not given again, and the
+90 s). A claim belongs to its turn: an input the claiming turn ended without, however it ended, is queued (above), and the turn after
+that takes it answers it. A task given again and waiting is delivered into that turn. At the turn's end the claimed task is not given again, and the
 last response answers it, in the one report per giver. `handled` with no turn running, or on a task queued in the tool for a turn after,
 claims nothing, and says the task is answered by the report of the turn it runs in. Otherwise, when the turn
 ends as a turn does (not stopped, and not cut to be continued), the task is undelivered and given again at rest (`MailboxRecords.undeliver`

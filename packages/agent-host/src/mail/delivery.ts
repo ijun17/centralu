@@ -165,8 +165,12 @@ export class MailDelivery {
   private readonly timers = new Map<string, () => void>()
   /** When a mailbox was last woken: the 30 s gap */
   private readonly lastWake = new Map<string, number>()
-  /** Mail given into a running turn, by recipient: the input id the tool was given it under, and its messages, until that turn ends (`turnInputs`) */
-  private readonly joined = new Map<string, { id: string; ids: readonly string[]; at: number }[]>()
+  /**
+   * Mail given into a running turn, by recipient: the input id the tool was given it under, its messages, and when the tool took it, until that turn
+   * ends (`turnInputs`). Kept from the hand-off, not from the take: Claude Code takes an input it did not fold into the turn only as the input's own
+   * turn opens, and an input the turn ended without must be queued by then for that opening to make it its turn's work (#2499)
+   */
+  private readonly joined = new Map<string, { id: string; ids: readonly string[]; at?: number }[]>()
   /**
    * Tasks the receiver said its running turn does (`claim`), by recipient, until that turn ends: apart from `joined`, since the model can claim a task
    * before the tool says it took the input that gives it (#2497: Claude Code names a folded input in the turn's result)
@@ -598,7 +602,8 @@ export class MailDelivery {
         this.records.markDelivered(recipient, drained.messageIds, deliveredAt, turn ?? this.turns?.current(sessionId)?.turnSeq ?? null)
         this.records.markRead(recipient, drained.inline, deliveredAt)
       })
-      if (inputId) this.joined.set(recipient, [...(this.joined.get(recipient) ?? []), { id: inputId, ids: drained.messageIds, at: deliveredAt }])
+      const given = this.joined.get(recipient)
+      if (inputId && given) this.joined.set(recipient, given.map((g) => (g.id === inputId ? { ...g, at: deliveredAt } : g)))
       if (!quiet && !joins) this.lastWake.set(recipient, this.now())
       // The person wrote to it and it took the words: it is no longer waiting for an answer about the crowd
       if (waiting) {
@@ -610,6 +615,16 @@ export class MailDelivery {
       // Last, so a warning that cannot be written leaves the delivery's own bookkeeping done. A join too: a task it carries is counted (`pairTurnsSince`)
       if (!quiet) this.warnIfRunning(recipient, drained.messageIds, deliveredAt)
     }
+    // Not taken after all: no turn holds it, nor waits to run it
+    const forget = () => {
+      if (!inputId) return
+      for (const inputs of [this.joined, this.queued]) {
+        const rest = inputs.get(recipient)?.filter((g) => g.id !== inputId) ?? []
+        if (rest.length > 0) inputs.set(recipient, rest)
+        else inputs.delete(recipient)
+      }
+    }
+    if (inputId) this.joined.set(recipient, [...(this.joined.get(recipient) ?? []), { id: inputId, ids: drained.messageIds }])
     try {
       await this.sessions.deliver(sessionId, { text: drained.text, quiet, line: drained.line, listed: drained.listed, wanted: () => drained.messageIds.some((id) => this.records.recipient(id, recipient)?.settled !== 'withdrawn'), ...(joins ? { joins, id: inputId } : {}), ...(shown ? { shown } : {}), ...(depth ? { depth } : {}), taken }, (e) => {
         cancelTurn()
@@ -619,6 +634,7 @@ export class MailDelivery {
       // Taken already: what failed after it is not the delivery's, and giving the mail again could run the work twice
       if (delivered.at !== undefined) return void console.error(`[mail] ${recipient}: after the tool took the mail: ${errorMessage(e)}`)
       cancelTurn()
+      forget()
       if (e instanceof MailNotAtRest) {
         this.records.takeBack(recipient, drained.messageIds)
         return
@@ -659,7 +675,7 @@ export class MailDelivery {
        * stopped keeps it, so its giver is told of the stop; a turn cut to be continued keeps it for the turn that continues
        */
       const now = this.now()
-      if (turn.finished) for (const g of given.filter((g) => named.includes(g.id))) this.records.undeliver(recipient, g.ids.filter((id) => this.records.message(id)?.kind === 'task' && !claimed?.has(id)), g.at, { at: now })
+      if (turn.finished) for (const g of given) if (g.at !== undefined && named.includes(g.id)) this.records.undeliver(recipient, g.ids.filter((id) => this.records.message(id)?.kind === 'task' && !claimed?.has(id)), g.at, { at: now })
     }
     const ran = queued.filter((q) => named?.includes(q.id))
     const ids = ran.flatMap((q) => q.ids)
