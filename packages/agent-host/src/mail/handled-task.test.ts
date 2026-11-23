@@ -120,7 +120,10 @@ describe('a task marked handled by its receiver (#2493)', () => {
     const a = w.mail.task(A, B, { text: 'and review #13', origin: 'agent_session', delivered: false })
     await w.advance(5_000)
     // d waits behind a's delivery (one in flight per mailbox), and goes into the turn once a's is done, its own waiting for the tool too
+    const waiting = w.to('b').length
     const d = w.mail.task(D, B, { text: 'and the changelog', origin: 'agent_session', delivered: false })
+    await w.advance(5_000)
+    expect(w.to('b')).toHaveLength(waiting)
     expect(await handled(w, a.id)).toContain('is answered by this turn')
     w.mail.handOver(A, C, 'all', [B])
     const again = w.store.mailbox.watchedTo(B).find((r) => w.store.mailbox.message(r.messageId)?.sender === C)?.messageId ?? ''
