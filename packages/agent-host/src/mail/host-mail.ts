@@ -173,6 +173,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
      * there moves it (`host.mailMove`). Read as its parent, its replies wake the session as a parent's do (`quietAnswer`)
      */
     starterElsewhere: (id) => {
+      if (!sessions.sessionInfo(id)?.startedFromHub) return null
       const sender = store.mailbox.firstTask(addressOf(id), 'start_agent')?.sender
       const party = sender ? parseAddress(sender) : null
       return sender && party?.kind === 'session' && party.host !== hostId ? sender : null
