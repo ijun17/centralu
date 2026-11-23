@@ -825,6 +825,10 @@ describe('a successor reads and recalls its archived handoff lineage (#1487)', (
     // The store's answer, by its own record: an archived child of that starter; nothing for an id it does not hold
     expect(store.handoffs.archivedChildOf('kid1', ['old1'])).toBe(true)
     expect(store.handoffs.archivedChildOf('nobody', ['old1'])).toBe(false)
+    // A live session it started is read by the live rule, not as an archived one
+    put('livekid', [['assistant', 'still going']])
+    store.sessions.upsertSession({ ...store.sessions.listSessions().find((x) => x.id === 'livekid')!, askedBy: 'old1' })
+    expect(store.handoffs.archivedChildOf('livekid', ['old1'])).toBe(false)
   })
 
   it('deleting a session for good ends its part of the chain', async () => {
