@@ -137,14 +137,17 @@ describe('a usage read that is a command run (#1623)', () => {
     expect(read).toHaveBeenCalledTimes(2)
   })
 
-  it('never counts a time from the future as fresh (the clock moved back): the answer is read again', async () => {
+  it('never counts a time from the future as fresh (the clock moved back), and never shows it as the answer (#1702): the answer is read again', async () => {
     const clock = 1_000
-    const read = vi.fn(async () => 'new')
+    let release: (v: string) => void = () => {}
+    const read = vi.fn(() => new Promise<string>((resolve) => (release = resolve)))
     const ask = softRead({ read, fallback: () => 'none', freshMs: 60_000, failMs: 1000, softMs: 50, now: () => clock })
-    // Stamped an hour ahead of this clock
-    expect(await ask({ seed: { value: 'old', at: clock + 3_600_000 } })).toEqual(answer('old', true))
+    // Stamped an hour ahead of this clock: no seed, so not the answer that would carry that time (the fallback stands in)
+    expect(await ask({ seed: { value: 'old', at: clock + 3_600_000 } })).toEqual(answer('none', true))
     await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(1))
-    expect(await ask({ settle: true })).toEqual(answer('new'))
+    const settled = ask({ settle: true })
+    release('new')
+    expect(await settled).toEqual(answer('new'))
     // The read now dated at the clock's time stands as the kept answer
     expect(await ask()).toEqual(answer('new'))
   })

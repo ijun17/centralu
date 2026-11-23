@@ -29,6 +29,10 @@ export type Life = {
   lastError: string | null
   /** Stopped — failed maxFailures times in a row. Does not start again until a person restarts it */
   gaveUp: boolean
+  /** The folder's fingerprint when it gave up: only a change after that revives it, not what the failing app itself wrote there */
+  gaveUpStamp: string | null
+  /** A save has started it once since it last ran: another waits until it starts (`resetLife` keeps it) */
+  revivedBySave: boolean
   /** The spec generation discovered — the next startup connects without probing */
   verdict: PriorDiscovery | undefined
   /**
@@ -99,7 +103,7 @@ export type Blocker = { kind: 'invalid' | 'untrusted' | 'unconfirmed' | 'off' | 
  * after switching SDKs would keep connecting the old way.
  */
 export function resetLife(L: Life): void {
-  Object.assign(L, { failures: 0, retryAt: 0, lastError: null, gaveUp: false, verdict: undefined })
+  Object.assign(L, { failures: 0, retryAt: 0, lastError: null, gaveUp: false, gaveUpStamp: null, verdict: undefined })
 }
 
 /** A currently open host → app call */
@@ -163,6 +167,8 @@ export function newEntry(scope: Scope, found: ScannedApp, reservedIds: readonly 
       retryAt: 0,
       lastError: null,
       gaveUp: false,
+      gaveUpStamp: null,
+      revivedBySave: false,
       verdict: undefined,
       epoch: 0,
       inflight: 0,

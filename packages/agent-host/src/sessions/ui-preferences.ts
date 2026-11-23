@@ -1,5 +1,5 @@
 import type { AutoCompact, UiPreferences, UiPreferencesPatch } from '@cc/protocol'
-import { NUDGE_MARGIN, parseUiPreferences, readAutoCompact, readAutoCompactChosen, readNotifyPolicy } from '@cc/protocol'
+import { MIN_NUDGE_SECOND, MIN_NUDGE_SHARE, NUDGE_MARGIN, parseUiPreferences, readAutoCompact, readAutoCompactChosen, readNotifyPolicy } from '@cc/protocol'
 import { parseJson } from '../dev-services/store/json.js'
 import { isObj } from '../json-value.js'
 import { rpcError, type RpcError } from '../rpc-error.js'
@@ -127,6 +127,9 @@ export class UiPreferenceStore {
       const second = Math.round(asked.nudgeSecond * 100)
       if (asked.nudgeSecond > asked.share - NUDGE_MARGIN + 1e-9) {
         throw refusal(`The second reminder (${second}%) must be at least ${Math.round(NUDGE_MARGIN * 100)} points below the share agents compact at (${Math.round(asked.share * 100)}%): the tool's own compaction would come first.`)
+      }
+      if (compact.nudgeSecond != null && asked.nudgeSecond < MIN_NUDGE_SECOND - 1e-9) {
+        throw refusal(`The second reminder (${second}%) must be at least ${Math.round(MIN_NUDGE_SECOND * 100)}%: the first one sits ${Math.round(NUDGE_MARGIN * 100)} points under it, and not under ${Math.round(MIN_NUDGE_SHARE * 100)}%.`)
       }
       if (chosenFirst !== undefined && asked.nudgeSecond <= chosenFirst + 1e-9) {
         throw refusal(`The second reminder (${second}%) must be above the first (${Math.round(chosenFirst * 100)}%).`)

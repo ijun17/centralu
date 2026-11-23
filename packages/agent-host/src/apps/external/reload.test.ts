@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps, resultText, type AppRef, type RuntimeTiming } from './runtime.js'
@@ -219,6 +219,80 @@ describe('restarts after going quiet when there is no building session', () => {
     rt.refresh()
     await until(known, (names) => names.includes('edited'))
     expect(await pid()).not.toBe(before)
+  })
+
+  it('saving the file of an app that gave up after failing starts it again with the fix, but its own writes into its folder do not (#2487)', async () => {
+    plant()
+    make({ builder: false, timing: { maxFailures: 1 } })
+    await rt.tools(ref)
+    const broken = readFileSync(serverFile(), 'utf8')
+    // Fails at start and leaves a file in its own folder each time, as a program with a log there does
+    addTools(`  process.getBuiltinModule('node:fs').appendFileSync(new URL('./crash.log', import.meta.url), 'start\\n')\n  throw new Error('half-written tool')`)
+    rt.builderTurnEnded(ref)
+    await until(status, (s) => s === 'failed')
+    const starts = () => readFileSync(join(dirname(serverFile()), 'crash.log'), 'utf8').split('\n').length - 1
+    const before = starts()
+    rt.refresh()
+    await reflectDone()
+    expect(starts()).toBe(before)
+    expect(status()).toBe('failed')
+    // No building session turn ends here: the person fixes the file in an editor and saves
+    writeFileSync(serverFile(), broken)
+    addTool('fixed')
+    rt.refresh()
+    await until(known, (names) => names.includes('fixed'))
+    await reflectDone()
+    expect(status()).toBe('running')
+  })
+
+  it('a writer that outlives an app that gave up starts it once, not again and again (#2487)', async () => {
+    plant()
+    make({ builder: false, timing: { maxFailures: 1 } })
+    await rt.tools(ref)
+    addTools(`  process.getBuiltinModule('node:fs').appendFileSync(new URL('./start.log', import.meta.url), 'start\\n')\n  throw new Error('half-written tool')`)
+    rt.builderTurnEnded(ref)
+    await until(status, (s) => s === 'failed')
+    const dir = dirname(serverFile())
+    const starts = () => readFileSync(join(dir, 'start.log'), 'utf8').split('\n').length - 1
+    const before = starts()
+    // A process the app left behind, writing into its folder after it gave up, each time one more write: the first starts the
+    // app again, the others do not
+    let revived = 0
+    for (let i = 0; i < 3; i++) {
+      appendFileSync(join(dir, 'late.log'), 'x')
+      rt.refresh()
+      await reflectDone()
+      await until(status, (s) => s === 'failed')
+      if (i === 0) revived = starts()
+    }
+    expect(revived).toBeGreaterThan(before)
+    expect(starts()).toBe(revived)
+  })
+
+  it('an app a save started that then gives up while running is started by the next save too (#2487)', async () => {
+    plant()
+    make({ builder: false, timing: { maxFailures: 1 } })
+    await rt.tools(ref)
+    const good = readFileSync(serverFile(), 'utf8')
+    const logStart = "process.getBuiltinModule('node:fs').appendFileSync(new URL('./start.log', import.meta.url), 'start\\n')"
+    addTools(`  ${logStart}
+  throw new Error('half-written tool')`)
+    rt.builderTurnEnded(ref)
+    await until(status, (s) => s === 'failed')
+    // A save starts it, and it runs, then exits on its own and gives up again, with no change to a file
+    writeFileSync(serverFile(), good)
+    addTools(`  ${logStart}
+  setTimeout(() => process.exit(3), 1_000)`)
+    rt.refresh()
+    await until(status, (s) => s === 'running')
+    await until(status, (s) => s === 'failed', 10_000)
+    await reflectDone()
+    // The next save starts it again, with the fix
+    writeFileSync(serverFile(), good)
+    addTool('fixed')
+    rt.refresh()
+    await until(known, (names) => names.includes('fixed'))
+    expect(status()).toBe('running')
   })
 
   it('never wakes a non-running app because of an edit', async () => {

@@ -1,6 +1,30 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { win32 } from 'node:path'
-import { __forgetPrograms, launchFor, nodeShimEntry, notOnPath, programPath, resolveCommand, shimTarget, toolCommand, toolExecutable } from './tool-launch.js'
+import { __forgetPrograms, launchFor, nodeShimEntry, notOnPath, programPath, rememberedRunJs, resolveCommand, shimTarget, toolCommand, toolExecutable } from './tool-launch.js'
+
+describe('rememberedRunJs: npm\'s prefix is asked for once, not on every launch (#2487)', () => {
+  it('runs a script once per window, again after it, and asks a miss again', () => {
+    let clock = 0
+    const calls: string[] = []
+    let answer: string | null = 'C:\\npm'
+    const run = rememberedRunJs((script) => (calls.push(script), answer), 1_000, () => clock)
+    expect(run('a.js')).toBe('C:\\npm')
+    clock = 999
+    expect(run('a.js')).toBe('C:\\npm')
+    expect(run('b.js')).toBe('C:\\npm')
+    expect(calls).toEqual(['a.js', 'b.js'])
+    clock = 1_000
+    answer = 'D:\\npm'
+    expect(run('a.js')).toBe('D:\\npm')
+    // A miss is not kept: the next launch asks again
+    answer = null
+    clock = 5_000
+    expect(run('a.js')).toBeNull()
+    answer = 'E:\\npm'
+    expect(run('a.js')).toBe('E:\\npm')
+    expect(calls.filter((c) => c === 'a.js')).toHaveLength(4)
+  })
+})
 
 /**
  * Windows (#14), simulated. Node refuses to spawn a `.cmd` without a shell, and a shell would read

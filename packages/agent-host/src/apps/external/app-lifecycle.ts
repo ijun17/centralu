@@ -167,6 +167,7 @@ export class AppLifecycle {
       L.proc = proc
       L.pipeId = pipeId
       L.lastError = null
+      L.revivedBySave = false
       this.readTools(e, proc)
       proc.onUnexpectedExit = (reason) => this.crashed(e, proc, reason)
       return proc
@@ -230,6 +231,7 @@ export class AppLifecycle {
     const where = this.host.label(e.ref)
     if (L.failures >= this.host.timing.maxFailures) {
       L.gaveUp = true
+      L.gaveUpStamp = folderFingerprint(e.dir)
       // A stopped app never attaches to a session (decision 4) — announce so an already-attached session detaches it
       this.host.appsChanged()
       console.error(`[apps] ${where} stopped after ${L.failures} consecutive failures: ${reason.split('\n')[0]}`)
