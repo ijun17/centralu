@@ -3,7 +3,7 @@
  * Shared fakes and the world each test starts from are in manager.test-helpers.ts.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { SessionInfo, ToolName, UsageHistory } from '@cc/protocol'
+import type { NormalizedEvent, SessionInfo, ToolName, UsageHistory } from '@cc/protocol'
 import { NO_LIMITS, type AgentAdapter } from '../adapters/contract.js'
 import { openCodeUsageReader } from '../adapters/opencode/usage.js'
 import { Store } from '../dev-services/store.js'
