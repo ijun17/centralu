@@ -262,6 +262,9 @@ describe('the items an issue plans, and where each went', () => {
     expect(planItems('## To do\n\n1. Built by https://github.com/ijun17/centralu/pull/7')[0].state).toBe('carried')
     // Facts, causes and observations are not work: without a heading of work no numbered line is an item
     expect(planItems('1. The cache is stale\n2. The read races the write')).toEqual([])
+    // A bug's steps to reproduce are not work, but work on making something reproducible is
+    expect(planItems('## Repro steps\n\n1. Open the app')).toEqual([])
+    expect(planItems('## Fix: make the build reproducible\n\n1. Pin the clock')).toHaveLength(1)
   })
 
   it('reads the plan sections an issue cites, in the forms guard/doc-refs reads, and names the plans it cites with no section', () => {
