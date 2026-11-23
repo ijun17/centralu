@@ -1,6 +1,6 @@
 # Mail without threads (#1347, #1684)
 
-> **Status: proposed, round 5, 2026-11-02.** It replaces the thread design of 2026-10-20 (this file before round 1, in
+> **Status: round 5, 2026-11-02, built as §16 says slice by slice (M5 in #2494); §13 is not built (#2508).** It replaces the thread design of 2026-10-20 (this file before round 1, in
 > git history). Written against main at `9fb7c778b`. The owner decided on #1684 (comment of 2026-11-02) that **threads
 > are removed**, and on 2026-11-02 that **a reply is watched only when the sender asks for one** (`needsReply`), that
 > **every session may send to every session**, with one hold only: **a message from a session of an untrusted
@@ -654,7 +654,8 @@ named again on trust** (D12, Q7 (b)). Left:
 2. **Q8. The word `orchestrator` on a linked machine.** The orchestrator lives on the hub. A session on a linked
    machine that sends to `orchestrator` is refused "there is no orchestrator to ask yet", and neither §11.1's
    `resolveTo` nor §14 says whether the word reaches the hub's orchestrator through the link. No code before this
-   is decided.
+   is decided. **Decided 2026-11-23 (#2478): the refusal stands.** `person` (#2259) and `parent` (#2145) already reach the hub
+   from a linked machine, so the word adds no path of its own.
 
 Q6 (the label's lifetime) is gone with the label (D11). Q7 (a delegation from an untrusted project) is decided as
 option (b), refuse and tell on trust (D12, §7.4).
@@ -2626,7 +2627,8 @@ you". The other layouts of round 1 (A by counterpart, C by chain) are in git his
 
 ## 13. Apps, the merge queue, watches, the task board
 
-These are not in this plan's slices. They keep the old plan's intent, re-keyed, and each gets its own implementation
+These are not in this plan's slices, and none is built. The app runtime and the merge queue's notices are #2508, which writes
+this section out before it is built (2026-11-23). They keep the old plan's intent, re-keyed, and each gets its own implementation
 section when it is briefed:
 
 - **The app runtime (old §9.4):** `centralu.mail.caller()` is unchanged; `post(to: callerAddress, { text, replyTo?,
@@ -2716,7 +2718,7 @@ the host on messages with a window that lists no mail (N8). M4 of round 1 is dro
 | M6 | the Inbox, option B | with the stack (forward-fix) |
 | M3b | **the second schema was not built** (§11.3). Planned: the version-2 tool, `mailArgs`, sentences S4 to S9, `sessions`, name resolution, the budget | the stack |
 | M3c | deletions: `service.ts`, `relations.ts`, `policy.ts`, the v61 readers but the move's and `legacyChain`, thread tests | M3b |
-| M5 | the reminder, with its log | M3c |
+| M5 | the reminder, with its log (built, #2494) | M3c |
 | M8 | the task row becomes the one record of an owed report; `report_marks` still written | M5 |
 | M7 | contract: copy what is left, then drop the v61 tables; stop writing `report_marks`. As built: store steps 74 and 75 and the deletion of every reader; the drop is step 76, one release after step 75 | — (a contract step) |
 | M7b | delete the version-1 tool mapping, once no v1 call was seen for a release. Closed with M7: with no second schema, nothing to delete | M7 |
@@ -3408,7 +3410,7 @@ with `COMMAND_CALLS` and `PLAIN_CALLS`, `holdsInbound` with `mail/policy.ts`, an
 
 ### M5. The unanswered reminder
 
-Built in #2477; where the build differs from what follows, §10.11 says what it does.
+Built in #2494 (issue #2477); where the build differs from what follows, §10.11 says what it does.
 
 **Adds**
 
@@ -3846,7 +3848,8 @@ It never fires for the state it was set in. The row keeps the target's last ende
 registration as its baseline, and the answer says what the target is doing now. A session may watch a session it may
 read (`mayRead`, `adapters/contract/centralu-tools.ts:570`, the one read rule); otherwise the call is refused as
 `read_session` would refuse it. Also refused: itself; a session it has an open task to (§18.1); and a session on
-another computer (`elsewhere`, as mail was refused before linked mail; later the target's host keeps the watch). A
+another computer (`elsewhere`). A watch across the link is not planned (2026-11-23, #2478): work given to a linked child
+reports back as mail (#1948) and an unanswered task is reminded (#2494), so a new protocol for it would buy little. A
 session watch ends after 24 hours; setting it again extends it.
 
 **A pull request's checks** (`#123`, PR 2): the host keeps them (owner, 2026-11-13, §18.14 Q2 = a). The watch is a
