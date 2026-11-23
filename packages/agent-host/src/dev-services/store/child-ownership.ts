@@ -35,7 +35,7 @@ export class ChildOwnershipRecords {
    * transaction: each moved session's `asked_by_session_id` and `parent_session_id` where they name the original, and its start_agent requests still waiting for the person (`agent_start_requests`, whose
    * stored request names its caller too). A crash before the commit leaves every row on the original; after it, every
    * row on the new session, so the next host (a swap or a restart) reads one owner either way.
-   * `then`: the rest of the handoff's move that is stored elsewhere (the mail, `MailService.handOver`), run last in the same
+   * `then`: the rest of the handoff's move that is stored elsewhere (the mail, `Handoffs.handOver`), run last in the same
    * transaction, so a refusal there leaves every row of both on the original.
    */
   moveChildren(

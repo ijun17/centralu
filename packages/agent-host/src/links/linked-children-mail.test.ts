@@ -264,8 +264,8 @@ describe("whether a hub session's reply wakes its child's session on a linked ma
       const { r, local } = await start('please approve my command')
       const task = copyOf('h1', r.sessionId)!
       if (c.older) {
-        const moveAcross = machine.mail!.service.moveAcross.bind(machine.mail!.service)
-        vi.spyOn(machine.mail!.service, 'moveAcross').mockImplementation((from, to, ids) => moveAcross(from, to, ids.filter((id) => machine.store.mailbox.message(id)?.sender === from)))
+        const moveAcross = machine.mail!.service.handoffs.moveAcross.bind(machine.mail!.service.handoffs)
+        vi.spyOn(machine.mail!.service.handoffs, 'moveAcross').mockImplementation((from, to, ids) => moveAcross(from, to, ids.filter((id) => machine.store.mailbox.message(id)?.sender === from)))
       }
       const child = () => machine.mgr.listSessions().find((s) => s.id === local)!
       await eventually(() => child().state === 'waiting_approval')

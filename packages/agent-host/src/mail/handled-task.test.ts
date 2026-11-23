@@ -129,7 +129,7 @@ describe('a task marked handled by its receiver (#2493)', () => {
     await w.advance(5_000)
     expect(w.to('b')).toHaveLength(waiting)
     expect(await handled(w, a.id)).toContain('is answered by this turn')
-    w.mail.handOver(A, C, 'all', [B])
+    w.mail.handoffs.handOver(A, C, 'all', [B])
     const again = w.store.mailbox.watchedTo(B).find((r) => w.store.mailbox.message(r.messageId)?.sender === C)?.messageId ?? ''
     const takeD = holdDelivery(w)
     take()
@@ -197,7 +197,7 @@ describe('a task marked handled by its receiver (#2493)', () => {
     const a = w.mail.task(A, B, { text: 'and review #13', origin: 'agent_session', delivered: false })
     await w.advance(5_000)
     expect(await handled(w, a.id)).toContain('is answered by this turn')
-    w.mail.handOver(A, C, 'all', [B])
+    w.mail.handoffs.handOver(A, C, 'all', [B])
     // The task goes again from the heir with the same delivery (#1936): the child's turn end answers it to the heir, and the giver that left hears nothing
     const again = w.store.mailbox.watchedTo(B).find((r) => w.store.mailbox.message(r.messageId)?.sender === C)
     expect(again).toBeDefined()

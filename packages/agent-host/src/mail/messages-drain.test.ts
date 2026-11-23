@@ -269,7 +269,7 @@ describe('parties that go and parties that take over (§7.7)', () => {
     const second = w.mail.task(W, C, { text: 'and the docs', origin: 'agent_session', delivered: false })
     w.records.markReleased(first.id, C, w.clock.t, 'stopped')
 
-    w.mail.handOver(W, B, 'all', [C])
+    w.mail.handoffs.handOver(W, B, 'all', [C])
     expect([first.id, second.id].map((id) => w.rowOf(id, C).settled)).toEqual(['withdrawn', 'withdrawn'])
     const again = w.records.watchedTo(C).map((r) => ({ r, m: w.records.message(r.messageId)! }))
     expect(again.map(({ r, m }) => [m.sender, m.body, m.causeId, m.origin, r.deliveredAt !== null, r.releasedWhy])).toEqual([
@@ -278,7 +278,7 @@ describe('parties that go and parties that take over (§7.7)', () => {
     ])
     // A task to a session that does not move stays the original's
     const other = w.mail.task(W, A, { text: 'unrelated', origin: 'mail', delivered: true })
-    w.mail.handOver(W, B, 'all', [C])
+    w.mail.handoffs.handOver(W, B, 'all', [C])
     expect(w.rowOf(other.id, A).settled).toBeNull()
   })
 
@@ -298,7 +298,7 @@ describe('parties that go and parties that take over (§7.7)', () => {
     expect(w.message(a1).createdAt).toBe(w.message(a2).createdAt)
     // A Centralu notice about a session is no report: it is not folded under one
     const card = w.mail.notice(W, { body: '[Centralu] a card', facts: { about: { session: C } }, dedupeKey: 'card-test' })!.id
-    w.mail.handOver(W, B, 'all', [C, A])
+    w.mail.handoffs.handOver(W, B, 'all', [C, A])
     const readOf = (id: string) => w.rowOf(id, B).readAt
     expect([c1, c2, a1].map(readOf).every((at) => at !== null)).toBe(true)
     expect([c3, a2, card].map(readOf)).toEqual([null, null, null])
@@ -313,10 +313,10 @@ describe('parties that go and parties that take over (§7.7)', () => {
     expect(told(A)).toEqual([])
     // A later handoff back to B is news again
     w.sessions.get('c')!.askedBy = 'b'
-    w.mail.handOver(B, W, 'all', [C])
+    w.mail.handoffs.handOver(B, W, 'all', [C])
     w.sessions.get('c')!.askedBy = 'w'
     w.clock.t += 1
-    w.mail.handOver(W, B, 'all', [C])
+    w.mail.handoffs.handOver(W, B, 'all', [C])
     expect(told(C)).toHaveLength(3)
   })
 
@@ -324,7 +324,7 @@ describe('parties that go and parties that take over (§7.7)', () => {
     const w = world()
     w.mail.task(W, C, { text: 'delete the branch', origin: 'send_to_session', delivered: false })
     w.mail.task(ORC, B, { text: 'fix the lint', origin: 'send_to_session', delivered: false })
-    w.mail.handOver(W, ORC, 'all', [C])
+    w.mail.handoffs.handOver(W, ORC, 'all', [C])
     const again = w.records.watchedTo(C).map((r) => w.records.message(r.messageId)!)
     expect(again.map((m) => [m.sender, m.body, m.origin, m.facts.handedOver])).toEqual([[ORC, 'delete the branch', 'send_to_session', true]])
     due(w)
@@ -345,7 +345,7 @@ describe('parties that go and parties that take over (§7.7)', () => {
     w.records.markDelivered(W, [m1.id, m2.id, m3.id, m4.id, m5.id], w.clock.t, null)
     w.records.markRead(W, [m2.id, m4.id], w.clock.t)
 
-    const preview = w.mail.handOverPreview(W, B)
+    const preview = w.mail.handoffs.handOverPreview(W, B)
     expect(preview).toEqual([
       { messageId: m1.id, firstLine: 'unread question', kind: 'message', unread: true },
       { messageId: m2.id, firstLine: 'read question', kind: 'message', unread: false },
@@ -353,7 +353,7 @@ describe('parties that go and parties that take over (§7.7)', () => {
     ])
     expect(w.records.recipient(m1.id, B)).toBeUndefined()
 
-    expect(w.mail.handOver(W, B, 'all')).toEqual(preview)
+    expect(w.mail.handoffs.handOver(W, B, 'all')).toEqual(preview)
     expect(w.rowOf(m1.id, B)).toMatchObject({ deliveredAt: null, readAt: null })
     expect(w.rowOf(m2.id, B).deliveredAt).not.toBeNull()
     expect(w.records.recipient(m3.id, W)).toBeUndefined()
@@ -377,7 +377,7 @@ describe('parties that go and parties that take over (§7.7)', () => {
     due(w)
     w.records.markDelivered(ORC, [viaRole.id, direct.id], w.clock.t, 2)
     w.records.markRead(ORC, [viaRole.id], w.clock.t)
-    expect(w.mail.roleMoved(ORC2)).toBe(1)
+    expect(w.mail.handoffs.roleMoved(ORC2)).toBe(1)
     expect(w.rowOf(viaRole.id, ORC2)).toMatchObject({ via: 'orchestrator', deliveredAt: null, readAt: null, turnSeq: null })
     expect(w.records.recipient(viaRole.id, ORC)).toBeUndefined()
     expect(w.rowOf(direct.id, ORC).deliveredAt).not.toBeNull()

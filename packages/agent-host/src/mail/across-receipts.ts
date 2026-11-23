@@ -60,7 +60,7 @@ export class AcrossReceipts extends AcrossCore {
   }
 
   /**
-   * On a hub: a handoff moved tasks it gave linked machines' sessions to another session here (`MessageService.handOver`, #1948 step 6). Each machine is
+   * On a hub: a handoff moved tasks it gave linked machines' sessions to another session here (`Handoffs.handOver`, #1948 step 6). Each machine is
    * told, so its copy names the heir and reads as handed over; the report it sends back goes to the heir either way, by this host's task. A message a
    * machine's session sent that moved goes to that machine (#2530), which gives its row to the heir
    */
@@ -109,7 +109,7 @@ export class AcrossReceipts extends AcrossCore {
       this.d.log?.(`[mail] ${hub.name} asked to move tasks from ${oneLineText(p.from, 200)} to ${oneLineText(p.to, 200)}, which are not both its sessions: refused`)
       return { ok: false, why: 'not_allowed', text: `${hub.name} may move only work its own sessions gave here.` }
     }
-    const moved = this.d.service.moveAcross(from, to, p.ids)
+    const moved = this.d.service.handoffs.moveAcross(from, to, p.ids)
     if (moved < p.ids.length) this.d.log?.(`[mail] ${hub.name} moved ${moved} of ${p.ids.length} message(s) from ${from}: the rest are no open task it gave here, nor unread or open mail a session here sent it`)
     return { ok: true, moved }
   }

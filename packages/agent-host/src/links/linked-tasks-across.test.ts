@@ -254,9 +254,9 @@ describe('a task across a link (#1948 step 6)', () => {
     expect(there.moveFromHub(self, { from: at(hub, 'h2'), to: at(hub, orc), ids: [id] })).toEqual({ ok: true, moved: 0 })
     expect(machine.store.mailbox.message(id)?.sender).toBe(at(hub, orc))
     // The hub's handoff: its copy is the heir's at once, and the machine is told
-    hub.mail!.service.handOver(at(hub, orc), at(hub, 'h2'), 'all', [at(hub, 'm1.w1')])
+    hub.mail!.service.handoffs.handOver(at(hub, orc), at(hub, 'h2'), 'all', [at(hub, 'm1.w1')])
     expect(hub.store.mailbox.message(id)).toMatchObject({ sender: at(hub, 'h2'), facts: { handedOver: true } })
-    await across.movedAcross(hub.mail!.service.takeMoves())
+    await across.movedAcross(hub.mail!.service.handoffs.takeMoves())
     expect(machine.store.mailbox.message(id)).toMatchObject({ sender: at(hub, 'h2'), facts: { handedOver: true, hubAssistant: true } })
     // Handed over, it no longer reads as the person's
     expect(machine.mail!.service.read(at(machine, 'w1'), { id }).items[0]?.forPerson).toBeUndefined()
@@ -271,8 +271,8 @@ describe('a task across a link (#1948 step 6)', () => {
     await eventually(() => machine.store.mailbox.recipient(id, at(machine, 'w1')) !== undefined)
     if (!there.turns.current('w1')) there.turns.beginOther('w1', 'person', null)
     expect((await there.tool.call('w1', { action: 'handled', thread: id })).text).toContain("is answered by this turn's report")
-    hub.mail!.service.handOver(at(hub, 'h1'), at(hub, 'h2'), 'all', [at(hub, 'm1.w1')])
-    await across.movedAcross(hub.mail!.service.takeMoves())
+    hub.mail!.service.handoffs.handOver(at(hub, 'h1'), at(hub, 'h2'), 'all', [at(hub, 'm1.w1')])
+    await across.movedAcross(hub.mail!.service.handoffs.takeMoves())
     expect(machine.store.mailbox.message(id)?.sender).toBe(at(hub, 'h2'))
     there.turns.observe({ type: 'turn_complete', sessionId: 'w1' } as never, true)
     there.service.lastResponse(at(machine, 'w1'), { body: () => 'The session ended its turn.', released: false, answers: () => true })
@@ -380,8 +380,8 @@ describe("a hub's copy of a task across (#1948 step 6)", () => {
     await sending
     // The handoff happens while the machine is away: it cannot be told
     machine.reachable = false
-    w.mail.handOver(addr('orc'), addr('h2'), 'all', [child])
-    await across.movedAcross(w.mail.takeMoves())
+    w.mail.handoffs.handOver(addr('orc'), addr('h2'), 'all', [child])
+    await across.movedAcross(w.mail.handoffs.takeMoves())
     expect(moves).toEqual([])
     // Back: the move is told at the next round
     machine.reachable = true

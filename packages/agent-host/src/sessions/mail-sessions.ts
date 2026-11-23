@@ -4,7 +4,7 @@ import { cardOrTurn, errorMessage } from '@cc/protocol'
 import type { MailSessions, ReceiverState } from '../mail/delivery.js'
 import type { AnswerGiven, GivenTask, LinkedTasks } from '../mail/delegation.js'
 import type { CardHooks } from '../mail/card-notices.js'
-import type { HandedOverMessage } from '../mail/messages.js'
+import type { HandedOverMessage } from '../mail/handoff.js'
 import type { StopTold, StopWhy, WaitEnd } from '../mail/stop-notices.js'
 import type { MailToolArgs, MailToolResult, NoteSent } from '../mail/tool.js'
 import type { TurnStart } from '../mail/turns.js'
@@ -33,7 +33,7 @@ export type MailHooks = {
   /** The wait of a stop Centralu continues by itself ended, continued or not (#1415): who the stop's notice was held from hears it once */
   waitEnded?(sessionId: string, why: 'limit' | 'network', starter: string | null, end: WaitEnd): void
   /**
-   * A handoff moves the original's mail to the successor (mailbox §7.7, §10.6.5, `MessageService.handOver`): all of it for an original that goes, what
+   * A handoff moves the original's mail to the successor (mailbox §7.7, §10.6.5, `Handoffs.handOver`): all of it for an original that goes, what
    * the children that moved sent it for one that stays (`senders`, session ids), and the tasks it gave the `children` that move. Run inside the
    * transaction of the children's move; it throws to undo both
    */

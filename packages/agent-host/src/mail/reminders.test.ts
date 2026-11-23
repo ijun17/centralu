@@ -365,7 +365,7 @@ describe('MailReminders (docs/plans/mailbox.md §10)', () => {
     h.deliverFollowUp(B)
     h.w.records.markRead(B, [q], h.w.clock.t)
     const deliveredAt = h.w.rowOf(q, B).deliveredAt
-    h.w.mail.handOver(B, C, 'all')
+    h.w.mail.handoffs.handOver(B, C, 'all')
     expect(h.w.rowOf(q, C)).toMatchObject({ reminded: 0, remindedAt: null, deliveredAt })
     h.w.mail.stops.partyGone(B)
     expect(h.followUps(A)).toEqual([])
@@ -466,7 +466,7 @@ describe('MailReminders (docs/plans/mailbox.md §10)', () => {
       h.deliverFollowUp(B)
     }
     expect(h.w.rowOf(q, B).reminded).toBe(2)
-    h.w.mail.handOver(B, C, 'all')
+    h.w.mail.handoffs.handOver(B, C, 'all')
     h.w.mail.stops.partyGone(B)
     expect(h.w.rowOf(q, C)).toMatchObject({ reminded: 0, remindedAt: null, deliveredAt: null })
     expect(h.followUps(C)).toEqual([])
@@ -489,7 +489,7 @@ describe('MailReminders (docs/plans/mailbox.md §10)', () => {
     h.sweep()
     const reminder = h.followUps(B)[0]?.id
     expect(reminder).toBeDefined()
-    h.w.mail.handOver(B, C, { senders: [A] })
+    h.w.mail.handoffs.handOver(B, C, { senders: [A] })
     expect(h.w.rowOf(q, C).reminded).toBe(0)
     h.over.delete(B)
     h.w.clock.t += 3_000

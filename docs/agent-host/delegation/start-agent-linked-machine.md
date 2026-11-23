@@ -76,7 +76,7 @@ for a session the hub started there; its start holds a place from the card's ans
 task is checked as a local one. A hub restart loses nothing of it: the tasks and their copies are in the two mailboxes. A record a build before
 #1948 step 6 kept (`owed`, and its own reading of whose a turn was) is read once at startup (`RemoteAgents.restore`): a caller still owed a report
 by the old path is told once where the child stands, and the old fields go. A handoff gives the child to the heir, and the tasks its caller gave
-it with the caller's other mail (`MessageService.handOver`); the machine is told whose they are now (`host.mailMove`), so the report goes to the
+it with the caller's other mail (`Handoffs.handOver`); the machine is told whose they are now (`host.mailMove`), so the report goes to the
 heir. A child deleted there, or whose
 machine was removed, while the hub could not see it is cleared by `list` and `delete`; the caller's session archive clears its
 children's records, and a handoff gives them to the heir. In the sidebar it stands in that machine's project, among

@@ -1,5 +1,5 @@
 /**
- * On a machine, a hub's handoff (`host.mailMove`, `MessageService.moveAcross`) gives its heir the rows of mail this machine's sessions sent the original
+ * On a machine, a hub's handoff (`host.mailMove`, `Handoffs.moveAcross`) gives its heir the rows of mail this machine's sessions sent the original
  * that the hub moved (#2530): only those, so the heir's reply answers one it may read here. Over a real store.
  */
 import { describe, expect, it } from 'vitest'
@@ -24,7 +24,7 @@ describe("a hub's handoff on the machine its original's mail came from (#2530)",
       ).id
     const note = sent(at('a'))
     const others = [sent(CENTRALU), sent(sessionAddress('hub-cccccccc', 'z')), sent(at('b'), w.clock.t)]
-    expect(w.mail.moveAcross(FROM, TO, [note, ...others])).toBe(1)
+    expect(w.mail.handoffs.moveAcross(FROM, TO, [note, ...others])).toBe(1)
     expect(w.store.mailbox.recipients(note).map((r) => r.recipient)).toEqual([TO])
     for (const id of others) expect(w.store.mailbox.recipients(id).map((r) => r.recipient)).toEqual([FROM])
     w.stop()

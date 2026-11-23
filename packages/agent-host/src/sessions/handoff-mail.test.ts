@@ -20,7 +20,7 @@ import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 
 /**
  * A handoff moves the original session's mail to the session that took over, with its children (#1574, docs/plans/mailbox.md §7.7,
- * `MessageService.handOver`): an original that goes gives every unsettled watched row and unread message it holds; one that stays gives those
+ * `Handoffs.handOver`): an original that goes gives every unsettled watched row and unread message it holds; one that stays gives those
  * from the children that moved. What the original had not read waits for the successor, delivered afresh. Wired as `main.ts` wires the mailbox
  * (`hostMail` and `useMail`): the real session manager and the host's mail, with fake adapters.
  */
@@ -397,7 +397,7 @@ describe('the handoff mail move in the situations around it (#1574)', () => {
     const { project, parent } = await parentOf(h)
     const child = await startChild(h, parent, 'long work')
     const fromChild = ask(h, child, [parent], 'Which branch?')
-    vi.spyOn(h.m.service, 'handOver').mockImplementation(() => {
+    vi.spyOn(h.m.service.handoffs, 'handOver').mockImplementation(() => {
       throw new Error('crash in the mail step')
     })
     const heir = await handOff(h, project, parent, false)

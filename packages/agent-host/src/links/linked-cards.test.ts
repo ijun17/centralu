@@ -56,8 +56,8 @@ describe("a machine's cards, as a hub's giver of work there reads them (#1948 st
     const [card] = await cards('h1')
     expect(card).toMatchObject({ kind: 'question', answerable: true, questions: [expect.objectContaining({ question: 'Proceed?' })] })
     // Handed over on the hub: the heir answers, the old giver no longer does
-    hub.mail!.service.handOver(sessionAddress(hub.id, 'h1'), sessionAddress(hub.id, 'h2'), 'all', [sessionAddress(hub.id, 'm1.w1')])
-    await hub.mail!.across.movedAcross(hub.mail!.service.takeMoves())
+    hub.mail!.service.handoffs.handOver(sessionAddress(hub.id, 'h1'), sessionAddress(hub.id, 'h2'), 'all', [sessionAddress(hub.id, 'm1.w1')])
+    await hub.mail!.across.movedAcross(hub.mail!.service.handoffs.takeMoves())
     await eventually(() => machine.store.mailbox.message(id)?.sender === sessionAddress(hub.id, 'h2'))
     expect(await cards('h1')).toEqual([])
     expect(await reader.answerCard('m1.w1', 'h1', card!.card, 'Yes')).toMatchObject({ ok: false })

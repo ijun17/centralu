@@ -78,7 +78,7 @@ describe('moved mail, for the sessions the old mail was for', () => {
     const w = hostWorld()
     movedThread(w, { id: tid(9), at: w.clock.t - 1_000 }, [{ id: mid(13), sender: X, kind: 'note', body: 'released note', to: [{ recipient: A, held: 'released' }] }])
     ready(w)
-    w.mail.handOver(A, B, 'all')
+    w.mail.handoffs.handOver(A, B, 'all')
     await w.advance(2_000)
     expect(w.row(mid(13), B)?.held).toBe('released')
     expect(bodies(w, 'b')).toContain(mid(13))

@@ -13,7 +13,8 @@ import { answerRecorder, delegationRecorder, linkedTasksOf, openTaskParties, per
 import { cardGivers, tellCard, withdrawEndedCards } from './card-notices.js'
 import { MailDelivery, type MailDeliveryOptions, type MailSessions } from './delivery.js'
 import { mailCalls } from './frame.js'
-import { MessageService, type HandedOverMessage } from './messages.js'
+import type { HandedOverMessage } from './handoff.js'
+import { MessageService } from './messages.js'
 import { mailReach, type DelegationTarget, type MailReach } from './reach.js'
 import { REFUSAL_TEXT, WARNING_TEXT, firstLineOf, hourlyKey } from './rules.js'
 import { MailTool, type MailToolHost } from './tool.js'
@@ -380,14 +381,14 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     },
     handOver: (from, to, which, children) => {
       const moveMail = () => {
-        const moved = service.handOver(addressOf(from), addressOf(to), which === 'all' ? 'all' : { senders: which.senders.map(addressOf) }, children.map(addressOf))
+        const moved = service.handoffs.handOver(addressOf(from), addressOf(to), which === 'all' ? 'all' : { senders: which.senders.map(addressOf) }, children.map(addressOf))
         // Tasks given across a link keep their id there: the machines are told whose they are now (#1948 step 6)
-        void across.movedAcross(service.takeMoves())
+        void across.movedAcross(service.handoffs.takeMoves())
         return moved
       }
       return aboutSessions(which === 'all' ? watches.handOver(addressOf(from), addressOf(to), moveMail) : moveMail())
     },
-    handOverPreview: (from, to) => aboutSessions(service.handOverPreview(addressOf(from), addressOf(to))),
+    handOverPreview: (from, to) => aboutSessions(service.handoffs.handOverPreview(addressOf(from), addressOf(to))),
     openWork: (id) => openWork(service, store, addressOf(id)),
     sessionChanged: (id) => delivery.poke(id),
     notice: (id, body, dedupeKey) => {
@@ -468,7 +469,7 @@ export function hostMail(store: Store, sessions: HostMailSessions, opts: { hostI
     turnStarted: turnRecorder(service, store.mailbox, mailTurns),
     refusesDelegation: (callerId, target, call) => refusesDelegation(service, reach, callerId, target, call),
     roleMoved: (to) => {
-      if (service.roleMoved(addressOf(to)) > 0) delivery.poke(to)
+      if (service.handoffs.roleMoved(addressOf(to)) > 0) delivery.poke(to)
     },
   }
 
