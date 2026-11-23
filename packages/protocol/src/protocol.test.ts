@@ -1259,7 +1259,7 @@ describe('turnsRunning', () => {
   })
 })
 
-// A later release sends the Assistant's wire values under the role's new name (docs/plans/assistant-rename.md);
+// A later release sends the Assistant's wire values under the role's new name (docs/plans/assistant-rename.md, #2532);
 // this build reads both and sends the old one
 describe("the Assistant's values under both names (#2133)", () => {
   it('reads both kinds as the Assistant, and no other kind', () => {

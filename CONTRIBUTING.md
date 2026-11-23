@@ -648,6 +648,10 @@ running, possibly the very session doing the work.
   paragraph that runs two list items into its text (`Holds: - a - b`, `1. x 2. y`: one item per line); a file
   over that share when its folder was swept may not go above its line in `COMMENT_SHARE_HELD`
   (tooling/guard-exceptions.js).
+- **A comment that promises later work names the issue that carries it** (#2488): a `TODO`, "a later
+  release removes …" or "not supported yet" has `#N` or "dropped: <why>" in the same sentence, so
+  closing an issue cannot lose the work without a trace. `guard/promises` (tooling/promises.ts)
+  reads every tracked code file.
 - Tests are titled with the behaviour they describe. When one breaks, the title alone
   should tell you what fell over.
 - New comments and documents are written in English — see [Language](#language).

@@ -20,8 +20,8 @@ export const SessionKind = z.enum(['worker', 'orchestrator', 'coordinator', 'ass
 export type SessionKind = z.infer<typeof SessionKind>
 
 /**
- * Whether a kind is the Assistant: sent as `'orchestrator'`, a later release sends `'assistant'`
- * (docs/plans/assistant-rename.md, step 4), and a peer may meet either. Readers ask this (lint: `guard/assistant-kind`).
+ * Whether a kind is the Assistant: sent as `'orchestrator'`, a later release sends `'assistant'` (#2532,
+ * docs/plans/assistant-rename.md step 5), and a peer may meet either. Readers ask this (lint: `guard/assistant-kind`).
  */
 export function isAssistantKind(kind: unknown): boolean {
   return kind === 'orchestrator' || kind === 'assistant'
