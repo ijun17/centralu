@@ -75,8 +75,8 @@ export class HandoffMarkers {
 
   /**
    * The handoff lineage of a session (#1487), nearest first: its predecessor, that one's predecessor, and so on, archived
-   * ones included; it ends at a session gone for good (its marker went with its messages). This is the whole of what a
-   * successor may read of the archive.
+   * ones included; it ends at a session gone for good (its marker went with its messages). This, and the archived children of
+   * it and of the successor (`archivedChildOf`), is what a successor may read of the archive.
    */
   lineage(sessionId: string, max = 12): string[] {
     const out: string[] = []
@@ -96,6 +96,19 @@ export class HandoffMarkers {
       at = from
     }
     return out
+  }
+
+  /**
+   * Whether a session in the session archive was started by one of `starters`, by the record archiving keeps (its `asked_by`, which a handoff
+   * does not rewrite for an archived child) (#2474). Not its `parent` alone: a row with only that is the person's (`own-agents.ts`). False for a
+   * live session, one deleted for good, and an Assistant's, which no session reads
+   */
+  archivedChildOf(sessionId: string, starters: readonly string[]): boolean {
+    if (starters.length === 0) return false
+    const row = this.db
+      .prepare<unknown[], { askedBy: unknown }>(`SELECT asked_by_session_id as askedBy FROM sessions WHERE id = ? AND deleted_at IS NOT NULL AND is_assistant = 0`)
+      .get(sessionId)
+    return typeof row?.askedBy === 'string' && starters.includes(row.askedBy)
   }
 
   /**

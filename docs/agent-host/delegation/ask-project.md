@@ -72,7 +72,8 @@ What one call does (`SessionManager.askProject`, which runs `AskProjectFlow` in 
    takes `handoff.fromSessionId` only for a live session of the same project, and `lineage` ends at a marker naming a session of another project (the archived
    row's project is in its trash record, `projectOf`), so a marker written another way reads nothing of the archive. `recall` keeps a quarter of its limit
    for these hits, nearest predecessor first. `read_session` reads these and `recall` searches
-   them (by their messages: the archive's search index is dropped, `searchSessions`), and nothing else of the archive; a session deleted for good takes its
+   them (by their messages: the archive's search index is dropped, `searchSessions`); `read_session` also reads the archived children the reader or
+   one of these started, by the host's own `asked_by` record (#2474, approvals.md); nothing else of the archive. A session deleted for good takes its
    own marker with it and ends the chain. The lines are the predecessor's: `role: predecessor` for the assistant's words, `predecessor: <id>` on every
    line, an opening sentence in the answer, and in `recall` the label "(your predecessor, archived)" with `[predecessor]` in the snippet. The note's
    header lists the lineage ids (`lineageLine`; the record's header, and the first line of an agent's note) and stays the only thing handed over. Named files and folders inside the target project, resolved through symlinks, become
