@@ -234,6 +234,49 @@ describe('the ACP session against a scripted agent', () => {
     }
   })
 
+  // #2479 (session-core §2.11, Q7): a limit and a refusal end the turn as one retryable error, the same for every tool
+  it.each([
+    ['max_tokens', 'Fake stopped: the reply reached its length limit.'],
+    ['max_turn_requests', 'Fake stopped: the turn reached its limit of steps.'],
+    ['refusal', 'Fake refused to go on with this turn.'],
+  ])('ends a turn the tool stopped with %s as a retryable error, not a notice and a completed turn', async (stopReason, message) => {
+    const w = world()
+    const s = await w.start()
+    s.send('go')
+    await w.peers[0]!.next(isPrompt)
+    w.peers[0]!.release('session/prompt', { result: { stopReason } })
+    const error = await w.event((e) => e.type === 'error')
+    expect(error).toMatchObject({ error: { code: 'internal', message, retryable: true } })
+    expect(w.events.some((e) => e.type === 'turn_complete' || e.type === 'notice')).toBe(false)
+  })
+
+  it('shows an edit approval as what the tool replaces and what it writes, and a new file as what it writes', async () => {
+    const w = world()
+    const s = await w.start()
+    s.send('go')
+    const peer = w.peers[0]!
+    await peer.next(isPrompt)
+    const options = [{ optionId: 'yes', name: 'Allow', kind: 'allow_once' }, { optionId: 'no', name: 'Reject', kind: 'reject_once' }]
+    const content = (oldText: string | null) => [{ type: 'diff', path: '/p/a.ts', oldText, newText: 'new line\n' }]
+    void peer.ask('session/request_permission', { sessionId: SID, options, toolCall: { toolCallId: 'c1', kind: 'edit', title: 'edit', content: content('old line\n') } })
+    const edit = await w.event((e) => e.type === 'approval_request' && e.detail.kind === 'file_edit')
+    expect(edit).toMatchObject({ detail: { diffPreview: '-old line\n+new line' } })
+    void peer.ask('session/request_permission', { sessionId: SID, options, toolCall: { toolCallId: 'c2', kind: 'edit', title: 'edit', content: content(null) } })
+    await w.event((e) => e.type === 'approval_request' && e.detail.kind === 'file_edit' && e.detail.diffPreview === '+new line')
+    s.interrupt()
+  })
+
+  it('leaves an image over the size ceiling undrawn, with the reason', async () => {
+    const w = world()
+    const s = await w.start()
+    s.send('go')
+    const peer = w.peers[0]!
+    await peer.next(isPrompt)
+    peer.update(SID, { sessionUpdate: 'agent_message_chunk', content: { type: 'image', mimeType: 'image/png', data: 'A'.repeat(11_500_000) } })
+    expect(await w.event((e) => e.type === 'message_image')).toMatchObject({ data: '', note: expect.stringContaining('too large') })
+    s.interrupt()
+  })
+
   it('answers a question asked after Stop as cancelled, with no card, and sends the lost cancel again', async () => {
     const w = world()
     const s = await w.start()

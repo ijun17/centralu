@@ -1,6 +1,7 @@
 import type { NormalizedEvent, RequestInput, TokenUsage, ToolSummary } from '@cc/protocol'
 import { asObj } from '../../json-value.js'
 import { TouchedFiles } from '../file-changes.js'
+import { inlineImageEvent } from '../images.js'
 import { planUpdate } from '../plan.js'
 import { tokenCount } from '../token-usage.js'
 import { toolResultEvent } from '../tool-result.js'
@@ -68,7 +69,7 @@ export class AcpNormalizer {
       case 'agent_message_chunk': {
         const text = blockText(u.content)
         if (u.content.type === 'image' && u.content.data && u.content.mimeType) {
-          return [{ type: 'message_image', sessionId, mime: u.content.mimeType, data: u.content.data }]
+          return [inlineImageEvent(sessionId, u.content.mimeType, u.content.data)]
         }
         if (this.lastChunk !== 'message') this.segment++
         this.lastChunk = 'message'
