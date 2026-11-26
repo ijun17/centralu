@@ -130,6 +130,7 @@ export function antigravityProfile(deps: AgyProfileDeps = {}): AgyProfile {
       stderrLine: agyStderrLine,
       signedOut,
       supportsModelOption: true,
+      interruptForInput: true,
       onConfigOptions: (options) => {
         const models = toModelOptions(options)
         if (models.length > 0) void saveAgyModels(home, models).catch(() => {})

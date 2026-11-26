@@ -114,5 +114,6 @@ export type AcpToolShape = {
   refusalIn?(answer: string): string | null
   /** Session-scoped model and effort options (`session/set_config_option`) */
   readonly supportsModelOption?: boolean
+  readonly interruptForInput?: boolean
   onConfigOptions?(options: readonly ConfigOption[]): void
 }

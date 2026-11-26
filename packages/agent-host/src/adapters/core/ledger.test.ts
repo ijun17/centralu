@@ -548,3 +548,57 @@ describe('a tool whose Stop ends its process (agy, session-core.md §8)', () => 
     expect(said(idle.events)).toEqual(['live:asleep'])
   })
 })
+
+describe('interruptForInput on human input', () => {
+  it('interrupts running turn on human input when interruptForInput is true, without dropping the queue', async () => {
+    // When not enabled, human input does not interrupt
+    const disabled = world('acp')
+    await disabled.session.ready
+    disabled.session.send('first')
+    disabled.session.send('second', { origin: { kind: 'human' } })
+    expect(disabled.wire.log).toEqual([])
+    await disabled.session.dispose()
+
+    const w = world('acp', { turns: { interruptForInput: true } })
+    await w.session.ready
+    w.session.send('first')
+    expect(w.wire.writes).toEqual(['first@p1'])
+    expect(w.wire.log).toEqual([])
+
+    // Non-human input does not interrupt
+    w.session.send('auto', { origin: { kind: 'channel', server: 'centralu' } })
+    expect(w.wire.log).toEqual([])
+
+    // Human input interrupts running turn without dropping the queue
+    w.session.send('second', { origin: { kind: 'human' } })
+    expect(w.wire.log).toEqual(['interrupt', 'releaseCards'])
+    expect(w.events.some((e) => e.type === 'error' && e.error.message.includes('still queued'))).toBe(false)
+
+    // The running turn ends as interrupted
+    w.wire.end({ how: 'interrupted' })
+    await settle()
+
+    // Now drain() picks up 'auto' and then 'second'
+    expect(w.wire.writes).toEqual(['first@p1', 'auto@p1'])
+    w.wire.end({ how: 'complete' })
+    await settle()
+    expect(w.wire.writes).toEqual(['first@p1', 'auto@p1', 'second@p1'])
+    await w.session.dispose()
+  })
+
+  it('interrupts process on human input when interruptForInput and interruptEndsProcess are true', async () => {
+    const w = world('agy', { turns: { interruptForInput: true } })
+    await w.session.ready
+    w.session.send('first')
+    expect(w.wire.writes).toEqual(['first@p1'])
+
+    w.session.send('second', { origin: { kind: 'human' } })
+    expect(w.spawned[0]?.signalCode).toBe('SIGINT')
+    expect(w.wire.log).toEqual(['interrupt', 'releaseCards', 'turnOver', 'releaseCards'])
+    await settle()
+
+    expect(w.wire.writes).toEqual(['first@p1', 'second@p2'])
+    await w.session.dispose()
+  })
+})
+

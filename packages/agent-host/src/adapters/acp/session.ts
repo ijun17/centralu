@@ -135,6 +135,11 @@ export class AcpSession extends CoreSession<AcpWire> implements SessionHandle {
     super.interrupt()
   }
 
+  override interruptForInput(): void {
+    this.opts.apps?.cancelAll()
+    super.interruptForInput()
+  }
+
   respondApproval(requestId: string, decision: ApprovalDecision, _scope?: unknown, matcher?: string): boolean {
     return this.wire.respondApproval(requestId, decision, matcher)
   }
@@ -180,7 +185,7 @@ class AcpWire implements ToolWire {
   readonly label: string
   readonly install?: string
   /** ACP runs one prompt at a time (§5.4); a cancel ends the turn with `cancelled`, so the Stop's timer applies */
-  readonly turns = { interruptEndsProcess: false } as const
+  readonly turns: ToolWire['turns']
   readonly launch: ToolWire['launch']
   /** ACP's `auto` allows (`core/grants.ts`) */
   readonly grants = new Grants('allow')
@@ -222,6 +227,7 @@ class AcpWire implements ToolWire {
   private currentModel: string | null = null
   private currentEffort: string | null = null
   private effortConfigId = 'thought_level'
+  private settingsQueue = Promise.resolve()
 
   constructor(
     private readonly opts: CreateSessionOpts,
@@ -230,6 +236,10 @@ class AcpWire implements ToolWire {
     this.label = deps.label
     if (deps.install !== undefined) this.install = deps.install
     this.preset = opts.permissionPreset
+    this.turns = {
+      interruptEndsProcess: false,
+      ...(deps.shape?.interruptForInput ? { interruptForInput: true } : {}),
+    }
     this.launch = async () => deps.spec
     this.normalizer = new AcpNormalizer(opts.sessionId, deps.label)
     this.unmapped = new UnmappedTypes(deps.label, opts.sessionId, KNOWN_UPDATES)
@@ -308,28 +318,30 @@ class AcpWire implements ToolWire {
 
   updateSettings(settings: { model?: string | null; effort?: string | null }): void {
     if (!this.deps.shape?.supportsModelOption) return
-    void (async () => {
-      if (settings.model) {
-        const ok = await this.setConfigOption('model', settings.model)
-        if (ok) {
-          this.currentModel = settings.model
-          this.openedSettings = {
-            model: this.currentModel,
-            effort: this.currentEffort,
+    this.settingsQueue = this.settingsQueue
+      .then(async () => {
+        if (settings.model) {
+          const ok = await this.setConfigOption('model', settings.model)
+          if (ok) {
+            this.currentModel = settings.model
+            this.openedSettings = {
+              model: this.currentModel,
+              effort: this.currentEffort,
+            }
           }
         }
-      }
-      if (settings.effort) {
-        const ok = await this.setConfigOption(this.effortConfigId, settings.effort)
-        if (ok) {
-          this.currentEffort = settings.effort
-          this.openedSettings = {
-            model: this.currentModel,
-            effort: this.currentEffort,
+        if (settings.effort) {
+          const ok = await this.setConfigOption(this.effortConfigId, settings.effort)
+          if (ok) {
+            this.currentEffort = settings.effort
+            this.openedSettings = {
+              model: this.currentModel,
+              effort: this.currentEffort,
+            }
           }
         }
-      }
-    })()
+      })
+      .catch(() => {})
   }
 
   async open(io: CoreIo, resume: { externalId: string } | null): Promise<{ externalId: string | null }> {
