@@ -14,6 +14,7 @@ import { agyCentraluTool, agyStderrLine, isAgyQuestion, readAgyCall } from './sh
 import { agentSignInUrl, googleAuthorizeUrl } from './sign-in.js'
 import { AGY_SURFACE } from './surface.js'
 import { agyUsageSnapshot, readAgyUsage, type UsageReadDeps } from './usage.js'
+import { listAgyModels, saveAgyModels, toModelOptions } from './models.js'
 
 /**
  * What Google's Antigravity agent through ACP can keep (docs/plans/antigravity-adapter.md §6), measured on 1.4.3:
@@ -32,7 +33,7 @@ const CAPABILITIES: AdapterCapabilities = {
   //   skill as `skills/system/run-workflow/SKILL.md` into the session's project at `session/new`; Windows 1.4.3 writes none
   //   (#2320, docs/plans/antigravity-acp.md §1 has the cause)
   // - Not offered yet: role text (`_meta.antigravity.systemPrompt.append` exists, unmeasured), untrusted projects (it reads
-  //   the project's own instruction files, as the other ACP tools), images in the prompt, the model and effort menus
+  //   the project's own instruction files, as the other ACP tools), images in the prompt
   ...ACP_CAPABILITIES,
   autoTitle: false,
 }
@@ -128,6 +129,14 @@ export function antigravityProfile(deps: AgyProfileDeps = {}): AgyProfile {
       editRunsAsNewCall: true,
       stderrLine: agyStderrLine,
       signedOut,
+      supportsModelOption: true,
+      onConfigOptions: (options) => {
+        const models = toModelOptions(options)
+        if (models.length > 0) void saveAgyModels(home, models).catch(() => {})
+      },
+    },
+    listModels() {
+      return listAgyModels(home, archive, setup, signedOut, DESCRIPTOR.label, DESCRIPTOR.install)
     },
     /*
      * Its weekly and five-hour limits per model group, from the agent Centralu signed in (`readAgyUsage`), one read at a

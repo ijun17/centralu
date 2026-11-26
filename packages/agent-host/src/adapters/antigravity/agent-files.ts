@@ -55,6 +55,18 @@ export async function usagePlace(home: AgyHome): Promise<{ cwd: string; kept: st
   return { cwd, kept: typeof kept === 'string' && kept !== '' ? kept : null, keep: (sessionId) => writeFile(file, `${JSON.stringify({ sessionId })}\n`) }
 }
 
+const AGY_MODELS_CACHE = 'models.json'
+
+/** Reads cached models JSON from Antigravity home if present */
+export async function readCachedAgyModels(home: AgyHome): Promise<string | null> {
+  return readFile(join(home.root, AGY_MODELS_CACHE), 'utf8').catch(() => null)
+}
+
+/** Persists models JSON to Antigravity home */
+export async function writeCachedAgyModels(home: AgyHome, text: string): Promise<void> {
+  await writeFile(join(home.root, AGY_MODELS_CACHE), text, 'utf8')
+}
+
 export type AgyHome = {
   root: string
   /** The installed version's folder */

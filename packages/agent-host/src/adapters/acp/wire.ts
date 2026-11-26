@@ -24,15 +24,15 @@ export const InitializeResult = z.looseObject({
 })
 export type InitializeResult = z.infer<typeof InitializeResult>
 
-const SelectOption = z.looseObject({ value: z.string(), name: nullish(z.string()) })
-const ConfigOption = z.looseObject({
+const SelectOption = z.looseObject({ value: z.string(), name: z.string().nullish().optional() })
+export const ConfigOption = z.looseObject({
   id: z.string(),
   category: nullish(z.string()),
   type: nullish(z.string()),
   currentValue: z.unknown().optional(),
   options: nullish(z.array(z.union([SelectOption, z.looseObject({ options: z.array(SelectOption) })]))),
 })
-type ConfigOption = z.infer<typeof ConfigOption>
+export type ConfigOption = z.infer<typeof ConfigOption>
 
 export const OpenedSession = z.looseObject({
   sessionId: nullish(z.string()),

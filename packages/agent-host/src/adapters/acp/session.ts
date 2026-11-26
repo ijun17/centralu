@@ -26,6 +26,7 @@ import {
   readUpdate,
   SessionList,
   RequestPermission,
+  type ConfigOption,
   type PermissionOption,
   type PermissionOutcome,
   type ToolCallFields,
@@ -99,6 +100,13 @@ const TREE_NOTE_MS = 2_000
 const CANCELLED: PermissionOutcome = { outcome: { outcome: 'cancelled' } }
 
 export class AcpSession extends CoreSession<AcpWire> implements SessionHandle {
+  readonly updateSettings?: (settings: {
+    model?: string | null
+    effort?: string | null
+    verbosity?: string | null
+    permissionPreset?: PermissionPreset
+  }) => void
+
   constructor(
     private readonly opts: CreateSessionOpts,
     emit: EventSink,
@@ -109,6 +117,13 @@ export class AcpSession extends CoreSession<AcpWire> implements SessionHandle {
       emit,
       new AcpWire(opts, deps),
     )
+    if (deps.shape?.supportsModelOption) {
+      this.updateSettings = (s) => this.wire.updateSettings(s)
+    }
+  }
+
+  takeOpenedSettings(): { model: string | null; effort: string | null } | null {
+    return this.wire.takeOpenedSettings()
   }
 
   /**
@@ -203,6 +218,8 @@ class AcpWire implements ToolWire {
   private opening: string | null = null
   /** This process's conversation is open (`open` answered): until then a failed open ends the process, after it the wire does */
   private opened = false
+  private openedSettings: { model: string | null; effort: string | null } | null = null
+  private effortConfigId = 'thought_level'
 
   constructor(
     private readonly opts: CreateSessionOpts,
@@ -242,6 +259,54 @@ class AcpWire implements ToolWire {
 
   private emit(e: NormalizedEvent): void {
     this.io.emit(e)
+  }
+
+  private updateEffortId(options: readonly ConfigOption[]): void {
+    const thought = options.find((c) => c.category === 'thought_level' || c.id === 'thought_level' || c.id === 'thinking_level')
+    if (thought?.id) this.effortConfigId = thought.id
+  }
+
+  private handleConfigOptions(options: readonly ConfigOption[]): void {
+    this.updateEffortId(options)
+    if (this.deps.shape?.supportsModelOption) {
+      const currentModel = options.find((c) => c.id === 'model' || c.category === 'model')?.currentValue
+      const currentEffort = options.find((c) => c.category === 'thought_level' || c.id === 'thought_level' || c.id === 'thinking_level')?.currentValue
+      const modelStr = typeof currentModel === 'string' ? currentModel : null
+      const effortStr = typeof currentEffort === 'string' ? currentEffort : null
+      if (modelStr || effortStr) {
+        this.openedSettings = { model: modelStr, effort: effortStr }
+      }
+      this.deps.shape.onConfigOptions?.(options)
+    }
+  }
+
+  private async setConfigOption(configId: string, value: string): Promise<void> {
+    if (!this.conversation) return
+    try {
+      await this.conn.request('session/set_config_option', {
+        sessionId: this.conversation,
+        configId,
+        value,
+      }, 20_000)
+    } catch (err) {
+      console.error(`[${this.label}] session/set_config_option failed (${configId}=${value}):`, err)
+    }
+  }
+
+  takeOpenedSettings(): { model: string | null; effort: string | null } | null {
+    const s = this.openedSettings
+    this.openedSettings = null
+    return s
+  }
+
+  updateSettings(settings: { model?: string | null; effort?: string | null }): void {
+    if (!this.deps.shape?.supportsModelOption) return
+    if (settings.model) {
+      void this.setConfigOption('model', settings.model)
+    }
+    if (settings.effort) {
+      void this.setConfigOption(this.effortConfigId, settings.effort)
+    }
   }
 
   async open(io: CoreIo, resume: { externalId: string } | null): Promise<{ externalId: string | null }> {
@@ -287,8 +352,9 @@ class AcpWire implements ToolWire {
         if (!method) throw rpcError(`${this.label} cannot reopen a conversation`, 'session_not_found')
         this.replaying = method === 'session/load'
         this.opening = resume.externalId
+        let opened: OpenedSession | null = null
         try {
-          OpenedSession.parse((await this.conn.request(method, { ...base, sessionId: resume.externalId }, 150_000)) ?? {})
+          opened = OpenedSession.parse((await this.conn.request(method, { ...base, sessionId: resume.externalId }, 150_000)) ?? {})
         } catch (err) {
           // Not the replay of a load any more: the list below is a call of its own
           this.replaying = false
@@ -299,13 +365,29 @@ class AcpWire implements ToolWire {
           this.opening = null
         }
         this.conversation = resume.externalId
+        if (opened?.configOptions) {
+          this.handleConfigOptions(opened.configOptions)
+        }
         this.costTotal = this.opts.runningCost?.last ?? null
       } else {
         const opened = OpenedSession.parse(await this.conn.request('session/new', base, 120_000))
         if (!opened.sessionId) throw new Error(`${this.label} opened a session without an id`)
         this.conversation = opened.sessionId
+        if (opened.configOptions) {
+          this.handleConfigOptions(opened.configOptions)
+        }
         this.costTotal = 0
         this.opts.runningCost?.keep(0)
+      }
+      if (this.deps.shape?.supportsModelOption) {
+        if (this.opts.model) {
+          await this.setConfigOption('model', this.opts.model)
+          this.openedSettings = { model: this.opts.model, effort: this.openedSettings?.effort ?? null }
+        }
+        if (this.opts.effort) {
+          await this.setConfigOption(this.effortConfigId, this.opts.effort)
+          this.openedSettings = { model: this.openedSettings?.model ?? null, effort: this.opts.effort }
+        }
       }
       this.opened = true
       return { externalId: this.conversation }
@@ -534,6 +616,10 @@ class AcpWire implements ToolWire {
       this.commands = read.update.availableCommands.map((c) => ({ name: c.name, ...(c.description ? { description: c.description } : {}), ...(c.input?.hint ? { argumentHint: c.input.hint } : {}) }))
       return
     }
+    if ('update' in read && read.update.sessionUpdate === 'config_option_update' && (read.sessionId === this.conversation || read.sessionId === this.opening)) {
+      this.handleConfigOptions(read.update.configOptions)
+      return
+    }
     if (read.sessionId !== this.conversation || this.replaying) return
     const turn = this.turn
     this.resendLostCancel()
@@ -559,6 +645,9 @@ class AcpWire implements ToolWire {
       case 'agent_message_chunk':
         if (turn) turn.answer += blockText(u.content)
         this.emitAll(this.normalizer.update(u), turn)
+        return
+      case 'config_option_update':
+        this.handleConfigOptions(u.configOptions)
         return
       default:
         this.emitAll(this.normalizer.update(u), turn)

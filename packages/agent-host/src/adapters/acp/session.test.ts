@@ -580,3 +580,80 @@ describe('every turn ends (#1829)', () => {
     expect(stateOf(w.events)).toBe('waiting_input')
   })
 })
+
+describe('model and effort selection in ACP session', () => {
+  const modelProfile: AcpProfile = {
+    ...profile,
+    shape: {
+      supportsModelOption: true,
+    },
+  }
+
+  const scriptWithModels: PeerScript = (method) => {
+    if (method === 'initialize') return { result: INIT_RESULT }
+    if (method === 'session/new') {
+      return {
+        result: {
+          sessionId: SID,
+          configOptions: [
+            {
+              id: 'model',
+              category: 'model',
+              type: 'select',
+              currentValue: 'gemini-4-argon',
+              options: [{ value: 'gemini-4-argon', name: 'Gemini 4 Argon' }],
+            },
+            {
+              id: 'thought_level',
+              category: 'thought_level',
+              type: 'select',
+              currentValue: 'medium',
+              options: [{ value: 'low' }, { value: 'medium' }, { value: 'high' }],
+            },
+          ],
+        },
+      }
+    }
+    if (method === 'session/set_config_option') return { result: {} }
+    return { result: null }
+  }
+
+  it('sets model and effort during session creation if requested and supported', async () => {
+    const w = world(scriptWithModels, { model: 'gemini-3.8-flash', effort: 'low' }, modelProfile)
+    const s = await w.start()
+    const peer = w.peers[0]!
+    const setCalls = peer.received.filter((m) => m.method === 'session/set_config_option')
+    expect(setCalls).toHaveLength(2)
+    expect(setCalls[0]?.params).toEqual({ sessionId: SID, configId: 'model', value: 'gemini-3.8-flash' })
+    expect(setCalls[1]?.params).toEqual({ sessionId: SID, configId: 'thought_level', value: 'low' })
+    expect(s.takeOpenedSettings?.()).toEqual({ model: 'gemini-3.8-flash', effort: 'low' })
+    expect(s.takeOpenedSettings?.()).toBeNull()
+    await s.dispose()
+  })
+
+  it('does not send set_config_option when tool shape does not support model option', async () => {
+    const w = world(scriptWithModels, { model: 'gemini-3.8-flash', effort: 'low' }, profile)
+    const s = await w.start()
+    const peer = w.peers[0]!
+    const setCalls = peer.received.filter((m) => m.method === 'session/set_config_option')
+    expect(setCalls).toHaveLength(0)
+    expect(s.updateSettings).toBeUndefined()
+    expect(s.takeOpenedSettings?.()).toBeNull()
+    await s.dispose()
+  })
+
+  it('dispatches set_config_option on updateSettings', async () => {
+    const w = world(scriptWithModels, {}, modelProfile)
+    const s = await w.start()
+    const peer = w.peers[0]!
+    expect(peer.received.filter((m) => m.method === 'session/set_config_option')).toHaveLength(0)
+
+    s.updateSettings?.({ model: 'claude-opus-5-5', effort: 'high' })
+    await peer.next((m) => m.method === 'session/set_config_option' && (m.params as { configId: string }).configId === 'thought_level')
+    const setCalls = peer.received.filter((m) => m.method === 'session/set_config_option')
+    expect(setCalls).toHaveLength(2)
+    expect(setCalls[0]?.params).toEqual({ sessionId: SID, configId: 'model', value: 'claude-opus-5-5' })
+    expect(setCalls[1]?.params).toEqual({ sessionId: SID, configId: 'thought_level', value: 'high' })
+    await s.dispose()
+  })
+})
