@@ -46,7 +46,7 @@ export async function readAgyUsage(home: AgyHome, archive: AgyArchive, signedOut
   const proc = startToolProcess({ ...launch, cwd: place.cwd, env: { ...process.env, ...launch.env } }, deps.spawn ? { spawn: deps.spawn } : {})
   let text = ''
   /** What the agent did that "/usage" never does (a request, a tool): the answer is not taken */
-  let strayed: string | null = null
+  const stray = { what: null as string | null }
   let wantsSignIn = false
   let timedOut = false
   let hasUsageCommand: boolean | null = null
@@ -57,13 +57,13 @@ export async function readAgyUsage(home: AgyHome, archive: AgyArchive, signedOut
         const u = method === 'session/update' ? readUpdate(params) : null
         if (!u || !('update' in u)) return
         if (u.update.sessionUpdate === 'agent_message_chunk' && u.update.content.type === 'text') text += u.update.content.text ?? ''
-        if (u.update.sessionUpdate === 'tool_call') strayed ??= 'a tool call'
+        if (u.update.sessionUpdate === 'tool_call') stray.what ??= 'a tool call'
         if (u.update.sessionUpdate === 'available_commands_update') {
           hasUsageCommand = u.update.availableCommands.some((c) => c.name === 'usage')
         }
       },
       onRequest: async (_id, method) => {
-        strayed ??= method
+        stray.what ??= method
         throw new RpcError(METHOD_NOT_FOUND, `Method not found: ${method}`)
       },
       onExit: () => {},
@@ -92,7 +92,7 @@ export async function readAgyUsage(home: AgyHome, archive: AgyArchive, signedOut
     if (hasUsageCommand === false) throw new Error('Antigravity does not support "/usage" in this version')
     text = ''
     const done = PromptResult.parse(await conn.request('session/prompt', { sessionId, prompt: [{ type: 'text', text: '/usage' }] }, timeoutMs))
-    if (strayed) throw new Error(`Antigravity answered "/usage" with ${strayed}, not its usage`)
+    if (stray.what) throw new Error(`Antigravity answered "/usage" with ${stray.what}, not its usage`)
     const reason: string = typeof done.stopReason === 'string' ? done.stopReason : ''
     if (reason !== 'end_turn') throw new Error(`Antigravity's "/usage" ended "${reason}", not with its usage`)
     return readAgyQuota(text)
