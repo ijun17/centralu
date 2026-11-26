@@ -68,6 +68,8 @@ export interface ToolWire {
   readonly turns: {
     /** A Stop ends the process (`agy`: SIGINT, through `SessionProcess.interrupt`); the next input starts a new one on the same conversation */
     readonly interruptEndsProcess: boolean
+    /** A new human input interrupts the running turn to execute immediately instead of queueing behind it */
+    readonly interruptForInput?: boolean
   }
   /** The process to start for this conversation, asked again for every new process (§5.1) */
   readonly launch: ToolLaunch

@@ -1,7 +1,7 @@
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { isInTurn, transition, type AdapterCapabilities, type NormalizedEvent, type SessionState } from '@cc/protocol'
 import type { AgentProcess, CreateSessionOpts, ProcessSource } from '../contract.js'
 import type { SessionApps } from '../contract/session-apps.js'
@@ -580,3 +580,187 @@ describe('every turn ends (#1829)', () => {
     expect(stateOf(w.events)).toBe('waiting_input')
   })
 })
+
+describe('model and effort selection in ACP session', () => {
+  const modelProfile: AcpProfile = {
+    ...profile,
+    shape: {
+      supportsModelOption: true,
+    },
+  }
+
+  const scriptWithModels: PeerScript = (method) => {
+    if (method === 'initialize') return { result: INIT_RESULT }
+    if (method === 'session/new') {
+      return {
+        result: {
+          sessionId: SID,
+          configOptions: [
+            {
+              id: 'model',
+              category: 'model',
+              type: 'select',
+              currentValue: 'gemini-4-argon',
+              options: [{ value: 'gemini-4-argon', name: 'Gemini 4 Argon' }],
+            },
+            {
+              id: 'thought_level',
+              category: 'thought_level',
+              type: 'select',
+              currentValue: 'medium',
+              options: [{ value: 'low' }, { value: 'medium' }, { value: 'high' }],
+            },
+          ],
+        },
+      }
+    }
+    if (method === 'session/set_config_option') return { result: {} }
+    return { result: null }
+  }
+
+  it('sets model and effort during session creation if requested and supported', async () => {
+    const w = world(scriptWithModels, { model: 'gemini-3.8-flash', effort: 'low' }, modelProfile)
+    const s = await w.start()
+    const peer = w.peers[0]!
+    const setCalls = peer.received.filter((m) => m.method === 'session/set_config_option')
+    expect(setCalls).toHaveLength(2)
+    expect(setCalls[0]?.params).toEqual({ sessionId: SID, configId: 'model', value: 'gemini-3.8-flash' })
+    expect(setCalls[1]?.params).toEqual({ sessionId: SID, configId: 'thought_level', value: 'low' })
+    expect(s.takeOpenedSettings?.()).toEqual({ model: 'gemini-3.8-flash', effort: 'low' })
+    expect(s.takeOpenedSettings?.()).toBeNull()
+    await s.dispose()
+  })
+
+  it('does not send set_config_option when tool shape does not support model option', async () => {
+    const w = world(scriptWithModels, { model: 'gemini-3.8-flash', effort: 'low' }, profile)
+    const s = await w.start()
+    const peer = w.peers[0]!
+    const setCalls = peer.received.filter((m) => m.method === 'session/set_config_option')
+    expect(setCalls).toHaveLength(0)
+    expect(s.updateSettings).toBeUndefined()
+    expect(s.takeOpenedSettings?.()).toBeNull()
+    await s.dispose()
+  })
+
+  it('dispatches set_config_option on updateSettings', async () => {
+    const w = world(scriptWithModels, {}, modelProfile)
+    const s = await w.start()
+    const peer = w.peers[0]!
+    expect(peer.received.filter((m) => m.method === 'session/set_config_option')).toHaveLength(0)
+
+    s.updateSettings?.({ model: 'claude-opus-5-5', effort: 'high' })
+    await peer.next((m) => m.method === 'session/set_config_option' && (m.params as { configId: string }).configId === 'thought_level')
+    const setCalls = peer.received.filter((m) => m.method === 'session/set_config_option')
+    expect(setCalls).toHaveLength(2)
+    expect(setCalls[0]?.params).toEqual({ sessionId: SID, configId: 'model', value: 'claude-opus-5-5' })
+    expect(setCalls[1]?.params).toEqual({ sessionId: SID, configId: 'thought_level', value: 'high' })
+    await s.dispose()
+  })
+
+  it('preserves existing model when config_option_update only updates effort', async () => {
+    const w = world(scriptWithModels, { model: 'gemini-3.8-flash', effort: 'low' }, modelProfile)
+    const s = await w.start()
+    const peer = w.peers[0]!
+    expect(s.takeOpenedSettings?.()).toEqual({ model: 'gemini-3.8-flash', effort: 'low' })
+
+    peer.update(SID, {
+      sessionUpdate: 'config_option_update',
+      configOptions: [
+        {
+          id: 'thought_level',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: 'high',
+          options: [{ value: 'low' }, { value: 'high' }],
+        },
+      ],
+    })
+
+    expect(s.takeOpenedSettings?.()).toEqual({ model: 'gemini-3.8-flash', effort: 'high' })
+    await s.dispose()
+  })
+
+  it('does not adopt requested model when set_config_option fails', async () => {
+    const failingScript: PeerScript = (method, params, peer) => {
+      if (method === 'session/set_config_option') {
+        return { error: { code: -32603, message: 'Peer rejected model' } }
+      }
+      return scriptWithModels(method, params, peer)
+    }
+    const w = world(failingScript, { model: 'gemini-3.8-flash' }, modelProfile)
+    const s = await w.start()
+    // Does not adopt 'gemini-3.8-flash', remains the peer's initial model
+    expect(s.takeOpenedSettings?.()).toEqual({ model: 'gemini-4-argon', effort: 'medium' })
+    await s.dispose()
+  })
+})
+
+describe('interruptForInput in ACP session', () => {
+  const interruptProfile: AcpProfile = {
+    ...profile,
+    shape: {
+      interruptForInput: true,
+    },
+  }
+
+  it('cancels running prompt and cancels session apps when human input arrives', async () => {
+    // When disabled, human input does not cancel
+    const cancelAllDisabled = vi.fn()
+    const mockAppsDisabled: SessionApps = {
+      cancelAll: cancelAllDisabled,
+      current: () => [],
+      noteCall: () => {},
+      callEnded: () => {},
+      close: () => {},
+    }
+    const wDisabled = world(base, { apps: mockAppsDisabled }, profile)
+    const sDisabled = await wDisabled.start()
+    sDisabled.send('first')
+    await wDisabled.peers[0]!.next(isPrompt)
+    sDisabled.send('second', { origin: { kind: 'human' } })
+    expect(wDisabled.peers[0]!.received.some((m) => m.method === 'session/cancel')).toBe(false)
+    expect(cancelAllDisabled).not.toHaveBeenCalled()
+    await sDisabled.dispose()
+
+    const cancelAll = vi.fn()
+    const mockApps: SessionApps = {
+      cancelAll,
+      current: () => [],
+      noteCall: () => {},
+      callEnded: () => {},
+      close: () => {},
+    }
+    const w = world(base, { apps: mockApps }, interruptProfile)
+    const s = await w.start()
+    const peer = w.peers[0]!
+
+    s.send('first')
+    await peer.next(isPrompt)
+
+    // Non-human input does not trigger cancel
+    s.send('auto', { origin: { kind: 'channel', server: 'centralu' } })
+    expect(peer.received.some((m) => m.method === 'session/cancel')).toBe(false)
+    expect(cancelAll).not.toHaveBeenCalled()
+
+    // Human input triggers session/cancel and cancelAll()
+    s.send('second', { origin: { kind: 'human' } })
+    await peer.next((m) => m.method === 'session/cancel')
+    expect(cancelAll).toHaveBeenCalledTimes(1)
+
+    // Release the cancelled prompt
+    peer.release('session/prompt', { result: { stopReason: 'cancelled' } })
+
+    // Next queued prompt runs ('auto')
+    await peer.next((m) => isPrompt(m) && JSON.stringify(m).includes('auto'))
+    await new Promise((r) => setImmediate(r))
+    peer.release('session/prompt', { result: { stopReason: 'end_turn' } })
+
+    // Then 'second' runs
+    await peer.next((m) => isPrompt(m) && JSON.stringify(m).includes('second'))
+    await new Promise((r) => setImmediate(r))
+    peer.release('session/prompt', { result: { stopReason: 'end_turn' } })
+
+    await s.dispose()
+  })
+})
+

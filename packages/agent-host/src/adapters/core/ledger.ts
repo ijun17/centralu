@@ -114,21 +114,25 @@ export class CoreSession<W extends ToolWire = ToolWire> {
   }
 
   send(text: string, opts?: { origin?: InputOrigin; id?: string; compact?: boolean }): void {
-    void this.enqueue(text, opts?.id ?? null, opts?.compact === true)
+    void this.enqueue(text, opts?.id ?? null, opts?.compact === true, undefined, opts?.origin)
   }
 
   sendTracked(text: string, observer?: InputObserver, opts?: { origin?: InputOrigin; id?: string }): Promise<void> {
-    return this.enqueue(text, opts?.id ?? null, false, observer)
+    return this.enqueue(text, opts?.id ?? null, false, observer, opts?.origin)
   }
 
-  private enqueue(text: string, named: string | null, compact: boolean, observer?: InputObserver): Promise<void> {
+  private enqueue(text: string, named: string | null, compact: boolean, observer?: InputObserver, origin?: InputOrigin): Promise<void> {
     const receipt = this.receipts.create(observer)
     if (this.phase === 'closed') {
       this.receipts.fail([receipt.id], new Error(`${this.wire.label} session is closed`))
       return receipt.done
     }
     this.queue.push({ input: { id: receipt.id, text, compact }, named })
-    this.drain()
+    if (this.turn && this.wire.turns.interruptForInput && origin?.kind === 'human') {
+      this.interruptForInput()
+    } else {
+      this.drain()
+    }
     return receipt.done
   }
 
@@ -253,6 +257,25 @@ export class CoreSession<W extends ToolWire = ToolWire> {
     }
     if (this.wire.turns.interruptEndsProcess) {
       // Its exit is the Stop's confirmation (it may come at once, ending the turn), not a crash
+      this.expectedExits.add(turn.proc)
+      this.process.interrupt()
+    }
+  }
+
+  /** A new human input interrupts the running turn so it can run immediately, without dropping the queue */
+  protected interruptForInput(): void {
+    const turn = this.turn
+    if (!turn || this.phase !== 'ready' || turn.stopAsked) return
+    turn.stopAsked = true
+    this.wire.interrupt?.()
+    this.wire.releaseCards()
+    if (!turn.stopTimer) {
+      turn.stopTimer = setTimeout(() => {
+        if (this.turn === turn) this.emit(stopNotEnded(this.sessionId, this.wire.label))
+      }, this.stopConfirmMs)
+      turn.stopTimer.unref?.()
+    }
+    if (this.wire.turns.interruptEndsProcess) {
       this.expectedExits.add(turn.proc)
       this.process.interrupt()
     }

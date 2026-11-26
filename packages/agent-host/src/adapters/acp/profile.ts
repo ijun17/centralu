@@ -1,7 +1,7 @@
-import type { AdapterCapabilities, ToolDescriptor } from '@cc/protocol'
+import type { AdapterCapabilities, ModelOption, ToolDescriptor } from '@cc/protocol'
 import type { AgentSpawnSpec, CreateSessionOpts, DetectResult, LimitsAnswer, LocalUsage } from '../contract.js'
 import type { AdapterSurface } from '../contract/surface.js'
-import type { RequestPermission, ToolCallFields } from './wire.js'
+import type { ConfigOption, RequestPermission, ToolCallFields } from './wire.js'
 
 /** What every ACP tool keeps alike (Cursor, OpenCode, Antigravity): each profile spreads it and overrides what differs */
 export const ACP_CAPABILITIES: AdapterCapabilities = {
@@ -54,6 +54,8 @@ export type AcpProfile = {
    * compacted only when its agent advertises `compact` (`AcpSession.compactCommand`)
    */
   readonly infersCompaction?: boolean
+  /** The models available to choose from (`AgentAdapter.listModels`); absent, the tool reports none */
+  listModels?(): Promise<ModelOption[]>
   /** The parts of a tool's ACP that differ from the common shape the core reads (`AcpToolShape`) */
   readonly shape?: AcpToolShape
 }
@@ -110,4 +112,8 @@ export type AcpToolShape = {
    * answer, never a reply that merely contains the words: a model may well quote them
    */
   refusalIn?(answer: string): string | null
+  /** Session-scoped model and effort options (`session/set_config_option`) */
+  readonly supportsModelOption?: boolean
+  readonly interruptForInput?: boolean
+  onConfigOptions?(options: readonly ConfigOption[]): void
 }

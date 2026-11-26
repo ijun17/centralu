@@ -102,6 +102,8 @@ function joinedChunks(lines: readonly Line[]): string {
     .join('')
 }
 
+const BUILTIN_COMMANDS = new Set(['plan', 'logout', 'usage'])
+
 const files = ROOTS.flatMap((root) => readdirSync(root).flatMap((dir) => readdirSync(join(root, dir)).filter((f) => f.endsWith('.jsonl')).map((f) => join(root, dir, f))))
 
 describe('the committed recordings', () => {
@@ -118,7 +120,7 @@ describe('the committed recordings', () => {
       const found = [...PRIVATE, ...(/[\\/](?:claude|codex)[\\/]recordings[\\/]/.test(file) ? CLAUDE_PRIVATE : []), ...(/[\\/]codex[\\/]recordings[\\/]/.test(file) ? CODEX_PRIVATE : []), ...machineWords(/[\\/]codex[\\/]recordings[\\/]/.test(file))].flatMap(([what, re]) => readings.flatMap((r) => (re.exec(r) ? [`${what}: ${re.exec(r)![0]}`] : [])))
       expect(found).toEqual([])
       const commands = lines.flatMap((l) => l.msg?.params?.update?.availableCommands ?? []).map((c) => c.name)
-      expect(commands.filter((c) => typeof c !== 'string' || !/^command-\d+$/.test(c))).toEqual([])
+      expect(commands.filter((c) => typeof c !== 'string' || (!/^command-\d+$/.test(c) && !BUILTIN_COMMANDS.has(c)))).toEqual([])
       // Claude Code's lists keep the commands that ship with it and number the rest
       const own = lines.flatMap((l) => [...(l.msg?.commands ?? []), ...(l.msg?.response?.response?.commands ?? [])]).filter((c) => c.builtin !== true)
       expect(own.filter((c) => typeof c.name !== 'string' || !/^command-\d+$/.test(c.name))).toEqual([])

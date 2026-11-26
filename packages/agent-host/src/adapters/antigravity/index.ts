@@ -1,10 +1,11 @@
-import { notSignedIn, type AdapterCapabilities, type ToolDescriptor } from '@cc/protocol'
+import { notSignedIn, type AdapterCapabilities, type ToolDescriptor, type UsageSnapshot } from '@cc/protocol'
 import { dataRoot } from '../../data-dir.js'
 import type { Platform } from '../../os.js'
 import { rpcError } from '../../rpc-error.js'
 import type { AgentProcess, AgentSpawnSpec, DetectResult } from '../contract.js'
 import { AcpAdapter } from '../acp/adapter.js'
 import { ACP_CAPABILITIES, type AcpProfile } from '../acp/profile.js'
+import { toolNotInstalled } from '../core/tool-process.js'
 import { agyAppFinder, agyHome, agyPlatformKey, browserFolder, sweepSessionTemps, type AgyHome, type HelperPlaces } from './agent-files.js'
 import { agyLaunch } from './launch.js'
 import { AGY_RELEASE, type AgyArchive } from './release.js'
@@ -12,6 +13,8 @@ import { AgySetup, type AgySetupDeps } from './setup.js'
 import { agyCentraluTool, agyStderrLine, isAgyQuestion, readAgyCall } from './shape.js'
 import { agentSignInUrl, googleAuthorizeUrl } from './sign-in.js'
 import { AGY_SURFACE } from './surface.js'
+import { agyUsageSnapshot, readAgyUsage, type UsageReadDeps } from './usage.js'
+import { listAgyModels, saveAgyModels, toModelOptions } from './models.js'
 
 /**
  * What Google's Antigravity agent through ACP can keep (docs/plans/antigravity-adapter.md §6), measured on 1.4.3:
@@ -30,7 +33,7 @@ const CAPABILITIES: AdapterCapabilities = {
   //   skill as `skills/system/run-workflow/SKILL.md` into the session's project at `session/new`; Windows 1.4.3 writes none
   //   (#2320, docs/plans/antigravity-acp.md §1 has the cause)
   // - Not offered yet: role text (`_meta.antigravity.systemPrompt.append` exists, unmeasured), untrusted projects (it reads
-  //   the project's own instruction files, as the other ACP tools), images in the prompt, the model and effort menus
+  //   the project's own instruction files, as the other ACP tools), images in the prompt
   ...ACP_CAPABILITIES,
   autoTitle: false,
 }
@@ -50,6 +53,8 @@ export type AgyProfileDeps = Partial<Pick<AgySetupDeps, 'appFound' | 'installIo'
   arch?: string
   /** Where a session's `BROWSER` helper may go (`browserFolder`): its real places when not given */
   helperPlaces?: HelperPlaces
+  /** How the usage read starts its process and how long it waits (`readAgyUsage`) */
+  usage?: Pick<UsageReadDeps, 'spawn' | 'timeoutMs'>
 }
 
 export type AgyProfile = AcpProfile & { readonly agySetup: AgySetup; readonly home: AgyHome; readonly archive: AgyArchive | null }
@@ -59,6 +64,12 @@ export function antigravityProfile(deps: AgyProfileDeps = {}): AgyProfile {
   const archive = key ? AGY_RELEASE.archives[key] : null
   const home = agyHome(deps.dataDir ?? dataRoot(), AGY_RELEASE.version)
   const setup = new AgySetup({ home, archive, version: AGY_RELEASE.version, appFound: agyAppFinder(deps.platform), ...deps })
+  /** A process found the sign-in gone: the line turns signed out */
+  const signedOut = () => {
+    setup.noteSignedOut()
+    return rpcError(notSignedIn(DESCRIPTOR, 'centralu'), 'not_logged_in')
+  }
+  let reading: Promise<UsageSnapshot> | null = null
   return {
     descriptor: DESCRIPTOR,
     capabilities: CAPABILITIES,
@@ -117,10 +128,34 @@ export function antigravityProfile(deps: AgyProfileDeps = {}): AgyProfile {
       isQuestion: isAgyQuestion,
       editRunsAsNewCall: true,
       stderrLine: agyStderrLine,
-      signedOut() {
-        setup.noteSignedOut()
-        return rpcError(notSignedIn(DESCRIPTOR, 'centralu'), 'not_logged_in')
+      signedOut,
+      supportsModelOption: true,
+      interruptForInput: true,
+      onConfigOptions: (options) => {
+        const models = toModelOptions(options)
+        if (models.length > 0) void saveAgyModels(home, models).catch(() => {})
       },
+    },
+    listModels() {
+      return listAgyModels(home, archive, setup, signedOut, DESCRIPTOR.label, DESCRIPTOR.install)
+    },
+    /*
+     * Its weekly and five-hour limits per model group, from the agent Centralu signed in (`readAgyUsage`), one read at a
+     * time. No `account()`: the sign-in is this machine's Centralu's own (plan §0), so a linked machine's usage is read there
+     */
+    listUsage() {
+      if (!archive || !setup.installed()) return Promise.reject(toolNotInstalled(DESCRIPTOR.label, DESCRIPTOR.install))
+      if (setup.current().state !== 'ready') return Promise.reject(signedOut())
+      reading ??= readAgyUsage(home, archive, signedOut, { platform: deps.platform, helperPlaces: deps.helperPlaces, ...deps.usage })
+        .then((quota) => agyUsageSnapshot(quota, setup.current().plan?.name ?? null))
+        .catch((err: unknown) => {
+          console.error(`[usage] antigravity: ${err instanceof Error ? err.message : String(err)}`)
+          throw err
+        })
+        .finally(() => {
+          reading = null
+        })
+      return reading
     },
   }
 }

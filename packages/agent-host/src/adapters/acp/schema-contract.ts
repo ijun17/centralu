@@ -15,6 +15,7 @@ export const ACP_METHODS = [
   'session/close',
   'session/update',
   'session/request_permission',
+  'session/set_config_option',
 ] as const
 
 /** The known updates without the two methods: a vendor's own kinds are in no schema */
