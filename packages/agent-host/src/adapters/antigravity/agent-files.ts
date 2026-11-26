@@ -39,20 +39,10 @@ export function agyPlatformKey(platform: Platform = HOST_PLATFORM, arch: string 
 }
 
 /**
- * The folder, under `<data>/tools/antigravity/`:
- *
- *     <version>/             the server and its harness, side by side, and `install.json` written last
- *     gemini-home/           GEMINI_HOME: the agent's settings, conversations, and its token where it keeps a file (not on
- *                            a Mac with a usable Keychain, plan §4.2). Not versioned: a session made under one Centralu
- *                            still loads under the next (ids are per GEMINI_HOME, spike §3)
- *     .install-<owner>-<random>/  an install in progress (removed when it ends, however it ends)
- *     .sign-in-<owner>-<random>/  one process's browser helper, its address and its TEMP if not a session's (removed when
- *                            it ends; in `spareFolder` where the data folder's path cannot be put in `BROWSER`)
- *     tmp/<session>/         a session's TEMP (`sessionTemp`), until the session is deleted for good
- *     usage/                 the folder the usage read runs in (`readAgyUsage`): what the agent writes at `session/new` stays out of projects
- *     usage-session.json     the conversation that read keeps, opened again by the next one
- *
- * `<owner>` names the host process that made the folder (`ownerTag`), so another host never removes it while that one runs
+ * The Antigravity folder layout under `<data>/tools/antigravity/` (docs/plans/antigravity-adapter.md):
+ * `<version>/`, `gemini-home/`, `.install-<owner>-<random>/`, `.sign-in-<owner>-<random>/` (browser helper and TEMP),
+ * `tmp/<session>/` (session TEMP), `usage/` (`readAgyUsage` cwd), and `usage-session.json` (kept conversation).
+ * `<owner>` names the host process that made the folder (`ownerTag`).
  */
 /** Where the usage read runs (`usage/`), and the conversation it keeps for the next read (`usage-session.json`), if any */
 export async function usagePlace(home: AgyHome): Promise<{ cwd: string; kept: string | null; keep(sessionId: string): Promise<void> }> {

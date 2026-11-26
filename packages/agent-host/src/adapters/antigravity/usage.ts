@@ -42,13 +42,14 @@ export async function readAgyUsage(home: AgyHome, archive: AgyArchive, signedOut
   const folder = await browserFolder(home, deps.platform, deps.helperPlaces)
   if (folder.browser === '') throw new Error(`Antigravity cannot say its usage: ${folder.why}`)
   const place = await usagePlace(home)
-  const launch = agyLaunch(home, archive, folder.browser)
+  const launch = agyLaunch(home, archive, folder)
   const proc = startToolProcess({ ...launch, cwd: place.cwd, env: { ...process.env, ...launch.env } }, deps.spawn ? { spawn: deps.spawn } : {})
   let text = ''
   /** What the agent did that "/usage" never does (a request, a tool): the answer is not taken */
   let strayed: string | null = null
   let wantsSignIn = false
   let timedOut = false
+  let hasUsageCommand: boolean | null = null
   const conn = new AcpConnection(
     proc,
     {
@@ -57,6 +58,9 @@ export async function readAgyUsage(home: AgyHome, archive: AgyArchive, signedOut
         if (!u || !('update' in u)) return
         if (u.update.sessionUpdate === 'agent_message_chunk' && u.update.content.type === 'text') text += u.update.content.text ?? ''
         if (u.update.sessionUpdate === 'tool_call') strayed ??= 'a tool call'
+        if (u.update.sessionUpdate === 'available_commands_update') {
+          hasUsageCommand = u.update.availableCommands.some((c) => c.name === 'usage')
+        }
       },
       onRequest: async (_id, method) => {
         strayed ??= method
@@ -85,10 +89,11 @@ export async function readAgyUsage(home: AgyHome, archive: AgyArchive, signedOut
       if (!sessionId) throw new Error('Antigravity opened a conversation without an id')
       await place.keep(sessionId)
     }
+    if (hasUsageCommand === false) throw new Error('Antigravity does not support "/usage" in this version')
     text = ''
     const done = PromptResult.parse(await conn.request('session/prompt', { sessionId, prompt: [{ type: 'text', text: '/usage' }] }, timeoutMs))
     if (strayed) throw new Error(`Antigravity answered "/usage" with ${strayed}, not its usage`)
-    if (done.stopReason !== 'end_turn') throw new Error(`Antigravity's "/usage" ended "${done.stopReason}", not with its usage`)
+    if (done.stopReason !== 'end_turn') throw new Error(`Antigravity's "/usage" ended "${String(done.stopReason)}", not with its usage`)
     return readAgyQuota(text)
   } catch (err) {
     if (wantsSignIn || (err instanceof RpcError && err.code === AUTH_REQUIRED)) throw signedOut()
@@ -98,7 +103,7 @@ export async function readAgyUsage(home: AgyHome, archive: AgyArchive, signedOut
     throw err
   } finally {
     clearTimeout(timer)
-    await conn.dispose(1000).catch(() => {})
+    await conn.dispose(5000).catch(() => {})
     await folder.remove()
   }
 }
@@ -133,16 +138,20 @@ export function readAgyQuota(markdown: string): AgyQuota {
     if (bucket) {
       const group = groups.at(-1)
       if (!group) throw unread('a limit before any group')
-      const reset = RESET.exec(bucket[3]!)
+      const resetStr = bucket[3]
+      const reset = resetStr ? RESET.exec(resetStr) : null
       if (!reset) throw unread('a reset time')
       const [, month, day, year, hour, minute] = reset
-      const at = new Date(Date.UTC(Number(year), MONTHS.indexOf(month!), Number(day), Number(hour), Number(minute)))
-      group.buckets.push({ label: bucket[1]!, remaining: Number(bucket[2]), resetsAt: at.toISOString() })
+      const label = bucket[1]
+      const remainingStr = bucket[2]
+      if (!month || !day || !year || !hour || !minute || !label || !remainingStr) throw unread('a reset time')
+      const at = new Date(Date.UTC(Number(year), MONTHS.indexOf(month), Number(day), Number(hour), Number(minute)))
+      group.buckets.push({ label, remaining: Number(remainingStr), resetsAt: at.toISOString() })
       continue
     }
     const group = GROUP.exec(line)
-    if (!group) throw unread('a line of a kind it does not know')
-    groups.push({ name: group[1]!, buckets: [] })
+    if (!group || !group[1]) throw unread('a line of a kind it does not know')
+    groups.push({ name: group[1], buckets: [] })
   }
   const quota = AgyQuota.safeParse(groups)
   if (!quota.success) throw unread(groups.length === 0 ? 'no limits' : 'a group with no limits, or a value out of range')
