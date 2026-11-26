@@ -74,7 +74,7 @@ export function toModelOptions(configOptions: readonly ConfigOption[]): ModelOpt
     (c) => c.category === 'thought_level' || c.id === 'thought_level' || c.id === 'thinking_level',
   )
   const rawEfforts = extractSelectOptions(thoughtOpt?.options)
-  const efforts = rawEfforts.map((o) => o.value)
+  const efforts = [...new Set(rawEfforts.map((o) => o.value))]
   const defaultEffort =
     typeof thoughtOpt?.currentValue === 'string' && efforts.includes(thoughtOpt.currentValue)
       ? thoughtOpt.currentValue
@@ -83,13 +83,21 @@ export function toModelOptions(configOptions: readonly ConfigOption[]): ModelOpt
         : null
 
   const modelItems = extractSelectOptions(modelOpt.options)
-  return modelItems.map((item) => ({
-    id: item.value,
-    label: item.name || item.value,
-    efforts: [...efforts],
-    defaultEffort,
-    tiers: [],
-  }))
+  const seen = new Set<string>()
+  const result: ModelOption[] = []
+  for (const item of modelItems) {
+    if (!seen.has(item.value)) {
+      seen.add(item.value)
+      result.push({
+        id: item.value,
+        label: item.name || item.value,
+        efforts: [...efforts],
+        defaultEffort,
+        tiers: [],
+      })
+    }
+  }
+  return result
 }
 
 /** Saves discovered models to the Antigravity home cache */

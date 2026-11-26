@@ -143,6 +143,34 @@ describe('toModelOptions', () => {
       },
     ])
   })
+
+  it('deduplicates duplicate models and efforts', () => {
+    const models = toModelOptions([
+      {
+        id: 'model',
+        category: 'model',
+        type: 'select',
+        options: [
+          { value: 'dup-model', name: 'First' },
+          { value: 'dup-model', name: 'Second' },
+        ],
+      },
+      {
+        id: 'thought_level',
+        category: 'thought_level',
+        type: 'select',
+        options: [{ value: 'low' }, { value: 'low' }, { value: 'high' }],
+      },
+    ])
+    expect(models).toHaveLength(1)
+    expect(models[0]).toEqual({
+      id: 'dup-model',
+      label: 'First',
+      efforts: ['low', 'high'],
+      defaultEffort: 'low',
+      tiers: [],
+    })
+  })
 })
 
 describe('listAgyModels and saveAgyModels', () => {

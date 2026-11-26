@@ -656,4 +656,41 @@ describe('model and effort selection in ACP session', () => {
     expect(setCalls[1]?.params).toEqual({ sessionId: SID, configId: 'thought_level', value: 'high' })
     await s.dispose()
   })
+
+  it('preserves existing model when config_option_update only updates effort', async () => {
+    const w = world(scriptWithModels, { model: 'gemini-3.8-flash', effort: 'low' }, modelProfile)
+    const s = await w.start()
+    const peer = w.peers[0]!
+    expect(s.takeOpenedSettings?.()).toEqual({ model: 'gemini-3.8-flash', effort: 'low' })
+
+    peer.update(SID, {
+      sessionUpdate: 'config_option_update',
+      configOptions: [
+        {
+          id: 'thought_level',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: 'high',
+          options: [{ value: 'low' }, { value: 'high' }],
+        },
+      ],
+    })
+
+    expect(s.takeOpenedSettings?.()).toEqual({ model: 'gemini-3.8-flash', effort: 'high' })
+    await s.dispose()
+  })
+
+  it('does not adopt requested model when set_config_option fails', async () => {
+    const failingScript: PeerScript = (method, params, peer) => {
+      if (method === 'session/set_config_option') {
+        return { error: { code: -32603, message: 'Peer rejected model' } }
+      }
+      return scriptWithModels(method, params, peer)
+    }
+    const w = world(failingScript, { model: 'gemini-3.8-flash' }, modelProfile)
+    const s = await w.start()
+    // Does not adopt 'gemini-3.8-flash', remains the peer's initial model
+    expect(s.takeOpenedSettings?.()).toEqual({ model: 'gemini-4-argon', effort: 'medium' })
+    await s.dispose()
+  })
 })

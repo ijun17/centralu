@@ -94,3 +94,14 @@ describe('what an ACP tool says about its usage (#1623, #2459)', () => {
     expect(agy.localUsage).toBeUndefined()
   })
 })
+
+describe('what an ACP tool says about its models (#2479)', () => {
+  it('exposes listModels only when profile declares it (Antigravity), keeping Cursor and OpenCode isolated', () => {
+    const cursor = new FakeAdapter(cursorProfile())
+    expect(cursor.listModels).toBeUndefined()
+    const openCode = new FakeAdapter(openCodeProfile())
+    expect(openCode.listModels).toBeUndefined()
+    const agy = new FakeAdapter(antigravityProfile())
+    expect(agy.listModels).toBeTypeOf('function')
+  })
+})

@@ -219,6 +219,8 @@ class AcpWire implements ToolWire {
   /** This process's conversation is open (`open` answered): until then a failed open ends the process, after it the wire does */
   private opened = false
   private openedSettings: { model: string | null; effort: string | null } | null = null
+  private currentModel: string | null = null
+  private currentEffort: string | null = null
   private effortConfigId = 'thought_level'
 
   constructor(
@@ -271,25 +273,30 @@ class AcpWire implements ToolWire {
     if (this.deps.shape?.supportsModelOption) {
       const currentModel = options.find((c) => c.id === 'model' || c.category === 'model')?.currentValue
       const currentEffort = options.find((c) => c.category === 'thought_level' || c.id === 'thought_level' || c.id === 'thinking_level')?.currentValue
-      const modelStr = typeof currentModel === 'string' ? currentModel : null
-      const effortStr = typeof currentEffort === 'string' ? currentEffort : null
-      if (modelStr || effortStr) {
-        this.openedSettings = { model: modelStr, effort: effortStr }
+      if (typeof currentModel === 'string') this.currentModel = currentModel
+      if (typeof currentEffort === 'string') this.currentEffort = currentEffort
+      if (this.currentModel !== null || this.currentEffort !== null) {
+        this.openedSettings = {
+          model: this.currentModel,
+          effort: this.currentEffort,
+        }
       }
       this.deps.shape.onConfigOptions?.(options)
     }
   }
 
-  private async setConfigOption(configId: string, value: string): Promise<void> {
-    if (!this.conversation) return
+  private async setConfigOption(configId: string, value: string): Promise<boolean> {
+    if (!this.conversation) return false
     try {
       await this.conn.request('session/set_config_option', {
         sessionId: this.conversation,
         configId,
         value,
       }, 20_000)
+      return true
     } catch (err) {
       console.error(`[${this.label}] session/set_config_option failed (${configId}=${value}):`, err)
+      return false
     }
   }
 
@@ -301,12 +308,28 @@ class AcpWire implements ToolWire {
 
   updateSettings(settings: { model?: string | null; effort?: string | null }): void {
     if (!this.deps.shape?.supportsModelOption) return
-    if (settings.model) {
-      void this.setConfigOption('model', settings.model)
-    }
-    if (settings.effort) {
-      void this.setConfigOption(this.effortConfigId, settings.effort)
-    }
+    void (async () => {
+      if (settings.model) {
+        const ok = await this.setConfigOption('model', settings.model)
+        if (ok) {
+          this.currentModel = settings.model
+          this.openedSettings = {
+            model: this.currentModel,
+            effort: this.currentEffort,
+          }
+        }
+      }
+      if (settings.effort) {
+        const ok = await this.setConfigOption(this.effortConfigId, settings.effort)
+        if (ok) {
+          this.currentEffort = settings.effort
+          this.openedSettings = {
+            model: this.currentModel,
+            effort: this.currentEffort,
+          }
+        }
+      }
+    })()
   }
 
   async open(io: CoreIo, resume: { externalId: string } | null): Promise<{ externalId: string | null }> {
@@ -381,12 +404,18 @@ class AcpWire implements ToolWire {
       }
       if (this.deps.shape?.supportsModelOption) {
         if (this.opts.model) {
-          await this.setConfigOption('model', this.opts.model)
-          this.openedSettings = { model: this.opts.model, effort: this.openedSettings?.effort ?? null }
+          const ok = await this.setConfigOption('model', this.opts.model)
+          if (ok) {
+            this.currentModel = this.opts.model
+            this.openedSettings = { model: this.currentModel, effort: this.currentEffort }
+          }
         }
         if (this.opts.effort) {
-          await this.setConfigOption(this.effortConfigId, this.opts.effort)
-          this.openedSettings = { model: this.openedSettings?.model ?? null, effort: this.opts.effort }
+          const ok = await this.setConfigOption(this.effortConfigId, this.opts.effort)
+          if (ok) {
+            this.currentEffort = this.opts.effort
+            this.openedSettings = { model: this.currentModel, effort: this.currentEffort }
+          }
         }
       }
       this.opened = true
@@ -645,9 +674,6 @@ class AcpWire implements ToolWire {
       case 'agent_message_chunk':
         if (turn) turn.answer += blockText(u.content)
         this.emitAll(this.normalizer.update(u), turn)
-        return
-      case 'config_option_update':
-        this.handleConfigOptions(u.configOptions)
         return
       default:
         this.emitAll(this.normalizer.update(u), turn)
