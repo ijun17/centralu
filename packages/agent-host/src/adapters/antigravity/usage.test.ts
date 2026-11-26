@@ -115,7 +115,10 @@ describe('readAgyUsage with recorded and scripted peers', () => {
 
     const [first, second] = await Promise.all([adapter.listUsage!(), adapter.listUsage!()])
     expect(first).toEqual(second)
-    expect(first.windows.length).toBeGreaterThan(0)
+    expect(first).not.toBe('no-limits')
+    if (first !== 'no-limits') {
+      expect(first.windows.length).toBeGreaterThan(0)
+    }
     expect(spawns).toBe(1)
   })
 
@@ -128,7 +131,7 @@ describe('readAgyUsage with recorded and scripted peers', () => {
       if (method === 'initialize') return { result: { protocolVersion: 1 } }
       if (method === 'session/new') {
         setTimeout(() => {
-          peer.notify('session/update', { sessionId: 'ses-1', update: { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'plan' }] } })
+          peer.update('ses-1', { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'plan' }] })
         }, 10)
         return { result: { sessionId: 'ses-1' } }
       }
@@ -148,12 +151,12 @@ describe('readAgyUsage with recorded and scripted peers', () => {
       if (method === 'initialize') return { result: { protocolVersion: 1 } }
       if (method === 'session/new') {
         setTimeout(() => {
-          peer.notify('session/update', { sessionId: 'ses-1', update: { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'usage' }] } })
+          peer.update('ses-1', { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'usage' }] })
         }, 10)
         return { result: { sessionId: 'ses-1' } }
       }
       if (method === 'session/prompt') {
-        peer.notify('session/update', { sessionId: 'ses-1', update: { sessionUpdate: 'tool_call', callId: 'c-1', tool: 'some_tool' } })
+        peer.update('ses-1', { sessionUpdate: 'tool_call', callId: 'c-1', tool: 'some_tool' })
         return { result: { stopReason: 'end_turn' } }
       }
       return { result: null }
@@ -178,12 +181,12 @@ describe('readAgyUsage with recorded and scripted peers', () => {
       if (method === 'session/resume') return { error: { code: -32001, message: 'session not found' } }
       if (method === 'session/new') {
         setTimeout(() => {
-          peer.notify('session/update', { sessionId: 'new-ses', update: { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'usage' }] } })
+          peer.update('new-ses', { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'usage' }] })
         }, 10)
         return { result: { sessionId: 'new-ses' } }
       }
       if (method === 'session/prompt') {
-        peer.notify('session/update', { sessionId: 'new-ses', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: SAMPLE_MARKDOWN } } })
+        peer.update('new-ses', { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: SAMPLE_MARKDOWN } })
         return { result: { stopReason: 'end_turn' } }
       }
       return { result: null }
