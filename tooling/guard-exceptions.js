@@ -319,7 +319,7 @@ export const COMMENTS_LEFT = [
  */
 export const COMMENT_SHARE_HELD = {
   files: {
-    'packages/agent-host/src/adapters/acp/profile.ts': 54,
+    'packages/agent-host/src/adapters/acp/profile.ts': 53,
     'packages/agent-host/src/adapters/claude/centralu-mcp.ts': 39,
     'packages/agent-host/src/adapters/claude/history.ts': 38,
     'packages/agent-host/src/adapters/claude/json.ts': 48,
@@ -349,7 +349,7 @@ export const COMMENT_SHARE_HELD = {
     'packages/agent-host/src/adapters/contract/session-apps.ts': 61,
     'packages/agent-host/src/adapters/contract/surface.ts': 51,
     'packages/agent-host/src/adapters/core/grants.ts': 39,
-    'packages/agent-host/src/adapters/core/seam.ts': 57,
+    'packages/agent-host/src/adapters/core/seam.ts': 56,
     'packages/agent-host/src/adapters/edit-grant.ts': 39,
     'packages/agent-host/src/adapters/opencode/config.ts': 40,
     'packages/agent-host/src/adapters/plan.ts': 41,
