@@ -93,7 +93,8 @@ export async function readAgyUsage(home: AgyHome, archive: AgyArchive, signedOut
     text = ''
     const done = PromptResult.parse(await conn.request('session/prompt', { sessionId, prompt: [{ type: 'text', text: '/usage' }] }, timeoutMs))
     if (strayed) throw new Error(`Antigravity answered "/usage" with ${strayed}, not its usage`)
-    if (done.stopReason !== 'end_turn') throw new Error(`Antigravity's "/usage" ended "${String(done.stopReason)}", not with its usage`)
+    const reason: string = typeof done.stopReason === 'string' ? done.stopReason : ''
+    if (reason !== 'end_turn') throw new Error(`Antigravity's "/usage" ended "${reason}", not with its usage`)
     return readAgyQuota(text)
   } catch (err) {
     if (wantsSignIn || (err instanceof RpcError && err.code === AUTH_REQUIRED)) throw signedOut()
