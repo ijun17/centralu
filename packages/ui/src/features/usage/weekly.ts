@@ -3,11 +3,19 @@ import { formatDuration } from '../../app/format.js'
 
 /**
  * The weekly window the top-bar donut draws, by id or name, as tools name them differently (measured): claude
- * `weekly_all` / `weekly_scoped`, codex `secondary` labelled `1w`. None found: null, and the donut says unknown.
+ * `weekly_all` / `weekly_scoped`, codex `secondary` labelled `1w`, or model-group `<group>:weekly` labelled `Weekly`.
+ * When multiple model-family weekly windows exist, prefer the primary Gemini Models weekly window if present.
+ * None found: null, and the donut says unknown.
  */
 export function weeklyWindow(windows: readonly UsageWindow[]): UsageWindow | null {
   const weekly = windows.filter(isWeekly)
   if (weekly.length === 0) return null
+  const mainGemini = weekly.find((w) => /^gemini\s+models$/i.test(w.scope?.trim() ?? ''))
+  if (mainGemini) return mainGemini
+  const anyGemini = weekly.filter((w) => /gemini/i.test(w.scope ?? w.id))
+  if (anyGemini.length > 0 && weekly.every((w) => w.scope !== null)) {
+    return anyGemini.reduce((a, b) => (b.percent > a.percent ? b : a))
+  }
   // The fullest: a full per-model weekly must not hide behind a roomy account-wide one. Its name is in the tooltip
   return weekly.reduce((a, b) => (b.percent > a.percent ? b : a))
 }
@@ -25,7 +33,7 @@ export function barWindow(windows: readonly UsageWindow[]): UsageWindow | null {
 }
 
 export function isWeekly(w: UsageWindow): boolean {
-  return w.id.startsWith('weekly') || /^\d+\s*w$/i.test(w.label.trim())
+  return w.id.startsWith('weekly') || w.id.endsWith(':weekly') || /\bweekly\b/i.test(w.label) || /^\d+\s*w$/i.test(w.label.trim())
 }
 
 /** When a window resets, as time remaining: how much is left matters more than the moment */

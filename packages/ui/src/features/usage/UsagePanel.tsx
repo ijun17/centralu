@@ -12,6 +12,41 @@ import { HistorySection } from './HistorySection.jsx'
 import { SAME_ACCOUNT_LABEL } from './sameAccount.js'
 import { useLoad } from '../../app/useLoad.js'
 
+/**
+ * Group windows into rows: if windows have distinct model scopes (e.g. Antigravity's Gemini vs Claude/GPT),
+ * present each scope in its own row so related limits sit together (Gemini on top, others below: 2 and 2).
+ */
+function groupWindows(windows: UsageWindow[]): UsageWindow[][] {
+  const scopes = windows.map((w) => w.scope).filter((s): s is string => typeof s === 'string' && s !== '')
+  const distinctScopes = new Set(scopes)
+  if (distinctScopes.size >= 2) {
+    const map = new Map<string, UsageWindow[]>()
+    const unscoped: UsageWindow[] = []
+    for (const w of windows) {
+      if (w.scope) {
+        const list = map.get(w.scope) ?? []
+        list.push(w)
+        map.set(w.scope, list)
+      } else {
+        unscoped.push(w)
+      }
+    }
+    const rows: UsageWindow[][] = []
+    if (unscoped.length > 0) rows.push(unscoped)
+    const sortedScopes = Array.from(map.keys()).sort((a, b) => {
+      const aGem = /gemini/i.test(a) ? 0 : 1
+      const bGem = /gemini/i.test(b) ? 0 : 1
+      return aGem - bGem
+    })
+    for (const scopeKey of sortedScopes) {
+      const list = map.get(scopeKey)
+      if (list) rows.push(list)
+    }
+    return rows
+  }
+  return [windows]
+}
+
 /** Usage (FR-9, docs/agent-host/usage.md): subscription limits only, drawn for however many windows a tool has */
 export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A linked machine's limits (#82); null for this computer */ machine?: string | null }) {
   const platform = usePlatform()
@@ -87,6 +122,7 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
   }
 
   const { plan, windows, daily } = state.usage
+  const groups = groupWindows(windows)
 
   return (
     <div className="px-4 py-4" data-testid="usage-panel">
@@ -108,9 +144,13 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
         </p>
       )}
 
-      <div className="flex flex-wrap justify-center gap-6">
-        {windows.map((w) => (
-          <Donut key={`${w.id}-${w.scope ?? ''}`} window={w} />
+      <div className="space-y-4">
+        {groups.map((group, i) => (
+          <div key={i} className="flex flex-wrap justify-center gap-6">
+            {group.map((w) => (
+              <Donut key={`${w.id}-${w.scope ?? ''}`} window={w} />
+            ))}
+          </div>
         ))}
       </div>
 

@@ -97,6 +97,39 @@ describe('barWindow: the window the top-bar donut draws (#2459)', () => {
     expect(barWindow([w({ id: 'a', label: 'A', resetsAt: MONTH_END }), w({ id: 'b', label: 'B' })])?.id).toBe('a')
   })
 
+  it('multi-model weekly windows: picks Gemini Models weekly even if Claude weekly is fuller or resets later', () => {
+    const agyWindows = [
+      w({ id: 'gemini-models:weekly', label: 'Weekly', scope: 'Gemini Models', percent: 20, resetsAt: '2026-11-29T00:00:00.000Z' }),
+      w({ id: 'gemini-models:five-hour', label: 'Five Hour', scope: 'Gemini Models', percent: 90, resetsAt: '2026-11-22T15:00:00.000Z' }),
+      w({ id: 'claude-and-gpt-models:weekly', label: 'Weekly', scope: 'Claude and GPT models', percent: 85, resetsAt: '2026-12-01T00:00:00.000Z' }),
+      w({ id: 'claude-and-gpt-models:five-hour', label: 'Five Hour', scope: 'Claude and GPT models', percent: 50, resetsAt: '2026-11-22T15:00:00.000Z' }),
+    ]
+    expect(weeklyWindow(agyWindows)?.id).toBe('gemini-models:weekly')
+    expect(barWindow(agyWindows)?.id).toBe('gemini-models:weekly')
+  })
+
+  it('multi-model weekly history: picks Gemini Models weekly in barSeries', () => {
+    const agySeries = [
+      {
+        tool: 'antigravity' as const,
+        account: 'a',
+        window: 'gemini-models:weekly',
+        label: 'Weekly',
+        scope: 'Gemini Models',
+        points: [{ at: '2026-11-22T00:00:00.000Z', percent: 25, resetsAt: '2026-11-29T00:00:00.000Z' }],
+      },
+      {
+        tool: 'antigravity' as const,
+        account: 'a',
+        window: 'claude-and-gpt-models:weekly',
+        label: 'Weekly',
+        scope: 'Claude and GPT models',
+        points: [{ at: '2026-11-22T00:00:00.000Z', percent: 95, resetsAt: '2026-12-01T00:00:00.000Z' }],
+      },
+    ]
+    expect(barSeries(agySeries)?.window).toBe('gemini-models:weekly')
+  })
+
   it('is null with no window: the donut stays unknown', () => {
     expect(barWindow([])).toBeNull()
   })
