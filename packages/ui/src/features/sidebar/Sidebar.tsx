@@ -81,7 +81,7 @@ export function Sidebar() {
         The ways a project comes to be, as icons over the list: an existing folder or a new app. No "New folder as a
         project": the file manager or an agent makes the folder, then it is added.
       */}
-      <div className="mt-4 flex shrink-0 items-center gap-0.5 border-b border-line pb-1.5 pl-4 pr-2" data-testid="sidebar-projects-head">
+      <div className="mt-4 flex shrink-0 items-center gap-0.5 pb-1 pl-4 pr-2" data-testid="sidebar-projects-head">
         <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink-faint">Projects</span>
         <span ref={addAnchor} className="flex">
           <IconButton
@@ -126,7 +126,7 @@ export function Sidebar() {
               new app.
             </p>
           ) : (
-            <div className="cc-fade">
+            <div className="cc-fade flex flex-col px-2 py-1.5">
               {ids.map((id) => (
                 <ProjectBlock key={id} projectId={id} />
               ))}
@@ -168,13 +168,13 @@ export function Sidebar() {
 function SidebarSkeleton() {
   return (
     <div
-      className="cc-skeleton flex flex-col"
+      className="cc-skeleton flex flex-col px-2 py-1.5"
       role="status"
       aria-label="Loading projects"
       data-testid="sidebar-skeleton"
     >
       {[0, 1].map((i) => (
-        <div key={i} className="flex flex-col gap-2.5 border-b border-line px-4 py-3.5">
+        <div key={i} className="flex flex-col gap-2.5 rounded-lg px-2 py-3.5">
           <div className="h-3 w-1/3 animate-pulse rounded-md bg-surface-hover/50" />
           {[0, 1].map((r) => (
             <div key={r} className="flex items-center gap-2 pl-6">
