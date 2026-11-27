@@ -174,7 +174,7 @@ function SidebarSkeleton() {
       data-testid="sidebar-skeleton"
     >
       {[0, 1].map((i) => (
-        <div key={i} className="flex flex-col gap-2.5 rounded-lg px-2 py-3.5">
+        <div key={i} className="flex flex-col gap-2.5 rounded-lg px-2 py-2.5">
           <div className="h-3 w-1/3 animate-pulse rounded-md bg-surface-hover/50" />
           {[0, 1].map((r) => (
             <div key={r} className="flex items-center gap-2 pl-6">

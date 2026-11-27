@@ -95,7 +95,7 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
       tint is a row hover's strength (/20), under the row's own mark (/40 and the bar). Focus lane only (openProjectOf).
     */
     <section
-      className={`relative rounded-lg py-2.5 transition-colors hover:bg-surface-hover/30 ${open ? 'bg-surface-hover/20' : ''} ${away ? 'opacity-60' : ''} ${dropLine(drop.edge)}`}
+      className={`relative rounded-lg py-1.5 transition-colors hover:bg-surface-hover/30 ${open ? 'bg-surface-hover/20' : ''} ${away ? 'opacity-60' : ''} ${dropLine(drop.edge)}`}
       data-testid={`project-${project.name}`}
       data-machine={project.machine ?? undefined}
       data-away={away || undefined}
