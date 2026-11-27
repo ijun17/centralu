@@ -7,14 +7,14 @@ import { dirname, join, resolve } from 'node:path'
 import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { createInflateRaw } from 'node:zlib'
-import { errorMessage } from '@cc/protocol'
+import { errorMessage, isNewerVersion } from '@cc/protocol'
 import { asObj } from '../../json-value.js'
 import { processStartTime } from '../../dev-services/instance-lock.js'
 import { whichTool } from '../../env-path.js'
 import { HOST_PLATFORM, pathsOf, type Platform } from '../../os.js'
 import { readZipEntriesFrom, ZipError, zipEntryStart, type ZipEntry } from '../../zip.js'
 import { InstallFailure } from './failure.js'
-import { AGY_INSTALL_SPACE_BYTES, type AgyArchive, type AgyPlatformKey } from './release.js'
+import { AGY_INSTALL_SPACE_BYTES, isAllowedAgyArchiveUrl, isValidAgyVersion, normalizeSha256, sanitizeAgyCommand, type AgyArchive, type AgyPlatformKey, type AgyRelease } from './release.js'
 import { realOs } from '../../os/real.js'
 
 /**
@@ -80,6 +80,12 @@ export function agyHome(dataDir: string, version: string): AgyHome {
   return { root, versionDir: join(root, version), geminiHome: join(root, 'gemini-home') }
 }
 
+/** Returns an AgyHome targeting a different version under the same root */
+export function agyHomeWithVersion(home: AgyHome, version: string): AgyHome {
+  if (!isValidAgyVersion(version)) throw new Error(`Invalid Antigravity version: ${version}`)
+  return { root: home.root, versionDir: join(home.root, version), geminiHome: home.geminiHome }
+}
+
 /** The server's program in the installed folder */
 export function agyProgram(home: AgyHome, archive: AgyArchive): string {
   return join(home.versionDir, archive.command)
@@ -97,6 +103,74 @@ export function isInstalled(home: AgyHome, archive: AgyArchive): boolean {
   } catch {
     return false
   }
+}
+
+/** Reads self-describing archive metadata from `install.json` and checks that all declared files exist on disk */
+function readInstalledArchive(home: AgyHome): AgyArchive | null {
+  try {
+    const marker = asObj(JSON.parse(readFileSync(join(home.versionDir, INSTALL_MARKER), 'utf8')))
+    if (typeof marker.url !== 'string' || !isAllowedAgyArchiveUrl(marker.url)) return null
+    if (typeof marker.sha256 !== 'string') return null
+    const sha256 = normalizeSha256(marker.sha256)
+    if (!sha256) return null
+    if (typeof marker.command !== 'string') return null
+    const command = sanitizeAgyCommand(marker.command)
+    if (!command) return null
+    if (!Array.isArray(marker.args) || !marker.args.every((a): a is string => typeof a === 'string')) return null
+    if (!Array.isArray(marker.files) || marker.files.length === 0) return null
+    const files: string[] = []
+    for (const f of marker.files) {
+      if (typeof f !== 'string') return null
+      const clean = sanitizeAgyCommand(f)
+      if (!clean || clean !== f) return null
+      files.push(clean)
+    }
+    if (!files.includes(command)) return null
+    if (!files.every((f) => existsSync(join(home.versionDir, f)))) return null
+    return { url: marker.url, sha256, command, args: marker.args, files }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Scans the Antigravity root folder for installed version directories (e.g. `1.4.3`, `1.5.2`)
+ * that contain an `install.json` marker, returning versions sorted newest first.
+ */
+export function findInstalledAgyVersions(rootDir: string): string[] {
+  try {
+    const entries = readdirSync(rootDir, { withFileTypes: true })
+    const versions: string[] = []
+    for (const ent of entries) {
+      if (!ent.isDirectory() || !isValidAgyVersion(ent.name)) continue
+      const markerPath = join(rootDir, ent.name, INSTALL_MARKER)
+      if (existsSync(markerPath)) {
+        versions.push(ent.name)
+      }
+    }
+    return versions.sort((a, b) => (isNewerVersion(a, b) ? -1 : isNewerVersion(b, a) ? 1 : 0))
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Restores the newest valid Antigravity installation on disk (whether pinned or auto-updated).
+ * Prefers self-describing metadata stored in `install.json`, falling back to `knownReleases` for legacy markers.
+ */
+export function findInstalledAgy(
+  baseHome: AgyHome,
+  knownReleases: Readonly<Record<string, AgyRelease>>,
+  platformKey: AgyPlatformKey | null,
+): { version: string; home: AgyHome; archive: AgyArchive } | null {
+  for (const version of findInstalledAgyVersions(baseHome.root)) {
+    const home = agyHomeWithVersion(baseHome, version)
+    const fromMarker = readInstalledArchive(home)
+    if (fromMarker) return { version, home, archive: fromMarker }
+    const known = platformKey ? knownReleases[version]?.archives[platformKey] ?? null : null
+    if (known && isInstalled(home, known)) return { version, home, archive: known }
+  }
+  return null
 }
 
 /**
@@ -217,7 +291,7 @@ export async function installAgy(
   home: AgyHome,
   archive: AgyArchive,
   version: string,
-  opts: { io?: InstallIo; signal: AbortSignal; onProgress?: (p: Progress) => void; platform?: Platform },
+  opts: { io?: InstallIo; signal: AbortSignal; onProgress?: (p: Progress) => void; platform?: Platform; pruneOldVersions?: boolean },
 ): Promise<void> {
   const io = opts.io ?? realInstallIo
   const { signal } = opts
@@ -237,7 +311,10 @@ export async function installAgy(
     const pkg = join(work, 'pkg')
     await unpack(zip, archive, pkg, signal, opts.platform ?? HOST_PLATFORM)
     await realOs().files.promises.rm(zip, { force: true })
-    await writeFile(join(pkg, INSTALL_MARKER), `${JSON.stringify({ version, sha256: archive.sha256, url: archive.url })}\n`)
+    await writeFile(
+      join(pkg, INSTALL_MARKER),
+      `${JSON.stringify({ version, sha256: archive.sha256, url: archive.url, command: archive.command, args: archive.args, files: archive.files })}\n`,
+    )
     cancelled(signal)
     // A folder there without a whole install (another version's sha, a damaged copy) is replaced; a whole one is kept
     if (isInstalled(home, archive)) return
@@ -249,7 +326,7 @@ export async function installAgy(
   } finally {
     await realOs().files.promises.rm(work, { recursive: true, force: true }).catch(() => {})
   }
-  await removeOtherVersions(home)
+  if (opts.pruneOldVersions !== false) await removeOtherVersions(home)
 }
 
 async function download(io: InstallIo, url: string, to: string, signal: AbortSignal, onProgress?: (p: Progress) => void): Promise<string> {
@@ -365,12 +442,14 @@ function asFailure(err: unknown, signal: AbortSignal): InstallFailure {
 }
 
 /**
- * What an earlier host left of an install or a sign-in it did not finish (it crashed, or was killed mid-way): removed when
- * this host starts (`AgySetup`), before any install or sign-in of its own (plan §3.2)
+ * What an earlier host left of an install or a sign-in it did not finish (it crashed, or was killed mid-way), plus older
+ * version folders kept around by a background auto-update while the previous host was running: removed when this host
+ * starts (`AgySetup`), before any install or sign-in of its own (plan §3.2)
  */
 export async function removeLeftovers(home: AgyHome): Promise<void> {
   await removeStale(home.root, '.install-')
   await removeStale(home.root, '.sign-in-')
+  if (existsSync(join(home.versionDir, INSTALL_MARKER))) await removeOtherVersions(home)
 }
 
 /**

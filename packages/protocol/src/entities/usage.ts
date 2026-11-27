@@ -184,6 +184,8 @@ export const UsageWindow = z.object({
   resetsAt: z.string().nullable().default(null),
   /** If this window applies to one specific model only, that model's name */
   scope: z.string().nullable().default(null),
+  /** When a tool reports multiple scoped windows of the same cadence, the adapter marks its representative window here */
+  primary: z.boolean().optional(),
 })
 export type UsageWindow = z.infer<typeof UsageWindow>
 

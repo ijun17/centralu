@@ -7,10 +7,36 @@ import { useStore } from '../../store/store.js'
 import { useMachineName, useToolMeta } from '../../store/selectors.js'
 import { CacheSection } from './CacheSection.jsx'
 import { formatCount, formatReadAt } from '../../app/format.js'
-import { resetText } from './weekly.js'
+import { barWindow, resetText } from './weekly.js'
 import { HistorySection } from './HistorySection.jsx'
 import { SAME_ACCOUNT_LABEL } from './sameAccount.js'
 import { useLoad } from '../../app/useLoad.js'
+
+/**
+ * Group windows into rows when a tool reports multiple distinct model scopes,
+ * preserving the order emitted by the adapter so related limits sit together.
+ */
+function groupWindows(windows: UsageWindow[]): UsageWindow[][] {
+  const scopes = windows.map((w) => w.scope).filter((s): s is string => typeof s === 'string' && s !== '')
+  if (new Set(scopes).size >= 2) {
+    const map = new Map<string, UsageWindow[]>()
+    const unscoped: UsageWindow[] = []
+    for (const w of windows) {
+      if (w.scope) {
+        const list = map.get(w.scope) ?? []
+        list.push(w)
+        map.set(w.scope, list)
+      } else {
+        unscoped.push(w)
+      }
+    }
+    const rows: UsageWindow[][] = []
+    if (unscoped.length > 0) rows.push(unscoped)
+    for (const list of map.values()) rows.push(list)
+    return rows
+  }
+  return [windows]
+}
 
 /** Usage (FR-9, docs/agent-host/usage.md): subscription limits only, drawn for however many windows a tool has */
 export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A linked machine's limits (#82); null for this computer */ machine?: string | null }) {
@@ -53,8 +79,9 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
     <CacheSection cache={state.cache} toolLabel={meta.label} canOpen={(id) => id in useStore.getState().sessions} onOpen={openSession} />
   )
 
+  const preferredWindow = state.usage ? (barWindow(state.usage.windows)?.id ?? null) : null
   // The stored history, independent of the limits too; an older host or a failed read says so in a line
-  const history = <HistorySection tool={tool} machine={machine} canOpen={(id) => id in useStore.getState().sessions} onOpen={openSession} />
+  const history = <HistorySection tool={tool} machine={machine} preferredWindow={preferredWindow} canOpen={(id) => id in useStore.getState().sessions} onOpen={openSession} />
 
   // A tool with no limits (#1623): docs/design-system.md §10. A failed read (no `notReported`) shows its reason
   if (state.notReported) {
@@ -87,6 +114,7 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
   }
 
   const { plan, windows, daily } = state.usage
+  const groups = groupWindows(windows)
 
   return (
     <div className="px-4 py-4" data-testid="usage-panel">
@@ -108,9 +136,13 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
         </p>
       )}
 
-      <div className="flex flex-wrap justify-center gap-6">
-        {windows.map((w) => (
-          <Donut key={`${w.id}-${w.scope ?? ''}`} window={w} />
+      <div className="space-y-4">
+        {groups.map((group) => (
+          <div key={group[0]?.scope ?? 'unscoped'} className="flex flex-wrap justify-center gap-6">
+            {group.map((w) => (
+              <Donut key={`${w.id}-${w.scope ?? ''}`} window={w} />
+            ))}
+          </div>
         ))}
       </div>
 

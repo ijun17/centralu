@@ -31,7 +31,7 @@ export type UsageReadDeps = {
 export const AgyQuota = z.array(
   z.object({
     name: z.string().min(1),
-    buckets: z.array(z.object({ label: z.string().min(1), remaining: z.number().min(0).max(100), resetsAt: z.iso.datetime() })).min(1),
+    buckets: z.array(z.object({ label: z.string().min(1), remaining: z.number().min(0).max(100), resetsAt: z.iso.datetime().nullable() })).min(1),
   }),
 ).min(1)
 export type AgyQuota = z.infer<typeof AgyQuota>
@@ -110,8 +110,8 @@ export async function readAgyUsage(home: AgyHome, archive: AgyArchive, signedOut
 }
 
 const GROUP = /^- \*\*(.+)\*\*$/
-const NOTE = /^\*\(.*\)\*$/
-const BUCKET = /^- \*\*(.+):\*\* (\d+(?:\.\d+)?)% remaining \(resets (.+)\)$/
+const NOTE = /^\*?\(.*\)\*?$/
+const BUCKET = /^- \*\*(.+):\*\* (\d+(?:\.\d+)?)% remaining(?: \(resets (.+)\))?$/
 const RESET = /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{1,2}), (\d{4}), (\d{2}):(\d{2}) UTC$/
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
@@ -122,11 +122,11 @@ function unread(what: string): Error {
 
 /**
  * The "### Quota Limits" section of the answer (measured on 1.4.3, the answer in `recordings/antigravity-1.4.3/usage.jsonl`):
- * a group line, an italic note under it, and its limits, each "<n>% remaining (resets <Mon D, YYYY, HH:MM UTC>)". Every
- * other line there is a form not measured, so the whole answer is refused rather than read in part. Other sections are not read
+ * a group line, an optional note under it, and its limits, each "<n>% remaining (resets <Mon D, YYYY, HH:MM UTC>)" or "<n>% remaining".
+ * Other sections are not read.
  */
 export function readAgyQuota(markdown: string): AgyQuota {
-  const groups: { name: string; buckets: { label: string; remaining: number; resetsAt: string }[] }[] = []
+  const groups: { name: string; buckets: { label: string; remaining: number; resetsAt: string | null }[] }[] = []
   let inQuota = false
   for (const raw of markdown.split('\n')) {
     const line = raw.trim()
@@ -140,19 +140,27 @@ export function readAgyQuota(markdown: string): AgyQuota {
       const group = groups.at(-1)
       if (!group) throw unread('a limit before any group')
       const resetStr = bucket[3]
-      const reset = resetStr ? RESET.exec(resetStr) : null
-      if (!reset) throw unread('a reset time')
-      const [, month, day, year, hour, minute] = reset
+      let resetsAt: string | null = null
+      if (resetStr) {
+        const reset = RESET.exec(resetStr)
+        if (!reset) throw unread('a reset time')
+        const [, month, day, year, hour, minute] = reset
+        if (!month || !day || !year || !hour || !minute) throw unread('a reset time')
+        const at = new Date(Date.UTC(Number(year), MONTHS.indexOf(month), Number(day), Number(hour), Number(minute)))
+        resetsAt = at.toISOString()
+      }
       const label = bucket[1]
       const remainingStr = bucket[2]
-      if (!month || !day || !year || !hour || !minute || !label || !remainingStr) throw unread('a reset time')
-      const at = new Date(Date.UTC(Number(year), MONTHS.indexOf(month), Number(day), Number(hour), Number(minute)))
-      group.buckets.push({ label, remaining: Number(remainingStr), resetsAt: at.toISOString() })
+      if (!label || !remainingStr) throw unread('a bucket label or value')
+      group.buckets.push({ label, remaining: Number(remainingStr), resetsAt })
       continue
     }
     const group = GROUP.exec(line)
-    if (!group || !group[1]) throw unread('a line of a kind it does not know')
-    groups.push({ name: group[1], buckets: [] })
+    if (group && group[1]) {
+      groups.push({ name: group[1], buckets: [] })
+      continue
+    }
+    throw unread('a line of a kind it does not know')
   }
   const quota = AgyQuota.safeParse(groups)
   if (!quota.success) throw unread(groups.length === 0 ? 'no limits' : 'a group with no limits, or a value out of range')
@@ -161,12 +169,18 @@ export function readAgyQuota(markdown: string): AgyQuota {
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
+const isPrimaryGeminiGroup = (name: string) => /^gemini\s+models$/i.test(name.trim())
+
 /** One window per limit, scoped to its model group: "Weekly Limit Remaining" of "Gemini Models" is "Weekly", for Gemini Models */
 export function agyUsageSnapshot(quota: AgyQuota, plan: string | null): UsageSnapshot {
-  const windows: UsageWindow[] = quota.flatMap((g) =>
+  // Keep Gemini model groups ahead of other model families so the panel draws them on the top row
+  const ordered = [...quota].sort((a, b) => (/gemini/i.test(a.name) ? 0 : 1) - (/gemini/i.test(b.name) ? 0 : 1))
+  const windows: UsageWindow[] = ordered.flatMap((g) =>
     g.buckets.map((b) => {
       const label = b.label.replace(/\s+Limit(\s+Remaining)?$/, '')
-      return { id: `${slug(g.name)}:${slug(label)}`, label, percent: 100 - b.remaining, resetsAt: b.resetsAt, scope: g.name }
+      const id = `${slug(g.name)}:${slug(label)}`
+      const primary = isPrimaryGeminiGroup(g.name) && id.endsWith(':weekly')
+      return { id, label, percent: 100 - b.remaining, resetsAt: b.resetsAt, scope: g.name, ...(primary ? { primary: true } : {}) }
     }),
   )
   return { plan, windows, daily: [] }

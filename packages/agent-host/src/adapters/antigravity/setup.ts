@@ -1,9 +1,9 @@
 import { createListeners } from '@cc/common'
-import { errorMessage, type ToolSetup } from '@cc/protocol'
+import { errorMessage, isNewerVersion, type ToolSetup } from '@cc/protocol'
 import type { ToolSetupControl } from '../contract.js'
-import { hasSignIn, installAgy, isInstalled, removeLeftovers, type AgyHome, type InstallIo } from './agent-files.js'
+import { agyHomeWithVersion, hasSignIn, installAgy, isInstalled, removeLeftovers, type AgyHome, type InstallIo } from './agent-files.js'
 import { InstallFailure } from './failure.js'
-import type { AgyArchive } from './release.js'
+import { AGY_RELEASE, fetchLatestAgyRelease, type AgyArchive, type AgyPlatformKey, type AgyRegistryRelease } from './release.js'
 import { runSignIn, type SignInDeps, type SignInResult } from './sign-in.js'
 
 /**
@@ -28,6 +28,14 @@ export type AgySetupDeps = {
   /** This machine's archive, or null where Google ships no build */
   archive: AgyArchive | null
   version: string
+  /** Platform key for resolving platform archive on updates */
+  platformKey?: AgyPlatformKey | null
+  /** Whether auto-update is enabled (default: true) */
+  autoUpdate?: boolean
+  /** Custom fetcher for release updates (defaults to fetchLatestAgyRelease) */
+  fetchRelease?: () => Promise<AgyRegistryRelease | null>
+  /** Called when version/archive/home updates after auto-update */
+  onVersionUpdated?: (v: { version: string; archive: AgyArchive; home: AgyHome }) => void
   /** Whether the person's own Antigravity (app or `agy`) is on this machine (`ToolSetup.appFound`; `agyAppFinder`) */
   appFound?: () => boolean
   installIo?: InstallIo
@@ -39,8 +47,12 @@ export type AgySetupDeps = {
 }
 
 export class AgySetup implements ToolSetupControl {
+  private currentHome: AgyHome
+  private currentArchive: AgyArchive | null
+  private currentVersion: string
   private installing: Running<void> | null = null
   private signingIn: Running<void> | null = null
+  private checking: Promise<boolean> | null = null
   private progress: { received: number; total: number | null } | null = null
   private failure: ToolSetup['failure'] = undefined
   private plan: ToolSetup['plan'] = undefined
@@ -52,7 +64,78 @@ export class AgySetup implements ToolSetupControl {
   private readonly tidied: Promise<void>
 
   constructor(private readonly deps: AgySetupDeps) {
-    this.tidied = removeLeftovers(deps.home).catch(() => {})
+    this.currentHome = deps.home
+    this.currentArchive = deps.archive
+    this.currentVersion = deps.version
+    this.tidied = removeLeftovers(this.currentHome).catch(() => {})
+  }
+
+  get version(): string {
+    return this.currentVersion
+  }
+
+  get archive(): AgyArchive | null {
+    return this.currentArchive
+  }
+
+  get home(): AgyHome {
+    return this.currentHome
+  }
+
+  /**
+   * Checks for a newer Antigravity ACP version in the registry. Runs only when Antigravity is already installed
+   * and no manual install or sign-in is in flight. Concurrent calls share the same in-flight check.
+   */
+  checkUpdate(): Promise<boolean> {
+    if (this.deps.autoUpdate === false || !this.deps.platformKey) return Promise.resolve(false)
+    if (!this.installed() || this.installing || this.signingIn) return Promise.resolve(false)
+    if (this.checking) return this.checking
+    const run = this.runCheckUpdate().finally(() => {
+      if (this.checking === run) this.checking = null
+    })
+    this.checking = run
+    return run
+  }
+
+  private async runCheckUpdate(): Promise<boolean> {
+    const platformKey = this.deps.platformKey
+    if (!platformKey) return false
+    try {
+      await this.tidied
+      if (!this.installed() || this.installing || this.signingIn) return false
+      const fetchRelease = this.deps.fetchRelease ?? fetchLatestAgyRelease
+      const release = (await fetchRelease()) ?? AGY_RELEASE
+      const newArchive = release?.archives[platformKey]
+      if (!release || !newArchive) return false
+      const newVersion = release.version
+      if (!isNewerVersion(newVersion, this.currentVersion)) return false
+      const newHome = agyHomeWithVersion(this.currentHome, newVersion)
+      if (!isInstalled(newHome, newArchive)) {
+        if (this.installing || this.signingIn) return false
+        const run =
+          this.deps.runInstall ??
+          ((signal, onProgress) =>
+            installAgy(newHome, newArchive, newVersion, {
+              signal,
+              onProgress,
+              pruneOldVersions: false,
+              ...(this.deps.installIo ? { io: this.deps.installIo } : {}),
+            }))
+        const abort = new AbortController()
+        await run(abort.signal, () => {})
+      }
+      if (!this.installing && !this.signingIn && isInstalled(newHome, newArchive)) {
+        this.currentVersion = newVersion
+        this.currentArchive = newArchive
+        this.currentHome = newHome
+        this.deps.onVersionUpdated?.({ version: newVersion, archive: newArchive, home: newHome })
+        this.changed()
+        return true
+      }
+    } catch (e) {
+      console.error(`[Antigravity] auto-update check failed: ${errorMessage(e)}`)
+    }
+    return false
   }
 
   /** Resolves once the leftovers of an earlier host are gone (for tests and the host's start) */
@@ -61,7 +144,7 @@ export class AgySetup implements ToolSetupControl {
   }
 
   installed(): boolean {
-    return this.deps.archive !== null && isInstalled(this.deps.home, this.deps.archive)
+    return this.currentArchive !== null && isInstalled(this.currentHome, this.currentArchive)
   }
 
   private appFound(): boolean {
@@ -69,13 +152,13 @@ export class AgySetup implements ToolSetupControl {
   }
 
   signedIn(): boolean {
-    return this.installed() && !this.signedOutSeen && hasSignIn(this.deps.home)
+    return this.installed() && !this.signedOutSeen && hasSignIn(this.currentHome)
   }
 
   current(): ToolSetup {
     const base = { install: 'centralu', signIn: 'centralu' } as const
     const failure = this.failure ? { failure: this.failure } : {}
-    if (this.deps.archive === null) {
+    if (this.currentArchive === null) {
       return { ...base, state: 'not_installed', failure: { reason: 'unsupported_platform', message: 'Google ships no Antigravity agent for this system' } }
     }
     if (this.installing) return { ...base, state: 'installing', ...(this.progress ? { progress: this.progress } : {}) }
@@ -94,7 +177,9 @@ export class AgySetup implements ToolSetupControl {
   }
 
   install(): ToolSetup {
-    const archive = this.deps.archive
+    const home = this.currentHome
+    const archive = this.currentArchive
+    const version = this.currentVersion
     if (this.installing || !archive || this.installed()) return this.current()
     const abort = new AbortController()
     this.failure = undefined
@@ -102,7 +187,7 @@ export class AgySetup implements ToolSetupControl {
     const run =
       this.deps.runInstall ??
       ((signal, onProgress) =>
-        installAgy(this.deps.home, archive, this.deps.version, { signal, onProgress, ...(this.deps.installIo ? { io: this.deps.installIo } : {}) }))
+        installAgy(home, archive, version, { signal, onProgress, ...(this.deps.installIo ? { io: this.deps.installIo } : {}) }))
     const done = this.tidied
       .then(() =>
         run(abort.signal, (p) => {
@@ -137,17 +222,18 @@ export class AgySetup implements ToolSetupControl {
   }
 
   signIn(): ToolSetup {
-    const archive = this.deps.archive
+    const home = this.currentHome
+    const archive = this.currentArchive
     if (this.signingIn || !archive || !this.installed()) return this.current()
     const abort = new AbortController()
     this.failure = undefined
-    const run = this.deps.runSignIn ?? ((signal) => runSignIn(this.deps.home, archive, signal, this.deps.signIn ?? {}))
+    const run = this.deps.runSignIn ?? ((signal) => runSignIn(home, archive, signal, this.deps.signIn ?? {}))
     const done = this.tidied.then(() => run(abort.signal)).then(
       (result) => {
         this.signedOutSeen = false
         this.plan = result.plan ?? undefined
         // The agent answered, yet wrote no sign-in it will use: said, not taken for ready
-        if (!hasSignIn(this.deps.home)) this.failure = { reason: 'failed', message: 'Antigravity answered the sign-in but kept no account' }
+        if (!hasSignIn(home)) this.failure = { reason: 'failed', message: 'Antigravity answered the sign-in but kept no account' }
       },
       (err: unknown) => {
         this.failure = failureOf(err, 'sign-in')
