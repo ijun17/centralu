@@ -174,6 +174,8 @@ export const sessionsParams = {
    * `path` as the reply wrote it; the host resolves `~`, a path relative to the session's folder and a `file://` URL.
    */
   'messages.image': z.object({ sessionId: SessionId, path: z.string().min(1).max(4096) }),
+  /** Resolves a local file or folder link a reply named for native reveal; refuses unmentioned or off-machine paths */
+  'messages.resolveFile': z.object({ sessionId: SessionId, path: z.string().min(1).max(4096) }),
   'messages.search': z.object({ query: z.string(), limit: z.number().optional() }),
   'sessions.reorder': z.object({ projectId: ProjectId, orderedIds: z.array(z.string()) }),
   'sessions.list': z.object({}),

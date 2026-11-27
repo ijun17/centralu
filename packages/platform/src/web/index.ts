@@ -540,6 +540,13 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         await opts.nativeFiles.reveal(file)
         return { supported: true }
       },
+      revealMessageFile: async (sessionId, path) => {
+        if (!opts.nativeFiles) return { supported: false, reason: NO_DESKTOP_REVEAL }
+        const res = await rpc.call('messages.resolveFile', { sessionId, path })
+        if (!res.ok) throw new Error(res.message)
+        await opts.nativeFiles.reveal(res.file)
+        return { supported: true }
+      },
     },
     git: {
       status: (projectId) => rpc.call('git.status', { projectId }),

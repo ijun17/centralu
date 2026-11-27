@@ -61,6 +61,17 @@ export const MessageImage = z.discriminatedUnion('ok', [
 ])
 export type MessageImage = z.infer<typeof MessageImage>
 
+/** Why a local file link in a reply could not be resolved for reveal */
+export const MessageFileRefusal = z.enum(['not_mentioned', 'not_found', 'unreadable'])
+export type MessageFileRefusal = z.infer<typeof MessageFileRefusal>
+
+/** Canonical local path of a file or folder a reply named, for native reveal; never carries remote paths */
+export const MessageFile = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), file: z.string() }),
+  z.object({ ok: z.literal(false), reason: MessageFileRefusal, message: z.string() }),
+])
+export type MessageFile = z.infer<typeof MessageFile>
+
 /** What `fs.resolve` resolves a path for */
 export const FsResolvePurpose = z.enum(['trash', 'reveal', 'open', 'project'])
 export type FsResolvePurpose = z.infer<typeof FsResolvePurpose>

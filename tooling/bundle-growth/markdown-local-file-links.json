@@ -1,0 +1,4 @@
+{
+  "bytes": 6000,
+  "reason": "Markdown local file/folder link support: MessageFile protocol schema and messages.resolveFile client/mock wiring, hardened Unicode/file:///#L/UNC link parsing in filePath.ts, and ExternalFileLink with in-app image preview Modal, request-race guards, and native file reveal in Markdown.tsx. Measured 1,971,572 B against the 1,966,120 B ceiling (+5,452 B). Plain code with no new dependency."
+}

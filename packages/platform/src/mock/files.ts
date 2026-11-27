@@ -12,6 +12,7 @@ export class FilesMock {
   readonly trashedProjects: string[] = []
   readonly revealed: string[] = []
   readonly revealedImages: string[] = []
+  readonly revealedMessageFiles: { sessionId: string; path: string }[] = []
 
   searchError: string | null = null
 
@@ -48,6 +49,10 @@ export class FilesMock {
     },
     revealMessageImage: async (file: string) => {
       this.revealedImages.push(file)
+      return { supported: true }
+    },
+    revealMessageFile: async (sessionId: string, path: string) => {
+      this.revealedMessageFiles.push({ sessionId, path })
       return { supported: true }
     },
     reveal: async (projectId: string, path: string, sessionId?: string) => {

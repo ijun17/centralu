@@ -1,3 +1,4 @@
+import { sep } from 'node:path'
 import type { ModelWindows } from './auto-compact.js'
 import type { CacheLedger } from './cache-ledger.js'
 import {
@@ -9,6 +10,7 @@ import {
   streamRowKind,
   subagentStepRow,
   type Attachment,
+  type MessageFile,
   type MessageImage,
   type NormalizedEvent,
   type PermissionPreset,
@@ -16,7 +18,14 @@ import {
   type StoredMessage,
 } from '@cc/protocol'
 import type { Store } from '../dev-services/store.js'
-import { mentions, readMessageImage, resolveWrittenPath, writtenForms } from '../dev-services/message-image.js'
+import {
+  mentions,
+  readMessageImage,
+  resolveMessageFile,
+  resolveWrittenPath,
+  stripFileLocation,
+  writtenForms,
+} from '../dev-services/message-image.js'
 import { saveAttachment, sweepAttachments } from '../dev-services/attachments.js'
 
 /**
@@ -289,9 +298,35 @@ export class SessionRecord {
     if (!this.repliesName(sessionId, written)) {
       return { ok: false, reason: 'not_mentioned', message: 'No reply in this session names this path, so it is not read' }
     }
-    const abs = resolveWrittenPath(written, this.host.cwdFor(m))
+    const cwd = this.host.cwdFor(m)
+    const abs = resolveWrittenPath(written, cwd)
     if (abs === null) return { ok: false, reason: 'not_found', message: `${written} is not a path on this machine` }
-    return readMessageImage(abs)
+    const first = await readMessageImage(abs)
+    if (first.ok || !shouldRetryWithoutLocation(written, first.reason)) return first
+    const stripped = stripFileLocation(written)
+    if (!stripped) return first
+    const fallbackAbs = resolveWrittenPath(stripped, cwd)
+    return fallbackAbs === null ? first : readMessageImage(fallbackAbs)
+  }
+
+  /**
+   * Resolves a local file or folder one of this session's replies linked (`messages.resolveFile`).
+   * Checks `repliesName` before touching disk so unmentioned paths learn nothing about existence.
+   */
+  async messageFile(sessionId: string, written: string): Promise<MessageFile> {
+    const m = this.host.sessionOf(sessionId)
+    if (!this.repliesName(sessionId, written)) {
+      return { ok: false, reason: 'not_mentioned', message: 'No reply in this session names this path, so it is not opened' }
+    }
+    const cwd = this.host.cwdFor(m)
+    const abs = resolveWrittenPath(written, cwd)
+    if (abs === null) return { ok: false, reason: 'not_found', message: `${written} is not a path on this machine` }
+    const first = await resolveMessageFile(abs)
+    if (first.ok || !shouldRetryWithoutLocation(written, first.reason)) return first
+    const stripped = stripFileLocation(written)
+    if (!stripped) return first
+    const fallbackAbs = resolveWrittenPath(stripped, cwd)
+    return fallbackAbs === null ? first : resolveMessageFile(fallbackAbs)
   }
 
   repliesName(sessionId: string, written: string): boolean {
@@ -351,4 +386,14 @@ export class SessionRecord {
       }),
     )
   }
+}
+
+/**
+ * Whether a failed literal lookup should retry with a trailing `#L…` / `:line` suffix stripped.
+ * On Windows, `:` is rejected by `walkLinks` (`unchecked` -> `unreadable`) before `realpath` runs,
+ * so a `:line` suffix retries there too while POSIX `EACCES`/`EPERM` on a literal file still refuses.
+ */
+function shouldRetryWithoutLocation(written: string, reason: string): boolean {
+  if (reason === 'not_found') return true
+  return sep === '\\' && reason === 'unreadable' && /:\d+(?::\d+)?(?:#.*)?$/.test(written)
 }

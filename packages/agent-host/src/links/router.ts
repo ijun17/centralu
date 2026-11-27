@@ -150,7 +150,10 @@ export class Router {
       case 'view':
         return this.byView(method, params, route, ctx)
       case 'noRemote': {
-        if (this.owner(isObj(params) ? params[route.key] : undefined)) throw new NotOnRemoteError(method)
+        if (this.owner(isObj(params) ? params[route.key] : undefined)) {
+          if (route.refuse) return route.refuse()
+          throw new NotOnRemoteError(method)
+        }
         return this.opts.local(method, params, ctx)
       }
       case 'machine':

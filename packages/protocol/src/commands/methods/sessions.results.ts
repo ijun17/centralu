@@ -11,7 +11,7 @@ import {
   ToolStatus,
   UsageSnapshot,
 } from '../../entities.js'
-import { MessageImage } from '../files.js'
+import { MessageFile, MessageImage } from '../files.js'
 import { UnreachedMachine } from '../../machines.js'
 import { CommandInfo, ProjectInfo } from '../projects.js'
 import {
@@ -128,6 +128,7 @@ export const sessionsResults = {
   'agents.sleepPolicy': SleepPolicy,
   'agents.setSleepPolicy': SleepPolicy,
   'messages.image': MessageImage,
+  'messages.resolveFile': MessageFile,
   'messages.search': z.array(z.object({ sessionId: z.string(), seq: z.number(), snippet: z.string() })),
   'sessions.reorder': z.array(SessionInfo),
   'sessions.list': z.array(SessionInfo),

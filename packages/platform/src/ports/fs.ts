@@ -32,6 +32,8 @@ export interface FsPort {
   reveal(projectId: string, relPath: string, sessionId?: string): Promise<{ supported: boolean; reason?: string }>
   /** Reveals a `messageImage` answer's `file`, a path the host resolves; the window never builds one */
   revealMessageImage(file: string): Promise<{ supported: boolean; reason?: string }>
+  /** Resolves a path named by a session's reply (`messages.resolveFile`) and reveals it in the file manager */
+  revealMessageFile(sessionId: string, path: string): Promise<{ supported: boolean; reason?: string }>
 }
 
 export type { FsEntry, FsFile }
