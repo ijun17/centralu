@@ -19,7 +19,7 @@ import { parseMailId } from '../mail/ids.js'
  */
 
 /** Which window's connection a call came in on (transport/server.ts). Passed to the hub's own handler, never forwarded */
-type RpcContext = { client: number; rights?: 'full' | 'limited'; label?: string | null; covered?: boolean; window?: true }
+type RpcContext = { client: number; rights?: 'full' | 'limited'; label?: string | null; covered?: boolean; trustedDev?: true; window?: true }
 export type RpcHandler = (method: string, params: unknown, ctx?: RpcContext) => Promise<unknown>
 
 /** One linked machine, as the router needs it (linked-machine-connection.ts implements it) */
@@ -175,7 +175,7 @@ export class Router {
   }
 
   private async forward(m: RoutedMachine, method: string, params: unknown, ctx?: RpcContext): Promise<unknown> {
-    if (ctx?.rights === 'limited' && SCRIPT_TEXT.has(method)) {
+    if (ctx?.rights === 'limited' && !ctx.trustedDev && SCRIPT_TEXT.has(method)) {
       throw rpcError(`A script's message is not sent to ${m.name}: Centralu there would store it as the person's. Run the script on ${m.name} instead.`)
     }
     /*

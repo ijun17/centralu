@@ -553,7 +553,10 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
     expect(m1.calls).toEqual([])
     await router.handle('agents.send', { sessionId: 'm1.s1', text: 'hi' }, { client: 1 })
     await router.handle('agents.interrupt', { sessionId: 'm1.s1' }, script)
-    expect(m1.calls.map((c) => c.method)).toEqual(['agents.send', 'agents.interrupt'])
+    const trustedDev = { client: 3, rights: 'limited' as const, label: null, trustedDev: true as const }
+    await router.handle('agents.send', { sessionId: 'm1.s1', text: 'from dev tab' }, trustedDev)
+    await router.handle('agents.createSession', { projectId: 'm1.p1', cwd: '/srv', tool: 'claude', initialPrompt: 'hi' }, trustedDev)
+    expect(m1.calls.map((c) => c.method)).toEqual(['agents.send', 'agents.interrupt', 'agents.send', 'agents.createSession'])
   })
 
   it('a call to an unreachable machine fails at once, says to retry, and names the machine', async () => {

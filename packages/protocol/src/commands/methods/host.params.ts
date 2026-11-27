@@ -215,6 +215,8 @@ export const hostParams = {
    * --window` and cannot write to a host it did not start. `cancelled`: the announced end was called off
    */
   'host.systemEnding': z.object({ cancelled: z.boolean().optional() }),
+  /** Local dev:live tab pairing code for human message attribution on this socket only */
+  'host.trustDevTab': z.object({ code: z.string().regex(/^[A-Z0-9]{3}-[A-Z0-9]{3}$/) }),
   /**
    * docs/plans/remote-hub.md §12.7: sent at every connect and when its switch changes. This host calls that hub back only
    * on the connection the offer came in on, and shows it "not reachable" once that is gone.

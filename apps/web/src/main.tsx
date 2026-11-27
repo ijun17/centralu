@@ -1,6 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import { App, prepareFirstPaint, useStore } from '@cc/ui'
-import { createWebPlatform } from '@cc/platform/web'
+import { createWebPlatform, type RpcClient } from '@cc/platform/web'
 import { createMockPlatform } from '@cc/platform/mock'
 import type { Platform } from '@cc/platform/ports'
 import { startPlatform } from './bootstrap.js'
@@ -19,10 +19,11 @@ const firstPaint = prepareFirstPaint()
 const params = new URLSearchParams(location.search)
 const demo = params.get('demo')
 const root = createRoot(rootElement)
+let rpcClient: RpcClient | null = null
 // A failure is a screen to draw: thrown, it leaves a blank page
 const started = startPlatform<Platform>(location.search, import.meta.env, {
   mock: seedMock,
-  host: createWebPlatform,
+  host: (opts) => createWebPlatform({ ...opts, onRpcClient: (c) => (rpcClient = c) }),
 })
 
 function seedMock(): Platform {
@@ -50,6 +51,12 @@ if (started.error) {
     await seedDemo(started.platform as never, isDemoScene(demo) ? demo : 'focus')
   }
 
+  let devBanner = null
+  if (import.meta.env.DEV && rpcClient) {
+    const { DevTrustBanner } = await import('./DevTrustBanner.js')
+    devBanner = <DevTrustBanner rpc={rpcClient} />
+  }
+
   await firstPaint
-  root.render(<App platform={started.platform} />)
+  root.render(<App platform={started.platform} banner={devBanner} />)
 }

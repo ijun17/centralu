@@ -29,6 +29,8 @@ function harness(opts: { trash?: TrashedSession[]; canShow?: boolean; limits?: H
   const rights = new Map<string, 'full' | 'limited' | undefined>()
   /** What the program called itself, as each call that ran was told */
   const labels = new Map<string, string | null | undefined>()
+  /** Whether each call that ran carried `trustedDev` */
+  const trustedDevs = new Map<string, true | undefined>()
   const requests = new HostRequests({
     emit: (e) => events.push(e),
     canShow: () => canShow,
@@ -36,7 +38,11 @@ function harness(opts: { trash?: TrashedSession[]; canShow?: boolean; limits?: H
     sessionName: (id) => ({ named: 'Assistant', long: String.fromCharCode(0x202e).repeat(200) })[id] ?? null,
     limits: opts.limits,
     rpc: async (method, params, ctx) => {
-      if (!Object.hasOwn(lists, method)) { rights.set(method, ctx?.rights); labels.set(method, ctx?.label) }
+      if (!Object.hasOwn(lists, method)) {
+        rights.set(method, ctx?.rights)
+        labels.set(method, ctx?.label)
+        trustedDevs.set(method, ctx?.trustedDev)
+      }
       // The lists a card reads to name what a call acts on; every other call is recorded
       const read = Object.hasOwn(lists, method) ? lists[method] : undefined
       if (read) return read()
@@ -66,6 +72,7 @@ function harness(opts: { trash?: TrashedSession[]; canShow?: boolean; limits?: H
     events,
     calls,
     rights,
+    trustedDevs,
     labels,
     raised,
     nextCard,
@@ -367,5 +374,47 @@ describe('a host request (#1405)', () => {
     expect(h.requests.answer(card.requestId, 'allow')).toBe(false)
     expect((await caught(asked)).data?.refused).toBe('denied')
     expect(h.calls).toEqual([])
+  })
+
+  it('host.trustDevTab shows the origin, pairing code, and linked-machine scope, and resolves on Allow', async () => {
+    const h = harness()
+    const asked = h.requests.ask('host.trustDevTab', { code: 'K7M-4P2' }, { client: null, origin: 'http://127.0.0.1:5174' }, new AbortController().signal)
+    const card = await h.nextCard()
+    expect(card.method).toBe('host.trustDevTab')
+    expect(card.question).toContain('"http://127.0.0.1:5174"')
+    expect(card.question).toContain('K7M-4P2')
+    expect(card.question).toContain('linked machines')
+    expect(card.question).toContain('limited credential')
+    expect(h.requests.answer(card.requestId, 'allow')).toBe(true)
+    await expect(asked).resolves.toEqual({ ok: true })
+    // Trust state lives on the transport socket, never invokes an RPC handler directly
+    expect(h.calls).toEqual([])
+  })
+
+  it('generic() propagates from.trustedDev to deps.rpc while keeping rights: limited', async () => {
+    const h = harness()
+    const asked = h.requests.ask(
+      'agents.deleteSession',
+      { sessionId: 's1' },
+      { client: null, trustedDev: true },
+      new AbortController().signal,
+    )
+    const card = await h.nextCard()
+    expect(h.requests.answer(card.requestId, 'allow')).toBe(true)
+    await asked
+    expect(h.rights.get('agents.deleteSession')).toBe('limited')
+    expect(h.trustedDevs.get('agents.deleteSession')).toBe(true)
+  })
+
+  it('host.trustDevTab rejects malformed codes, missing origins, and denials without raising invalid cards', async () => {
+    const h = harness()
+    expect((await caught(h.requests.ask('host.trustDevTab', { code: 'bad' }, { client: null, origin: 'http://127.0.0.1:5174' }, new AbortController().signal))).data?.refused).toBe('not_done')
+    expect((await caught(h.requests.ask('host.trustDevTab', { code: 'K7M-4P2' }, { client: null }, new AbortController().signal))).data?.refused).toBe('not_done')
+    expect(h.raised()).toEqual([])
+
+    const denied = h.requests.ask('host.trustDevTab', { code: 'K7M-4P2' }, { client: null, origin: 'http://127.0.0.1:5174' }, new AbortController().signal)
+    const card = await h.nextCard()
+    h.requests.answer(card.requestId, 'deny')
+    expect((await caught(denied)).data?.refused).toBe('denied')
   })
 })

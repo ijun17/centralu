@@ -364,6 +364,8 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'host.handover': HUB,
   // The window of this machine telling its own host the system is ending (#1970); never through a link
   'host.systemEnding': HUB,
+  // A local dev:live browser tab asking its own host for human message attribution; never through a link
+  'host.trustDevTab': HUB,
   'machines.acceptVersions': HUB,
   'machines.install': HUB,
   'machines.update': HUB,

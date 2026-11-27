@@ -61,6 +61,8 @@ export type WebPlatformOptions = {
   }
   /** The desktop shell's answers, over the defaults a browser keeps */
   capabilities?: Partial<PlatformCapabilities>
+  /** Gives the browser dev shell access to the underlying RpcClient (used by `apps/web` for dev tab trust) */
+  onRpcClient?: (rpc: RpcClient) => void
 }
 
 /** Absent for this computer, never null: the host's schema takes a machine id or nothing */
@@ -402,6 +404,7 @@ function viewToolResult(r: { text: string; isError?: boolean; result?: unknown }
 export function createWebPlatform(opts: WebPlatformOptions): Platform {
   const url = new URL(opts.hostUrl ?? 'ws://127.0.0.1:5175')
   const rpc = new RpcClient({ url: url.toString(), token: opts.token, WebSocketImpl: opts.WebSocketImpl })
+  opts.onRpcClient?.(rpc)
   rpc.connect()
 
   const unsubscribeEndpoint = opts.onEndpointChange?.((next) => {

@@ -743,3 +743,31 @@ describe('view reads versus calls with side effects during a swap', () => {
     rpc.close()
   })
 })
+
+describe('RpcClient — connection rights from hello_ok', () => {
+  it('reports limited vs full from hello_ok and resets to null on disconnect and close', async () => {
+    const rpc = makeClient()
+    expect(rpc.rights).toBeNull()
+    rpc.connect()
+    expect(rpc.rights).toBeNull()
+
+    FakeWebSocket.last.ready({ rights: 'limited' })
+    expect(rpc.rights).toBe('limited')
+
+    FakeWebSocket.last.drop()
+    expect(rpc.rights).toBeNull()
+
+    await vi.advanceTimersByTimeAsync(1000)
+    // An older host or full-token hello_ok omits `rights`, which reads as 'full'
+    FakeWebSocket.last.ready()
+    expect(rpc.rights).toBe('full')
+
+    rpc.updateEndpoint('ws://127.0.0.1:9999/ws', 'tok-2')
+    expect(rpc.rights).toBeNull()
+    FakeWebSocket.last.ready({ rights: 'limited' })
+    expect(rpc.rights).toBe('limited')
+
+    rpc.close()
+    expect(rpc.rights).toBeNull()
+  })
+})

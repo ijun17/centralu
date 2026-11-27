@@ -51,10 +51,12 @@ export type HostRequestsDeps = {
 }
 
 /**
- * Who asked, as the hello said it: what the program called itself (never checked) and the session whose credential it holds
- * (#1405), which says only which session's process it claims to be
+ * Who asked, as the hello said it: what the program called itself (never checked), the session whose credential it holds
+ * (#1405), the dev browser `Origin` header (browser-enforced, though spoofable by local processes — the pairing code on the
+ * desktop card is the real approval boundary), and whether this open socket was already trusted as a local dev tab for human
+ * message attribution
  */
-export type RequestFrom = { client: string | null; session?: string }
+export type RequestFrom = { client: string | null; session?: string; origin?: string; trustedDev?: true }
 
 type Waiting = { request: HostRequest; settle: (answer: 'allow' | 'deny' | null, outcome: HostRequestOutcome) => void }
 
@@ -86,6 +88,8 @@ export class HostRequests {
     if (early) throw unanswered(method, early)
     const p = fields(params)
     switch (method) {
+      case 'host.trustDevTab':
+        return this.trustDevTab(params, from, signal)
       case 'trash.purge':
         return this.viaTrash(method, from, signal, { action: 'delete', sessionId: str(p.sessionId), what: 'session' }, () => ({ ok: true }))
       case 'trash.purgeSubagentSteps':
@@ -95,6 +99,26 @@ export class HostRequests {
       default:
         return this.generic(method, params, from, signal)
     }
+  }
+
+  /**
+   * A local `dev:live` browser tab asking to attribute messages on its single open WebSocket as typed by the person
+   * rather than as a script. The card displays the reported `Origin` header and the tab's 6-char pairing code — the code
+   * match in the desktop window is the security boundary (local processes can spoof `Origin`). Never grants full/window rights.
+   */
+  private async trustDevTab(params: unknown, from: RequestFrom, signal: AbortSignal): Promise<{ ok: true }> {
+    const runs = asItRuns('host.trustDevTab', params)
+    if (!runs.ok) throw refused('not_done', `host.trustDevTab was not done: ${runs.why}.`)
+    if (!from.origin) throw refused('not_done', 'host.trustDevTab was not done: no dev browser origin was provided.')
+    const code = str(fields(runs.params).code)
+    const question =
+      `Trust the dev browser tab at ${plainQuoted(from.origin, 120)} (code ${code}) to send messages as you? ` +
+      'Messages from this open tab (including to linked machines) will be recorded as typed by you rather than as a script until the tab reloads or disconnects. ' +
+      'It stays on the limited credential: approvals, deletions, mail, and security settings still require the Centralu desktop window. ' +
+      'Allow only if you clicked Trust this tab and see the same code there.'
+    const answer = await this.card('host.trustDevTab', question, from, signal)
+    if (answer.decision !== 'allow') throw unanswered('host.trustDevTab', answer.outcome)
+    return { ok: true }
   }
 
   /**
@@ -123,7 +147,7 @@ export class HostRequests {
       throw refused('not_done', `${method} was not done: what its card named changed while it stood (${now.ok ? `now ${now.text}` : now.why}).`)
     }
     // It runs as the call it was: a limited credential's (a script's createSession is told from a window's by it, §8.1)
-    return this.deps.rpc(method, runs.params, { client: -1, rights: 'limited', label: from.client })
+    return this.deps.rpc(method, runs.params, { client: -1, rights: 'limited', label: from.client, ...(from.trustedDev ? { trustedDev: true as const } : {}) })
   }
 
   /** The requests waiting, oldest first */

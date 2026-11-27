@@ -325,6 +325,15 @@ describe('a script that sends later is the script too (3.8b)', () => {
     expect(storedFirst(s.id).payload).toMatchObject({ fromScript: { credential: 'ci runner' } })
   })
 
+  it('a trusted dev:live browser socket sends raw human text without fromScript', async () => {
+    const s = await start({}, 'limited')
+    await rpc('agents.send', { sessionId: s.id, text: 'Typed in dev:live' }, { client: 1, rights: 'limited', label: null, trustedDev: true })
+    expect(storedFirst(s.id).payload).not.toHaveProperty('fromScript')
+    expect(handleOf(s.id)!.sent).toEqual(['Typed in dev:live'])
+    expect(handleOf(s.id)!.origins).toEqual([{ kind: 'human' }])
+    expect(w.mgr.sessionInfo(s.id)?.name).toBe('Typed in dev:live')
+  })
+
   it('a script’s send is work, not the person’s own turn: the turn it starts is reported on the task the person gave', async () => {
     const s = await start({}, 'limited')
     personTask(s.id)

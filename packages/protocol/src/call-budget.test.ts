@@ -18,4 +18,8 @@ describe('callBudgetMs (#2170)', () => {
     expect(callBudgetMs('apps.invoke')).toBe(APP_CAPABILITY_QUESTION_MS + APP_CALL_TIMEOUT_MS)
     expect(callBudgetMs('apps.invoke')).toBe(15 * 60_000)
   })
+
+  it('gives host.trustDevTab a minute past the host’s 15-minute card lifetime so expiry arrives before client timeout', () => {
+    expect(callBudgetMs('host.trustDevTab')).toBe(15 * 60_000 + 60_000)
+  })
 })

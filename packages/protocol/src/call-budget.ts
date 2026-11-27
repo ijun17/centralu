@@ -50,7 +50,11 @@ const GIT_WRITE_CALLS: ReadonlySet<string> = new Set(['git.stage', 'git.commit',
 /** `apps.invoke` may wait on the person's capability answer, then on the app's own bound */
 const APP_CALL_BUDGET_MS = APP_CAPABILITY_QUESTION_MS + APP_CALL_TIMEOUT_MS
 
+/** Past the host's 15-minute host-request lifetime (`HOST_REQUEST_LIMITS.lifetimeMs`), so the host's expiry arrives before client timeout */
+const HOST_REQUEST_BUDGET_MS = 15 * 60_000 + 60_000
+
 export function callBudgetMs(method: string): number {
+  if (method === 'host.trustDevTab') return HOST_REQUEST_BUDGET_MS
   if (method === 'apps.invoke') return APP_CALL_BUDGET_MS
   if (GIT_WRITE_CALLS.has(method)) return GIT_WRITE_BUDGET_MS
   return LONG_CALLS.has(method) ? LONG_CALL_BUDGET_MS : DEFAULT_CALL_BUDGET_MS

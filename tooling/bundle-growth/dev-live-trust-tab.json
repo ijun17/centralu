@@ -1,0 +1,4 @@
+{
+  "bytes": 500,
+  "reason": "Protocol HelloServer.rights, host.trustDevTab result schema and call budget, and RpcClient.rights tracking for dev:live tab trust promotion (DevTrustBanner itself is gated behind import.meta.env.DEV and tree-shaken from production builds). Measured 1,966,215 B against the 1,966,120 B ceiling (+95 B over ceiling). Plain code with no new dependency."
+}

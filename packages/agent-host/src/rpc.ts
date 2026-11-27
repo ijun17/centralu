@@ -179,7 +179,7 @@ export type MachinesPort = {
   followHub?(): void
 }
 
-type RpcContext = { client: number; rights?: 'full' | 'limited'; label?: string | null; covered?: boolean; window?: true }
+type RpcContext = { client: number; rights?: 'full' | 'limited'; label?: string | null; covered?: boolean; trustedDev?: true; window?: true }
 
 /** RPC routing. Parameters are validated exactly once, at the boundary (docs/protocol.md §4) */
 export function createRpcHandler(
@@ -340,7 +340,7 @@ export function createRpcHandler(
    * never from a field of the call. `_call` is for the compiler only: it must be a name in `SCRIPT_TEXT` (links/routes.ts), the list a
    * hub refuses to forward, so a new caller has to add its call there. Nothing checks that the name is the caller's own, or that a listed name has a caller
    */
-  const scriptAuthor = (_call: ScriptTextCall, ctx?: RpcContext) => (ctx?.rights === 'limited' ? { credential: scriptLabel(ctx.label) } : undefined)
+  const scriptAuthor = (_call: ScriptTextCall, ctx?: RpcContext) => (ctx?.rights === 'limited' && !ctx.trustedDev ? { credential: scriptLabel(ctx.label) } : undefined)
   /** An app's building session, written to by the person, or by the script that made the call (`scriptAuthor`) */
   const builderDeps = (call: ScriptTextCall, ctx?: RpcContext): BuilderRequestDeps => {
     const fromScript = scriptAuthor(call, ctx)
@@ -1052,6 +1052,7 @@ export function createRpcHandler(
     },
     'host.handover': async ({ handover: h }) => ack(handover?.(h)),
     'host.systemEnding': async ({ cancelled }) => ack(systemEnding?.(cancelled === true)),
+    'host.trustDevTab': async (_p) => ({ ok: true as const }),
   }
 
   const routes: Record<string, ((p: never, ctx?: RpcContext) => Promise<unknown>) | undefined> = { ...raw, ...handlers }

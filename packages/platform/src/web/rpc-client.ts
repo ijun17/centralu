@@ -77,6 +77,8 @@ export class RpcClient {
   private greeted = false
   /** `hello_ok` arrived: only then are calls sent and `connected` reported (protocol.md §1) */
   private ready = false
+  /** Connection rights reported by `hello_ok` (`'limited'` on limited credentials, `'full'` otherwise; null while disconnected) */
+  private connectionRights: 'full' | 'limited' | null = null
   private attempt = 0
   private closed = false
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined
@@ -94,6 +96,7 @@ export class RpcClient {
     // A new host numbers events from the start: the next hello is a first contact
     this.cursor.forget()
     this.ready = false
+    this.connectionRights = null
     this.clearTimers()
     // Detached first: close() is asynchronous, and the old onclose would clear the new socket and open another
     // reconnect, two sockets applying each streaming delta twice (measured)
@@ -131,12 +134,17 @@ export class RpcClient {
     return this.ready ? 'connected' : 'connecting'
   }
 
+  get rights(): 'full' | 'limited' | null {
+    return this.connectionRights
+  }
+
   connect(): void {
     if (this.closed) return
     // The backoff timer and updateEndpoint can overlap: never two sockets
     if (this.ws) return
     this.clearTimers()
     this.ready = false
+    this.connectionRights = null
     this.emitConn('connecting')
     const ws = new this.WS(this.opts.url)
     this.ws = ws
@@ -175,6 +183,7 @@ export class RpcClient {
     this.detach(ws)
     this.ws = null
     this.ready = false
+    this.connectionRights = null
     this.clearTimers()
     if (this.closed) return
     // Its answer never comes, even after a reconnect; left alone, a session would sit at 'working' for good
@@ -203,6 +212,7 @@ export class RpcClient {
       const greeted = this.greeted
       this.greeted = true
       this.ready = true
+      this.connectionRights = frame.rights ?? 'full'
       this.attempt = 0
       // protocol.md §1: a gap that cannot be replayed is read from the snapshot, and so is what the screen held when a
       // new host is met
@@ -355,6 +365,7 @@ export class RpcClient {
   close(): void {
     this.closed = true
     this.ready = false
+    this.connectionRights = null
     this.clearTimers()
     this.detach(this.ws)
     this.ws = null

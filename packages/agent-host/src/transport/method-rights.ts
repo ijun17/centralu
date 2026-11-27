@@ -370,6 +370,11 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
    * plant a false end that relabels a real crash as the system's (#1397)
    */
   'host.systemEnding': 'window',
+  /**
+   * A local `dev:live` browser tab asking the person (via a card with a pairing code and origin) to attribute
+   * messages on that single open WebSocket as human rather than script. Never grants full/window rights.
+   */
+  'host.trustDevTab': 'asks',
   'host.hubOffer': 'link',
   // From a hub that offered on the same connection only (rpc.ts), as `host.hubOffer` (#2067 item 2)
   'host.mail': 'link',
