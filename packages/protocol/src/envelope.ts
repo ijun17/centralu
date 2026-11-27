@@ -43,6 +43,8 @@ export const HelloServer = z.object({
    * Empty: it continues such turns; absent: it predates that
    */
   updateContinued: z.array(z.object({ sessionId: z.string(), at: z.number() })).optional().catch(undefined),
+  /** Sent when the socket authenticated with the limited credential (`'limited'`); absent on full connections and older hosts */
+  rights: z.enum(['full', 'limited']).optional().catch(undefined),
 })
 export type HelloServer = z.infer<typeof HelloServer>
 

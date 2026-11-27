@@ -77,6 +77,7 @@ export const hostResults = {
   ]),
   'host.handover': z.object({ ok: z.literal(true) }),
   'host.systemEnding': z.object({ ok: z.literal(true) }),
+  'host.trustDevTab': z.object({ ok: z.literal(true) }),
   // `mail`: this host takes `host.mail`, so the hub's task for a child here says to mail
   // `apps`: this host answers `host.apps` and `host.appCall`
   // `tasks`: this host takes the hub's tasks as mail and reports them back (`host.mail` with `task`)

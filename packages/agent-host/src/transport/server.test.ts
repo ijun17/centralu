@@ -8,6 +8,7 @@ import { HostServer, parseAllowedOrigins, versionMismatchMessage, type HostServe
 import { deriveHttpSecret, sameSecret, secretError, type HttpRoute } from './http.js'
 import { bridgeToken } from './bridge-token.js'
 import { limitedToken } from './limited-token.js'
+import { sessionToken } from './session-token.js'
 import { hostProof } from './host-proof.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { refuse } from '../mail/rules.js'
@@ -1516,5 +1517,220 @@ describe('deterministic shutdown (#82)', () => {
     expect(srv.close()).toBe(first)
     await first
     server = null
+  })
+})
+
+describe('host.trustDevTab (dev:live human attribution without privilege escalation)', () => {
+  const LIMITED = limitedToken(TOKEN)
+
+  async function rpcCall(c: ReturnType<typeof connect>, id: string, method: string, params: unknown) {
+    c.send({ kind: 'rpc', id, method, params })
+    await c.wait(() => c.frames.some((f) => f.kind === 'res' && f.id === id))
+    return c.frames.find((f) => f.kind === 'res' && f.id === id) as { ok: boolean; result?: unknown; error?: { message: string; data?: { refused?: string; rights?: string } } }
+  }
+
+  async function limitedClient(port: number, opts: { origin?: string; token?: string; client?: string } = {}) {
+    const c = connect(port, opts.origin)
+    await c.open()
+    c.send({ kind: 'hello', token: opts.token ?? LIMITED, protocolVersion: PROTOCOL_VERSION, ...(opts.client ? { client: opts.client } : {}) })
+    await c.wait(() => c.frames.some((f) => f.kind === 'hello_ok'))
+    return c
+  }
+
+  it('announces rights: limited only on limited sockets, promotes one dev tab socket for message attribution, keeps all window/asks barriers, isolates other sockets, and resets on reconnect', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const seen: { method: string; ctx: unknown }[] = []
+      const asks: { method: string; from: { client: string | null; session?: string; origin?: string; trustedDev?: true } }[] = []
+      const { port } = await start(
+        async (method, _params, ctx) => {
+          seen.push({ method, ctx })
+          return { ok: true }
+        },
+        {
+          onAsk: async (method, _params, from) => {
+            asks.push({ method, from })
+            return { ok: true }
+          },
+        },
+      )
+
+      // Full-token hello_ok stays unchanged (no rights field)
+      const fullHello = await hello(port, 'http://tauri.localhost')
+      expect(fullHello).not.toHaveProperty('rights')
+
+      const tabA = await limitedClient(port, { origin: 'http://127.0.0.1:5174' })
+      expect(tabA.frames[0]).toMatchObject({ kind: 'hello_ok', rights: 'limited' })
+
+      const tabB = await limitedClient(port, { origin: 'http://127.0.0.1:5174' })
+
+      // Before trust: agents.send has rights: 'limited' and no trustedDev
+      expect((await rpcCall(tabA, '1', 'agents.send', { sessionId: 's1', text: 'hi' })).ok).toBe(true)
+      expect(seen.at(-1)?.ctx).toMatchObject({ rights: 'limited' })
+      expect(seen.at(-1)?.ctx).not.toHaveProperty('trustedDev')
+
+      // Invalid params rejected before raising any card
+      const badBefore = await rpcCall(tabA, '1b', 'host.trustDevTab', { code: 'bad' })
+      expect(badBefore.ok).toBe(false)
+      expect(badBefore.error?.data).toEqual({ refused: 'not_done' })
+      expect(asks).toHaveLength(0)
+
+      // Promote tabA via desktop approval card
+      expect((await rpcCall(tabA, '2', 'host.trustDevTab', { code: 'K7M-4P2' })).ok).toBe(true)
+      expect(asks).toEqual([{ method: 'host.trustDevTab', from: { client: null, origin: 'http://127.0.0.1:5174' } }])
+      expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('trusted dev tab for human message attribution'))
+
+      // Idempotent: second valid call on already-trusted tabA does not raise another card,
+      // while invalid params are still rejected consistently
+      expect((await rpcCall(tabA, '3', 'host.trustDevTab', { code: 'Z9Q-1B2' })).ok).toBe(true)
+      expect(asks).toHaveLength(1)
+      const badAfter = await rpcCall(tabA, '3b', 'host.trustDevTab', { code: 'nope' })
+      expect(badAfter.ok).toBe(false)
+      expect(badAfter.error?.data).toEqual({ refused: 'not_done' })
+
+      // After trust: tabA gets trustedDev: true, still rights: 'limited' and NEVER window: true
+      expect((await rpcCall(tabA, '4', 'agents.send', { sessionId: 's1', text: 'hi again' })).ok).toBe(true)
+      expect(seen.at(-1)?.ctx).toMatchObject({ rights: 'limited', trustedDev: true })
+      expect(seen.at(-1)?.ctx).not.toHaveProperty('window')
+
+      // Window-only methods remain strictly refused even after trust
+      const ans = await rpcCall(tabA, '5', 'requests.answer', { requestId: 'r1', decision: 'allow' })
+      expect(ans.ok).toBe(false)
+      expect(ans.error?.data).toEqual({ refused: 'rights', rights: 'window' })
+
+      const mail = await rpcCall(tabA, '6', 'mail.list', {})
+      expect(mail.ok).toBe(false)
+      expect(mail.error?.data).toEqual({ refused: 'rights', rights: 'window' })
+
+      // Destructive asks methods still go through onAsk (never bypassed)
+      expect((await rpcCall(tabA, '7', 'trash.purge', { sessionId: 's1' })).ok).toBe(true)
+      expect(asks.at(-1)).toEqual({ method: 'trash.purge', from: { client: null, trustedDev: true } })
+
+      // Other simultaneous limited socket (tabB) is NOT trusted
+      expect((await rpcCall(tabB, '1', 'agents.send', { sessionId: 's1', text: 'from B' })).ok).toBe(true)
+      expect(seen.at(-1)?.ctx).not.toHaveProperty('trustedDev')
+
+      // Disconnect and reconnect resets trust completely
+      tabA.ws.close()
+      tabB.ws.close()
+      const reconnected = await limitedClient(port, { origin: 'http://127.0.0.1:5174' })
+      expect((await rpcCall(reconnected, '1', 'agents.send', { sessionId: 's1', text: 'after reload' })).ok).toBe(true)
+      expect(seen.at(-1)?.ctx).not.toHaveProperty('trustedDev')
+      reconnected.ws.close()
+    } finally {
+      errSpy.mockRestore()
+    }
+  })
+
+  it('hard-rejects non-dev origins, origin variants, origin-less clients, session credentials, serve/fullCredentials hosts, missing onAsk, concurrent requests, and disconnect races', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      let askCalls = 0
+      let releaseAsk!: () => void
+      let askSignal: AbortSignal | null = null
+      let askMode: 'deny' | 'allow' = 'deny'
+      const { port } = await start(async () => ({ ok: true }), {
+        onAsk: async (_method, _params, _from, signal) => {
+          askCalls++
+          askSignal = signal
+          await new Promise<void>((r) => (releaseAsk = r))
+          if (askMode === 'deny') throw new Error('denied by person')
+          return { ok: true }
+        },
+      })
+
+      // Missing Origin (native process / script)
+      const native = await limitedClient(port)
+      const rNative = await rpcCall(native, '1', 'host.trustDevTab', { code: 'K7M-4P2' })
+      expect(rNative.ok).toBe(false)
+      native.ws.close()
+
+      // Non-dev allowed origin (Tauri WebView)
+      const tauri = await limitedClient(port, { origin: 'http://tauri.localhost' })
+      const rTauri = await rpcCall(tauri, '1', 'host.trustDevTab', { code: 'K7M-4P2' })
+      expect(rTauri.ok).toBe(false)
+      tauri.ws.close()
+
+      // Origin trailing slash and uppercase variants are refused fail-closed at upgrade (403)
+      for (const badOrigin of ['http://127.0.0.1:5174/', 'HTTP://127.0.0.1:5174']) {
+        const ws = new WebSocket(`ws://127.0.0.1:${port}`, { origin: badOrigin })
+        const err = await new Promise<Error>((r) => ws.once('error', r))
+        expect(err.message).toMatch(/403/)
+      }
+
+      // Session credential (agent subprocess ccs1:...)
+      const sess = await limitedClient(port, { origin: 'http://127.0.0.1:5174', token: sessionToken(TOKEN, 'sess-1') })
+      const rSess = await rpcCall(sess, '1', 'host.trustDevTab', { code: 'K7M-4P2' })
+      expect(rSess.ok).toBe(false)
+      sess.ws.close()
+
+      expect(askCalls).toBe(0)
+      expect(spy).toHaveBeenCalledWith(expect.stringContaining('refused "host.trustDevTab"'))
+
+      // Concurrent second trust request while one is pending is rejected immediately, and denial leaves tab untrusted
+      const dev = await limitedClient(port, { origin: 'http://127.0.0.1:5173' })
+      const first = rpcCall(dev, '1', 'host.trustDevTab', { code: 'K7M-4P2' })
+      await dev.wait(() => askCalls === 1)
+      const dup = await rpcCall(dev, '2', 'host.trustDevTab', { code: 'K7M-4P2' })
+      expect(dup.ok).toBe(false)
+      expect(askCalls).toBe(1)
+      releaseAsk()
+      expect((await first).ok).toBe(false)
+      dev.ws.close()
+
+      // Socket closes before onAsk resolves: server's leaving signal aborts, so late resolve does not trust or log approval
+      spy.mockClear()
+      askMode = 'allow'
+      const closing = await limitedClient(port, { origin: 'http://127.0.0.1:5174' })
+      closing.send({ kind: 'rpc', id: '1', method: 'host.trustDevTab', params: { code: 'K7M-4P2' } })
+      await closing.wait(() => askCalls === 2)
+      closing.ws.close()
+      await closing.wait(() => askSignal?.aborted === true)
+      releaseAsk()
+      await new Promise((r) => setTimeout(r, 20))
+      expect(spy).not.toHaveBeenCalledWith(expect.stringContaining('trusted dev tab'))
+
+      // Missing onAsk handler refuses host.trustDevTab
+      await server?.close()
+      const noAsk = await start(async () => ({ ok: true }))
+      const noAskDev = await limitedClient(noAsk.port, { origin: 'http://127.0.0.1:5174' })
+      const rNoAsk = await rpcCall(noAskDev, '1', 'host.trustDevTab', { code: 'K7M-4P2' })
+      expect(rNoAsk.ok).toBe(false)
+      noAskDev.ws.close()
+      await noAsk.server.close()
+
+      // Serve host (servedBy: 'serve') always refuses host.trustDevTab
+      let serveAsks = 0
+      const served = await start(async () => ({ ok: true }), {
+        servedBy: 'serve',
+        onAsk: async () => {
+          serveAsks++
+          return { ok: true }
+        },
+      })
+      const serveDev = await limitedClient(served.port, { origin: 'http://127.0.0.1:5174' })
+      const rServe = await rpcCall(serveDev, '1', 'host.trustDevTab', { code: 'K7M-4P2' })
+      expect(rServe.ok).toBe(false)
+      expect(serveAsks).toBe(0)
+      serveDev.ws.close()
+      await served.server.close()
+
+      // Host with fullCredentials (serve credential mode) always refuses host.trustDevTab
+      let credAsks = 0
+      const credHost = await start(async () => ({ ok: true }), {
+        fullCredentials: () => [],
+        onAsk: async () => {
+          credAsks++
+          return { ok: true }
+        },
+      })
+      const credDev = await limitedClient(credHost.port, { origin: 'http://127.0.0.1:5174' })
+      const rCred = await rpcCall(credDev, '1', 'host.trustDevTab', { code: 'K7M-4P2' })
+      expect(rCred.ok).toBe(false)
+      expect(credAsks).toBe(0)
+      credDev.ws.close()
+    } finally {
+      spy.mockRestore()
+    }
   })
 })

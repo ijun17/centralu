@@ -165,6 +165,7 @@ With the limited credential: waits for the person's card in the window and runs 
 - `apps.enable`
 - `apps.importCommit`
 - `apps.remove`
+- `host.trustDevTab`
 - `machines.acceptVersions`
 - `machines.add`
 - `machines.autostart`
