@@ -126,7 +126,7 @@ export function Sidebar() {
               new app.
             </p>
           ) : (
-            <div className="cc-fade flex flex-col px-2 py-1.5">
+            <div className="cc-fade flex flex-col gap-1.5 px-2 py-1.5">
               {ids.map((id) => (
                 <ProjectBlock key={id} projectId={id} />
               ))}
@@ -168,13 +168,13 @@ export function Sidebar() {
 function SidebarSkeleton() {
   return (
     <div
-      className="cc-skeleton flex flex-col px-2 py-1.5"
+      className="cc-skeleton flex flex-col gap-1.5 px-2 py-1.5"
       role="status"
       aria-label="Loading projects"
       data-testid="sidebar-skeleton"
     >
       {[0, 1].map((i) => (
-        <div key={i} className="flex flex-col gap-2.5 rounded-lg px-2 py-2.5">
+        <div key={i} className="flex flex-col gap-2.5 rounded-lg bg-surface-raised px-2 py-2.5 ring-1 ring-inset ring-surface-selected">
           <div className="h-3 w-1/3 animate-pulse rounded-md bg-surface-hover/50" />
           {[0, 1].map((r) => (
             <div key={r} className="flex items-center gap-2 pl-6">

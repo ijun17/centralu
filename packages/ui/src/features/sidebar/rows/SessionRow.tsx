@@ -42,7 +42,7 @@ export function SessionRow({
       }}
       {...drop.handlers}
     >
-      <div className="relative">{children}</div>
+      <div className="relative pr-1.5">{children}</div>
     </li>
   )
 }

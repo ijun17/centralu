@@ -2,7 +2,7 @@ import { isMirrored, isUnread, type SessionSummary } from '@cc/core'
 import { useStore } from '../../../store/store.js'
 import { useSelectedSessionId } from '../../../store/selectors.js'
 import { SESSION_MIME } from '../reorder.js'
-import { INDENT, GUIDE, ROW_PAD } from '../layout.js'
+import { INDENT, GUIDE, ROW_PAD, ROW_PAD_IDLE } from '../layout.js'
 import { ToolMark } from '../marks/ToolMark.jsx'
 
 /**
@@ -20,7 +20,7 @@ export function UserAppSessions({ sessions: own }: { sessions: SessionSummary[] 
       <li
         key={s.id}
         data-level={2}
-        className={`relative ${INDENT[2]} ${GUIDE}`}
+        className={`relative ${INDENT[2]} pr-1.5 ${GUIDE}`}
         // Onto the grid like any session row; it carries no project, so no project screen takes it
         draggable
         onDragStart={(e) => {
@@ -34,8 +34,10 @@ export function UserAppSessions({ sessions: own }: { sessions: SessionSummary[] 
           data-testid={`app-session-row-${s.id}`}
           aria-current={focused ? 'page' : undefined}
           data-unread={(unread && !focused) || undefined}
-          className={`flex w-full items-center gap-2 border-l-2 py-1.5 ${ROW_PAD} pr-3 text-left text-md transition-colors ${
-            focused ? 'border-l-ink-muted bg-surface-hover/40 text-ink' : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
+          className={`flex w-full items-center gap-2 py-1.5 pr-3 text-left text-md transition-colors ${
+            focused
+              ? `rounded-r-md border-l-2 border-l-ink-muted bg-surface-hover/40 ${ROW_PAD} text-ink`
+              : `rounded-md ${ROW_PAD_IDLE} text-ink-muted hover:bg-surface-hover/25 hover:text-ink hover:ring-1 hover:ring-inset hover:ring-line`
           }`}
         >
           <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !isMirrored(s, machines)} interruption={s.interruption ?? null} openQuestions={s.pendingQuestions.length} unread={isUnread(s)} />

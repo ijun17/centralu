@@ -28,6 +28,8 @@ export const NAME_PAD = 'pl-[calc(var(--sidebar-gutter)+4px)]'
 export const ROW_MENU_PAD = 'pr-10'
 /** What a row's button stands in front of its content: the 2px bar (border-l-2) and, after it, this 28px gutter */
 export const ROW_PAD = 'pl-(--sidebar-gutter)'
+/** Same content column without border-l-2, so an unfocused row's inset hover ring aligns flush on all four edges */
+export const ROW_PAD_IDLE = 'pl-[calc(var(--sidebar-gutter)+2px)]'
 /** The fold chevron's button, and its glyph: one size for the project row and for every row that folds a group */
 export const DISCLOSURE_BUTTON = 'size-6'
 export const DISCLOSURE_ICON = 14

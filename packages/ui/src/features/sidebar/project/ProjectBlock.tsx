@@ -91,11 +91,13 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
 
   return (
     /*
-      The open project's whole group is tinted and its open row keeps its mark: a folded project has no row to mark. The
-      tint is a row hover's strength (/20), under the row's own mark (/40 and the bar). Focus lane only (openProjectOf).
+      Each project sits on its own raised card so a name on the left pairs with its right-aligned status counts without
+      dividers. The open project's whole card is tinted (/30), under the row's own mark (/40 and the bar). Focus lane only.
     */
     <section
-      className={`relative rounded-lg py-1.5 transition-colors hover:bg-surface-hover/30 ${open ? 'bg-surface-hover/20' : ''} ${away ? 'opacity-60' : ''} ${dropLine(drop.edge)}`}
+      className={`relative rounded-lg py-2 ring-1 ring-inset transition-colors ${
+        folded ? 'hover:bg-surface-hover/30' : ''
+      } ${open ? 'bg-surface-hover/30 ring-line' : 'bg-surface-raised ring-surface-selected'} ${away ? 'opacity-60' : ''} ${dropLine(drop.edge)}`}
       data-testid={`project-${project.name}`}
       data-machine={project.machine ?? undefined}
       data-away={away || undefined}

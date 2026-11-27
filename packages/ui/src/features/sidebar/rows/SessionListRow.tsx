@@ -4,7 +4,7 @@ import { childrenGroupKey } from '../../../store/foldGroups.js'
 import { useStore } from '../../../store/store.js'
 import { DotsIcon } from '../../../components/icons.jsx'
 import { groupAttention } from '../fold.js'
-import { MAX_LEVEL, ROW_MENU_PAD, ROW_PAD, type INDENT } from '../layout.js'
+import { MAX_LEVEL, ROW_MENU_PAD, ROW_PAD, ROW_PAD_IDLE, type INDENT } from '../layout.js'
 import { GroupToggle } from './GroupToggle.jsx'
 import { FoldedMark } from '../marks/FoldedMark.jsx'
 import { foldKeys } from './groupFold.js'
@@ -112,10 +112,10 @@ function SessionListRowView({
             // Unread (FR-16) is the name's brightness; the attribute lets tests see it without asserting a class
             data-unread={(unread && !focused) || undefined}
             // ROW_MENU_PAD clears the hover menu button: a name hidden under it is worse than truncated
-            className={`flex w-full items-center gap-2 border-l-2 py-1.5 ${ROW_PAD} ${ROW_MENU_PAD} text-left text-md transition-colors ${
+            className={`flex w-full items-center gap-2 py-1.5 ${ROW_MENU_PAD} text-left text-md transition-colors ${
               focused
-                ? 'border-l-ink-muted bg-surface-hover/40 text-ink'
-                : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
+                ? `rounded-r-md border-l-2 border-l-ink-muted bg-surface-hover/40 ${ROW_PAD} text-ink`
+                : `rounded-md ${ROW_PAD_IDLE} text-ink-muted hover:bg-surface-hover/25 hover:text-ink hover:ring-1 hover:ring-inset hover:ring-line`
             }`}
           >
             {/*

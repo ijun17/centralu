@@ -435,7 +435,7 @@ export const COMMENT_SHARE_HELD = {
     'packages/platform/src/ports/projects.ts': 56,
     'packages/platform/src/ports/system.ts': 63,
     'packages/protocol/src/app-id.ts': 40,
-    'packages/protocol/src/call-budget.ts': 40,
+    'packages/protocol/src/call-budget.ts': 39,
     'packages/protocol/src/commands/methods/apps.params.ts': 48,
     'packages/protocol/src/commands/methods/assistant.params.ts': 42,
     'packages/protocol/src/commands/methods/host.params.ts': 55,

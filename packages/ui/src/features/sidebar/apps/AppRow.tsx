@@ -9,7 +9,7 @@ import { isRemoteUserApp, type ExternalCatalogApp } from '../../../store/app-cat
 import { MachineBadge, MachineBadgePlaceholder } from '../../machines/MachineTag.jsx'
 import { APP_MIME, projectItemMime } from '../reorder.js'
 import { groupAttention } from '../fold.js'
-import { INDENT, ROW_PAD } from '../layout.js'
+import { INDENT, ROW_PAD, ROW_PAD_IDLE } from '../layout.js'
 import { GroupToggle } from '../rows/GroupToggle.jsx'
 import { FoldedMark } from '../marks/FoldedMark.jsx'
 import { foldKeys } from '../rows/groupFold.js'
@@ -80,7 +80,7 @@ export function AppRow({
   })
   return (
     <li
-      className={`relative ${INDENT[1]} ${away ? 'opacity-60' : ''}`}
+      className={`relative ${INDENT[1]} pr-1.5 ${away ? 'opacity-60' : ''}`}
       data-level={1}
       data-folded={folded || undefined}
       /*
@@ -110,8 +110,10 @@ export function AppRow({
         data-status={app.info.status}
         aria-current={active ? 'page' : undefined}
         title={app.status.reason ?? app.info.description ?? undefined}
-        className={`flex w-full items-center gap-2 border-l-2 py-1.5 ${ROW_PAD} ${busy ? 'pr-9' : 'pr-3'} text-left text-md transition-colors ${
-          active ? 'border-l-ink-muted bg-surface-hover/40 text-ink' : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
+        className={`flex w-full items-center gap-2 py-1.5 ${busy ? 'pr-9' : 'pr-3'} text-left text-md transition-colors ${
+          active
+            ? `rounded-r-md border-l-2 border-l-ink-muted bg-surface-hover/40 ${ROW_PAD} text-ink`
+            : `rounded-md ${ROW_PAD_IDLE} text-ink-muted hover:bg-surface-hover/25 hover:text-ink hover:ring-1 hover:ring-inset hover:ring-line`
         }`}
       >
         {/* The tool chip's width (17px), so names start in one column */}
