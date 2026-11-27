@@ -97,6 +97,48 @@ describe('barWindow: the window the top-bar donut draws (#2459)', () => {
     expect(barWindow([w({ id: 'a', label: 'A', resetsAt: MONTH_END }), w({ id: 'b', label: 'B' })])?.id).toBe('a')
   })
 
+  it('multi-model weekly windows: prefers a weekly window marked primary by the adapter', () => {
+    const multiWindows = [
+      w({ id: 'family-a:weekly', label: 'Weekly', scope: 'Family A', percent: 20, resetsAt: '2026-11-29T00:00:00.000Z', primary: true }),
+      w({ id: 'family-a:five-hour', label: 'Five Hour', scope: 'Family A', percent: 90, resetsAt: '2026-11-22T15:00:00.000Z' }),
+      w({ id: 'family-b:weekly', label: 'Weekly', scope: 'Family B', percent: 85, resetsAt: '2026-12-01T00:00:00.000Z' }),
+      w({ id: 'family-b:five-hour', label: 'Five Hour', scope: 'Family B', percent: 50, resetsAt: '2026-11-22T15:00:00.000Z' }),
+    ]
+    expect(weeklyWindow(multiWindows)?.id).toBe('family-a:weekly')
+    expect(barWindow(multiWindows)?.id).toBe('family-a:weekly')
+  })
+
+  it('matches scoped weekly labels such as "<Model> Weekly"', () => {
+    const windows = [
+      w({ id: 'model-x:model-x-weekly', label: 'Model X Weekly', scope: 'Model X', percent: 40, resetsAt: '2026-11-29T00:00:00.000Z' }),
+    ]
+    expect(weeklyWindow(windows)?.id).toBe('model-x:model-x-weekly')
+  })
+
+  it('multi-model weekly history: tracks preferredWindowId when provided to barSeries', () => {
+    const multiSeries = [
+      {
+        tool: 'antigravity' as const,
+        account: 'a',
+        window: 'family-a:weekly',
+        label: 'Weekly',
+        scope: 'Family A',
+        points: [{ at: '2026-11-22T00:00:00.000Z', percent: 25, resetsAt: '2026-11-29T00:00:00.000Z' }],
+      },
+      {
+        tool: 'antigravity' as const,
+        account: 'a',
+        window: 'family-b:weekly',
+        label: 'Weekly',
+        scope: 'Family B',
+        points: [{ at: '2026-11-22T00:00:00.000Z', percent: 95, resetsAt: '2026-12-01T00:00:00.000Z' }],
+      },
+    ]
+    expect(barSeries(multiSeries, 'family-a:weekly')?.window).toBe('family-a:weekly')
+    // Without a preferred window, falls back to the fullest weekly series
+    expect(barSeries(multiSeries)?.window).toBe('family-b:weekly')
+  })
+
   it('is null with no window: the donut stays unknown', () => {
     expect(barWindow([])).toBeNull()
   })

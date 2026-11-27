@@ -1,0 +1,4 @@
+{
+  "bytes": 500,
+  "reason": "Protocol UsageWindow.primary flag, primary-window preference in UsagePanel/HistorySection/weekly, and Antigravity mock capability parity in packages/platform/src/mock/tools.ts. Measured 1,965,801 B against the 1,965,620 B ceiling (+181 B over ceiling). Plain code with no new dependency."
+}
