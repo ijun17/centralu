@@ -119,6 +119,73 @@ describe('an image a reply names', () => {
   })
 })
 
+describe('a local file link a reply names (messages.resolveFile)', () => {
+  const resolveFile = (path: string, sessionId = session.id) =>
+    rpc('messages.resolveFile', { sessionId, path }) as Promise<{ ok: boolean; file?: string; reason?: string; message?: string }>
+
+  it('resolves non-image files, Korean names, folders, #L/:line links, encoded # file:// URLs, streaming, and subagent replies', async () => {
+    const dir = join(elsewhere, '자동사냥-배속-배너')
+    mkdirSync(dir, { recursive: true })
+    const zip = join(dir, '상점용-PNG.zip')
+    const txt = join(dir, 'notes.txt')
+    const hashFile = join(dir, 'report #1.pdf')
+    const shot = join(dir, 'shot.png')
+    writeFileSync(zip, 'PK\x03\x04')
+    writeFileSync(txt, 'hello')
+    writeFileSync(hashFile, '%PDF')
+    writeFileSync(shot, PNG)
+    const fileUrl = `${pathToFileURL(txt).href}#L10-L20`
+    const fileColonUrl = `${pathToFileURL(txt).href}:12`
+    const hashFileUrl = pathToFileURL(hashFile).href
+    agent().say(
+      `[다운로드](${zip}) · [메모](${fileUrl}) · [URL라인](${fileColonUrl}) · [앵커](${txt}#L10-L20) · [라인](${txt}:12:4) · [폴더](${dir}) · [해시](${hashFileUrl}) · [이미지](${shot}:1)`,
+    )
+
+    expect(await resolveFile(zip)).toEqual({ ok: true, file: zip })
+    expect(await resolveFile(fileUrl)).toEqual({ ok: true, file: txt })
+    expect(await resolveFile(fileColonUrl)).toEqual({ ok: true, file: txt })
+    expect(await resolveFile(`${txt}#L10-L20`)).toEqual({ ok: true, file: txt })
+    expect(await resolveFile(`${txt}:12:4`)).toEqual({ ok: true, file: txt })
+    expect(await resolveFile(dir)).toEqual({ ok: true, file: dir })
+    // Raw file:// URL keeps %23 intact so fileURLToPath resolves `report #1.pdf` instead of truncating at `#`
+    expect(await resolveFile(hashFileUrl)).toEqual({ ok: true, file: hashFile })
+    // Image links with :1 suffix fall back cleanly in messages.image as well
+    expect(await image(`${shot}:1`)).toMatchObject({ ok: true, file: shot })
+
+    // Streaming reply in memory
+    const liveFile = join(elsewhere, 'live.zip')
+    writeFileSync(liveFile, 'PK')
+    agent().say('Streaming… ', false)
+    agent().say(`[live](${liveFile})`, false)
+    expect(await resolveFile(liveFile)).toEqual({ ok: true, file: liveFile })
+
+    // Subagent reply
+    const subFile = join(elsewhere, 'sub.zip')
+    writeFileSync(subFile, 'PK')
+    agent().raw({
+      type: 'subagent_event',
+      sessionId: session.id,
+      parentCallId: 'task-2',
+      step: { type: 'message_delta', sessionId: session.id, role: 'assistant', text: `[sub](${subFile})` },
+    })
+    expect(await resolveFile(subFile)).toEqual({ ok: true, file: subFile })
+  })
+
+  it('refuses unmentioned paths, missing files, off-machine file:// URLs, and filesystem roots', async () => {
+    const secret = join(elsewhere, 'secret.zip')
+    writeFileSync(secret, 'x')
+    const missing = join(elsewhere, 'missing.zip')
+    agent().say(`[missing](${missing}) · [remote](file://server/share/a.zip) · [root](/)`)
+
+    expect(await resolveFile(secret)).toMatchObject({ ok: false, reason: 'not_mentioned' })
+    expect(await resolveFile(missing)).toMatchObject({ ok: false, reason: 'not_found' })
+    expect(await resolveFile('file://server/share/a.zip')).toMatchObject({ ok: false, reason: 'not_found' })
+    if (process.platform !== 'win32') {
+      expect(await resolveFile('/')).toMatchObject({ ok: false, reason: 'unreadable' })
+    }
+  })
+})
+
 describe('a path no reply of this session names', () => {
   it('is refused before it is read, even when it is a real image', async () => {
     const file = join(elsewhere, 'grid.png')

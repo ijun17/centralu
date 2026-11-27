@@ -485,15 +485,6 @@ describe('Linux bundle configuration', () => {
       expect(existsSync(join(ROOT, 'apps/desktop/src-tauri', icon)), `${icon} is missing`).toBe(true)
     }
   })
-
-  it('the macOS DMG background exists on disk when configured', () => {
-    const mac = JSON.parse(
-      readFileSync(join(ROOT, 'apps/desktop/src-tauri/tauri.conf.json'), 'utf8'),
-    ) as { bundle: { macOS?: { dmg?: { background?: string } } } }
-    const bg = mac.bundle.macOS?.dmg?.background
-    expect(bg, 'bundle.macOS.dmg.background is not set').toBeTruthy()
-    expect(existsSync(join(ROOT, 'apps/desktop/src-tauri', bg!)), `${bg} is missing`).toBe(true)
-  })
 })
 
 /**

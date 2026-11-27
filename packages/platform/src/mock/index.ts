@@ -405,6 +405,7 @@ export class MockPlatform implements Platform {
   get trashedProjects() { return this.filesMock.trashedProjects }
   get revealed() { return this.filesMock.revealed }
   get revealedImages() { return this.filesMock.revealedImages }
+  get revealedMessageFiles() { return this.filesMock.revealedMessageFiles }
 
   // terminals.ts
   get terminalState() { return this.terminalsMock.terminalState }

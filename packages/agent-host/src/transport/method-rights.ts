@@ -148,6 +148,7 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'agents.account': 'everyday',
   'usage.history': 'everyday',
   'messages.image': 'everyday',
+  'messages.resolveFile': 'everyday',
   'messages.search': 'everyday',
   'messages.load': 'everyday',
   'messages.subagent': 'everyday',

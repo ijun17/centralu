@@ -380,8 +380,7 @@ class AcpWire implements ToolWire {
       const version = init.agentInfo?.version ?? (await this.deps.version())
       if (version) this.emit({ type: 'agent_version', sessionId: this.sessionId, version })
       this.canClose = init.agentCapabilities?.sessionCapabilities?.close !== undefined
-      const meta = this.deps.shape?.sessionMeta?.(this.opts)
-      const base = { cwd: this.opts.cwd, mcpServers: this.mcpServers(), ...(meta ? { _meta: meta } : {}) }
+      const base = { cwd: this.opts.cwd, mcpServers: this.mcpServers() }
       if (resume) {
         const caps = init.agentCapabilities
         const method = caps?.loadSession ? 'session/load' : caps?.sessionCapabilities?.resume !== undefined ? 'session/resume' : null

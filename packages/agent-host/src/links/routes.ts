@@ -29,7 +29,7 @@ export type Route =
   /** `sharesAccount`: a tool logged in to the same account here and there reads its limits once, on the hub (`agents.usage`, #726) */
   | { kind: 'machine'; result?: ResultFix; sharesAccount?: boolean }
   | { kind: 'view'; keys: readonly string[]; result?: ResultFix; orMachine?: boolean }
-  | { kind: 'noRemote'; key: 'sessionId' | 'projectId' }
+  | { kind: 'noRemote'; key: 'sessionId' | 'projectId'; refuse?: () => unknown }
   | { kind: 'chain'; result?: ResultFix; params?: ParamsFix }
 
 const session = (result?: ResultFix, params?: ParamsFix): Route => ({ kind: 'session', result, params })
@@ -139,6 +139,16 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
     const { file: _file, ...rest } = r
     return rest
   }),
+  // A file on a linked machine cannot be revealed in this computer's file manager — refuse locally without forwarding
+  'messages.resolveFile': {
+    kind: 'noRemote',
+    key: 'sessionId',
+    refuse: () => ({
+      ok: false,
+      reason: 'not_found',
+      message: 'This file is on another machine and cannot be revealed here',
+    }),
+  },
   'trash.read': session(messages),
   'trash.restore': session(fields({ session: sessionInfo, project: projectInfo })),
   'trash.purge': session(),

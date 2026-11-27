@@ -794,6 +794,9 @@ export function createRpcHandler(
     'messages.image': async ({ sessionId, path }) => {
       return mgr.record.messageImage(sessionId, path)
     },
+    'messages.resolveFile': async ({ sessionId, path }) => {
+      return mgr.record.messageFile(sessionId, path)
+    },
     'messages.subagent': async ({ sessionId, parentCallId, afterSeq, limit }) => {
       return mgr.record.loadSubagentMessages(sessionId, parentCallId, afterSeq, limit)
     },

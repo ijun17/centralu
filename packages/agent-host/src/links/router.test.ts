@@ -95,6 +95,18 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
     localAnswers['messages.image'] = { ok: false, reason: 'too_large', message: 'big', file: '/Users/me/big.png' }
     expect(await router.handle('messages.image', { sessionId: 's1', path: '~/big.png' })).toMatchObject({ file: '/Users/me/big.png' })
     expect(local).toHaveLength(1)
+
+    m1.answers['messages.resolveFile'] = { ok: true, file: '/remote/home/out.zip' }
+    expect(await router.handle('messages.resolveFile', { sessionId: 'm1.s1', path: '~/out.zip' })).toMatchObject({
+      ok: false,
+      reason: 'not_found',
+    })
+    expect(m1.calls.filter((c) => c.method === 'messages.resolveFile')).toEqual([])
+    localAnswers['messages.resolveFile'] = { ok: true, file: '/Users/me/out.zip' }
+    expect(await router.handle('messages.resolveFile', { sessionId: 's1', path: '~/out.zip' })).toEqual({
+      ok: true,
+      file: '/Users/me/out.zip',
+    })
   })
 
   it('sends a project-keyed call by its project, and a terminal call by its terminal', async () => {

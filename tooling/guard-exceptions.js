@@ -414,7 +414,6 @@ export const COMMENT_SHARE_HELD = {
     'packages/agent-host/src/sessions/session-layout.ts': 37,
     'packages/agent-host/src/sessions/session-lines.ts': 38,
     'packages/agent-host/src/sessions/session-processes.ts': 46,
-    'packages/agent-host/src/sessions/session-record.ts': 36,
     'packages/agent-host/src/sessions/session-settings.ts': 39,
     'packages/agent-host/src/sessions/session-tools.ts': 36,
     'packages/agent-host/src/sessions/snippet.ts': 40,

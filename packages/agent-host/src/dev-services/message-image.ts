@@ -6,7 +6,7 @@ import { open, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { posix, sep, win32, type PlatformPath } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { IMAGE_PREVIEW_MAX_BYTES, type MessageImage, type MessageImageRefusal } from '@cc/protocol'
+import { IMAGE_PREVIEW_MAX_BYTES, type MessageFile, type MessageImage, type MessageImageRefusal } from '@cc/protocol'
 import { DRIVE_PATH, walkLinks } from './link-walk.js'
 
 /**
@@ -51,18 +51,33 @@ export function sniffImage(b: Uint8Array): string | null {
 }
 
 /**
- * The spellings of `written` a reply may hold. The window sends the path decoded (Markdown percent-encodes a
- * destination, so `한글.png` arrives as `%ED%95%9C…` and is decoded back); an agent that wrote `a%20b.png` itself
- * wrote the encoded form, which `encodeURI` gives back.
+ * The spellings of `written` a reply may hold. For non-`file:` paths, the window sends the path decoded (Markdown
+ * percent-encodes a destination, so `한글.png` arrives as `%ED%95%9C…` and is decoded back), while an agent that wrote
+ * `a%20b.png` itself wrote the encoded form (`encodeURI`). For `file:` URLs, the window sends the raw URL intact so
+ * `%23`, `%3F`, `%25`, and `%2F` are never corrupted or double-decoded before `fileURLToPath`, while `decodeURI` recovers
+ * unencoded UTF-8 characters (`한글`) that Markdown percent-encoded. Parentheses encoded as `%28`/`%29` for Markdown
+ * links are checked as well.
  */
 export function writtenForms(written: string): string[] {
-  let encoded = written
+  const forms = new Set<string>([written])
   try {
-    encoded = encodeURI(written)
+    forms.add(encodeURI(written))
   } catch {
     // A lone surrogate: only the string as sent can match
   }
-  return encoded === written ? [written] : [written, encoded]
+  if (/^file:/i.test(written)) {
+    try {
+      forms.add(decodeURI(written))
+    } catch {
+      // Malformed percent sequence: keep raw form only
+    }
+  }
+  for (const form of [...forms]) {
+    if (form.includes('(') || form.includes(')')) {
+      forms.add(form.replace(/\(/g, '%28').replace(/\)/g, '%29'))
+    }
+  }
+  return [...forms]
 }
 
 // What may stand right before and right after a path in Markdown: `](…)`, `(<…>)`, `[x]: …`, quotes, a code span
@@ -171,4 +186,53 @@ export async function readMessageImage(abs: string, max: number = IMAGE_PREVIEW_
   } finally {
     await handle.close()
   }
+}
+
+/**
+ * Strips a trailing `#L10` / `#L10-L20` anchor or `:10` / `:10:4` suffix from a path (or `:10` / `:10:4` from a `file:`
+ * URL; `fileURLToPath` already drops `#fragment`). Refuses stripping down to empty, `~`, or a bare Windows drive (`C:`).
+ */
+export function stripFileLocation(written: string): string | null {
+  if (/^file:/i.test(written)) {
+    const hashAt = written.indexOf('#')
+    const base = hashAt >= 0 ? written.slice(0, hashAt) : written
+    const stripped = base.replace(/:\d+(?::\d+)?$/, '')
+    if (!stripped || stripped === base || /^file:\/\/(?:\/|localhost\/)[A-Za-z]:?$/i.test(stripped)) return null
+    return stripped
+  }
+  if (/^[A-Za-z]:\d+(?::\d+)?$/.test(written)) return null
+  const stripped = written.replace(/(?:#L\d+(?:C\d+)?(?:-L?\d+(?:C\d+)?)?|:\d+(?::\d+)?)$/i, '')
+  if (!stripped || stripped === written || /^[A-Za-z]:$/.test(stripped) || stripped === '~') return null
+  return stripped
+}
+
+/**
+ * Resolves a local file or folder named by a reply to its canonical path for native reveal (`messages.resolveFile`).
+ * Runs the same on-machine and Windows link-walk checks as `readMessageImage`, never reads file bytes, and refuses
+ * filesystem roots (`/` or `C:\`) which cannot be revealed as an item in a parent folder.
+ */
+export async function resolveMessageFile(abs: string): Promise<MessageFile> {
+  const windows = sep === '\\'
+  if (windows) {
+    const walk = await walkLinks(abs)
+    if (!walk.ok && walk.reason === 'elsewhere') {
+      return { ok: false, reason: 'not_found', message: `${abs} leads to ${walk.why}, which is not on this machine` }
+    }
+    if (!walk.ok) return { ok: false, reason: 'unreadable', message: `Centralu cannot check where ${abs} leads: ${walk.why}` }
+  }
+  let file: string
+  try {
+    file = await realpath(abs)
+  } catch (e) {
+    const code = errnoCode(e)
+    if (code === 'EACCES' || code === 'EPERM') return { ok: false, reason: 'unreadable', message: `Centralu may not inspect ${abs}` }
+    return { ok: false, reason: 'not_found', message: `There is no file or folder at ${abs}` }
+  }
+  if (windows && !DRIVE_PATH.test(file)) {
+    return { ok: false, reason: 'not_found', message: `${abs} leads to ${file}, which is not on this machine` }
+  }
+  if (file === '/' || /^[A-Za-z]:[\\/]?$/.test(file)) {
+    return { ok: false, reason: 'unreadable', message: `${file} is a root folder and cannot be revealed` }
+  }
+  return { ok: true, file }
 }

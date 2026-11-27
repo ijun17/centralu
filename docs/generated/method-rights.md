@@ -104,6 +104,7 @@ With the limited credential: runs.
 - `machines.withdrawAsk`
 - `messages.image`
 - `messages.load`
+- `messages.resolveFile`
 - `messages.search`
 - `messages.subagent`
 - `messages.subagentTrashed`
