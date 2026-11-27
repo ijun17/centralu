@@ -293,8 +293,34 @@ export function toolSetupTests(): void {
       await expect(page.getByTestId('create-session-confirm')).toBeDisabled()
     })
 
-    test('the new-app dialog gives the reason Antigravity cannot build an app, and no Install or Sign in', async ({ page }) => {
-      // The mock says what the real host says: Antigravity takes no role text, and an app's builder is given its role as text
+    test('the new-app dialog shows Install/Sign in for Antigravity and clears the block once ready', async ({ page }) => {
+      // Antigravity supports roleText, so the new-app dialog walks through Centralu setup rather than refusing it
+      for (const [setup, expected] of [
+        [centralu('not_installed'), 'install'],
+        [centralu('signed_out'), 'sign_in'],
+      ] as const) {
+        await antigravity(page, setup)
+        await page.getByTestId('create-app').click()
+        const dialog = page.getByTestId('new-app-dialog')
+        await dialog.getByTestId('new-app-tool-antigravity').click()
+        const line = dialog.getByTestId('new-app-tool-blocked')
+        await expect(line).toHaveAttribute('data-setup', expected)
+        await expect(dialog.getByTestId('new-app-create')).toBeDisabled()
+        await page.keyboard.press('Escape')
+        await expect(dialog).toHaveCount(0)
+      }
+      await antigravity(page, centralu('ready'))
+      await page.getByTestId('create-app').click()
+      const dialog = page.getByTestId('new-app-dialog')
+      await dialog.getByTestId('new-app-tool-antigravity').click()
+      await expect(dialog.getByTestId('new-app-tool-blocked')).toHaveCount(0)
+      await page.keyboard.press('Escape')
+      await expect(dialog).toHaveCount(0)
+    })
+
+    test('the new-app dialog gives the reason a tool without role text cannot build an app, and no Install or Sign in', async ({ page }) => {
+      // A Centralu-managed tool without roleText shows the refusal instead of Install or Sign in
+      await page.evaluate(() => ((window as unknown as MockWindow).__mock.capabilityLimits.antigravity = { roleText: false }))
       for (const setup of [centralu('not_installed'), centralu('signed_out'), centralu('ready')]) {
         await antigravity(page, setup)
         await page.getByTestId('create-app').click()
@@ -435,12 +461,14 @@ export function toolSetupTests(): void {
         await expect(page.getByTestId('intro')).toBeVisible()
         await page.evaluate((t) => {
           const m = (window as unknown as MockWindow).__mock
+          // The real adapter cannot keep a project's own files out, so the Assistant (projectTrusted: false) refuses it
+          m.capabilityLimits.antigravity = { keepsRepoFilesOut: false }
           const claude = m.detected.find((x: any) => x.name === 'claude')
           m.detected = [claude, { name: 'antigravity', label: 'Antigravity', mark: 'A', install: 'Installed from Centralu', login: 'Sign in with Google', detail: 'agent 1.4.3', ...t }]
         }, tool)
         await page.getByTestId('redetect').click()
         const card = page.getByTestId('intro-card-antigravity')
-        await expect(page.getByTestId('intro-card-antigravity-status')).toContainText("Antigravity cannot take Centralu's role instructions yet")
+        await expect(page.getByTestId('intro-card-antigravity-status')).toContainText('runs only in trusted projects')
         await expect(card.getByRole('button')).toHaveCount(0)
         await expect(card).toBeDisabled()
         // The same dimming and reason type as the other refused cards: the whole card, not only its title
