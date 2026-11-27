@@ -116,4 +116,6 @@ export type AcpToolShape = {
   readonly supportsModelOption?: boolean
   readonly interruptForInput?: boolean
   onConfigOptions?(options: readonly ConfigOption[]): void
+  /** Extra `_meta` fields attached to `session/new`, `session/load`, and `session/resume` requests */
+  sessionMeta?(opts: CreateSessionOpts): Record<string, unknown> | undefined
 }

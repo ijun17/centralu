@@ -31,6 +31,18 @@ export function fakeInstall(home: AgyHome, archive: AgyArchive = TEST_ARCHIVE): 
   writeFileSync(join(home.versionDir, INSTALL_MARKER), JSON.stringify({ version: AGY_RELEASE.version, sha256: archive.sha256 }))
 }
 
+/** Leaves a finished install of a specific version and archive under home.root */
+export function fakeInstallVersion(home: AgyHome, version: string, archive: AgyArchive): AgyHome {
+  const versionHome = { root: home.root, versionDir: join(home.root, version), geminiHome: home.geminiHome }
+  fakeInstall(versionHome, archive)
+  return versionHome
+}
+
+/** Creates a folder under parent */
+export function makeFolder(parent: string, sub: string): void {
+  mkdirSync(join(parent, sub), { recursive: true })
+}
+
 /**
  * What the agent's sign-in leaves on disk where its token goes to the file (Windows, Linux, a Mac without a usable
  * Keychain): `auth.type` and a token file, whose content no one reads. On a Mac with the Keychain only the settings are left

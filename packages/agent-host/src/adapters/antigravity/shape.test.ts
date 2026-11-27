@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { NormalizedEvent, PermissionPreset } from '@cc/protocol'
 import { FakeAcpPeer, type PeerScript } from '../acp/fake-peer.test-helpers.js'
 import { logToolStderr, redactLines, startToolProcess } from '../core/tool-process.js'
+import { fakeCentraluTools } from '../frames/fakes.test-helpers.js'
 import { AntigravityAdapter, antigravityProfile } from './index.js'
 import { agyStderrLine, readAgyCall } from './shape.js'
 import { driven, fakeInstall, HOST_TEST_ARCHIVE, HOST_TEST_PLATFORM, fakeSignIn, pathIn, sessionOpts, tempData, tokenPath } from './agent-files.test-helpers.js'
@@ -277,4 +278,46 @@ describe("requests Centralu once refused (subagents, the agent's own folder)", (
       await handle.dispose()
     })
   }
+})
+
+describe('system prompt injection (_meta.antigravity.systemPrompt.append)', () => {
+  const capture: PeerScript = (method) => {
+    if (method === 'initialize') return { result: INIT }
+    if (method === 'session/new') return { result: { sessionId: SID } }
+    if (method === 'session/load') return { result: {} }
+    return { hold: true }
+  }
+
+  it('sends Centralu tool instructions and role text via _meta.antigravity.systemPrompt.append on session/new and session/load', async () => {
+    const w = world(capture, 'normal')
+    const opts = sessionOpts('agy-meta', 'normal', {
+      centraluTools: fakeCentraluTools(),
+      centraluBridge: { url: 'ws://127.0.0.1:0', token: 'tok' },
+      toolProfile: 'reader',
+      systemPromptAppend: 'You are a focused reviewer.',
+    })
+    const handle = await w.adapter.createSession(opts, w.emit)
+    const created = w.peers[0]!.received.find((m) => m.method === 'session/new')
+    const meta = (created?.params as { _meta?: { antigravity?: { systemPrompt?: { append?: string } } } } | undefined)?._meta
+    expect(meta?.antigravity?.systemPrompt?.append).toContain('You are a focused reviewer.')
+    expect(meta?.antigravity?.systemPrompt?.append).toContain('You are running inside Centralu.')
+    expect(meta?.antigravity?.systemPrompt?.append).toContain('invoke_subagent')
+    await handle.dispose()
+
+    // Also sent on session/load (resume)
+    const w2 = world(capture, 'normal')
+    const resumed = await w2.adapter.createSession({ ...opts, resumeExternalId: SID }, w2.emit)
+    const loaded = w2.peers[0]!.received.find((m) => m.method === 'session/load')
+    const loadMeta = (loaded?.params as { _meta?: { antigravity?: { systemPrompt?: { append?: string } } } } | undefined)?._meta
+    expect(loadMeta?.antigravity?.systemPrompt?.append).toBe(meta?.antigravity?.systemPrompt?.append)
+    await resumed.dispose()
+  })
+
+  it('omits _meta when neither systemPromptAppend nor Centralu tools are present', async () => {
+    const w = world(capture, 'normal')
+    const handle = await w.adapter.createSession(sessionOpts('agy-plain', 'normal'), w.emit)
+    const created = w.peers[0]!.received.find((m) => m.method === 'session/new')
+    expect((created?.params as Record<string, unknown> | undefined)?._meta).toBeUndefined()
+    await handle.dispose()
+  })
 })

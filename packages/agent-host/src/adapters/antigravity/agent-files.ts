@@ -7,7 +7,7 @@ import { dirname, join, resolve } from 'node:path'
 import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { createInflateRaw } from 'node:zlib'
-import { errorMessage } from '@cc/protocol'
+import { errorMessage, isNewerVersion } from '@cc/protocol'
 import { asObj } from '../../json-value.js'
 import { processStartTime } from '../../dev-services/instance-lock.js'
 import { whichTool } from '../../env-path.js'
@@ -80,6 +80,11 @@ export function agyHome(dataDir: string, version: string): AgyHome {
   return { root, versionDir: join(root, version), geminiHome: join(root, 'gemini-home') }
 }
 
+/** Returns an AgyHome targeting a different version under the same root */
+export function agyHomeWithVersion(home: AgyHome, version: string): AgyHome {
+  return { root: home.root, versionDir: join(home.root, version), geminiHome: home.geminiHome }
+}
+
 /** The server's program in the installed folder */
 export function agyProgram(home: AgyHome, archive: AgyArchive): string {
   return join(home.versionDir, archive.command)
@@ -96,6 +101,27 @@ export function isInstalled(home: AgyHome, archive: AgyArchive): boolean {
     return archive.files.every((f) => existsSync(join(home.versionDir, f)))
   } catch {
     return false
+  }
+}
+
+/**
+ * Scans the Antigravity root folder for installed version directories (e.g. `1.4.3`, `1.5.2`)
+ * that contain a valid `install.json` marker, returning versions sorted newest first.
+ */
+export function findInstalledAgyVersions(rootDir: string): string[] {
+  try {
+    const entries = readdirSync(rootDir, { withFileTypes: true })
+    const versions: string[] = []
+    for (const ent of entries) {
+      if (!ent.isDirectory() || !/^\d+\.\d+\.\d+/.test(ent.name)) continue
+      const markerPath = join(rootDir, ent.name, INSTALL_MARKER)
+      if (existsSync(markerPath)) {
+        versions.push(ent.name)
+      }
+    }
+    return versions.sort((a, b) => (isNewerVersion(a, b) ? -1 : isNewerVersion(b, a) ? 1 : 0))
+  } catch {
+    return []
   }
 }
 

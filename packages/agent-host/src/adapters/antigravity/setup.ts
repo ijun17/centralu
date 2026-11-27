@@ -1,9 +1,9 @@
 import { createListeners } from '@cc/common'
-import { errorMessage, type ToolSetup } from '@cc/protocol'
+import { errorMessage, isNewerVersion, type ToolSetup } from '@cc/protocol'
 import type { ToolSetupControl } from '../contract.js'
-import { hasSignIn, installAgy, isInstalled, removeLeftovers, type AgyHome, type InstallIo } from './agent-files.js'
+import { agyHomeWithVersion, hasSignIn, installAgy, isInstalled, removeLeftovers, type AgyHome, type InstallIo } from './agent-files.js'
 import { InstallFailure } from './failure.js'
-import type { AgyArchive } from './release.js'
+import { AGY_RELEASE, fetchLatestAgyRelease, type AgyArchive, type AgyPlatformKey, type AgyRelease } from './release.js'
 import { runSignIn, type SignInDeps, type SignInResult } from './sign-in.js'
 
 /**
@@ -28,6 +28,14 @@ export type AgySetupDeps = {
   /** This machine's archive, or null where Google ships no build */
   archive: AgyArchive | null
   version: string
+  /** Platform key for resolving platform archive on updates */
+  platformKey?: AgyPlatformKey | null
+  /** Whether auto-update is enabled (default: true) */
+  autoUpdate?: boolean
+  /** Custom fetcher for release updates (defaults to fetchLatestAgyRelease) */
+  fetchRelease?: () => Promise<AgyRelease | null>
+  /** Called when version/archive/home updates after auto-update */
+  onVersionUpdated?: (v: { version: string; archive: AgyArchive; home: AgyHome }) => void
   /** Whether the person's own Antigravity (app or `agy`) is on this machine (`ToolSetup.appFound`; `agyAppFinder`) */
   appFound?: () => boolean
   installIo?: InstallIo
@@ -53,6 +61,59 @@ export class AgySetup implements ToolSetupControl {
 
   constructor(private readonly deps: AgySetupDeps) {
     this.tidied = removeLeftovers(deps.home).catch(() => {})
+    if (deps.autoUpdate !== false && deps.platformKey) {
+      this.tidied.then(() => this.checkUpdate()).catch((e) => console.error(`[Antigravity] auto-update check failed: ${errorMessage(e)}`))
+    }
+  }
+
+  get version(): string {
+    return this.deps.version
+  }
+
+  get archive(): AgyArchive | null {
+    return this.deps.archive
+  }
+
+  get home(): AgyHome {
+    return this.deps.home
+  }
+
+  /**
+   * Checks for a newer Antigravity ACP version in the registry. If a newer version is found,
+   * automatically downloads and installs it in the background into its own version folder.
+   */
+  async checkUpdate(): Promise<boolean> {
+    if (this.deps.autoUpdate === false || !this.deps.platformKey) return false
+    try {
+      const fetchRelease = this.deps.fetchRelease ?? fetchLatestAgyRelease
+      const release = (await fetchRelease()) ?? AGY_RELEASE
+      if (!release || !release.archives[this.deps.platformKey]) return false
+      const newVersion = release.version
+      const currentVersion = this.deps.version
+      if (isNewerVersion(newVersion, currentVersion)) {
+        const newArchive = release.archives[this.deps.platformKey]
+        const newHome = agyHomeWithVersion(this.deps.home, newVersion)
+        if (!isInstalled(newHome, newArchive)) {
+          const run =
+            this.deps.runInstall ??
+            ((signal, onProgress) =>
+              installAgy(newHome, newArchive, newVersion, { signal, onProgress, ...(this.deps.installIo ? { io: this.deps.installIo } : {}) }))
+          const abort = new AbortController()
+          await run(abort.signal, () => {})
+        }
+        if (isInstalled(newHome, newArchive)) {
+          this.deps.version = newVersion
+          this.deps.archive = newArchive
+          this.deps.home = newHome
+          this.deps.onVersionUpdated?.({ version: newVersion, archive: newArchive, home: newHome })
+          this.changed()
+          return true
+        }
+      }
+    } catch (e) {
+      console.error(`[Antigravity] auto-update check failed: ${errorMessage(e)}`)
+    }
+    return false
   }
 
   /** Resolves once the leftovers of an earlier host are gone (for tests and the host's start) */
