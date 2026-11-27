@@ -330,7 +330,7 @@ describe('system prompt injection (_meta.antigravity.systemPrompt.append)', () =
     await resumedHandle.dispose()
   })
 
-  it('supports systemPromptAppend alone and Centralu tools alone', async () => {
+  it('supports systemPromptAppend alone, Centralu tools alone, and omits _meta when neither is present', async () => {
     const wRole = world(capture, 'normal')
     const hRole = await wRole.adapter.createSession(sessionOpts('agy-role', 'normal', { systemPromptAppend: 'Role only.' }), wRole.emit)
     const roleMeta = (wRole.peers[0]!.received.find((m) => m.method === 'session/new')?.params as { _meta?: { antigravity?: { systemPrompt?: { append?: string } } } } | undefined)?._meta
@@ -349,13 +349,11 @@ describe('system prompt injection (_meta.antigravity.systemPrompt.append)', () =
     const toolsMeta = (wTools.peers[0]!.received.find((m) => m.method === 'session/new')?.params as { _meta?: { antigravity?: { systemPrompt?: { append?: string } } } } | undefined)?._meta
     expect(toolsMeta?.antigravity?.systemPrompt?.append).toContain('You are running inside Centralu.')
     await hTools.dispose()
-  })
 
-  it('omits _meta when neither systemPromptAppend nor Centralu tools are present', async () => {
-    const w = world(capture, 'normal')
-    const handle = await w.adapter.createSession(sessionOpts('agy-plain', 'normal'), w.emit)
-    const created = w.peers[0]!.received.find((m) => m.method === 'session/new')
+    const wPlain = world(capture, 'normal')
+    const hPlain = await wPlain.adapter.createSession(sessionOpts('agy-plain', 'normal'), wPlain.emit)
+    const created = wPlain.peers[0]!.received.find((m) => m.method === 'session/new')
     expect((created?.params as Record<string, unknown> | undefined)?._meta).toBeUndefined()
-    await handle.dispose()
+    await hPlain.dispose()
   })
 })
