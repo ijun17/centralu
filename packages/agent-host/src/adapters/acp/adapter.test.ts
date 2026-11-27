@@ -66,13 +66,7 @@ describe('what the ACP tools keep alike', () => {
   it('is ACP_CAPABILITIES for all three, each overriding only what it measured different', () => {
     expect(cursorProfile().capabilities).toStrictEqual({ ...ACP_CAPABILITIES, contextUsage: 'none', presets: ['auto'] })
     expect(openCodeProfile().capabilities).toStrictEqual(ACP_CAPABILITIES)
-    expect(antigravityProfile().capabilities).toStrictEqual({
-      ...ACP_CAPABILITIES,
-      autoTitle: false,
-      instructionChannel: 'developer',
-      subagentTool: 'invoke_subagent',
-      roleText: true,
-    })
+    expect(antigravityProfile().capabilities).toStrictEqual({ ...ACP_CAPABILITIES, autoTitle: false })
     expect(ACP_CAPABILITIES).toMatchObject({ approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, midTurnInput: false, instructionChannel: 'server', processModel: 'per-session', roleText: false })
   })
 })

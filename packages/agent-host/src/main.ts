@@ -544,10 +544,7 @@ const agentVersions = new AgentVersionService({
   writeAutoApply: autoApplyAgentVersions.write,
 })
 // A tool's own install and sign-in (#59) tell every window as they go: no RPC is waiting when a download ends
-for (const a of adapters.values()) {
-  a.setup?.onChange((setup) => events.push({ type: 'tool_setup', tool: a.tool, setup }))
-  void a.setup?.checkUpdate?.()
-}
+for (const a of adapters.values()) a.setup?.onChange((setup) => events.push({ type: 'tool_setup', tool: a.tool, setup }))
 versionsRef.current = agentVersions
 mgr.useVersionHint((tool) => agentVersions.installedNow(tool))
 /*
