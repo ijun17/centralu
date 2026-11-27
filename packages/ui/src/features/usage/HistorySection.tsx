@@ -24,11 +24,13 @@ const GROUPS: { by: Extract<UsageHistoryBy, 'session' | 'project'>; label: strin
 export function HistorySection({
   tool,
   machine = null,
+  preferredWindow = null,
   canOpen,
   onOpen,
 }: {
   tool: ToolName
   machine?: string | null
+  preferredWindow?: string | null
   /** Whether a session is on this screen to be opened */
   canOpen: (sessionId: string) => boolean
   onOpen: (sessionId: string) => void
@@ -53,7 +55,7 @@ export function HistorySection({
   return (
     <>
       <LoadFailedFold what="the usage history" error={read.error} onRetry={() => void read.reload()} className="pt-3" testId="usage-history-failed" />
-      {read.data && <HistoryView {...read.data} by={by} onBy={setBy} canOpen={canOpen} onOpen={onOpen} />}
+      {read.data && <HistoryView {...read.data} preferredWindow={preferredWindow} by={by} onBy={setBy} canOpen={canOpen} onOpen={onOpen} />}
     </>
   )
 }
@@ -63,6 +65,7 @@ export function HistoryView({
   history,
   from,
   to,
+  preferredWindow = null,
   by,
   onBy,
   canOpen,
@@ -71,12 +74,13 @@ export function HistoryView({
   history: UsageHistory
   from: number
   to: number
+  preferredWindow?: string | null
   by: 'session' | 'project'
   onBy: (by: 'session' | 'project') => void
   canOpen: (sessionId: string) => boolean
   onOpen: (sessionId: string) => void
 }) {
-  const drawn = barSeries(history.readings)
+  const drawn = barSeries(history.readings, preferredWindow)
   const top = topUsage(history.rows, TOP)
   const since = history.recordedSince ? Date.parse(history.recordedSince) : NaN
 
