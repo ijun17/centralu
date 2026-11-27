@@ -288,7 +288,16 @@ describe('system prompt injection (_meta.antigravity.systemPrompt.append)', () =
     return { hold: true }
   }
 
-  it('sends Centralu tool instructions and role text via _meta.antigravity.systemPrompt.append on session/new and session/load', async () => {
+  const captureResume: PeerScript = (method) => {
+    if (method === 'initialize') {
+      return { result: { protocolVersion: 1, agentCapabilities: { loadSession: false, sessionCapabilities: { resume: {} } } } }
+    }
+    if (method === 'session/resume') return { result: {} }
+    if (method === 'session/new') return { result: { sessionId: SID } }
+    return { hold: true }
+  }
+
+  it('sends Centralu tool instructions and role text via _meta.antigravity.systemPrompt.append on session/new, session/load, and session/resume', async () => {
     const w = world(capture, 'normal')
     const opts = sessionOpts('agy-meta', 'normal', {
       centraluTools: fakeCentraluTools(),
@@ -306,11 +315,40 @@ describe('system prompt injection (_meta.antigravity.systemPrompt.append)', () =
 
     // Also sent on session/load (resume)
     const w2 = world(capture, 'normal')
-    const resumed = await w2.adapter.createSession({ ...opts, resumeExternalId: SID }, w2.emit)
+    const loadedHandle = await w2.adapter.createSession({ ...opts, resumeExternalId: SID }, w2.emit)
     const loaded = w2.peers[0]!.received.find((m) => m.method === 'session/load')
     const loadMeta = (loaded?.params as { _meta?: { antigravity?: { systemPrompt?: { append?: string } } } } | undefined)?._meta
     expect(loadMeta?.antigravity?.systemPrompt?.append).toBe(meta?.antigravity?.systemPrompt?.append)
-    await resumed.dispose()
+    await loadedHandle.dispose()
+
+    // Also sent on session/resume when the agent advertises resume instead of loadSession
+    const w3 = world(captureResume, 'normal')
+    const resumedHandle = await w3.adapter.createSession({ ...opts, resumeExternalId: SID }, w3.emit)
+    const resumed = w3.peers[0]!.received.find((m) => m.method === 'session/resume')
+    const resumeMeta = (resumed?.params as { _meta?: { antigravity?: { systemPrompt?: { append?: string } } } } | undefined)?._meta
+    expect(resumeMeta?.antigravity?.systemPrompt?.append).toBe(meta?.antigravity?.systemPrompt?.append)
+    await resumedHandle.dispose()
+  })
+
+  it('supports systemPromptAppend alone and Centralu tools alone', async () => {
+    const wRole = world(capture, 'normal')
+    const hRole = await wRole.adapter.createSession(sessionOpts('agy-role', 'normal', { systemPromptAppend: 'Role only.' }), wRole.emit)
+    const roleMeta = (wRole.peers[0]!.received.find((m) => m.method === 'session/new')?.params as { _meta?: { antigravity?: { systemPrompt?: { append?: string } } } } | undefined)?._meta
+    expect(roleMeta?.antigravity?.systemPrompt?.append).toBe('Role only.')
+    await hRole.dispose()
+
+    const wTools = world(capture, 'normal')
+    const hTools = await wTools.adapter.createSession(
+      sessionOpts('agy-tools', 'normal', {
+        centraluTools: fakeCentraluTools(),
+        centraluBridge: { url: 'ws://127.0.0.1:0', token: 'tok' },
+        toolProfile: 'reader',
+      }),
+      wTools.emit,
+    )
+    const toolsMeta = (wTools.peers[0]!.received.find((m) => m.method === 'session/new')?.params as { _meta?: { antigravity?: { systemPrompt?: { append?: string } } } } | undefined)?._meta
+    expect(toolsMeta?.antigravity?.systemPrompt?.append).toContain('You are running inside Centralu.')
+    await hTools.dispose()
   })
 
   it('omits _meta when neither systemPromptAppend nor Centralu tools are present', async () => {

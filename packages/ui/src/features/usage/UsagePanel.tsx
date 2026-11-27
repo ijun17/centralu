@@ -7,19 +7,18 @@ import { useStore } from '../../store/store.js'
 import { useMachineName, useToolMeta } from '../../store/selectors.js'
 import { CacheSection } from './CacheSection.jsx'
 import { formatCount, formatReadAt } from '../../app/format.js'
-import { resetText } from './weekly.js'
+import { barWindow, resetText } from './weekly.js'
 import { HistorySection } from './HistorySection.jsx'
 import { SAME_ACCOUNT_LABEL } from './sameAccount.js'
 import { useLoad } from '../../app/useLoad.js'
 
 /**
- * Group windows into rows: if windows have distinct model scopes (e.g. Antigravity's Gemini vs Claude/GPT),
- * present each scope in its own row so related limits sit together (Gemini on top, others below: 2 and 2).
+ * Group windows into rows when a tool reports multiple distinct model scopes,
+ * preserving the order emitted by the adapter so related limits sit together.
  */
 function groupWindows(windows: UsageWindow[]): UsageWindow[][] {
   const scopes = windows.map((w) => w.scope).filter((s): s is string => typeof s === 'string' && s !== '')
-  const distinctScopes = new Set(scopes)
-  if (distinctScopes.size >= 2) {
+  if (new Set(scopes).size >= 2) {
     const map = new Map<string, UsageWindow[]>()
     const unscoped: UsageWindow[] = []
     for (const w of windows) {
@@ -33,15 +32,7 @@ function groupWindows(windows: UsageWindow[]): UsageWindow[][] {
     }
     const rows: UsageWindow[][] = []
     if (unscoped.length > 0) rows.push(unscoped)
-    const sortedScopes = Array.from(map.keys()).sort((a, b) => {
-      const aGem = /gemini/i.test(a) ? 0 : 1
-      const bGem = /gemini/i.test(b) ? 0 : 1
-      return aGem - bGem
-    })
-    for (const scopeKey of sortedScopes) {
-      const list = map.get(scopeKey)
-      if (list) rows.push(list)
-    }
+    for (const list of map.values()) rows.push(list)
     return rows
   }
   return [windows]
@@ -88,8 +79,9 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
     <CacheSection cache={state.cache} toolLabel={meta.label} canOpen={(id) => id in useStore.getState().sessions} onOpen={openSession} />
   )
 
+  const preferredWindow = state.usage ? (barWindow(state.usage.windows)?.id ?? null) : null
   // The stored history, independent of the limits too; an older host or a failed read says so in a line
-  const history = <HistorySection tool={tool} machine={machine} canOpen={(id) => id in useStore.getState().sessions} onOpen={openSession} />
+  const history = <HistorySection tool={tool} machine={machine} preferredWindow={preferredWindow} canOpen={(id) => id in useStore.getState().sessions} onOpen={openSession} />
 
   // A tool with no limits (#1623): docs/design-system.md §10. A failed read (no `notReported`) shows its reason
   if (state.notReported) {
@@ -145,8 +137,8 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
       )}
 
       <div className="space-y-4">
-        {groups.map((group, i) => (
-          <div key={i} className="flex flex-wrap justify-center gap-6">
+        {groups.map((group) => (
+          <div key={group[0]?.scope ?? 'unscoped'} className="flex flex-wrap justify-center gap-6">
             {group.map((w) => (
               <Donut key={`${w.id}-${w.scope ?? ''}`} window={w} />
             ))}

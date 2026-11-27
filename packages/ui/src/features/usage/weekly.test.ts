@@ -97,37 +97,46 @@ describe('barWindow: the window the top-bar donut draws (#2459)', () => {
     expect(barWindow([w({ id: 'a', label: 'A', resetsAt: MONTH_END }), w({ id: 'b', label: 'B' })])?.id).toBe('a')
   })
 
-  it('multi-model weekly windows: picks Gemini Models weekly even if Claude weekly is fuller or resets later', () => {
-    const agyWindows = [
-      w({ id: 'gemini-models:weekly', label: 'Weekly', scope: 'Gemini Models', percent: 20, resetsAt: '2026-11-29T00:00:00.000Z' }),
-      w({ id: 'gemini-models:five-hour', label: 'Five Hour', scope: 'Gemini Models', percent: 90, resetsAt: '2026-11-22T15:00:00.000Z' }),
-      w({ id: 'claude-and-gpt-models:weekly', label: 'Weekly', scope: 'Claude and GPT models', percent: 85, resetsAt: '2026-12-01T00:00:00.000Z' }),
-      w({ id: 'claude-and-gpt-models:five-hour', label: 'Five Hour', scope: 'Claude and GPT models', percent: 50, resetsAt: '2026-11-22T15:00:00.000Z' }),
+  it('multi-model weekly windows: prefers a weekly window marked primary by the adapter', () => {
+    const multiWindows = [
+      w({ id: 'family-a:weekly', label: 'Weekly', scope: 'Family A', percent: 20, resetsAt: '2026-11-29T00:00:00.000Z', primary: true }),
+      w({ id: 'family-a:five-hour', label: 'Five Hour', scope: 'Family A', percent: 90, resetsAt: '2026-11-22T15:00:00.000Z' }),
+      w({ id: 'family-b:weekly', label: 'Weekly', scope: 'Family B', percent: 85, resetsAt: '2026-12-01T00:00:00.000Z' }),
+      w({ id: 'family-b:five-hour', label: 'Five Hour', scope: 'Family B', percent: 50, resetsAt: '2026-11-22T15:00:00.000Z' }),
     ]
-    expect(weeklyWindow(agyWindows)?.id).toBe('gemini-models:weekly')
-    expect(barWindow(agyWindows)?.id).toBe('gemini-models:weekly')
+    expect(weeklyWindow(multiWindows)?.id).toBe('family-a:weekly')
+    expect(barWindow(multiWindows)?.id).toBe('family-a:weekly')
   })
 
-  it('multi-model weekly history: picks Gemini Models weekly in barSeries', () => {
-    const agySeries = [
+  it('matches scoped weekly labels such as "<Model> Weekly"', () => {
+    const windows = [
+      w({ id: 'model-x:model-x-weekly', label: 'Model X Weekly', scope: 'Model X', percent: 40, resetsAt: '2026-11-29T00:00:00.000Z' }),
+    ]
+    expect(weeklyWindow(windows)?.id).toBe('model-x:model-x-weekly')
+  })
+
+  it('multi-model weekly history: tracks preferredWindowId when provided to barSeries', () => {
+    const multiSeries = [
       {
         tool: 'antigravity' as const,
         account: 'a',
-        window: 'gemini-models:weekly',
+        window: 'family-a:weekly',
         label: 'Weekly',
-        scope: 'Gemini Models',
+        scope: 'Family A',
         points: [{ at: '2026-11-22T00:00:00.000Z', percent: 25, resetsAt: '2026-11-29T00:00:00.000Z' }],
       },
       {
         tool: 'antigravity' as const,
         account: 'a',
-        window: 'claude-and-gpt-models:weekly',
+        window: 'family-b:weekly',
         label: 'Weekly',
-        scope: 'Claude and GPT models',
+        scope: 'Family B',
         points: [{ at: '2026-11-22T00:00:00.000Z', percent: 95, resetsAt: '2026-12-01T00:00:00.000Z' }],
       },
     ]
-    expect(barSeries(agySeries)?.window).toBe('gemini-models:weekly')
+    expect(barSeries(multiSeries, 'family-a:weekly')?.window).toBe('family-a:weekly')
+    // Without a preferred window, falls back to the fullest weekly series
+    expect(barSeries(multiSeries)?.window).toBe('family-b:weekly')
   })
 
   it('is null with no window: the donut stays unknown', () => {

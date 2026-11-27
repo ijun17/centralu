@@ -4,18 +4,14 @@ import { formatDuration } from '../../app/format.js'
 /**
  * The weekly window the top-bar donut draws, by id or name, as tools name them differently (measured): claude
  * `weekly_all` / `weekly_scoped`, codex `secondary` labelled `1w`, or model-group `<group>:weekly` labelled `Weekly`.
- * When multiple model-family weekly windows exist, prefer the primary Gemini Models weekly window if present.
+ * When an adapter marks a weekly window as `primary`, prefer it; otherwise pick the fullest weekly window.
  * None found: null, and the donut says unknown.
  */
 export function weeklyWindow(windows: readonly UsageWindow[]): UsageWindow | null {
   const weekly = windows.filter(isWeekly)
   if (weekly.length === 0) return null
-  const mainGemini = weekly.find((w) => /^gemini\s+models$/i.test(w.scope?.trim() ?? ''))
-  if (mainGemini) return mainGemini
-  const anyGemini = weekly.filter((w) => /gemini/i.test(w.scope ?? w.id))
-  if (anyGemini.length > 0 && weekly.every((w) => w.scope !== null)) {
-    return anyGemini.reduce((a, b) => (b.percent > a.percent ? b : a))
-  }
+  const primary = weekly.find((w) => w.primary)
+  if (primary) return primary
   // The fullest: a full per-model weekly must not hide behind a roomy account-wide one. Its name is in the tooltip
   return weekly.reduce((a, b) => (b.percent > a.percent ? b : a))
 }
@@ -52,9 +48,10 @@ export function usageTone(percent: number): string {
 
 /**
  * The stored series of the window the top bar draws, the weekly one or else the longest (`barWindow` on each latest
- * point), of the account read last, so a changed account shows
+ * point), of the account read last, so a changed account shows. When the live panel already chose a representative
+ * window (`preferredWindowId`), match it so the history line tracks the same window as the top-bar donut.
  */
-export function barSeries(readings: readonly UsageHistoryReadings[]): UsageHistoryReadings | null {
+export function barSeries(readings: readonly UsageHistoryReadings[], preferredWindowId?: string | null): UsageHistoryReadings | null {
   const live = readings.flatMap((s) => {
     const point = s.points[s.points.length - 1]
     return point ? [{ s, point }] : []
@@ -62,6 +59,10 @@ export function barSeries(readings: readonly UsageHistoryReadings[]): UsageHisto
   const newest = live.reduce<(typeof live)[number] | null>((a, x) => (!a || Date.parse(x.point.at) > Date.parse(a.point.at) ? x : a), null)
   if (!newest) return null
   const ofAccount = live.filter((x) => x.s.account === newest.s.account)
+  if (preferredWindowId) {
+    const matched = ofAccount.find((x) => x.s.window === preferredWindowId)
+    if (matched) return matched.s
+  }
   const windows = ofAccount.map(({ s, point }) => ({ id: s.window, label: s.label, percent: point.percent, resetsAt: point.resetsAt, scope: s.scope }))
   const picked = barWindow(windows)
   return picked ? (ofAccount[windows.indexOf(picked)]?.s ?? null) : null

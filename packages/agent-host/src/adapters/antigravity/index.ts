@@ -8,7 +8,7 @@ import { toolProfileOf, type AgentProcess, type AgentSpawnSpec, type CreateSessi
 import { AcpAdapter } from '../acp/adapter.js'
 import { ACP_CAPABILITIES, type AcpProfile } from '../acp/profile.js'
 import { toolNotInstalled } from '../core/tool-process.js'
-import { agyAppFinder, agyHome, agyPlatformKey, browserFolder, findInstalledAgyVersions, isInstalled, sweepSessionTemps, type AgyHome, type HelperPlaces } from './agent-files.js'
+import { agyAppFinder, agyHome, agyPlatformKey, browserFolder, findInstalledAgy, sweepSessionTemps, type AgyHome, type HelperPlaces } from './agent-files.js'
 import { agyLaunch } from './launch.js'
 import { AGY_RELEASE, KNOWN_AGY_RELEASES, type AgyArchive } from './release.js'
 import { AgySetup, type AgySetupDeps } from './setup.js'
@@ -25,6 +25,7 @@ const AGY_SUBAGENT_TOOL = 'invoke_subagent'
  * System prompt appended via `_meta.antigravity.systemPrompt.append` on `session/new`, `session/load`, and
  * `session/resume`: the session's role text (`opts.systemPromptAppend`), followed by Centralu's MCP tool instructions
  * when the Centralu bridge is attached (since `centralu-bridge.mjs` omits MCP `initialize.instructions`).
+ * Heading names the MCP server rather than `mcp__centralu__*` because Antigravity calls tools via `call_mcp_tool`.
  */
 export function agySystemPrompt(opts: CreateSessionOpts): string | undefined {
   const apps = (opts.apps?.current().length ?? 0) > 0
@@ -71,7 +72,7 @@ const DESCRIPTOR: ToolDescriptor = {
   login: "Sign in with Google from Antigravity's line in Centralu.",
 }
 
-export type AgyProfileDeps = Partial<Pick<AgySetupDeps, 'appFound' | 'installIo' | 'signIn' | 'runSignIn' | 'runInstall'>> & {
+export type AgyProfileDeps = Partial<Pick<AgySetupDeps, 'appFound' | 'autoUpdate' | 'fetchRelease' | 'installIo' | 'signIn' | 'runSignIn' | 'runInstall'>> & {
   dataDir?: string
   platform?: Platform
   arch?: string
@@ -87,21 +88,15 @@ export function antigravityProfile(deps: AgyProfileDeps = {}): AgyProfile {
   const root = deps.dataDir ?? dataRoot()
   const baseHome = agyHome(root, AGY_RELEASE.version)
   const key = agyPlatformKey(deps.platform, deps.arch)
-  // Check if a known release is already installed on disk (e.g. 1.4.3 or 1.5.2)
-  const installed = findInstalledAgyVersions(baseHome.root)
-  let initialRelease = AGY_RELEASE
-  if (key && !isInstalled(baseHome, AGY_RELEASE.archives[key])) {
-    const known = installed[0] ? KNOWN_AGY_RELEASES[installed[0]] : null
-    if (known && known.archives[key] && isInstalled(agyHome(root, known.version), known.archives[key])) {
-      initialRelease = known
-    }
-  }
-  const initialArchive = key ? initialRelease.archives[key] : null
-  const initialHome = initialRelease === AGY_RELEASE ? baseHome : agyHome(root, initialRelease.version)
+  // Restore the newest valid install on disk (pinned or auto-updated); otherwise target the pinned default release
+  const existing = key ? findInstalledAgy(baseHome, KNOWN_AGY_RELEASES, key) : null
+  const initialVersion = existing?.version ?? AGY_RELEASE.version
+  const initialArchive = existing?.archive ?? (key ? AGY_RELEASE.archives[key] : null)
+  const initialHome = existing?.home ?? baseHome
   const setup = new AgySetup({
     home: initialHome,
     archive: initialArchive,
-    version: initialRelease.version,
+    version: initialVersion,
     platformKey: key,
     autoUpdate: true,
     appFound: agyAppFinder(deps.platform),

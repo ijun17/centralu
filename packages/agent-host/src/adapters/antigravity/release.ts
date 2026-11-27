@@ -1,12 +1,13 @@
 /**
- * The one version of Google's Antigravity ACP agent this build installs (docs/plans/antigravity-adapter.md §3): the ACP
- * registry's entry `antigravity-acp`, copied here by hand, so a build downloads the archive its tests and review saw and checks
- * the sha256 the registry published for it. A newer agent is never fetched by itself: a newer Centralu pins it.
+ * Pinned default release of Google's Antigravity ACP agent (docs/plans/antigravity-adapter.md §3) and verified registry
+ * lookup for automatic background updates. Every archive installed—pinned or fetched from the official ACP registry—must
+ * pass strict version/URL/command validation and match its declared SHA-256 digest before anything is unpacked.
  */
 
 import { z } from 'zod'
 
-export type AgyPlatformKey = 'darwin-aarch64' | 'darwin-x86_64' | 'linux-x86_64' | 'linux-aarch64' | 'windows-x86_64' | 'windows-aarch64'
+export const AGY_PLATFORM_KEYS = ['darwin-aarch64', 'darwin-x86_64', 'linux-x86_64', 'linux-aarch64', 'windows-x86_64', 'windows-aarch64'] as const
+export type AgyPlatformKey = (typeof AGY_PLATFORM_KEYS)[number]
 
 export type AgyArchive = {
   url: string
@@ -30,7 +31,46 @@ export type AgyRelease = {
   archives: Readonly<Record<AgyPlatformKey, AgyArchive>>
 }
 
+/** A release read from the remote ACP registry, which may omit platforms not published in that build */
+export type AgyRegistryRelease = {
+  version: string
+  oauthClient: string
+  archives: Readonly<Partial<Record<AgyPlatformKey, AgyArchive>>>
+}
+
 const BASE = 'https://dl.google.com/agy-extensions/releases'
+const ALLOWED_ARCHIVE_ORIGIN = 'https://dl.google.com'
+const ALLOWED_ARCHIVE_PREFIX = '/agy-extensions/releases/'
+const STRICT_SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
+const SHA256_HEX = /^[0-9a-f]{64}$/i
+const PLAIN_FILENAME = /^[\w.-]+$/
+
+/** Strict semver suitable for a single path segment under the Antigravity root (forbids `..`, slashes, etc.) */
+export function isValidAgyVersion(version: string): boolean {
+  return STRICT_SEMVER.test(version) && !version.includes('..')
+}
+
+/** Whether `url` points to Google's Antigravity release CDN over HTTPS without path traversal */
+export function isAllowedAgyArchiveUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return parsed.origin === ALLOWED_ARCHIVE_ORIGIN && parsed.pathname.startsWith(ALLOWED_ARCHIVE_PREFIX) && !parsed.pathname.includes('..')
+  } catch {
+    return false
+  }
+}
+
+/** Validates a 64-character hex SHA-256 digest and normalizes it to lowercase, or returns null */
+export function normalizeSha256(sha256: string): string | null {
+  return SHA256_HEX.test(sha256) ? sha256.toLowerCase() : null
+}
+
+/** Strips an optional leading `./` and validates that the executable name is a plain file name (not `.`, `..`, or a path) */
+export function sanitizeAgyCommand(cmd: string): string | null {
+  const clean = cmd.replace(/^\.\//, '')
+  if (clean === '.' || clean === '..' || !PLAIN_FILENAME.test(clean)) return null
+  return clean
+}
 
 const posix = (url: string, sha256: string, args: readonly string[] = []): AgyArchive => ({
   url,
@@ -106,49 +146,45 @@ const acpRegistrySchema = z.object({
   ),
 })
 
-/** Parses an AgyRelease from the ACP registry's registry.json */
-export function parseAgyReleaseFromRegistry(json: unknown): AgyRelease | null {
+/** Parses and validates an Antigravity release from the ACP registry's registry.json */
+export function parseAgyReleaseFromRegistry(json: unknown): AgyRegistryRelease | null {
   const parsed = acpRegistrySchema.safeParse(json)
   if (!parsed.success) return null
   const entry = parsed.data.agents.find((a) => a.id === 'antigravity-acp')
-  if (!entry?.version || !entry.distribution?.binary) return null
+  if (!entry?.version || !isValidAgyVersion(entry.version) || !entry.distribution?.binary) return null
   const binary = entry.distribution.binary
-  const darwinAarch64 = binary['darwin-aarch64']
-  const darwinX86_64 = binary['darwin-x86_64']
-  const linuxX86_64 = binary['linux-x86_64']
-  const linuxAarch64 = binary['linux-aarch64']
-  const windowsX86_64 = binary['windows-x86_64']
-  const windowsAarch64 = binary['windows-aarch64']
-  if (!darwinAarch64 || !darwinX86_64 || !linuxX86_64 || !linuxAarch64 || !windowsX86_64 || !windowsAarch64) return null
 
-  const toArchive = (b: z.infer<typeof acpBinaryEntrySchema>, isWin: boolean): AgyArchive => {
-    const cmd = b.cmd ? b.cmd.replace(/^\.\//, '') : isWin ? 'agy_acp_server.exe' : 'agy_acp_server.par'
+  const archives: Partial<Record<AgyPlatformKey, AgyArchive>> = {}
+  for (const key of AGY_PLATFORM_KEYS) {
+    const b = binary[key]
+    if (!b) continue
+    if (!isAllowedAgyArchiveUrl(b.archive)) return null
+    const sha256 = normalizeSha256(b.sha256)
+    if (!sha256) return null
+    const isWin = key.startsWith('windows-')
+    const cmd = b.cmd !== undefined ? sanitizeAgyCommand(b.cmd) : isWin ? 'agy_acp_server.exe' : 'agy_acp_server.par'
+    if (!cmd) return null
     const harness = isWin ? 'localharness_external.exe' : 'localharness_external'
-    return {
+    archives[key] = {
       url: b.archive,
-      sha256: b.sha256,
+      sha256,
       command: cmd,
       args: b.args ?? [],
       files: [cmd, harness],
     }
   }
 
+  if (Object.keys(archives).length === 0) return null
+
   return {
     version: entry.version,
     oauthClient: AGY_RELEASE.oauthClient,
-    archives: {
-      'darwin-aarch64': toArchive(darwinAarch64, false),
-      'darwin-x86_64': toArchive(darwinX86_64, false),
-      'linux-x86_64': toArchive(linuxX86_64, false),
-      'linux-aarch64': toArchive(linuxAarch64, false),
-      'windows-x86_64': toArchive(windowsX86_64, true),
-      'windows-aarch64': toArchive(windowsAarch64, true),
-    },
+    archives,
   }
 }
 
 /** Fetches the latest published Antigravity ACP release definition from the official ACP registry */
-export async function fetchLatestAgyRelease(registryUrl = ACP_REGISTRY_URL, timeoutMs = 10_000): Promise<AgyRelease | null> {
+export async function fetchLatestAgyRelease(registryUrl = ACP_REGISTRY_URL, timeoutMs = 10_000): Promise<AgyRegistryRelease | null> {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   try {

@@ -274,6 +274,8 @@ export interface ToolSetupControl {
   signIn(): ToolSetup
   cancelSignIn(): Promise<ToolSetup>
   onChange(listener: (setup: ToolSetup) => void): () => void
+  /** Optional background check for a newer managed tool release; called by the host at startup */
+  checkUpdate?(): Promise<boolean>
 }
 
 export type EventSink = (event: NormalizedEvent) => void

@@ -110,7 +110,7 @@ export async function readAgyUsage(home: AgyHome, archive: AgyArchive, signedOut
 }
 
 const GROUP = /^- \*\*(.+)\*\*$/
-const NOTE = /^\*\(.*\)\*$/
+const NOTE = /^\*?\(.*\)\*?$/
 const BUCKET = /^- \*\*(.+):\*\* (\d+(?:\.\d+)?)% remaining(?: \(resets (.+)\))?$/
 const RESET = /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{1,2}), (\d{4}), (\d{2}):(\d{2}) UTC$/
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -160,22 +160,27 @@ export function readAgyQuota(markdown: string): AgyQuota {
       groups.push({ name: group[1], buckets: [] })
       continue
     }
-    if (line.startsWith('*(') || line.startsWith('(')) continue
     throw unread('a line of a kind it does not know')
   }
-  const quota = AgyQuota.safeParse(groups.filter((g) => g.buckets.length > 0))
+  const quota = AgyQuota.safeParse(groups)
   if (!quota.success) throw unread(groups.length === 0 ? 'no limits' : 'a group with no limits, or a value out of range')
   return quota.data
 }
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
+const isPrimaryGeminiGroup = (name: string) => /^gemini\s+models$/i.test(name.trim())
+
 /** One window per limit, scoped to its model group: "Weekly Limit Remaining" of "Gemini Models" is "Weekly", for Gemini Models */
 export function agyUsageSnapshot(quota: AgyQuota, plan: string | null): UsageSnapshot {
-  const windows: UsageWindow[] = quota.flatMap((g) =>
+  // Keep Gemini model groups ahead of other model families so the panel draws them on the top row
+  const ordered = [...quota].sort((a, b) => (/gemini/i.test(a.name) ? 0 : 1) - (/gemini/i.test(b.name) ? 0 : 1))
+  const windows: UsageWindow[] = ordered.flatMap((g) =>
     g.buckets.map((b) => {
       const label = b.label.replace(/\s+Limit(\s+Remaining)?$/, '')
-      return { id: `${slug(g.name)}:${slug(label)}`, label, percent: 100 - b.remaining, resetsAt: b.resetsAt, scope: g.name }
+      const id = `${slug(g.name)}:${slug(label)}`
+      const primary = isPrimaryGeminiGroup(g.name) && id.endsWith(':weekly')
+      return { id, label, percent: 100 - b.remaining, resetsAt: b.resetsAt, scope: g.name, ...(primary ? { primary: true } : {}) }
     }),
   )
   return { plan, windows, daily: [] }

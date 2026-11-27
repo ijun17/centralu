@@ -25,16 +25,24 @@ export function tempData(): { dir: string; home: AgyHome; done(): void } {
 }
 
 /** What a finished install leaves: the files and the marker naming the pinned archive */
-export function fakeInstall(home: AgyHome, archive: AgyArchive = TEST_ARCHIVE): void {
+export function fakeInstall(home: AgyHome, archive: AgyArchive = TEST_ARCHIVE, version: string = AGY_RELEASE.version): void {
   mkdirSync(home.versionDir, { recursive: true })
   for (const f of archive.files) writeFileSync(join(home.versionDir, f), 'stand-in')
-  writeFileSync(join(home.versionDir, INSTALL_MARKER), JSON.stringify({ version: AGY_RELEASE.version, sha256: archive.sha256 }))
+  writeFileSync(
+    join(home.versionDir, INSTALL_MARKER),
+    JSON.stringify({ version, sha256: archive.sha256, url: archive.url, command: archive.command, args: archive.args, files: archive.files }),
+  )
 }
 
 /** Leaves a finished install of a specific version and archive under home.root */
-export function fakeInstallVersion(home: AgyHome, version: string, archive: AgyArchive): AgyHome {
+export function fakeInstallVersion(home: AgyHome, version: string, archive: AgyArchive, legacyMarker = false): AgyHome {
   const versionHome = { root: home.root, versionDir: join(home.root, version), geminiHome: home.geminiHome }
-  fakeInstall(versionHome, archive)
+  mkdirSync(versionHome.versionDir, { recursive: true })
+  for (const f of archive.files) writeFileSync(join(versionHome.versionDir, f), 'stand-in')
+  const marker = legacyMarker
+    ? { version, sha256: archive.sha256, url: archive.url }
+    : { version, sha256: archive.sha256, url: archive.url, command: archive.command, args: archive.args, files: archive.files }
+  writeFileSync(join(versionHome.versionDir, INSTALL_MARKER), JSON.stringify(marker))
   return versionHome
 }
 

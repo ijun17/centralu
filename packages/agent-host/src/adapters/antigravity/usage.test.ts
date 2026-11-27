@@ -69,11 +69,22 @@ describe('Antigravity quota parser (readAgyQuota)', () => {
     ])
     const snapshot = agyUsageSnapshot(quota, null)
     expect(snapshot.windows).toEqual([
-      { id: 'gemini-models:weekly', label: 'Weekly', percent: 28, resetsAt: '2026-12-03T07:04:00.000Z', scope: 'Gemini Models' },
+      { id: 'gemini-models:weekly', label: 'Weekly', percent: 28, resetsAt: '2026-12-03T07:04:00.000Z', scope: 'Gemini Models', primary: true },
       { id: 'gemini-models:five-hour', label: 'Five Hour', percent: 3, resetsAt: '2026-11-27T07:57:00.000Z', scope: 'Gemini Models' },
       { id: 'claude-and-gpt-models:weekly', label: 'Weekly', percent: 0, resetsAt: null, scope: 'Claude and GPT models' },
       { id: 'claude-and-gpt-models:five-hour', label: 'Five Hour', percent: 0, resetsAt: null, scope: 'Claude and GPT models' },
     ])
+  })
+
+  it('accepts plain parenthetical notes but refuses unclosed note lines and empty groups', () => {
+    const plainNote = `### Quota Limits\n- **Gemini Models**\n  (Plain note)\n  - **Weekly Limit Remaining:** 100% remaining`
+    expect(readAgyQuota(plainNote)).toHaveLength(1)
+
+    const unclosedNote = `### Quota Limits\n- **Gemini Models**\n  (Unclosed note\n  - **Weekly Limit Remaining:** 100% remaining`
+    expect(() => readAgyQuota(unclosedNote)).toThrow('a line of a kind it does not know')
+
+    const emptyGroup = `### Quota Limits\n- **Gemini Models**\n- **Claude and GPT models**\n  - **Weekly Limit Remaining:** 100% remaining`
+    expect(() => readAgyQuota(emptyGroup)).toThrow('a group with no limits')
   })
 
   it('refuses when a line kind is unknown in the quota section', () => {
@@ -97,8 +108,12 @@ describe('Antigravity quota parser (readAgyQuota)', () => {
 })
 
 describe('Antigravity usage snapshot (agyUsageSnapshot)', () => {
-  it('turns quota buckets into usage windows scoped by model group', () => {
+  it('turns quota buckets into usage windows scoped by model group, ordered Gemini first with primary weekly marked', () => {
     const quota: AgyQuota = [
+      {
+        name: 'Claude and GPT models',
+        buckets: [{ label: 'Weekly Limit Remaining', remaining: 50, resetsAt: '2026-11-29T09:18:00.000Z' }],
+      },
       {
         name: 'Gemini Models',
         buckets: [{ label: 'Weekly Limit Remaining', remaining: 85, resetsAt: '2026-11-29T09:18:00.000Z' }],
@@ -107,7 +122,8 @@ describe('Antigravity usage snapshot (agyUsageSnapshot)', () => {
     const snapshot = agyUsageSnapshot(quota, 'Pro')
     expect(snapshot.plan).toBe('Pro')
     expect(snapshot.windows).toEqual([
-      { id: 'gemini-models:weekly', label: 'Weekly', percent: 15, resetsAt: '2026-11-29T09:18:00.000Z', scope: 'Gemini Models' },
+      { id: 'gemini-models:weekly', label: 'Weekly', percent: 15, resetsAt: '2026-11-29T09:18:00.000Z', scope: 'Gemini Models', primary: true },
+      { id: 'claude-and-gpt-models:weekly', label: 'Weekly', percent: 50, resetsAt: '2026-11-29T09:18:00.000Z', scope: 'Claude and GPT models' },
     ])
     expect(snapshot.daily).toEqual([])
   })
