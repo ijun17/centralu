@@ -1,14 +1,15 @@
 import { startNumberedLists } from '@cc/core'
 import { errorMessage } from '@cc/protocol/client'
-import { Fragment, memo, useRef, type ReactNode } from 'react'
+import { Fragment, memo, useEffect, useRef, useState, type ReactNode } from 'react'
 import ReactMarkdown, { defaultUrlTransform, type Options, type UrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useCapability } from '../../app/PlatformProvider.jsx'
+import { Modal } from '../../components/Modal.jsx'
 import { useStore } from '../../store/store.js'
 import { requestViewerJump } from '../viewer/jump.js'
-import { parseFileRef, type FileRef } from './filePath.js'
+import { isImageLinkPath, localLinkPath, parseFileRef, parseMarkdownFileRef, type FileRef } from './filePath.js'
 import { advanceSplit, piecesOf, type MarkdownSplit } from './markdownBlocks.js'
-import { localImagePath } from './localImages.js'
+import { loadReplyImage, localImagePath } from './localImages.js'
 import { ReplyImage } from './ReplyImage.jsx'
 
 /**
@@ -17,8 +18,8 @@ import { ReplyImage } from './ReplyImage.jsx'
  * apart by background brightness and spacing, not color.
  *
  * `projectRoot` is the session's project directory (null for the assistant): it decides whether a backticked path is a
- * file the person can open (`parseFileRef`). `sessionId` is given only for an agent's reply: a local image in it is
- * read by that session's host, which reads only a path one of the session's replies wrote (`ReplyImage`).
+ * file the person can open (`parseFileRef`). `sessionId` is given only for an agent's reply: a local image or external
+ * file link in it is verified by that session's host against the session's replies before reading or revealing.
  */
 export const Markdown = memo(function Markdown({
   text: written,
@@ -37,7 +38,7 @@ export const Markdown = memo(function Markdown({
   tone?: MarkdownTone
   /** The project of the file the link opens — the owner of projectRoot (#182) */
   projectId?: string | null
-  /** The session whose reply this is; null where a local image is not to be read */
+  /** The session whose reply this is; null where a local image or external file link is not to be read/revealed */
   sessionId?: string | null
   /** The session whose folder projectRoot is: a link reads the file through it, from its worktree (#1209) */
   linkSessionId?: string | null
@@ -106,7 +107,7 @@ export const MarkdownBlock = memo(function MarkdownBlock({
   return (
     <ReactMarkdown
       remarkPlugins={REMARK_PLUGINS}
-      urlTransform={keepLocalImages}
+      urlTransform={keepLocalDestinations}
       components={{
         /*
          * An image branches the way a link does. A web address is an ordinary `<img>`, as before (the desktop CSP
@@ -125,25 +126,17 @@ export const MarkdownBlock = memo(function MarkdownBlock({
           return <ReplyImage key={path} path={path} alt={label} sessionId={sessionId} />
         },
         /*
-         * Links branch three ways (#39):
-         *  - If href is a file in this project, it is the same file link as a backticked
-         *    path — the agent also writes things like `[manager.ts](packages/.../manager.ts)`,
-         *    which would otherwise be a dead link.
+         * Links branch four ways (#39):
          *  - http(s) and mailto open in a new window (navigating inside the app would lose
          *    the session).
-         *  - Any other href is **never put into the DOM.** The rule that a string produced
-         *    by a model must not sit in an attribute the browser would interpret (see the
-         *    `code` comment below) holds just as much for `a` — leaving only the text is the
-         *    honest rendering.
+         *  - If href is a file in this project (including `file://`, `#L10-L20`, non-ASCII), it
+         *    opens in the read-only viewer (`FileLink`).
+         *  - If href is another local file/folder named in a session reply (e.g. `~/Downloads/...`),
+         *    it renders as `ExternalFileLink` (in-app preview for images, host-verified reveal in
+         *    the file manager — never arbitrary OS execution, never placed in a DOM `href`).
+         *  - Any other href is **never put into the DOM.** Leaving only the text is the honest rendering.
          */
         a: ({ node: _node, href, children, ...props }) => {
-          const ref = typeof href === 'string' ? parseFileRef(tryDecode(href), projectRoot) : null
-          if (ref)
-            return (
-              <FileLink refInfo={ref} projectId={projectId} sessionId={linkSessionId}>
-                {children}
-              </FileLink>
-            )
           if (typeof href === 'string' && /^(https?:|mailto:)/i.test(href)) {
             return (
               <a
@@ -167,6 +160,24 @@ export const MarkdownBlock = memo(function MarkdownBlock({
                 {children}
               </a>
             )
+          }
+          if (typeof href === 'string') {
+            const ref = parseMarkdownFileRef(href, projectRoot)
+            if (ref) {
+              return (
+                <FileLink refInfo={ref} projectId={projectId} sessionId={linkSessionId}>
+                  {children}
+                </FileLink>
+              )
+            }
+            const local = sessionId ? localLinkPath(href) : null
+            if (local && sessionId) {
+              return (
+                <ExternalFileLink key={local} written={local} sessionId={sessionId}>
+                  {children}
+                </ExternalFileLink>
+              )
+            }
           }
           return <>{children}</>
         },
@@ -194,19 +205,14 @@ export const MarkdownBlock = memo(function MarkdownBlock({
 })
 
 /**
- * react-markdown's URL rule, except that an image's file path is kept: the rule would empty `file:` and keep the rest,
- * and the `img` component above needs the destination as written either way. It never reaches the DOM from there.
+ * react-markdown's URL rule, except that local file paths (including `file://`) are kept for our `img` and `a`
+ * components, which never place local paths in a DOM `src` or `href` attribute. Unsafe schemes (`javascript:`, `data:`)
+ * still fall through to `defaultUrlTransform` and are emptied.
  */
-const keepLocalImages: UrlTransform = (url, key, node) =>
-  key === 'src' && node.tagName === 'img' && localImagePath(url) !== null ? url : defaultUrlTransform(url)
-
-/** A link's href may be percent-encoded — if it cannot be decoded, judge it on the raw text */
-function tryDecode(href: string): string {
-  try {
-    return decodeURIComponent(href)
-  } catch {
-    return href
-  }
+const keepLocalDestinations: UrlTransform = (url, key, node) => {
+  if (key === 'src' && node.tagName === 'img' && localImagePath(url) !== null) return url
+  if (key === 'href' && node.tagName === 'a' && localLinkPath(url) !== null) return url
+  return defaultUrlTransform(url)
 }
 
 /**
@@ -249,5 +255,166 @@ export function FileLink({
     >
       {children}
     </button>
+  )
+}
+
+/**
+ * A Markdown link to a local file or folder outside `projectRoot` (or in an assistant session with no project).
+ * Image links open an in-app preview via `messages.image` (right-click reveals in the file manager); all other
+ * local files/folders reveal via `messages.resolveFile` + `reveal_path` so arbitrary files are never executed.
+ */
+function ExternalFileLink({
+  written,
+  sessionId,
+  children,
+}: {
+  written: string
+  sessionId: string
+  children: ReactNode
+}) {
+  const platform = useStore((s) => s.platform)
+  const toast = (msg: string) => useStore.getState().setToast(msg)
+  const remote = useStore((s) => !!s.sessions[sessionId]?.machine)
+  const fileManager = useCapability('fileManagerName')
+  const isImage = isImageLinkPath(written)
+  const [preview, setPreview] = useState<{ src: string; file?: string } | null>(null)
+  const [loading, setLoading] = useState(false)
+  const busyRef = useRef(false)
+  const revealBusyRef = useRef(false)
+  const reqIdRef = useRef(0)
+
+  useEffect(() => {
+    const id = ++reqIdRef.current
+    setPreview(null)
+    setLoading(false)
+    busyRef.current = false
+    revealBusyRef.current = false
+    return () => {
+      if (reqIdRef.current === id) reqIdRef.current += 1
+    }
+  }, [written, sessionId])
+
+  const reveal = () => {
+    if (!platform || revealBusyRef.current) return
+    if (remote) {
+      toast('This file is on another machine and cannot be revealed here')
+      return
+    }
+    const id = reqIdRef.current
+    revealBusyRef.current = true
+    void platform.fs
+      .revealMessageFile(sessionId, written)
+      .then(
+        (res) => {
+          if (reqIdRef.current !== id) return
+          if (!res.supported) toast(res.reason ?? 'Showing files is not available here')
+        },
+        (err: unknown) => {
+          if (reqIdRef.current !== id) return
+          const msg = errorMessage(err)
+          toast(msg.includes(written) ? msg : `Could not show ${written}: ${msg}`)
+        },
+      )
+      .finally(() => {
+        if (reqIdRef.current === id) revealBusyRef.current = false
+      })
+  }
+
+  const openImage = () => {
+    if (!platform || busyRef.current) return
+    const id = reqIdRef.current
+    busyRef.current = true
+    setLoading(true)
+    void loadReplyImage((sid, p) => platform.agents.messageImage(sid, p), sessionId, written)
+      .then((answer) => {
+        if (reqIdRef.current !== id) return
+        if (answer.ok) {
+          setPreview({ src: `data:${answer.mime};base64,${answer.data}`, file: answer.file })
+          return
+        }
+        if (!remote && answer.file && (answer.reason === 'too_large' || answer.reason === 'not_an_image')) {
+          void platform.fs.revealMessageImage(answer.file).then(
+            () => {
+              if (reqIdRef.current === id) toast(answer.message)
+            },
+            () => {
+              if (reqIdRef.current === id) toast(answer.message)
+            },
+          )
+          return
+        }
+        toast(answer.message)
+      })
+      .catch((err: unknown) => {
+        if (reqIdRef.current !== id) return
+        const msg = errorMessage(err)
+        toast(msg.includes(written) ? msg : `Could not open ${written}: ${msg}`)
+      })
+      .finally(() => {
+        if (reqIdRef.current === id) {
+          busyRef.current = false
+          setLoading(false)
+        }
+      })
+  }
+
+  const title = isImage
+    ? `Preview ${written}${remote ? '' : ` · Right-click: Reveal in ${fileManager}`}`
+    : remote
+      ? `${written} (on another machine)`
+      : `Reveal ${written} in ${fileManager}`
+
+  return (
+    <>
+      <button
+        type="button"
+        className={`${loading ? 'cursor-wait' : 'cursor-pointer'} underline decoration-ink-faint underline-offset-2 hover:decoration-ink`}
+        title={title}
+        aria-busy={loading || undefined}
+        data-testid="external-file-link"
+        data-path={written}
+        onClick={isImage ? openImage : reveal}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          reveal()
+        }}
+      >
+        {children}
+      </button>
+      {preview && (
+        <Modal onClose={() => setPreview(null)} testId="image-lightbox">
+          <div className="flex flex-col items-center gap-2">
+            <h2 className="sr-only">Image preview: {written}</h2>
+            <img
+              src={preview.src}
+              alt={written}
+              className="max-h-[calc(86vh/var(--text-zoom))] max-w-[calc(92vw/var(--text-zoom))] rounded-lg border border-line"
+              onError={() => {
+                setPreview(null)
+                toast(`Could not decode image: ${written}`)
+              }}
+            />
+            {!remote && preview.file && platform && (
+              <button
+                type="button"
+                className="readout text-xs text-ink-faint underline underline-offset-2 hover:text-ink"
+                onClick={() => {
+                  const target = preview.file
+                  if (!target) return
+                  void platform.fs.revealMessageImage(target).then(
+                    (res) => {
+                      if (!res.supported) toast(res.reason ?? 'Showing files is not available here')
+                    },
+                    (err: unknown) => toast(`Could not show ${target}: ${errorMessage(err)}`),
+                  )
+                }}
+              >
+                Reveal in {fileManager}
+              </button>
+            )}
+          </div>
+        </Modal>
+      )}
+    </>
   )
 }

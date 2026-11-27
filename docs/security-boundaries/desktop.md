@@ -130,6 +130,16 @@ carries its resolved path, and the window offers to reveal it in the file manage
 which still refuses a relative path or one with a link in it. For a session on a linked machine the hub drops that path
 from the answer (`links/routes.ts`) and the window offers no reveal: the file is on the other machine.
 
+Markdown links to local files or folders outside `projectRoot` (or in sessions with no project) follow the same
+boundary (`messages.resolveFile`, `SessionRecord.messageFile`, `dev-services/message-image.ts` `resolveMessageFile`).
+Raster image links (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`) preview in-app through `messages.image` (right-click
+reveals); all other local files and folders are resolved by `messages.resolveFile` and handed only to `reveal_path`,
+never to an OS opener that could execute the target. Before touching disk, `messages.resolveFile` verifies that the
+session's own replies named the path (`repliesName`), runs the same on-machine and Windows `walkLinks` + `DRIVE_PATH` +
+`realpath` checks without reading file bytes, strips a trailing `#L…` or `:line` suffix only as a fallback after
+`repliesName` succeeds, refuses filesystem roots (`/` and `C:\`), and refuses linked-machine sessions locally on the hub
+without forwarding (`links/routes.ts` `noRemote`). Local destinations never enter DOM `<a href>` or `<img src>`.
+
 Limits:
 
 - **What the agent writes decides what is shown.** Text an agent read (a web page, a repository file) can steer it into

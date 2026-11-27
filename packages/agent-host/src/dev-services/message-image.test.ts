@@ -6,7 +6,15 @@ import { pathToFileURL } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { IMAGE_PREVIEW_MAX_BYTES } from '@cc/protocol'
 import { localLinkTarget } from './link-walk.js'
-import { mentions, readMessageImage, resolveWrittenPath, sniffImage } from './message-image.js'
+import {
+  mentions,
+  readMessageImage,
+  resolveMessageFile,
+  resolveWrittenPath,
+  sniffImage,
+  stripFileLocation,
+  writtenForms,
+} from './message-image.js'
 import { itSymlink } from '../link.test-helpers.js'
 
 /** The smallest bytes each format's signature accepts, padded so the file is not empty past the signature */
@@ -273,3 +281,58 @@ describe('readMessageImage', () => {
     expect(got).not.toHaveProperty('data')
   })
 })
+
+describe('writtenForms', () => {
+  it('matches both raw and decodeURI forms for file: URLs and %28/%29 parentheses for Markdown links', () => {
+    expect(writtenForms('file:///Users/me/%ED%95%9C%EA%B8%80%20%231.pdf')).toContain('file:///Users/me/한글 %231.pdf')
+    expect(writtenForms('file:///Users/me/%ED%95%9C%EA%B8%80%20%231.pdf')).toContain('file:///Users/me/%ED%95%9C%EA%B8%80%20%231.pdf')
+    expect(writtenForms('/tmp/shot (1).png')).toContain('/tmp/shot%20%281%29.png')
+    expect(mentions('[shot](/tmp/shot%20%281%29.png)', '/tmp/shot (1).png')).toBe(true)
+  })
+})
+
+describe('stripFileLocation', () => {
+  it('strips #L anchors and :line/:line:col suffixes from paths and :line from file: URLs', () => {
+    expect(stripFileLocation('/tmp/a.ts#L10-L20')).toBe('/tmp/a.ts')
+    expect(stripFileLocation('/tmp/a.ts:12:4')).toBe('/tmp/a.ts')
+    expect(stripFileLocation('C:\\Users\\me\\notes.txt:12')).toBe('C:\\Users\\me\\notes.txt')
+    expect(stripFileLocation('file:///tmp/notes.txt:10')).toBe('file:///tmp/notes.txt')
+    expect(stripFileLocation('file:///tmp/notes.txt:10#L1')).toBe('file:///tmp/notes.txt')
+  })
+
+  it('refuses stripping down to empty, bare home, or bare Windows drive letter', () => {
+    expect(stripFileLocation('/tmp/a.ts')).toBeNull()
+    expect(stripFileLocation('file:///tmp/a.ts#L10')).toBeNull()
+    expect(stripFileLocation('C:10')).toBeNull()
+    expect(stripFileLocation('~:10')).toBeNull()
+    expect(stripFileLocation('file:///C:10')).toBeNull()
+  })
+})
+
+describe('resolveMessageFile', () => {
+  it('resolves regular files, folders, and symlinks to canonical paths, and refuses missing/dangling/root', async () => {
+    const file = join(dir, 'bundle.zip')
+    const sub = join(dir, 'folder')
+    writeFileSync(file, 'PK')
+    mkdirSync(sub)
+
+    expect(await resolveMessageFile(file)).toEqual({ ok: true, file })
+    expect(await resolveMessageFile(sub)).toEqual({ ok: true, file: sub })
+    expect(await resolveMessageFile(join(dir, 'nope.zip'))).toMatchObject({ ok: false, reason: 'not_found' })
+
+    if (process.platform !== 'win32') {
+      expect(await resolveMessageFile('/')).toMatchObject({ ok: false, reason: 'unreadable' })
+    }
+  })
+
+  itSymlink('follows valid symlinks to canonical paths and refuses dangling links', async () => {
+    const target = join(dir, 'real.zip')
+    writeFileSync(target, 'PK')
+    symlinkSync(target, join(dir, 'link.zip'))
+    symlinkSync(join(dir, 'missing.zip'), join(dir, 'dangling.zip'))
+
+    expect(await resolveMessageFile(join(dir, 'link.zip'))).toEqual({ ok: true, file: target })
+    expect(await resolveMessageFile(join(dir, 'dangling.zip'))).toMatchObject({ ok: false, reason: 'not_found' })
+  })
+})
+
