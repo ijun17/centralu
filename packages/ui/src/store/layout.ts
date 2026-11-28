@@ -25,13 +25,15 @@ const CENTER_MIN = 360
  * What the conversation keeps in a window too narrow for the side lanes (#1561), which give way first. Real pixels.
  * Lower than CENTER_MIN, which is what a drag leaves while there is room.
  */
-export const CENTER_FLOOR = 300
+const CENTER_FLOOR = 300
 
 /**
- * The sidebar's CSS minimum: SIDEBAR_MIN while the window leaves CENTER_FLOOR beside it, then less (#2362). Two fixed
- * minimums would push the conversation past the window's right edge below their sum. `100%` is the lanes' row, the window.
+ * The conversation's CSS minimum: CENTER_FLOOR while the window leaves SIDEBAR_MIN beside it, then less (#2455, *owner,
+ * 2026-11-29*). The sidebar keeps SIDEBAR_MIN at any width, the narrowest at which its names read; narrower, they are
+ * cut to a letter. Two fixed minimums would push the conversation past the window's right edge below their sum (#2362).
+ * `100%` is the lanes' row, the window.
  */
-export const sidebarFloor = (zoom: number): string => `min(${SIDEBAR_MIN / zoom}px, 100% - ${CENTER_FLOOR / zoom}px)`
+export const centerFloor = (zoom: number): string => `min(${CENTER_FLOOR / zoom}px, 100% - ${SIDEBAR_MIN / zoom}px)`
 
 /**
  * The layout is in zoom coordinates and `innerWidth` in real pixels, so the room is divided by `zoom`; the minimum

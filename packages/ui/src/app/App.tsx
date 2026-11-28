@@ -9,7 +9,7 @@ import { Gust } from './Gust.jsx'
 import { ErrorBoundary } from './ErrorBoundary.jsx'
 import { applyTheme, cacheChoice, pickTheme, resolveChoice } from './theme.js'
 import { applyTypography, cacheTypography, typographyOf } from './typography.js'
-import { CENTER_FLOOR, projectScreenOf, screenExists, usableThemeFiles, useStore, useTextZoom } from '../store/store.js'
+import { centerFloor, projectScreenOf, screenExists, usableThemeFiles, useStore, useTextZoom } from '../store/store.js'
 import { showsIntro } from '../store/screens.js'
 import { canStep } from '../store/navHistory.js'
 import { dialogOpen } from '../store/layers.js'
@@ -273,7 +273,7 @@ function Body() {
       {/*
         min-w-0: else widening the panel scrolls the whole screen sideways.
       */}
-      <div className="cc-fade relative flex min-h-0 min-w-0 flex-1" style={{ minWidth: CENTER_FLOOR / zoom }}>
+      <div className="cc-fade relative flex min-h-0 min-w-0 flex-1" style={{ minWidth: centerFloor(zoom) }}>
         {view === 'assistant' ? (
           <AssistantView />
         ) : view === 'grid' ? (
