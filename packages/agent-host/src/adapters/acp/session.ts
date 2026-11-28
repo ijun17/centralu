@@ -1,8 +1,9 @@
 import { isAbsolute, join } from 'node:path'
-import { notSignedIn, type ApprovalDecision, type ApprovalDetail, type NormalizedEvent, type PermissionPreset, type QuestionAnswer } from '@cc/protocol'
+import { notSignedIn, type AdapterCapabilities, type ApprovalDecision, type ApprovalDetail, type NormalizedEvent, type PermissionPreset, type QuestionAnswer } from '@cc/protocol'
 import { CENTRALU_MCP_NAME } from '../../apps/contract.js'
 import { rpcError } from '../../rpc-error.js'
 import { asObj } from '../../json-value.js'
+import { agentTextOf } from '../../sessions/agent-text.js'
 import { alwaysAllowKey } from '../always-allow.js'
 import { bridgePath } from '../bridge-path.js'
 import type { AgentSpawnSpec, CreateSessionOpts, EventSink, SessionHandle } from '../contract.js'
@@ -65,6 +66,31 @@ export type AcpSessionDeps = {
   shape?: AcpToolShape
   /** The agent asking for a browser sign-in in this session's process (`AcpProfile.launch`), removed with the session */
   signInWanted?: SignInWanted
+  /** How the tool is told Centralu's tool instructions (`AcpProfile.capabilities`) */
+  capabilities: Pick<AdapterCapabilities, 'instructionChannel' | 'subagentTool'>
+}
+
+/**
+ * Centralu's own tools, and the attached apps through its `app` tool (#2231), by the same stdio bridge Codex starts (§6).
+ * The bridge answers `initialize` with the tool instructions only for a tool that shows a server's (`server`)
+ */
+export function acpMcpServers(opts: CreateSessionOpts, capabilities: AcpSessionDeps['capabilities']): unknown[] {
+  const bridge = opts.centraluBridge
+  if (!opts.centraluTools || !bridge) return []
+  const instructions = capabilities.instructionChannel === 'server' ? agentTextOf(opts, capabilities.subagentTool).tools : undefined
+  return [
+    {
+      name: CENTRALU_MCP_NAME,
+      command: process.execPath,
+      args: [bridgePath()],
+      env: [
+        { name: 'CC_HOST_URL', value: bridge.url },
+        { name: 'CC_BRIDGE_TOKEN', value: bridge.token },
+        { name: 'CC_SESSION_ID', value: opts.sessionId },
+        ...(instructions ? [{ name: 'CC_BRIDGE_INSTRUCTIONS', value: instructions }] : []),
+      ],
+    },
+  ]
 }
 
 /** `edit`: the asked call is an edit whose run may come as a new call (`AcpToolShape.editRunsAsNewCall`), with its files */
@@ -473,22 +499,8 @@ class AcpWire implements ToolWire {
     return err instanceof Error ? err : new Error(String(err))
   }
 
-  /** Centralu's own tools, and the attached apps through its `app` tool (#2231), by the same stdio bridge Codex starts (§6) */
   private mcpServers(): unknown[] {
-    const bridge = this.opts.centraluBridge
-    if (!this.opts.centraluTools || !bridge) return []
-    return [
-      {
-        name: CENTRALU_MCP_NAME,
-        command: process.execPath,
-        args: [bridgePath()],
-        env: [
-          { name: 'CC_HOST_URL', value: bridge.url },
-          { name: 'CC_BRIDGE_TOKEN', value: bridge.token },
-          { name: 'CC_SESSION_ID', value: this.opts.sessionId },
-        ],
-      },
-    ]
+    return acpMcpServers(this.opts, this.deps.capabilities)
   }
 
   startTurn(input: TurnInput, core: RunningTurn): void {

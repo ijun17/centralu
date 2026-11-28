@@ -17,6 +17,7 @@ import { WebSocket } from 'ws'
 const URL_ = process.env.CC_HOST_URL
 const TOKEN = process.env.CC_BRIDGE_TOKEN
 const SESSION_ID = process.env.CC_SESSION_ID
+const INSTRUCTIONS = process.env.CC_BRIDGE_INSTRUCTIONS
 /**
  * The ceiling for waiting on a single tool call. It must be shorter than Codex's own ceiling
  * (`tool_timeout_sec`, 300 seconds — set explicitly by the adapter) so the bridge is the one that
@@ -105,15 +106,15 @@ async function handle(msg) {
 
   if (method === 'initialize') {
     /*
-     * No `instructions`: codex-cli 0.160.0 shows a server's instructions to no model (measured, #525). The role
-     * instructions Claude gets from its in-process server reach a Codex thread through its developer instructions
-     * instead (CodexSession.developerInstructions); sending them here as well would say them twice to a Codex that
-     * starts showing them.
+     * The tool instructions only where the session's tool shows a server's (`acpMcpServers` sets them: OpenCode). Codex
+     * shows them to no model and gets them in its developer instructions, so its bridge sends none (#525);
+     * docs/agent-host/tool-profiles.md "What every tool is told".
      */
     return ok(id, {
       protocolVersion: params?.protocolVersion ?? '2025-06-18',
       capabilities: { tools: {} },
       serverInfo: { name: 'centralu', version: '1' },
+      ...(INSTRUCTIONS ? { instructions: INSTRUCTIONS } : {}),
     })
   }
   if (method === 'notifications/initialized') return

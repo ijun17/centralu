@@ -21,6 +21,8 @@ import { execText } from '../../os/exec.js'
  */
 const CAPABILITIES: AdapterCapabilities = {
   ...ACP_CAPABILITIES,
+  // It shows the model an MCP server's `initialize` instructions (scripts/probe-acp-mcp-instructions.mts, measured on 1.19.4)
+  instructionChannel: 'server',
 }
 
 const DESCRIPTOR: ToolDescriptor = {

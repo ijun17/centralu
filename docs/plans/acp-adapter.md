@@ -659,8 +659,8 @@ session; an HTTP endpoint would be a second way in to secure. `bridge-path.ts` m
 `appAttachment: 'restart'`, as for Codex. Superseded by #2231: no app is a server of the session any more; apps are
 reached through the one `app` tool of Centralu's bridge (apps/attaching.md "Apps through one Centralu tool (#2231)").
 
-Tool approvals inside our own bridge are the host's, as now. The bridge sends no MCP instructions, so there is no
-`instructionChannel` (agent-host/tool-profiles.md "What every tool is told"); ACP has no system-prompt field, so
+Tool approvals inside our own bridge are the host's, as now. The bridge sends MCP instructions only to a tool measured
+to show them (OpenCode; agent-host/tool-profiles.md "What every tool is told"); ACP has no system-prompt field, so
 `systemPromptAppend` has no standard path (open question 2).
 
 ## 7. Capabilities
@@ -681,7 +681,7 @@ Values for the ACP adapter, decided per profile and, where marked, from the `ini
 | `backgroundTasks`, `builtInSubagents` | false | until PR 2 |
 | `midTurnInput` | false | §5.4 |
 | `processModel` | `per-session` | §3.1 |
-| `instructionChannel` | absent: none is sent | §6 |
+| `instructionChannel` | absent for Cursor (none is sent); `server` for OpenCode (the bridge's `initialize`) | §6 |
 | `sleep` | false | until resume is measured to lose nothing on Cursor |
 | `compactCommand` (method) | absent on the adapter; the session's says null for Cursor | §5.6 |
 | `listExternalSessions`, `readExternalHistory` (methods) | PR 2 | `sessionCapabilities.list` |

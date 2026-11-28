@@ -63,7 +63,9 @@ export class ToolsMock {
     ['antigravity', { models: [], capabilities: { ...NO_ROLE_TEXT, instructionChannel: 'developer', roleText: true } }],
     // No role text on the real host (each adapter's `CAPABILITIES`); mock-capability-parity.test.ts holds them together
     // eslint-disable-next-line agent/agent-adapter-checks -- Fixture catalogue supplies these CLIs' model and capability data.
-    ...['cursor-agent', 'opencode'].map((tool): [ToolName, { models: []; capabilities: typeof NO_ROLE_TEXT }] => [tool, { models: [], capabilities: NO_ROLE_TEXT }]),
+    ['cursor-agent', { models: [], capabilities: NO_ROLE_TEXT }],
+    // eslint-disable-next-line agent/agent-adapter-checks -- Fixture catalogue supplies this CLI's model and capability data.
+    ['opencode', { models: [], capabilities: { ...NO_ROLE_TEXT, instructionChannel: 'server' } }],
   ])
 
   firstRegisteredTool(): ToolName {

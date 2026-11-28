@@ -86,6 +86,7 @@ export abstract class AcpAdapter implements AgentAdapter {
       ...(this.profile.infersCompaction ? { infersCompaction: true } : {}),
       ...(shape ? { shape } : {}),
       ...(launch.signInWanted ? { signInWanted: launch.signInWanted } : {}),
+      capabilities: this.profile.capabilities,
     })
     try {
       await session.ready

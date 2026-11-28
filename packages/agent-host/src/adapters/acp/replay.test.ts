@@ -275,7 +275,9 @@ for (const dir of readdirSync(RECORDINGS)) {
         const { events, sent } = await replay(dir, name)
         const created = sent.find((f) => f.method === 'session/new') as { params: { mcpServers: { name: string; env: { name: string; value: string }[] }[] } }
         expect(created.params.mcpServers.map((m) => m.name)).toEqual(['centralu'])
-        expect(created.params.mcpServers[0]!.env.map((e) => e.name).sort()).toEqual(['CC_BRIDGE_TOKEN', 'CC_HOST_URL', 'CC_SESSION_ID'])
+        // The tool instructions ride along only to a tool that shows a server's (OpenCode: `instructionChannel: 'server'`)
+        const told = dir.startsWith('opencode') ? ['CC_BRIDGE_INSTRUCTIONS'] : []
+        expect(created.params.mcpServers[0]!.env.map((e) => e.name).sort()).toEqual([...told, 'CC_BRIDGE_TOKEN', 'CC_HOST_URL', 'CC_SESSION_ID'])
         // The agent asked no permission for them under Normal: the recording holds no request
         expect(of(events, 'approval_request')).toEqual([])
         const calls = of(events, 'tool_call')

@@ -65,7 +65,7 @@ describe("Cursor's presets", () => {
 describe('what the ACP tools keep alike', () => {
   it('is ACP_CAPABILITIES for all three, each overriding only what it measured different', () => {
     expect(cursorProfile().capabilities).toStrictEqual({ ...ACP_CAPABILITIES, contextUsage: 'none', presets: ['auto'] })
-    expect(openCodeProfile().capabilities).toStrictEqual(ACP_CAPABILITIES)
+    expect(openCodeProfile().capabilities).toStrictEqual({ ...ACP_CAPABILITIES, instructionChannel: 'server' })
     expect(antigravityProfile().capabilities).toStrictEqual({
       ...ACP_CAPABILITIES,
       autoTitle: false,

@@ -31,22 +31,27 @@ is the name of the tool's own subagent tool, which the `start_agent` line names 
 | Claude | `systemPrompt.append` | the in-process server's `instructions`, which Claude Code heads itself |
 | Codex | one text in the thread's developer instructions: the role, then the instructions under one heading (`joinedAgentText`) | (same text) |
 | Antigravity | the same one text, in `_meta.antigravity.systemPrompt.append` | (same text) |
-| Cursor, OpenCode | none | none |
+| OpenCode | none | the stdio bridge's `initialize` `instructions` (`acpMcpServers` hands them to it) |
+| Cursor | none | none |
 
 The doors differ because the tools do. codex-cli 0.160.0 shows a server's instructions to no model (#525, measured
-with `scripts/probe-codex-mcp-instructions.mts`), so the bridge sends none and every tool but Claude gets them in
-its one text. Codex reads that text at `thread/start` only and ignores it on `thread/resume`, so a Codex thread
-keeps what it was started with: one that changes profile while its thread lives on has its new tools without their
-instructions until it starts a new thread.
+with `scripts/probe-codex-mcp-instructions.mts`), so its bridge sends none and Codex gets them in its one text.
+Codex reads that text at `thread/start` only and ignores it on `thread/resume`, so a Codex thread keeps what it was
+started with: one that changes profile while its thread lives on has its new tools without their instructions until
+it starts a new thread.
 
-**Cursor and OpenCode are told nothing**, neither a role nor these instructions: their ACP servers take no system
-prompt, and whether they show a server's `initialize` instructions to the model is not measured yet (#2479). So
-they declare no `instructionChannel` and `roleText: false`, the cost measure counts no instructions for them, and a
-session that needs role text (the Assistant, a coordinator, an app's builder) is refused on them (`launchRefusal`).
-An ordinary session on them runs without the "Centralu's tools first" rule.
+Which ACP tools show a server's `initialize` instructions was measured with `scripts/probe-acp-mcp-instructions.mts`
+(2026-11-29, three runs each, a marked phrase asked for before and after calling the server's tool): OpenCode 1.19.4
+named it in 6 of 6 turns, before any call; the Cursor agent 2026.10.22-27dcf5f answered "unknown" in 3 of 3 before a
+call and named it once in 3 after, only by looking the server up itself. So OpenCode declares `instructionChannel:
+'server'` and its bridge is handed the instructions; Cursor declares none and is told nothing.
+
+**Neither takes a role**: their ACP servers take no system prompt (a leading prompt block is #2479). So they declare
+`roleText: false`, and a session that needs role text (the Assistant, a coordinator, an app's builder) is refused on
+them (`launchRefusal`). An ordinary session on Cursor runs without the "Centralu's tools first" rule.
 
 `sessions/agent-text.test.ts` reads every seat's text from each adapter's own transport and fails on any difference
-from `agentTextOf` that its short list of tools told nothing does not name.
+from `agentTextOf` that its short list of parts a tool is not told does not name.
 
 ## The profiles in detail
 
