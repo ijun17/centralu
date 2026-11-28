@@ -61,6 +61,22 @@ describe("a tool's models", () => {
     expect((await queries.listModels('claude')).models).toEqual([m('new')])
   })
 
+  it('an ask after the change does not join a read of the old CLI still running', async () => {
+    let release!: (v: ModelOption[]) => void
+    answer = () => new Promise<ModelOption[]>((r) => (release = r))
+    const before = queries.listModels('claude')
+    queries.forgetModels('claude')
+    const readOld = release
+    answer = async () => [m('new')]
+    expect((await queries.listModels('claude')).models).toEqual([m('new')])
+    expect(reads).toBe(2)
+    readOld([m('old')])
+    expect((await before).models).toEqual([m('old')])
+    // What the old read ended with is not kept: the next ask still has the new list
+    expect((await queries.listModels('claude')).models).toEqual([m('new')])
+    expect(reads).toBe(2)
+  })
+
   it('forgetting a tool also ends the wait after a failed read', async () => {
     answer = async () => {
       throw new Error('the tool did not answer')
