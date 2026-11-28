@@ -474,6 +474,33 @@ describe('a failed reorder or command save puts back only what it changed (#842 
     expect(useStore.getState().toast).toContain('disk full')
   })
 
+  it('a removal the host refuses ends on the list the host holds, also after another edit made while it was out (#2472)', async () => {
+    const platform = new MockPlatform()
+    const p = await platform.projects.add('/tmp/cmds-refused')
+    await platform.projects.setCommands(p.id, [{ command: 'pnpm dev' }])
+    await platform.commands.run(p.id, 'pnpm dev', 100, 30)
+    platform.stopDoesNotEnd = true
+    await useStore.getState().attach(platform)
+    // The later edit answers last, as an add made during a removal's wait does
+    const real = platform.projects.setCommands
+    let answer = () => {}
+    vi.spyOn(platform.projects, 'setCommands')
+      .mockImplementationOnce(real)
+      .mockImplementationOnce(async (...args) => {
+        await new Promise<void>((resolve) => (answer = resolve))
+        return real(...args)
+      })
+
+    const removing = useStore.getState().setProjectCommands(p.id, [])
+    const adding = useStore.getState().setProjectCommands(p.id, [{ command: 'pnpm lint' }])
+    await removing
+    answer()
+    await adding
+
+    await vi.waitFor(() => expect(useStore.getState().projects[p.id]?.commands).toEqual([{ command: 'pnpm dev' }]))
+    expect(useStore.getState().toast).toContain('pnpm dev did not stop, so it stays on the list')
+  })
+
   it('a failed command save does not bring back a project removed while it was out', async () => {
     const platform = new MockPlatform()
     const p = await platform.projects.add('/tmp/cmds-gone')

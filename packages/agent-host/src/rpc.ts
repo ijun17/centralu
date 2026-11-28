@@ -769,8 +769,11 @@ export function createRpcHandler(
       externalApps?.refresh()
       return { ok: true as const }
     },
-    'projects.setCommands': async ({ projectId, commands }) => {
-      return mgr.projectRegistry.setProjectCommands(projectId, commands)
+    'projects.setCommands': async ({ projectId, commands: saved }) => {
+      // A run whose command leaves the list loses the only Stop on screen: it ends first, or the list stays (#2472).
+      // Trimmed, as the registry stores a command
+      await commands?.stopDropped(mgr.cwdOfProject(projectId), new Set(saved.map((c) => c.command.trim())))
+      return mgr.projectRegistry.setProjectCommands(projectId, saved)
     },
     'worktrees.setTrunk': async ({ projectId, baseBranch }) => ack(await mgr.projectRegistry.setWorktreeTrunk(projectId, baseBranch)),
     'projects.setAgentInstructions': async ({ projectId, text }) => ack(mgr.projectRegistry.setAgentInstructions(projectId, text)),

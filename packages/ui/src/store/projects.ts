@@ -332,6 +332,13 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
             toast: `Could not save commands: ${errorMessage(e)}`,
           }
         })
+        // Then the host's own list: another save made meanwhile rolls back to a list the host never had, and a removal
+        // the host refused takes seconds, long enough for one (#2472)
+        const held = (await platform.projects.list().catch(() => null))?.find((x) => x.id === projectId)?.commands
+        if (held) set((s) => {
+          const now = s.projects[projectId]
+          return now ? { projects: { ...s.projects, [projectId]: { ...now, commands: held } } } : {}
+        })
       }
     })
   },

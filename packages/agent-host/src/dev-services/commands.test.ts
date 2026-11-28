@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -8,6 +8,13 @@ import { CommandRunner } from './commands.js'
 import { alive, cleanUp, consoleHosts, plantTreeScript, processCounters, settle, treePids } from './process-tree.test-helpers.js'
 import type { PtyModule } from './terminal.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
+import type { ToolName } from '@cc/protocol'
+import type { AgentAdapter } from '../adapters/contract.js'
+import { Store } from './store.js'
+import { SessionManager } from '../sessions/manager.js'
+import { createRpcHandler } from '../rpc.js'
+import { ownProcesses } from '../process.test-helpers.js'
+import { removeTree } from '../temp-dir.test-helpers.js'
 
 /**
  * The contract for the frequently used command runner (#60):
@@ -390,4 +397,89 @@ describe.runIf(process.platform === 'win32')('CommandRunner — the whole tree o
       kill.mockRestore()
     }
   }, 90_000 * SLOW)
+})
+
+/**
+ * A saved command removed while it runs is stopped first (#2472): its row holds the only
+ * Stop on screen, so a run that outlived its row could not be stopped until the app quit. Through the RPC door the
+ * window knocks on, with a real process standing in for the pty's shell: it leads a group of its own as node-pty's
+ * does, so the stop is the same tree stop a run gets.
+ */
+
+const own = ownProcesses()
+const started: ChildProcess[] = []
+let removeDir = ''
+
+/** Each run is a real Node process that idles until it is ended */
+const realProcesses: PtyModule = {
+  spawn() {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', detached: process.platform !== 'win32', windowsHide: true })
+    started.push(child)
+    return {
+      pid: child.pid,
+      onData: () => {},
+      onExit: (cb) => void child.once('exit', (code) => cb({ exitCode: code ?? 0 })),
+      write: () => {},
+      resize: () => {},
+      kill: (signal) => void child.kill(signal as NodeJS.Signals | undefined),
+    }
+  },
+}
+
+/** A run that no stop ends */
+const deafProcesses: PtyModule = {
+  spawn: () => ({ onData: () => {}, onExit: () => {}, write: () => {}, resize: () => {}, kill: () => {} }),
+}
+
+async function project(ptys: PtyModule) {
+  removeDir = realpathSync(mkdtempSync(join(tmpdir(), 'cc-cmd-remove-')))
+  const adapters = new Map<ToolName, AgentAdapter>()
+  const rpc = createRpcHandler(new SessionManager(new Store(), adapters, () => {}), adapters, { commands: new CommandRunner(() => {}, ptys) })
+  const { id } = (await rpc('projects.add', { path: removeDir })) as { id: string }
+  const saved = [{ command: 'pnpm dev' }, { command: 'pnpm test' }]
+  await rpc('projects.setCommands', { projectId: id, commands: saved })
+  await rpc('commands.run', { projectId: id, command: 'pnpm dev' })
+  const running = async () => ((await rpc('commands.state', { projectId: id })) as { runs: { command: string; running: boolean }[] }).runs
+  const list = async () => ((await rpc('projects.list', {})) as { id: string; commands: unknown[] }[]).find((p) => p.id === id)!.commands
+  return { rpc, id, running, list }
+}
+
+describe('removing a saved command while it runs (#2472)', () => {
+  afterEach(async () => {
+    await own.endAfter(started.map((c) => c.pid ?? 0), 500)
+    started.length = 0
+    vi.useRealTimers()
+    if (removeDir) await removeTree(removeDir)
+    removeDir = ''
+  })
+
+  it('stops it, and answers once the process has ended; a command that stays, renamed or moved, keeps running', async () => {
+    const p = await project(realProcesses)
+    await p.rpc('commands.run', { projectId: p.id, command: 'pnpm test' })
+    const [dev, test] = started.map((c) => c.pid!)
+    await p.rpc('projects.setCommands', { projectId: p.id, commands: [{ command: ' pnpm test ', label: 'Tests' }, { command: 'pnpm dev' }] })
+    expect([own.alive(dev!), own.alive(test!)]).toEqual([true, true])
+
+    await expect(p.rpc('projects.setCommands', { projectId: p.id, commands: [{ command: 'pnpm test' }] })).resolves.toEqual([{ command: 'pnpm test' }])
+
+    expect([own.alive(dev!), own.alive(test!)]).toEqual([false, true])
+    expect(await p.running()).toEqual([
+      expect.objectContaining({ command: 'pnpm dev', running: false }),
+      expect.objectContaining({ command: 'pnpm test', running: true }),
+    ])
+    expect(await p.list()).toEqual([{ command: 'pnpm test' }])
+  }, 30_000 * SLOW)
+
+  it('keeps the command on the list, and says why, when the stop does not end it', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] })
+    const p = await project(deafProcesses)
+
+    const removing = p.rpc('projects.setCommands', { projectId: p.id, commands: [{ command: 'pnpm test' }] })
+    const said = expect(removing).rejects.toThrow('pnpm dev did not stop, so it stays on the list')
+    await vi.advanceTimersByTimeAsync(60_000)
+    await said
+
+    expect(await p.list()).toEqual([{ command: 'pnpm dev' }, { command: 'pnpm test' }])
+    expect(await p.running()).toEqual([expect.objectContaining({ command: 'pnpm dev', running: true })])
+  })
 })
