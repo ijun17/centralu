@@ -2,19 +2,16 @@ import { test, expect, type Locator, type Page } from '@playwright/test'
 import { setup, newSession } from './control.js'
 
 /**
- * The folds of the sidebar: a folded project opens from its whole name row, and a project's rows and the Assistant's
- * children slide open and closed (#1605). Run in Chromium (sidebar-fold.spec.ts) and in WebKit (sidebar-fold-webkit.spec.ts):
- * the desktop app is WKWebView, and a height animation has to be smooth there too.
+ * The folds of the sidebar: clicking a project's row background (or arrow) toggles its fold, and a project's rows and
+ * the Assistant's children slide open and closed (#1605). Run in Chromium (sidebar-fold.spec.ts) and in WebKit
+ * (sidebar-fold-webkit.spec.ts): the desktop app is WKWebView, and a height animation has to be smooth there too.
  *
- * The 0.1 s rest and the exit (`usePresence`, 150 ms) run on Playwright's clock, which the tests move by hand; the
- * transition itself runs on the browser's own time. A fold is waited on by its end state (`data-fold` on the list's
- * `Fold`), never by a sleep.
+ * The exit (`usePresence`, 150 ms) runs on Playwright's clock, which the tests move by hand; the transition itself runs
+ * on the browser's own time. A fold is waited on by its end state (`data-fold` on the list's `Fold`), never by a sleep.
  */
 
 /** How long a leaving list stays: LEAVE_MS in components/presence.ts */
 const LEAVE_MS = 150
-/** Just over the rest the pointer needs on a row: HOVER_EXPAND_MS in features/sidebar/fold.ts */
-const REST_MS = 101
 
 const rows = (page: Page, project: string) => page.getByTestId(`project-${project}`).locator('[data-testid^="session-row-"]')
 const header = (page: Page, project: string) => page.getByTestId(`project-${project}`).locator('header')
@@ -31,16 +28,23 @@ async function foldedProject(page: Page, opts: { sessions?: number } = {}) {
   await page.clock.pauseAt(new Date(Date.now() + 60_000))
 }
 
-/** The pointer on the row's empty space: right of the name, left of the menu button. Returns what is under it. */
-async function restOnEmptySpace(page: Page): Promise<string> {
+/** Coordinates on the row's empty space: right of the name, left of the menu button */
+async function emptySpacePoint(page: Page): Promise<{ x: number; y: number; hit: string }> {
   const box = (await header(page, 'alpha').boundingBox())!
   const x = box.x + box.width * 0.62
   const y = box.y + box.height / 2
-  await page.mouse.move(x, y)
-  return page.evaluate(([px, py]) => {
+  const hit = await page.evaluate(([px, py]) => {
     const el = document.elementFromPoint(px, py)
     return el?.closest('button') ? 'a button' : el?.tagName.toLowerCase() === 'header' ? 'the row' : (el?.tagName ?? 'nothing')
   }, [x, y] as const)
+  return { x, y, hit }
+}
+
+/** Clicks the row's empty space and returns what element sat under the pointer */
+async function clickEmptySpace(page: Page): Promise<string> {
+  const pt = await emptySpacePoint(page)
+  await page.mouse.click(pt.x, pt.y)
+  return pt.hit
 }
 
 /** The list's height, sampled as fast as the page answers until it has stopped changing (for a list that must not move at all) */
@@ -87,51 +91,41 @@ const nonincreasing = (hs: number[]) => hs.every((h, i) => i === 0 || h <= hs[i 
 const smooth = (hs: number[]) => hs.slice(1, 4).every((h) => h > hs[0]! && h < hs[4]!) || hs.slice(1, 4).every((h) => h < hs[0]! && h > hs[4]!)
 
 export function sidebarFoldTests() {
-  test('Fold: resting on the empty space of a folded project row expands it', async ({ page }) => {
+  test('Fold: clicking the empty space of a project row expands and collapses it', async ({ page }) => {
     await foldedProject(page)
     // Over the row itself, not over its name or a button
-    expect(await restOnEmptySpace(page)).toBe('the row')
-    await page.clock.runFor(REST_MS - 2)
-    await expect(rows(page, 'alpha')).toHaveCount(0)
-    await page.clock.runFor(3)
+    expect(await clickEmptySpace(page)).toBe('the row')
     await expect(rows(page, 'alpha')).toHaveCount(1)
-    await expect(page.getByTestId('project-alpha')).toHaveAttribute('data-hover-expanded', 'true')
-    // The saved fold is untouched
-    await expect(page.getByTestId('project-fold-alpha')).toHaveAttribute('aria-label', 'Expand alpha')
-  })
-
-  test('Fold: resting on a button of the row expands it too; a press before the rest is over does not', async ({ page }) => {
-    await foldedProject(page)
-    await page.getByTestId('project-menu-alpha').hover()
-    await page.clock.runFor(REST_MS)
-    await expect(rows(page, 'alpha')).toHaveCount(1)
-    await away(page)
-    // The exit's timer starts once the list has been told to leave: wait for that, then move the clock
+    await expect(page.getByTestId('project-fold-alpha')).toHaveAttribute('aria-label', 'Collapse alpha')
+    expect(await page.evaluate(() => (window as any).__mock.workspaceSnapshot?.foldedProjects?.length)).toBe(0)
+    // Clicking the row background again folds it back
+    expect(await clickEmptySpace(page)).toBe('the row')
     await expect(region(page, 'alpha')).toHaveAttribute('data-fold', 'closing')
     await page.clock.runFor(LEAVE_MS + 1)
     await expect(rows(page, 'alpha')).toHaveCount(0)
-    // A press is a decision not to wait: the menu opens and the rest that was running does not expand the project
-    await page.getByTestId('project-menu-alpha').click()
-    await page.clock.runFor(REST_MS * 3)
-    await expect(page.getByTestId('project-menu-open-alpha')).toBeVisible()
-    await expect(rows(page, 'alpha')).toHaveCount(0)
+    await expect(page.getByTestId('project-fold-alpha')).toHaveAttribute('aria-label', 'Expand alpha')
   })
 
-  test('Fold: a pass over the empty space shorter than the rest does nothing', async ({ page }) => {
+  test('Fold: resting on a folded project row or its buttons does not expand it', async ({ page }) => {
     await foldedProject(page)
-    await restOnEmptySpace(page)
-    await page.clock.runFor(REST_MS - 30)
-    await away(page)
+    const pt = await emptySpacePoint(page)
+    expect(pt.hit).toBe('the row')
+    await page.mouse.move(pt.x, pt.y)
+    await page.clock.runFor(1000)
+    await expect(rows(page, 'alpha')).toHaveCount(0)
+    await page.getByTestId('project-header-alpha').hover()
+    await page.clock.runFor(1000)
+    await expect(rows(page, 'alpha')).toHaveCount(0)
+    await page.getByTestId('project-menu-alpha').hover()
     await page.clock.runFor(1000)
     await expect(rows(page, 'alpha')).toHaveCount(0)
   })
 
   test('Fold: the rows stay in the page while they leave, and go when the exit ends', async ({ page }) => {
     await foldedProject(page)
-    await restOnEmptySpace(page)
-    await page.clock.runFor(REST_MS)
+    await clickEmptySpace(page)
     await expect(rows(page, 'alpha')).toHaveCount(1)
-    await away(page)
+    await clickEmptySpace(page)
     // Folded as far as the project goes, but nothing is taken away yet: no blink
     await expect(page.getByTestId('project-alpha')).toHaveAttribute('data-folded', 'true')
     await expect(region(page, 'alpha')).toHaveAttribute('data-fold', 'closing')
@@ -143,16 +137,14 @@ export function sidebarFoldTests() {
     await expect(region(page, 'alpha')).toHaveCount(0)
   })
 
-  test('Fold: coming back while the rows leave opens them again', async ({ page }) => {
+  test('Fold: clicking again while the rows leave opens them again', async ({ page }) => {
     await foldedProject(page)
-    await restOnEmptySpace(page)
-    await page.clock.runFor(REST_MS)
+    await clickEmptySpace(page)
     await expect(region(page, 'alpha')).toHaveAttribute('data-fold', 'opening')
-    await away(page)
+    await clickEmptySpace(page)
     await expect(region(page, 'alpha')).toHaveAttribute('data-fold', 'closing')
-    // Back on the row before the exit ends: the saved fold is folded, so it takes a new rest
-    await restOnEmptySpace(page)
-    await page.clock.runFor(REST_MS)
+    // Click again before the exit ends
+    await clickEmptySpace(page)
     await expect(region(page, 'alpha')).toHaveAttribute('data-fold', 'opening')
     await expect(rows(page, 'alpha')).toHaveCount(1)
     await page.clock.runFor(1000)
@@ -163,15 +155,14 @@ export function sidebarFoldTests() {
   test('Fold: the height grows and shrinks in steps, never jumping', async ({ page }) => {
     await foldedProject(page, { sessions: 3 })
     await slowFolds(page)
-    await restOnEmptySpace(page)
-    await page.clock.runFor(REST_MS)
+    await clickEmptySpace(page)
     const opening = await heightsAlongTransition(region(page, 'alpha'))
     // From nothing to the full list, part way in between and never back: it did not arrive in one frame
     expect(opening.heights[0]).toBe(0)
     expect(opening.heights[4]).toBeGreaterThan(60)
     expect(nondecreasing(opening.heights)).toBe(true)
     expect(smooth(opening.heights)).toBe(true)
-    await away(page)
+    await clickEmptySpace(page)
     await expect(region(page, 'alpha')).toHaveAttribute('data-fold', 'closing')
     const closing = await heightsAlongTransition(region(page, 'alpha'))
     expect(closing.heights[0]).toBe(opening.heights[4])
@@ -183,8 +174,7 @@ export function sidebarFoldTests() {
   test('Fold: a click on a row while the list is still opening lands', async ({ page }) => {
     await foldedProject(page, { sessions: 2 })
     await slowFolds(page)
-    await restOnEmptySpace(page)
-    await page.clock.runFor(REST_MS)
+    await clickEmptySpace(page)
     await expect(region(page, 'alpha')).toHaveAttribute('data-fold', 'opening')
     // The second session is the open one; the first is pressed while the list is still moving
     const first = rows(page, 'alpha').first()
@@ -192,22 +182,6 @@ export function sidebarFoldTests() {
     await first.click()
     expect(await stillMoving(region(page, 'alpha'))).toBe(true)
     await expect(first).toHaveAttribute('aria-current', 'page')
-    // And the saved fold was left as it is, as it is for any row of a hover-expanded project
-    expect(await page.evaluate(() => (window as any).__mock.workspaceSnapshot?.foldedProjects?.length)).toBe(1)
-  })
-
-  test('Fold: a click on the arrow while the list is opening makes it stay', async ({ page }) => {
-    await foldedProject(page)
-    await slowFolds(page)
-    await restOnEmptySpace(page)
-    await page.clock.runFor(REST_MS)
-    await expect(region(page, 'alpha')).toHaveAttribute('data-fold', 'opening')
-    await page.getByTestId('project-fold-alpha').click()
-    expect(await stillMoving(region(page, 'alpha'))).toBe(true)
-    await away(page)
-    await page.clock.runFor(1000)
-    await expect(rows(page, 'alpha')).toHaveCount(1)
-    await expect(region(page, 'alpha')).toHaveAttribute('data-fold', 'open')
   })
 
   test('Fold: the arrow opens and closes a project with the same slide', async ({ page }) => {
@@ -224,12 +198,11 @@ export function sidebarFoldTests() {
 
   test('Fold: a list on its way out takes no presses and no focus', async ({ page }) => {
     await foldedProject(page)
-    await restOnEmptySpace(page)
-    await page.clock.runFor(REST_MS)
+    await clickEmptySpace(page)
     await expect(region(page, 'alpha')).toHaveAttribute('data-fold', 'opening')
     await page.clock.runFor(300)
     await expect(region(page, 'alpha')).toHaveAttribute('data-fold', 'open')
-    await away(page)
+    await clickEmptySpace(page)
     await expect(region(page, 'alpha')).toHaveAttribute('data-fold', 'closing')
     await expect(region(page, 'alpha')).toHaveJSProperty('inert', true)
   })
@@ -250,8 +223,7 @@ export function sidebarFoldTests() {
   test('Fold: with reduced motion the list does not travel, it only fades', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await foldedProject(page, { sessions: 3 })
-    await restOnEmptySpace(page)
-    await page.clock.runFor(REST_MS)
+    await clickEmptySpace(page)
     const list = region(page, 'alpha')
     await expect(rows(page, 'alpha')).toHaveCount(3)
     await expect(list).toHaveCSS('transition-property', 'opacity')
@@ -260,7 +232,7 @@ export function sidebarFoldTests() {
     expect(new Set(opening).size).toBe(1)
     const full = opening[0]!
     expect(full).toBeGreaterThan(60)
-    await away(page)
+    await clickEmptySpace(page)
     // Fading out in place: as tall as before until the rows are taken away, then gone at once
     await expect(list).toHaveAttribute('data-fold', 'closing')
     expect((await heightsWhileMoving(list, full)).every((h) => h === full)).toBe(true)
@@ -286,6 +258,9 @@ export async function assistantWithChildren(page: Page, opts: { current?: string
     },
     [orc, opts.current ?? [], opts.earlier ?? []] as const,
   )
+  // setup() lands on the Assistant screen; leave it so the tests start with the children folded
+  await page.getByTestId('grid-button').click()
+  await expect(page.getByTestId('assistant-children')).toHaveCount(0)
   await away(page)
   await page.clock.pauseAt(new Date(Date.now() + 60_000))
   return orc as Record<string, unknown> & { id: string }
@@ -294,13 +269,13 @@ export async function assistantWithChildren(page: Page, opts: { current?: string
 export function assistantFoldTests() {
   const fold = (page: Page) => page.getByTestId('assistant-fold')
   const button = (page: Page) => page.getByTestId('assistant-button')
+  const grid = (page: Page) => page.getByTestId('grid-button')
   const row = (page: Page, name: string) => page.getByTestId(`assistant-child-row-orc-child-${name}`)
 
   test('Fold: the Assistant children grow in steps, never jumping', async ({ page }) => {
     await assistantWithChildren(page, { current: ['alpha', 'beta', 'gamma'] })
     await slowFolds(page)
-    await button(page).hover()
-    await page.clock.runFor(REST_MS)
+    await button(page).click()
     const opening = await heightsAlongTransition(fold(page))
     expect(opening.heights[0]).toBe(0)
     expect(opening.heights[4]).toBeGreaterThan(60)
@@ -311,8 +286,7 @@ export function assistantFoldTests() {
   test('Fold: a press on an Assistant child while the list is still opening lands', async ({ page }) => {
     await assistantWithChildren(page, { current: ['alpha', 'beta', 'gamma'] })
     await slowFolds(page)
-    await button(page).hover()
-    await page.clock.runFor(REST_MS)
+    await button(page).click()
     await expect(fold(page)).toHaveAttribute('data-fold', 'opening')
     await row(page, 'alpha').click()
     expect(await stillMoving(fold(page))).toBe(true)
@@ -321,10 +295,9 @@ export function assistantFoldTests() {
 
   test('Fold: the Assistant children stay in the page until their exit ends', async ({ page }) => {
     await assistantWithChildren(page)
-    await button(page).hover()
-    await page.clock.runFor(REST_MS)
+    await button(page).click()
     await expect(row(page, 'alpha')).toBeVisible()
-    await away(page)
+    await grid(page).click()
     await expect(fold(page)).toHaveAttribute('data-fold', 'closing')
     await expect(row(page, 'alpha')).toHaveCount(1)
     await page.clock.runFor(LEAVE_MS - 1)
@@ -337,8 +310,7 @@ export function assistantFoldTests() {
   test('Fold: the Assistant children fade in place with reduced motion', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await assistantWithChildren(page)
-    await button(page).hover()
-    await page.clock.runFor(REST_MS)
+    await button(page).click()
     await expect(row(page, 'alpha')).toBeVisible()
     await expect(fold(page)).toHaveCSS('transition-property', 'opacity')
     expect(new Set(await heightsWhileMoving(fold(page))).size).toBe(1)

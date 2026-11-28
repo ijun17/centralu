@@ -80,7 +80,7 @@ tool in the other tiers), and one line of its instructions says to use them rath
   when the child is deleted for good (`purgeSession`), and with a start that fails. It runs under the Assistant's
   preset and gets no Centralu tools and only the person's own settings (no project to trust). There is no worktree,
   and a busy child is not forked: there is no repository to fork from. In the sidebar it hangs under the
-  Assistant's row (`assistantChildren`), folded until the mouse rests on its button (#1591), with a ⋯ menu to stop or delete it; a child whose assistant was
+  Assistant's row (`assistantChildren`), folded while elsewhere and open while the Assistant page or one of its children is open, with a ⋯ menu to stop or delete it; a child whose assistant was
   replaced stays there under "Started by an earlier assistant".
 - **The consent**: a card under `safe` and `normal` (no project's trust stands in for it), naming no project
   ("Start Codex in a folder of its own, outside any project, …") and offering no "Always for this project"; ⌥a, or that
