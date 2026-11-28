@@ -36,7 +36,7 @@ export const postPrePr = (repo, sha, description) => postStatus(repo, sha, { sta
 // A tier's name as it goes into a label; which names exist is the repository's (scripts/tier.mjs), not the board's
 const TIER_NAME = /^[a-z][a-z-]{0,30}$/
 /** The tier of a change nobody could judge (a script that answers none, or an unreadable one): deep, never lower */
-export const UNKNOWN_TIER = { name: 'deep', line: 'Tier: deep (pnpm pre-pr answered no tier, so the paths were not judged).', because: [] }
+const UNKNOWN_TIER = { name: 'deep', line: 'Tier: deep (pnpm pre-pr answered no tier, so the paths were not judged).', because: [] }
 // A stack of three builds three heads, then runs the changed tests twice: minutes, not seconds
 const LIMIT_MS = 30 * 60_000
 const BEAT_MS = 60_000
@@ -50,7 +50,7 @@ const COPY_PREFIX = 'cc-board-pre-pr-'
 let calls = 0
 
 /** The last line of the script's stdout that is a JSON object: its answer. */
-export function answerOf(stdout) {
+function answerOf(stdout) {
   const lines = String(stdout ?? '').trim().split('\n').reverse()
   for (const line of lines) {
     try {

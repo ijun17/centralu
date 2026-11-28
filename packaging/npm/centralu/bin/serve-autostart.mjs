@@ -84,7 +84,7 @@ export function autostartName(how, { dataDir, home, env, platform = process.plat
 }
 
 /** The task's name before the user was part of it: an earlier version's entry, removed when this user's (`taskScript`) */
-export function legacyTaskName({ dataDir, home, env, platform = process.platform }) {
+function legacyTaskName({ dataDir, home, env, platform = process.platform }) {
   return autostartName('task', { dataDir, home, env, platform })
 }
 

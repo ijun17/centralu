@@ -123,7 +123,7 @@ export function mirrorModules(root, worktree, folders = nodeModulesDirs(root)) {
   return n
 }
 /** Every run keeps its worktrees in one folder of the temporary folder, named after the run. */
-export const RUN_PREFIX = 'cc-pre-pr-'
+const RUN_PREFIX = 'cc-pre-pr-'
 export const runDir = (id) => join(canonical(tmpdir()), `${RUN_PREFIX}${id}`)
 
 /**

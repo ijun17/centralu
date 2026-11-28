@@ -85,8 +85,8 @@ import { alive, listSome, plural, short, span, writeJsonAtomic } from './util.mj
 import { GUARD_MS, guardTick } from './main-guard.mjs'
 import { actOnRed, retractRed } from './main-revert.mjs'
 
-export const QUEUE_FILE = 'merge-queue.json'
-export const LEASE_FILE = 'merge-queue.lease.json'
+const QUEUE_FILE = 'merge-queue.json'
+const LEASE_FILE = 'merge-queue.lease.json'
 /** A driver that stops renewing for this long (killed, asleep) hands the queue to the next one. */
 export const LEASE_MS = 3 * 60_000
 const PAUSE_MIN_MS = 60_000
@@ -141,7 +141,7 @@ export function updateQueue(dir, fn) {
 }
 
 /** The file in the data folder that tells this instance whether it guards main: `{ "drive": true }` or `{ "drive": false }` (#2087) */
-export const DRIVER_FILE = 'queue-driver.json'
+const DRIVER_FILE = 'queue-driver.json'
 /** How long after it landed something an instance goes on watching main's full run for it (a hunt or a retraction under way holds it longer) */
 export const GUARD_LANDED_MS = Number(process.env.PROJECT_BOARD_QUEUE_GUARD_LANDED_MS) || 3 * 3600_000
 

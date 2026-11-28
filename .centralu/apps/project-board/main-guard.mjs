@@ -26,7 +26,7 @@ export const GUARD_MS = Number(process.env.PROJECT_BOARD_QUEUE_GUARD_MS) || 2 * 
 /** A bisect probe whose run has not finished after this long ends the hunt (no runner, a stuck run): an issue says so */
 export const PROBE_MAX_MS = Number(process.env.PROJECT_BOARD_QUEUE_PROBE_MS) || 2 * 3600_000
 /** A rerun of main's run that GitHub has not started after this long is given up on: the failure is reported, not waited for */
-export const RERUN_STUCK_MS = Number(process.env.PROJECT_BOARD_QUEUE_RERUN_STUCK_MS) || 10 * 60_000
+const RERUN_STUCK_MS = Number(process.env.PROJECT_BOARD_QUEUE_RERUN_STUCK_MS) || 10 * 60_000
 const WORKFLOW = 'build.yml'
 const REF_SPACE = 'refs/centralu-guard'
 
@@ -74,7 +74,7 @@ export function attributeByPaths(candidates, failedJobs, jobPaths = {}) {
  * commit; `good` the index of the last commit known green (-1: main's last green commit, before them all),
  * `bad` the first known red. Answers `{ culprit }` once they are next to each other, else `{ probe }`.
  */
-export function bisectStep(commits, good, bad) {
+function bisectStep(commits, good, bad) {
   if (bad - good <= 1) return { culprit: commits[bad] }
   return { probe: commits[Math.floor((good + bad) / 2)], index: Math.floor((good + bad) / 2) }
 }
@@ -107,7 +107,7 @@ export const probeBranch = (sha) => `queue/bisect-${String(sha).slice(0, 12)}`
  * and the files it changed. From the checkout: fetched from GitHub's remote into a ref space of the
  * guard's own, so the checkout's branches and work are never touched.
  */
-export async function commitsBetween(dir, repo, defaultBranch, green, red) {
+async function commitsBetween(dir, repo, defaultBranch, green, red) {
   const root = await topLevel(dir)
   const remote = await remoteFor(root, repo)
   if (!remote) throw new GitError(`the checkout at ${root} has no remote for github.com/${repo}`)
@@ -152,7 +152,7 @@ export async function diagnose(repo, run, { failingLine, flaky = QUEUE.flakyJobs
 const RERUNS_KEPT = 30
 
 /** The reruns by run id with `id` added, the oldest dropped past RERUNS_KEPT (keys keep their insertion order: run ids are too large to be array indexes, which JavaScript would sort) */
-export const boundedReruns = (reruns, id, record) => Object.fromEntries(Object.entries({ ...(reruns ?? {}), [id]: record }).slice(-RERUNS_KEPT))
+const boundedReruns = (reruns, id, record) => Object.fromEntries(Object.entries({ ...(reruns ?? {}), [id]: record }).slice(-RERUNS_KEPT))
 
 /**
  * A failure that passed the rerun of its failed jobs is a flake for now (#1496): main is left alone. It is a break after all

@@ -17,7 +17,7 @@ const OTHER = String.raw`[\p{L}--[\p{Script=Latin}\p{Script=Greek}\p{Script=Comm
 const FOREIGN = new RegExp(String.raw`${OTHER}+(?:[\s\p{P}]*${OTHER}+)*`, 'v')
 
 /** The text without what may be in another language: code, quotes, HTML comments and addresses. */
-export function unquoted(text) {
+function unquoted(text) {
   return String(text ?? '')
     .replace(/\r\n?/g, '\n')
     .replace(/^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n {0,3}\1[^\n]*|$)/gm, '')
@@ -65,13 +65,13 @@ export function privateWordHits(text, words) {
   })
 }
 
-export function privateWordProblems(text, words, what = 'The text') {
+function privateWordProblems(text, words, what = 'The text') {
   const hits = privateWordHits(text, words)
   if (!hits.length) return []
   return [`${what} contains ${hits.length === 1 ? 'a word' : 'words'} from the private list: ${hits.map((w) => `"${w}"`).join(', ')}. Leave ${hits.length === 1 ? 'it' : 'them'} out or say it in general terms.`]
 }
 
-export function attributionProblems(text, what = 'The text') {
+function attributionProblems(text, what = 'The text') {
   const lines = attributionLines(text)
   if (!lines.length) return []
   return [`${what} carries attribution lines (${lines.map((l) => `"${l.trim()}"`).join(', ')}). Remove them: nothing here is signed by a tool (docs/commit-conventions.md).`]
@@ -282,7 +282,7 @@ export function itemState(text, ticked = false) {
 }
 
 /** What "Planned, not built" may say: "None" (a plan's last pull request: "Plan items left: none"), or lines that each name the issue carrying an item or say "dropped: <why>". */
-export function plannedProblems(text, heading) {
+function plannedProblems(text, heading) {
   if (/^(?:plan items left:\s*)?none(?:\.|:[^\n]*)?$/i.test(text)) return []
   if (!text) return [`"${heading}" is empty. Name each planned item this change does not build with the issue that carries it (#N), or "dropped: <why>"; or "None" when it builds all of it.`]
   const bad = text.split('\n').filter((l) => l.trim() && !itemState(l))

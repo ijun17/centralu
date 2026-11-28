@@ -17,7 +17,7 @@ const HOW = 'tick it, name the issue or pull request that carries it (#N), or ad
  * The items an issue's body plans, then those of each plan section it cites, read from the default branch; the citations that did
  * not read (`unread`), and the plans it names with no section, whose items are not read (`bare`, a warning).
  */
-export async function issueItems(repo, body) {
+async function issueItems(repo, body) {
   const items = planItems(body)
   const unread = []
   const { sections, bare } = citedPlans(body)

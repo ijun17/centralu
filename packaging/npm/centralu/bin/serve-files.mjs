@@ -37,7 +37,7 @@ import { windowsPowershell } from './serve-windows.mjs'
 export const SERVE_STATE_FILE = 'serve.json'
 
 /** The label of the full credential a version 1 file's token became; removed by the next pairing */
-export const LEGACY_LABEL = 'legacy'
+const LEGACY_LABEL = 'legacy'
 
 /** A full credential's verifier: the SHA-256 of it, as hex (the host's `serve-credentials.ts` compares the same) */
 export function verifierOf(credential) {
@@ -253,12 +253,12 @@ function parseServeState(raw) {
 }
 
 /** An entry the launcher lists, `--revoke` takes and the host accepts: an 8-hex id, a label `--pair` takes, a hex verifier */
-export function isListedEntry(e) {
+function isListedEntry(e) {
   return typeof e?.id === 'string' && CREDENTIAL_ID_RE.test(e.id) && typeof e.label === 'string' && PAIR_LABEL_RE.test(e.label) && typeof e.verifier === 'string' && /^[0-9a-f]{64}$/.test(e.verifier)
 }
 
 /** A hub's key entry the launcher lists, `--revoke` takes and the host accepts (#1711): an 8-hex id, a label `--pair` takes, a public key the host takes (§4.1) */
-export function isKeyEntry(e) {
+function isKeyEntry(e) {
   return typeof e?.id === 'string' && CREDENTIAL_ID_RE.test(e.id) && typeof e.label === 'string' && PAIR_LABEL_RE.test(e.label) && parseLinkPublicKey(e.publicKey) !== null
 }
 
@@ -419,7 +419,7 @@ export function changeServeState(dataDir, change, platform = process.platform, {
  * is what is removed, and put back when it was another writer's. Reading it and then removing it by name could remove
  * a lock another writer took over in between. Never throws: a lock left behind goes stale and is taken over.
  */
-export function releaseLock(lock, mine, { read = readFileSync, rename = renameSync, link = linkSync, rm = rmSync } = {}) {
+function releaseLock(lock, mine, { read = readFileSync, rename = renameSync, link = linkSync, rm = rmSync } = {}) {
   const aside = `${lock}.${mine}.release`
   try {
     renameRetrying(lock, aside, { rename, budgetMs: 1_000 })
@@ -472,7 +472,7 @@ function putBack(aside, lock, link) {
  * hub's at each link or any program's), `window` (`--window`, the person's window on Windows at each start), `handover`
  * (the launcher's own, for one `host.handover` call and withdrawn right after)
  */
-export const PAIRED_VIA = ['pair', 'window', 'handover']
+const PAIRED_VIA = ['pair', 'window', 'handover']
 
 /**
  * A new full credential for `label` (#1405): written as its verifier only, and returned once. One label holds one

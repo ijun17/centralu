@@ -261,7 +261,7 @@ export function npmCommand(platform, args) {
 
 export const WEBVIEW2_DOWNLOAD = 'https://developer.microsoft.com/microsoft-edge/webview2/'
 /** Microsoft's link to the Evergreen Bootstrapper itself, for someone who wants one click. */
-export const WEBVIEW2_BOOTSTRAPPER = 'https://go.microsoft.com/fwlink/p/?LinkId=2124703'
+const WEBVIEW2_BOOTSTRAPPER = 'https://go.microsoft.com/fwlink/p/?LinkId=2124703'
 
 /** The Evergreen WebView2 Runtime's client id, the same under every registry hive. */
 const WEBVIEW2_CLIENT = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'

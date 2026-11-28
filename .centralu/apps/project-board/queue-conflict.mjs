@@ -43,7 +43,7 @@ const HOOKS_OFF = ['-c', 'core.hooksPath=/dev/null']
 const MARKER = /^(?:<{7}|>{7})(?: |$)/m
 
 const matches = (patterns, path) => (patterns ?? []).some((p) => pathMatches(p, path))
-export const commandLine = (argv) => argv.join(' ')
+const commandLine = (argv) => argv.join(' ')
 
 /**
  * What to do with a merge's conflicted `files`, by the lists (`mechanical`: `{ files, run }` entries;
@@ -67,7 +67,7 @@ export function conflictPlan(files, { mechanical = [], never = [] } = {}) {
 }
 
 /** Why the files of a plan that hands off are not the queue's to regenerate, in words. */
-export function planWhy(plan) {
+function planWhy(plan) {
   const parts = []
   if (plan.never.length) parts.push(`${listSome(plan.never, 6)} ${plan.never.length === 1 ? 'is' : 'are'} never regenerated (project.json queue.conflicts.never)`)
   if (plan.other.length) parts.push(`${listSome(plan.other, 6)} ${plan.other.length === 1 ? 'is' : 'are'} not on project.json's list of mechanical files (queue.conflicts.mechanical)`)
@@ -183,7 +183,7 @@ async function sameLock(root, tmp, mainTip) {
  * not the checkout's own); any other link, to the store or a folder, at what it is in the checkout.
  * Plain files (pnpm's state) are copied. Answers how many folders were mirrored.
  */
-export async function mirrorModules(root, tmp) {
+async function mirrorModules(root, tmp) {
   const rootReal = await realpath(root)
   const inWorkspace = (target) => {
     const rel = relative(rootReal, target)
