@@ -125,4 +125,4 @@ leaves open is listed as background work (kind `shell`) until its `item/complete
 `active` (Codex starts the goal's turns itself) is listed (kind `other`) until it is cleared, completed or paused; both in
 `CodexChildTracker` (`adapters/codex/child-tracker.ts`).
 
-Not covered: the reconnect recovery still wakes the sessions that were live before a host restart without a keeper.
+A reconnect wakes no session (#2538): a session stays asleep until something addresses it.

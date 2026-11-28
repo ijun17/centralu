@@ -390,7 +390,7 @@ export function linkedHostsUiTests(): void {
     })
   })
 
-  test('a machine that goes away is dimmed and never woken; when it comes back its live sessions are', async ({ page }) => {
+  test('a machine that goes away is dimmed and never woken, nor when it comes back (#2538)', async ({ page }) => {
     test.setTimeout(120_000)
     await withPair({}, async (pair) => {
       const connected = () => expect.poll(async () => (await machines(pair))[0]?.status, { timeout: 20_000 }).toBe('connected')
@@ -422,13 +422,15 @@ export function linkedHostsUiTests(): void {
         expect(calls.filter((c) => c.method === 'agents.resumeSession')).toEqual([])
       })
 
-      await test.step('it comes back: the machine resyncs, and only the session it held live is woken', async () => {
+      await test.step('it comes back: the machine resyncs and wakes nothing, the session it held live included', async () => {
         await restartRemote(pair)
         await expect(page.getByTestId('project-machine-remote-project')).toHaveAttribute('data-status', 'connected', { timeout: 20_000 })
         await expect(page.getByTestId('project-remote-project')).not.toHaveAttribute('data-away', 'true')
-        // The remote host restarted: the live one's process is gone and is asked for again; the dormant one stays as it was
-        await expect.poll(() => calls.filter((c) => c.method === 'agents.resumeSession').map((c) => c.params.sessionId)).toEqual([live.id])
         await expect(page.getByTestId('away-note')).toHaveCount(0)
+        // The remote host restarted: the live one's process went with it, and it waits to be written to as the dormant one does
+        await expect(page.getByTestId(`session-row-${live.id}`)).toBeVisible()
+        await page.waitForTimeout(1000)
+        expect(calls.filter((c) => c.method === 'agents.resumeSession')).toEqual([])
       })
     })
   })

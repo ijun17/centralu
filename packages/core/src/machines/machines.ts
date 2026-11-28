@@ -1,4 +1,4 @@
-import { isInTurn, MIN_SUPPORTED_VERSION, releaseOf, turnsRunning, type HostActivity, type MachineInfo, type MachineStatus } from '@cc/protocol/client'
+import { MIN_SUPPORTED_VERSION, releaseOf, turnsRunning, type HostActivity, type MachineInfo, type MachineStatus } from '@cc/protocol/client'
 
 /**
  * Linked machines on the screen (#82, docs/plans/remote-hub.md): which rows are away, what a link's state and last
@@ -16,22 +16,11 @@ export function machineAway(machine: Pick<MachineInfo, 'status'> | undefined): b
 }
 
 /**
- * Away rows stay listed and dimmed and are never woken: `machine_resync` wakes them once the machine is back. The row's
+ * Away rows stay listed and dimmed, and `wake` refuses them: waking would only fail at the hub. The row's
  * `unreachable` mark is not read: it is about one answer and outlives the outage when a list read lands late (#1611).
  */
 export function isAway(row: Placed | undefined, machines: Readonly<Record<string, MachineInfo>>): boolean {
   return !!row?.machine && machineAway(machines[row.machine])
-}
-
-/**
- * The one rule for waking rows a reconnect found asleep, for a host and a linked machine (#1611, #1618, #2163). Not a
- * mirrored row, nor an away machine's, nor one in a turn with no process: an update cut it, and its host continues it.
- */
-export function wakeable(
-  row: (Placed & { live?: boolean; state?: unknown }) | undefined,
-  machines: Readonly<Record<string, MachineInfo>>,
-): boolean {
-  return !!row && !row.live && !row.unreachable && !isAway(row, machines) && !isInTurn(row.state)
 }
 
 /** The mark a connected machine's row kept from an older answer does not count (#1611) */

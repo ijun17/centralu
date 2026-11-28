@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent, SessionInfo, ThemeFileEntry } from '@cc/protocol'
-import { DEFAULT_UI_PREFERENCES, sessionLiveDefaults } from '@cc/protocol'
+import { DEFAULT_UI_PREFERENCES, SessionState, sessionLiveDefaults } from '@cc/protocol'
 // eslint-disable-next-line no-restricted-imports -- the runtime ui knows only ports, but tests are contractually required to use MockPlatform instead of ad-hoc mocking (see the header of platform/src/mock/index.ts)
 import { MockPlatform } from '@cc/platform/mock'
 import { useStore, type ChatItem } from './store.js'
@@ -139,41 +139,26 @@ describe('the connection label', () => {
   })
 })
 
-// A host brought back knows none of the agent processes that died with it; the window wakes the ones it knew ran, only those.
-describe('reviving after a reconnect', () => {
-  it('wakes what was running before the drop and the new host does not run, and nothing else', async () => {
+// A reconnect wakes nothing (#2538): a turn an update cut, and the background work that stop ended, are the host's to continue
+// (#1618, #1902), and a session at rest waits to be written to. Every state a row can hold before the drop, with and without work
+describe('after a reconnect', () => {
+  const work = [{ id: 'bg-1', kind: 'shell' as const, description: 'npm run dev', status: 'running' as const }]
+  const cases = SessionState.options.flatMap((state) => [
+    { id: `rc-${state}`, state, backgroundTasks: [] },
+    { id: `rc-${state}-work`, state, backgroundTasks: work },
+  ])
+
+  it('wakes no session the new host does not run, whatever it was doing before the drop', async () => {
     const mock = new MockPlatform()
-    mock.sessions.set('rv-running', sessionInfo('rv-running', { live: true }))
-    mock.sessions.set('rv-asleep', sessionInfo('rv-asleep', { live: false }))
-    mock.sessions.set('rv-still', sessionInfo('rv-still', { live: true }))
+    for (const c of cases) mock.sessions.set(c.id, sessionInfo(c.id, { live: true, state: c.state, backgroundTasks: c.backgroundTasks }))
     await useStore.getState().attach(mock)
+    // The new host came up with none of the processes, and lists each row as it was
+    for (const c of cases) mock.sessions.get(c.id)!.live = false
+    await useStore.getState().recoverAfterReconnect()
 
-    mock.setConnectionState('disconnected')
-    // The new host came up with only one of the two processes still attached
-    mock.sessions.get('rv-running')!.live = false
-    mock.setConnectionState('connected')
-
-    await vi.waitFor(() => expect(mock.resumeCalls).toEqual(['rv-running']))
-    expect(useStore.getState().toast).toBe('Reconnected — resuming 1 session')
-    await vi.waitFor(() => expect(useStore.getState().sessions['rv-running']!.live).toBe(true))
-    expect(useStore.getState().sessions['rv-asleep']!.live).toBe(false)
-  })
-
-  it('a session the new host no longer lists is not woken', async () => {
-    const mock = new MockPlatform()
-    mock.sessions.set('rv-gone', sessionInfo('rv-gone', { live: true }))
-    mock.sessions.set('rv-kept', sessionInfo('rv-kept', { live: true }))
-    await useStore.getState().attach(mock)
-
-    mock.setConnectionState('disconnected')
-    mock.sessions.delete('rv-gone')
-    mock.sessions.get('rv-kept')!.live = false
-    mock.setConnectionState('connected')
-
-    await vi.waitFor(() => expect(mock.resumeCalls).toEqual(['rv-kept']))
-    expect(useStore.getState().toast).toBe('Reconnected — resuming 1 session')
-    await vi.waitFor(() => expect(useStore.getState().sessions['rv-kept']!.live).toBe(true))
-    expect(useStore.getState().sessions['rv-gone']).toBeUndefined()
+    expect(mock.resumeCalls).toEqual([])
+    expect(useStore.getState().toast).toBeNull()
+    for (const c of cases) expect(useStore.getState().sessions[c.id]!.live).toBe(false)
   })
 })
 

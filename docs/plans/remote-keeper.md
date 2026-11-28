@@ -265,8 +265,8 @@ in step 2 (#1618, #1626); agent-host/lifecycle/continue-after-update.md, "Contin
    before it answers any hello, whether or not the Continue is in yet (one that turns out lost is no longer named), so
    the order of the Continue and the reconnect does not matter, and the caller hears once that its child's turn was cut
    and continued. An update that ends with the machine not back tells the drop then.
-5. **The window** does not wake a session that is in a turn with no process: the machine continues it. Its existing
-   "<machine> is back — resuming N sessions" counts only the sessions it wakes itself; nothing new is drawn.
+5. **The window** does not wake a session that is in a turn with no process: the machine continues it. Since #2538 it
+   wakes no session when the machine is back; nothing new is drawn.
 6. **An older host** (a machine before step 2, or one rolled back to it) lists nothing: the hub's sentence says the turns
    were lost, the turns keep their "stopped" mark and Continue, and a caller on the hub hears the drop, as before.
 
@@ -472,8 +472,8 @@ for the rules it guards, in its own pull request. The Windows desktop (#14) take
   retryable error and the agent calls again. Terminals keep their scrollback (the ring) and their shell.
 - **Where a swap cannot keep what runs (§5.1):** an update nobody approved, and the person's Update now, go at once,
   with no waiting step on the row. The sessions it cut stay in their turn, with no "stopped" mark, and their
-  conversation shows that Centralu continued the turn on the new version. The window's existing "<machine> is back —
-  resuming N sessions" counts only the sessions it wakes itself. Terminals and project commands there close.
+  conversation shows that Centralu continued the turn on the new version. The window wakes no session when the machine is
+  back (#2538). Terminals and project commands there close.
 - **New: an outdated keeper on Windows** (step 5, decision 2): one line on that machine's row in Settings → Machines,
   never in the sidebar, saying its keeper is from an older version and is replaced when nothing runs there or by
   Update. Its wording is proposed in step 5's pull request. It appears and leaves with a short transition, and with
