@@ -32,9 +32,9 @@ const LONG_CALLS: ReadonlySet<string> = new Set([
   'agents.updateSettings', // Swaps out the process if a resting session's settings change (restartSession)
   'agents.forkConversation', // Revives as a forked copy
   'machines.update', // Installs beside and waits for the sessions there to finish (#1399); a wait that outlasts it is the row's to show
-  'agents.resolveMcpProposal', // Restarts the Assistant on approval
-  'agents.resolveSkillProposal', // Same
-  'agents.deleteAssistantSkill', // Same
+  'agents.resolveMcpProposal', // These three restart the Assistant on approval
+  'agents.resolveSkillProposal',
+  'agents.deleteAssistantSkill',
   // A clone takes as long as the repository does; past this budget the screen says it is still cloning
   'projects.create',
 ])
