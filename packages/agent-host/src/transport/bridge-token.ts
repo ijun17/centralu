@@ -3,14 +3,11 @@ import { isSessionId } from '@cc/protocol'
 import { sameSecret } from './http.js'
 
 /**
- * The Codex bridge's credential (#382): good for one session's bridge calls and nothing else. The bridge
- * (`adapters/codex/centralu-bridge.mjs`) gets it in its environment, which every process of the same user can read (macOS 27.0.1:
- * `ps eww -p <pid>`, `sysctl kern.procargs2`; docs/security-boundaries/keeper.md "The front door"). The front door's token would
- * open every RPC (a preset to auto, trusting a project); this opens only what the bridge does, for its own session (`bridgeRefusal`).
- * Derived, not stored: an HMAC of the session id keyed by the host's token (the keeper's, the same for every host it runs), so a
- * bridge a host started is accepted by the next host after a swap (bridge-reconnect.test.ts) with nothing handed over, and holding it
- * gives nothing toward the token or another session's credential. Shape `ccb1:<sessionId>:<mac>`; a session id never contains `:`
- * (`isSessionId`). Its label keeps it apart from other values derived from the token (`deriveHttpSecret` uses its own)
+ * The Codex bridge's credential (#382): good for one session's bridge calls and nothing else, since the bridge's environment is
+ * readable by any process of the same user (docs/security-boundaries/keeper.md "The front door"). Derived, not stored: an HMAC of
+ * the session id keyed by the host's token, so the next host after a swap accepts it (bridge-reconnect.test.ts). Shape
+ * `ccb1:<sessionId>:<mac>`; a session id never contains `:` (`isSessionId`). Its label keeps it apart from other values derived
+ * from the token (`deriveHttpSecret` uses its own)
  */
 const PREFIX = 'ccb1'
 
@@ -31,7 +28,10 @@ export function bridgeSessionOf(hostToken: string, given: string): string | null
 }
 
 /** Every RPC the bridge sends (centralu-bridge.mjs) and nothing more: each names its `sessionId`, and the host judges what that session may do */
-const BRIDGE_METHODS: ReadonlySet<string> = new Set(['assistant.tools', 'assistant.tool'])
+const BRIDGE_METHODS: ReadonlySet<string> = new Set([
+  'assistant.tools',
+  'assistant.tool',
+])
 
 /**
  * Why a connection with the bridge credential of `boundSession` may not make this call, or null: the call must name that
