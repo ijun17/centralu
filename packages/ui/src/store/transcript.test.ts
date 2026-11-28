@@ -24,6 +24,22 @@ describe('a script’s first message (§8.1)', () => {
   })
 })
 
+describe('another sender’s message with the words of a pending send (FR-11)', () => {
+  it('from another session or an app is a row of its own: the bubble, its attachments and its undo stay the person’s', () => {
+    const shot = { kind: 'image', path: '/a/shot.png', name: 'shot.png', mime: 'image/png', bytes: 3 }
+    const pending: ChatItem[] = [{ kind: 'user', seq: 1, text: 'go', pending: true, attachments: [shot] as never }]
+    const live = feed(
+      [
+        { type: 'user_message', seq: 5, text: 'go', from: { sessionId: 'orch', name: 'Assistant' } },
+        { type: 'user_message', seq: 6, text: 'go', fromApp: { appId: 'a', projectId: null, name: 'Board' } },
+      ],
+      pending,
+    )
+    expect(live).toHaveLength(3)
+    expect(live[0]).toMatchObject({ seq: 1, pending: true, attachments: [shot] })
+  })
+})
+
 describe('an image the agent viewed keeps the path it was viewed under (#1464)', () => {
   it('live and stored, apart from `path`, which a stored row holds as the host’s own copy', () => {
     const viewed = '/work/shots/out.png'

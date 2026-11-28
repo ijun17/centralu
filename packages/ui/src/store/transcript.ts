@@ -113,14 +113,14 @@ function holds(items: ChatItem[], seq: number | undefined): boolean {
 }
 
 /**
- * Whether a stored message with this text is the host's copy of the person's unconfirmed send (#75), live or from a
- * history page (#79). Its attribution plays no part: the host labels a send by the connection's credential, so a window
- * holding the limited one gets its own send back as a script's (#2469), and that copy takes the bubble's place with
- * the label the host stored. Another sender's message with the same words while a send is pending takes the bubble in
- * host order and the send's own copy draws after it: two rows, each as stored.
+ * Whether a stored message is the host's copy of the person's unconfirmed send (#75), live or from a history page (#79):
+ * the same text, unlabelled or labelled as a script's. The host labels a send by the connection's credential, so a
+ * window holding the limited one gets its own send back as a script's (#2469); that copy takes the bubble's place with
+ * the host's label. A send never comes back as another session's or an app's (FR-11), so those stay rows of their own
+ * and never take the bubble, its attachments or its undo on a failed send.
  */
-export function isPendingSend(item: ChatItem, text: string): boolean {
-  return item.kind === 'user' && !!item.pending && item.text === text
+export function isPendingSend(item: ChatItem, msg: { text: string; from?: unknown; fromApp?: unknown }): boolean {
+  return item.kind === 'user' && !!item.pending && !msg.from && !msg.fromApp && item.text === msg.text
 }
 
 /**
@@ -272,7 +272,7 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
         ...(e.fromApp ? { fromApp: e.fromApp } : {}),
         ...(e.fromScript ? { fromScript: e.fromScript } : {}),
       }
-      const idx = items.findIndex((i) => isPendingSend(i, e.text))
+      const idx = items.findIndex((i) => isPendingSend(i, e))
       if (idx === -1)
         return [
           ...items,

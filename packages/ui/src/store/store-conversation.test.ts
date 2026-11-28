@@ -634,7 +634,6 @@ describe('a conversation item\'s identity — only a changed row becomes a new o
   })
 })
 
-// The composer clears on send (#38) and a failed send removes the bubble; the toast does not return the text.
 /*
  * The host labels a send by the connection's credential: a window holding the limited one gets its own send back as a
  * script's (#2469). One send is one row, labelled as the host stored it, whichever comes first: the echo or the answer.
@@ -679,6 +678,7 @@ describe('one send is one row when the host labels it as a script’s (#2469)', 
   })
 })
 
+// The composer clears on send (#38) and a failed send removes the bubble; the toast does not return the text.
 describe('restoring written text after a send failure', () => {
   it('a failure returns the sentence to the composer', async () => {
     const s = 'sf-s1'
