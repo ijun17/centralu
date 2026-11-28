@@ -379,7 +379,7 @@ describe('a host request (#1405)', () => {
   })
 
   it('host.trustDevTab shows the code the host gave this tab, and answers Allow with a key that trusts only that socket', async () => {
-    const devTabs = new DevTabs()
+    const devTabs = new DevTabs(Date.now, () => {})
     const h = harness({ devTabs })
     const code = devTabs.issueCode(7)
     const asked = h.requests.ask('host.trustDevTab', { code }, { client: null, origin: 'http://127.0.0.1:5174', socket: 7 }, new AbortController().signal)
@@ -400,7 +400,7 @@ describe('a host request (#1405)', () => {
   })
 
   it('a card’s call runs as its tab’s trust stands when it runs, with the limited credential’s rights', async () => {
-    const devTabs = new DevTabs()
+    const devTabs = new DevTabs(Date.now, () => {})
     const h = harness({ devTabs })
     devTabs.grant('http://127.0.0.1:5174', 7)
     const run = async (sessionId: string) => {
@@ -422,7 +422,7 @@ describe('a host request (#1405)', () => {
   })
 
   it('host.trustDevTab raises no card for a code the host did not give this socket, another origin, a session, a serve host or a tab gone meanwhile', async () => {
-    const devTabs = new DevTabs()
+    const devTabs = new DevTabs(Date.now, () => {})
     const h = harness({ devTabs })
     const tab = { client: null, origin: 'http://127.0.0.1:5174', socket: 7 }
     const ask = (params: unknown, from: Parameters<HostRequests['ask']>[2], signal = new AbortController().signal) => h.requests.ask('host.trustDevTab', params, from, signal)

@@ -1542,7 +1542,8 @@ describe('a dev browser tab the person trusted (dev-tabs.ts)', () => {
   /** A host whose card always allows, as the person would, and records every call's context */
   async function host() {
     let now = 1_000_000
-    const devTabs = new DevTabs(() => now)
+    const logs: string[] = []
+    const devTabs = new DevTabs(() => now, (line) => logs.push(line))
     const seen: Record<string, unknown>[] = []
     const { port } = await start(
       async (_method, _params, ctx) => {
@@ -1559,7 +1560,7 @@ describe('a dev browser tab the person trusted (dev-tabs.ts)', () => {
       return seen.at(-1)!.trustedDev === true
     }
     const trust = async (c: ReturnType<typeof connect>, id: string) => (await rpcCall(c, id, 'host.trustDevTab', { code: 'K7M-4P2' })).result!.key as string
-    return { port, devTabs, sendsAsPerson, trust, advance: (ms: number) => (now += ms) }
+    return { port, devTabs, logs, sendsAsPerson, trust, advance: (ms: number) => (now += ms) }
   }
 
   it('keeps its trust across reconnects with its key, as attribution only', async () => {
@@ -1623,6 +1624,9 @@ describe('a dev browser tab the person trusted (dev-tabs.ts)', () => {
     expect(await h.sendsAsPerson(a, '3')).toBe(true)
     const again = await tab(h.port, { key })
     h.devTabs.revoke(h.devTabs.list()[0]!.id)
+    // host.log names the grant and its origin, never the key
+    expect(h.logs).toHaveLength(2)
+    expect(h.logs.join(' ')).not.toContain(key)
     expect(await h.sendsAsPerson(a, '4')).toBe(false)
     expect(await h.sendsAsPerson(again, '1')).toBe(false)
     for (const c of [a, again]) c.ws.close()
