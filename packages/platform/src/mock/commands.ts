@@ -15,6 +15,8 @@ export class CommandsMock {
       history: string
     }
   >()
+  /** A test's switch: a stop that does not end the run, as a process ignoring it past the host's wait */
+  stopDoesNotEnd = false
   private runKey(projectId: string, command: string): string {
     return `${projectId}\u0000${command}`
   }
@@ -31,6 +33,15 @@ export class CommandsMock {
     r.running = false
     r.exitCode = exitCode
     for (const h of this.terminalsMock.termExitHandlers) h({ terminalId: r.runId, exitCode })
+  }
+
+  /** As the host (#2472): a running command the saved list drops is stopped first, or the list is not saved */
+  async stopDropped(projectId: string, keep: ReadonlySet<string>): Promise<void> {
+    for (const [key, r] of this.commandRuns) {
+      if (!key.startsWith(`${projectId}\u0000`) || !r.running || keep.has(r.command)) continue
+      if (this.stopDoesNotEnd) throw new Error(`${r.command} did not stop, so it stays on the list`)
+      await this.commands.stop(projectId, r.command)
+    }
   }
 
   // As the host (#60): a re-run kills and replaces the last run, and the log lives as long as the run does

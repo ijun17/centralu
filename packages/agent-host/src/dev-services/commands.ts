@@ -2,6 +2,7 @@ import { createRequire } from 'node:module'
 import { commandShell, type PtyModule } from './terminal.js'
 import type { EndedRun } from '../lifecycle/update-ended.js'
 import { PtySlot, isPtyModule, type PtyStreamSink } from './pty-slot.js'
+import { KILL_GRACE_MS } from '../os/kill-tree.js'
 
 /**
  * The runner for frequently used commands (#60).
@@ -38,7 +39,12 @@ type Entry = {
   slot: PtySlot
   exitCode: number | null
   startedAt: number
+  /** Settles once its process has ended */
+  ended: Promise<void>
 }
+
+/** How long a stop that waits may take: the tree's grace period, then its SIGKILL landing */
+const STOP_WAIT_MS = KILL_GRACE_MS + 5_000
 
 export type CommandSink = PtyStreamSink
 
@@ -87,6 +93,25 @@ export class CommandRunner {
   stop(cwd: string, command: string): void {
     const e = this.entries.get(this.key(cwd, command))
     if (e) this.stopEntry(e)
+  }
+
+  /**
+   * Stops the runs in `cwd` whose command `keep` does not hold, and settles once each has ended (#2472): a run whose
+   * command left the saved list has no Stop left on screen. Rejects, naming the first, if one still runs after
+   * STOP_WAIT_MS, so its command stays on the list.
+   */
+  async stopDropped(cwd: string, keep: ReadonlySet<string>): Promise<void> {
+    const going = [...this.entries.values()].filter((e) => e.cwd === cwd && e.slot.alive && !keep.has(e.command))
+    for (const e of going) this.stopEntry(e)
+    const late = await Promise.all(
+      going.map((e) => {
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const deadline = new Promise<string>((resolve) => (timer = setTimeout(() => resolve(e.command), STOP_WAIT_MS)))
+        return Promise.race([e.ended.then(() => null), deadline]).finally(() => clearTimeout(timer))
+      }),
+    )
+    const still = late.find((c) => c !== null)
+    if (still) throw new Error(`${still} did not stop, so it stays on the list`)
   }
 
   /**
@@ -151,13 +176,18 @@ export class CommandRunner {
   }
 
   private entry(cwd: string, command: string, runId: string, startedAt: number): Entry {
+    let end = () => {}
     const entry: Entry = {
       cwd,
       command,
       runId,
-      slot: new PtySlot(runId, this.emit, (exitCode) => (entry.exitCode = exitCode)),
+      slot: new PtySlot(runId, this.emit, (exitCode) => {
+        entry.exitCode = exitCode
+        end()
+      }),
       exitCode: null,
       startedAt,
+      ended: new Promise((resolve) => (end = resolve)),
     }
     return entry
   }

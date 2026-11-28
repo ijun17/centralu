@@ -775,6 +775,7 @@ so it goes on with the window closed; the host keeps only the last run's log per
 | **Each row says how it stands**: a breathing dot and the time running, or how the last run ended and how long ago. Running is the plain ink, not white; a failed run is the dashed grey ring | The list answers "what is running and how did the last run end" at a glance; nothing here waits on the person |
 | **The log opens in place under its row** (a click on the row, or Space), one at a time; the window keeps the last log after a run ends | The window stays a short list until a log is asked for; a running log also stands in the terminal tab |
 | Restart beside a running row; rename and remove on hover or focus, remove at the far end | A removal cannot be undone, so it stands away from Run |
+| **Removing a running command stops it first**, and the control reads "Stop and remove" while it runs; the host ends the run before it saves the list, and a run that will not end keeps its row, with a toast saying so ([#2472](https://github.com/ijun17/centralu/issues/2472), owner, 2026-11-29) | Its row holds its only Stop: a run that outlived its row could not be stopped until the app quit |
 | **Adding is command first**; the name field shows once there is a command. The commands the agent ran in the session are offered under the field, most repeated first | A command just seen is kept in one click |
 | Keys: the list takes the keyboard, ↑↓ move, ↵ runs (on a running row it opens the log), Space opens or closes the log, Esc closes | Enter never stops or restarts a server |
 

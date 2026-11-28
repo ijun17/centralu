@@ -1,5 +1,5 @@
 import { defaultCapabilities } from '../capabilities.js'
-import { changedFileCount, type DevTab, type NormalizedEvent } from '@cc/protocol/client'
+import { changedFileCount, type DevTab, type NormalizedEvent, type SavedCommand } from '@cc/protocol/client'
 import type { AgentPort, DiagnosticsPort, Platform } from '../ports/index.js'
 import { AgentVersionsMock } from './agent-versions.js'
 import { AppBuilderMock } from './app-builder.js'
@@ -103,7 +103,13 @@ export class MockPlatform implements Platform {
     ...this.appSettingsMock.apps,
     ...this.appImportsMock.apps,
   }
-  readonly projects = this.projectsMock.projects
+  readonly projects = {
+    ...this.projectsMock.projects,
+    setCommands: async (projectId: string, commands: SavedCommand[]) => {
+      await this.commandsMock.stopDropped(projectId, new Set(commands.map((c) => c.command.trim())))
+      return this.projectsMock.projects.setCommands(projectId, commands)
+    },
+  }
   readonly machines = this.machinesMock.machines
   readonly mail = this.mailMock.mail
   readonly mockMail = this.mailMock
@@ -416,6 +422,7 @@ export class MockPlatform implements Platform {
   // commands.ts
   get commandRuns() { return this.commandsMock.commandRuns }
   set commandRuns(value: CommandsMock['commandRuns']) { this.commandsMock.commandRuns = value }
+  set stopDoesNotEnd(value: boolean) { this.commandsMock.stopDoesNotEnd = value }
 
   // system.ts
   get nextPickedDirectory() { return this.systemMock.nextPickedDirectory }

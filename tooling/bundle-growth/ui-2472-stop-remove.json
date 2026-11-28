@@ -1,0 +1,4 @@
+{
+  "bytes": 300,
+  "reason": "Removing a running saved command stops it first (#2472): the remove control's \"Stop and remove\" label while it runs, and the store reading a project's commands back from the host after a failed save, so a removal the host refused ends on the host's list. Measured 1,972,875 B, 255 B over the ceiling of 1,972,620 B (Windows production build). Plain code with no dependency; lazy loading would not lower the total, which counts every chunk."
+}
