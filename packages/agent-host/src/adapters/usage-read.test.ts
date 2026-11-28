@@ -166,6 +166,19 @@ describe('a usage read that is a command run (#1623)', () => {
     await vi.waitFor(async () => expect(await ask()).toEqual(answer('new')))
   })
 
+  it('does not stand a future-dated answer in for a read that failed after the clock moved back (#2535)', async () => {
+    let clock = 10_000
+    const g = gate<string>()
+    const read = vi.fn<() => Promise<string>>().mockResolvedValueOnce('old').mockReturnValueOnce(g.promise)
+    const ask = softRead({ read, fallback: () => 'none', freshMs: 1000, failMs: 1000, softMs: 50, now: () => clock, onFail: () => {} })
+    expect(await ask()).toEqual(answer('old'))
+    clock = 20_000
+    const settled = ask({ settle: true })
+    clock = 100
+    g.reject(new Error('boom'))
+    expect(await settled).toEqual(answer('none'))
+  })
+
   it('lets a settle wait only so long: the run goes on, the asker gets a provisional answer, and what the run reads is kept', async () => {
     const g = gate<string>()
     const read = vi.fn(() => g.promise)
