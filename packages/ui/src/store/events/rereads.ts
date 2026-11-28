@@ -4,7 +4,7 @@ import type { StoreGet, StoreSet } from '../state.js'
 /** A list's read; `e` is the broadcast that asked for it, absent after a gap */
 type Read = (get: StoreGet, set: StoreSet, e?: NormalizedEvent) => unknown
 
-// Both lists, whichever tool saved; a newer host sends `assistant_proposals_changed` (#2133)
+// Both lists, whichever tool saved; a host before #2532 sends `orchestrator_proposals_changed`
 const proposals = (get: StoreGet) => Promise.all([get().refreshMcpProposals(), get().refreshSkillProposals()])
 
 /**

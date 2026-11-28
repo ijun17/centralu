@@ -352,8 +352,7 @@ export class MailTool {
         throw refuse(ref.role === PERSON ? 'elsewhere' : 'unknown', `${where} the computer that started this session, and mail does not cross computers from this one, so nothing was sent. End your turn with the answer: that is how your parent hears from you.`)
       }
       if (ref.role === PERSON) return { address: PERSON }
-      // #2133: the address is `assistant`, with no alias for the old `orchestrator`; the stored `via` keeps its old value until the store's rename
-      // (docs/plans/assistant-rename.md, step 4), so the previous release still reads these rows
+      // #2133: the address is `assistant`, with no alias for the old `orchestrator` (docs/plans/assistant-rename.md)
       if (ref.role === 'assistant') {
         const id = this.host.assistantId()
         if (!id) throw refuse('no_mailbox', 'there is no Assistant to ask yet: write to the person instead')
