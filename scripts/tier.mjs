@@ -18,6 +18,8 @@
 // A file's mode counts too (git diff --raw): a symbolic link or a submodule is deep, and a file executable in the
 // new commit at least light, whatever its name says. A TypeScript or JavaScript file whose change is only in comments,
 // spaces and blank lines is at most light (#2352, `commentsOnly`): a comment fix in a deep file does not make the change deep.
+// A test file whose change only adds tests is at most light too (#2563, `testsAdded`): no line it had removed or changed, and
+// nothing added that skips or focuses a test. An added helpers file, or any other file a test reads, keeps its tier.
 //
 // --base defaults to origin/main, --head to HEAD; the change is what head adds over where it left
 // base. The rules are read from base, so a change cannot loosen the rules that judge it; a base
@@ -174,10 +176,11 @@ export function modeTier(entry) {
 /**
  * One file's tier: { path, tier, rules }, and `tests` when it took the tier of the file it tests (a test
  * of a deep file guards that boundary, so weakening it is deep too), `commentsOnly` (the tier its name
- * gives) when only its comments changed and that put it lower, or `mode` when its mode put it higher
- * (`entry`: its modes before and after, from `changedEntries`; none for a bare path).
+ * gives) when only its comments changed and that put it lower, `testsAdded` (likewise) when the change only
+ * adds tests to it (`testsAdded`, #2563: adding a check weakens no boundary), or `mode` when its mode put it
+ * higher (`entry`: its modes before and after, from `changedEntries`; none for a bare path).
  */
-export function tierOfFile(path, rules, entry = null, commentsOnly = false) {
+export function tierOfFile(path, rules, entry = null, commentsOnly = false, testsAdded = false) {
   const p = String(path).split('\\').join('/').replace(/^\.\//, '')
   let best = { path: p, ...ownTier(p, rules, entry?.oldMode === MODES.absent) }
   for (const s of subjectsOf(p)) {
@@ -185,6 +188,7 @@ export function tierOfFile(path, rules, entry = null, commentsOnly = false) {
     if (rank(t.tier) > rank(best.tier)) best = { path: p, ...t, tests: s }
   }
   if (commentsOnly && rank(best.tier) > rank(COMMENT_ONLY_TIER)) best = { path: p, tier: COMMENT_ONLY_TIER, rules: [], commentsOnly: best.tier }
+  else if (testsAdded && rank(best.tier) > rank(TESTS_ADDED_TIER)) best = { path: p, tier: TESTS_ADDED_TIER, rules: [], testsAdded: best.tier }
   const m = modeTier(entry)
   if (m && rank(m.tier) > rank(best.tier)) best = { path: p, tier: m.tier, rules: [], mode: m.mode }
   return best
@@ -194,10 +198,11 @@ export function tierOfFile(path, rules, entry = null, commentsOnly = false) {
  * A change's tier: { tier, files, because, counts }. `because` is the files at that tier, the ones that
  * put it there; `counts` how many files fell in each tier. No files at all is auto: nothing to review.
  * `modes`: each path's modes (`changedEntries`), when they are known; `commentsOnly`: the paths whose change
- * is only in comments, spaces and blank lines (`commentsOnly`), when their contents were read.
+ * is only in comments, spaces and blank lines (`commentsOnly`), and `testsAdded` the test files whose change only adds
+ * tests (`testsAdded`), when their contents were read.
  */
-export function classify(paths, rules, modes = new Map(), commentsOnly = new Set()) {
-  const files = [...new Set(paths)].map((p) => tierOfFile(p, rules, modes.get(p) ?? null, commentsOnly.has(p)))
+export function classify(paths, rules, modes = new Map(), commentsOnly = new Set(), testsAdded = new Set()) {
+  const files = [...new Set(paths)].map((p) => tierOfFile(p, rules, modes.get(p) ?? null, commentsOnly.has(p), testsAdded.has(p)))
   const tier = files.map((f) => f.tier).reduce(higher, 'auto')
   const counts = Object.fromEntries(TIERS.map((t) => [t, files.filter((f) => f.tier === t).length]).filter(([, n]) => n))
   return { tier, files, because: files.filter((f) => f.tier === tier), counts }
@@ -207,6 +212,7 @@ export function classify(paths, rules, modes = new Map(), commentsOnly = new Set
 export function reasonOf(file, rules) {
   if (file.mode) return file.mode
   if (file.commentsOnly) return `only comments changed, else ${file.commentsOnly}`
+  if (file.testsAdded) return `only tests added, else ${file.testsAdded}`
   if (!file.rules.length) return `no rule matches: ${rules.fallback}`
   return `${file.rules.join(', ')}${file.tests ? `, as the test of ${file.tests}` : ''}`
 }
@@ -240,6 +246,7 @@ export function report(result, rules) {
     lines.push(`  ${f.path}${f.tests ? ` (a test of ${f.tests}, which takes its tier)` : ''}`)
     if (f.mode) lines.push(`      ${f.mode}, so ${f.tier} whatever its name says`)
     else if (f.commentsOnly) lines.push(`      only its comments, spaces and blank lines changed, so at most ${COMMENT_ONLY_TIER} (by its name: ${f.commentsOnly})`)
+    else if (f.testsAdded) lines.push(`      the change only adds tests to it, so at most ${TESTS_ADDED_TIER} (by its name: ${f.testsAdded})`)
     else if (!f.rules.length) lines.push(`      no rule matches it, so ${rules.fallback} (${RULES_FILE} "fallback")`)
     for (const id of f.rules) lines.push(`      ${id}: ${byId.get(id).why}`)
   }
@@ -337,6 +344,33 @@ export function commentsOnly(path, before, after, ts) {
   return a !== null && b !== null && JSON.stringify(a) === JSON.stringify(b)
 }
 
+// --- Tests only added (#2563) -------------------------------------------------------------------
+
+/** The most a test file takes whose change only adds tests: a new check weakens no boundary, and it is still reviewed */
+export const TESTS_ADDED_TIER = 'light'
+
+/** A test file by its name, x.test.<code extension>, or its helpers, x.test-helpers.<code extension> (`subjectsOf`) */
+const TEST_FILE = /\.test(-helpers)?\.[cm]?[jt]sx?$/
+/** What makes a test not run, or the others not run: added, it is no added check */
+const NOT_RUN = /\.(?:skip|only|todo|skipIf|runIf)\b/g
+
+/**
+ * Whether going from `before` (null: the change adds the file) to `after` only adds tests to the test file `path`: every
+ * line it had is still there, in order, so no check was removed or changed, and nothing added skips a test, focuses one
+ * or leaves one to do. An added helpers file is not: what it does is reached only through the tests that use it.
+ */
+export function testsAdded(path, before, after) {
+  const name = TEST_FILE.exec(path)
+  if (!name || before === after || (before === null && name[1])) return false
+  const notRun = (text) => text.match(NOT_RUN)?.length ?? 0
+  if (notRun(after) > notRun(before ?? '')) return false
+  if (before === null) return true
+  const kept = before.split('\n')
+  let i = 0
+  for (const line of after.split('\n')) if (i < kept.length && line === kept[i]) i++
+  return i === kept.length
+}
+
 // --- Reading a checkout -------------------------------------------------------------------------
 
 // git started here, not through scripts/interrupts.mjs: the board runs main's copy of this file alone (queue-integrate.mjs)
@@ -405,25 +439,48 @@ function commentOnlyPaths(root, entries, rules) {
   // loaded only when a file is judged: it takes longer than the rest of a run
   const ts = judged.length ? typescriptAt(root) : null
   if (!ts) return new Set()
-  const utf8 = new TextDecoder('utf-8', { fatal: true })
-  // as text only when it is UTF-8: two bytes that both decode to U+FFFD would look alike. A git that fails, an
-  // interrupted one too, throws: tierOfChange's callers answer that as deep, or stop on the interrupt
-  const text = (sha) => {
-    const bytes = execFileSync('git', ['cat-file', 'blob', sha], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 })
-    try {
-      return utf8.decode(bytes)
-    } catch {
-      return null
-    }
-  }
   return new Set(
     judged
       .filter((e) => {
-        const [before, after] = [text(e.oldSha), text(e.newSha)]
+        const [before, after] = [blobText(root, e.oldSha), blobText(root, e.newSha)]
         return before !== null && after !== null && commentsOnly(e.path, before, after, ts)
       })
       .map((e) => e.path),
   )
+}
+
+/**
+ * The test files among `entries` (`changedEntries`) whose change only adds tests (`testsAdded`): plain, or added as a
+ * plain file, and named so that they take more than TESTS_ADDED_TIER, read from git by their blobs. No other is read.
+ */
+function testsAddedPaths(root, entries, rules) {
+  const judged = entries.filter(
+    (e) => TEST_FILE.test(e.path) && PLAIN_FILES.includes(e.newMode) && (e.oldMode === MODES.absent || PLAIN_FILES.includes(e.oldMode)) && rank(tierOfFile(e.path, rules).tier) > rank(TESTS_ADDED_TIER),
+  )
+  return new Set(
+    judged
+      .filter((e) => {
+        const before = e.oldMode === MODES.absent ? null : blobText(root, e.oldSha)
+        const after = blobText(root, e.newSha)
+        return after !== null && (before !== null || e.oldMode === MODES.absent) && testsAdded(e.path, before, after)
+      })
+      .map((e) => e.path),
+  )
+}
+
+const utf8 = new TextDecoder('utf-8', { fatal: true })
+
+/**
+ * A blob's text, or null when it is not UTF-8: two bytes that both decode to U+FFFD would look alike. A git that fails, an
+ * interrupted one too, throws: tierOfChange's callers answer that as deep, or stop on the interrupt
+ */
+function blobText(root, sha) {
+  const bytes = execFileSync('git', ['cat-file', 'blob', sha], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 })
+  try {
+    return utf8.decode(bytes)
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -440,6 +497,7 @@ export function tierOfChange({ root, base, head, rulesRef = base }) {
     found.rules,
     new Map(entries.map((e) => [e.path, e])),
     commentOnlyPaths(root, entries, found.rules),
+    testsAddedPaths(root, entries, found.rules),
   )
   return { ...result, rulesFrom: found.from, line: tierLine(result, found.rules), text: report(result, found.rules) }
 }

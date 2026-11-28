@@ -180,6 +180,7 @@ export const NOT_GUARDS: Readonly<Record<string, readonly string[]>> = {
     'tooling/surface-drift.test.ts',
     'tooling/test-timing.test.ts',
     'tooling/tier-comment-only.test.ts',
+    'tooling/tier-tests-added.test.ts',
     'tooling/ux-engine.test.ts',
     'tooling/ux-klm.test.ts',
     'tooling/vitest-data-dir.test.ts',
