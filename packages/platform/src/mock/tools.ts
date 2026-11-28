@@ -3,7 +3,7 @@ import type { Emit } from './event-bus.js'
 import type { AgentPort, MachineRef } from '../ports/index.js'
 
 /** What the ACP-based tools declare on the real host: no role text, subagents or peer messaging */
-const NO_ROLE_TEXT: Pick<AdapterCapabilities, 'verbosities' | 'exclusiveWriter' | 'toolDeferral' | 'instructionChannel' | 'processModel' | 'builtInSubagents' | 'peerMessaging' | 'roleText'> = { verbosities: [], exclusiveWriter: false, toolDeferral: false, instructionChannel: 'server', processModel: 'per-session', builtInSubagents: false, peerMessaging: false, roleText: false }
+const NO_ROLE_TEXT: Pick<AdapterCapabilities, 'verbosities' | 'exclusiveWriter' | 'toolDeferral' | 'processModel' | 'builtInSubagents' | 'peerMessaging' | 'roleText'> = { verbosities: [], exclusiveWriter: false, toolDeferral: false, processModel: 'per-session', builtInSubagents: false, peerMessaging: false, roleText: false }
 
 /** The agent tools the mock knows: what is detected, their models and capabilities, and the slash command list */
 export class ToolsMock {

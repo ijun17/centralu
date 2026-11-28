@@ -21,7 +21,7 @@ import { cursorSignInStore } from '../../os.js'
  * commands and deletes: so Safe, Normal and Edits, which ask before a change, cannot be kept, and it runs under Auto only
  * (owner to decide whether Cursor stays offered so); nothing keeps it from reading `.cursor/rules` and `AGENTS.md`, so trusted
  * projects only; ACP has no field for Centralu's role text, so it cannot be the Assistant, a coordinator or an app's
- * agent yet.
+ * builder (a way to give it is #2479).
  */
 const CAPABILITIES: AdapterCapabilities = {
   ...ACP_CAPABILITIES,

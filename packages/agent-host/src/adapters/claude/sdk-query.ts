@@ -3,7 +3,9 @@ import { hostAccessEnv, toolProfileOf } from '../contract.js'
 import type { randomUUID } from 'node:crypto'
 import type { AgentProcess, CreateSessionOpts, InputOrigin } from '../contract.js'
 import type { LocalSpawnSpec } from '../local-process.js'
+import { agentTextOf } from '../../sessions/agent-text.js'
 import { seatHas } from '../../sessions/tool-seats.js'
+import { CLAUDE_SUBAGENT_TOOL } from './centralu-mcp.js'
 import { withoutCrossSessionMessaging } from './cross-session.js'
 import { probeIds } from './live-queries.js'
 import type { ModelQuery } from './models.js'
@@ -11,8 +13,6 @@ import { settingSourcesFor } from './permissions.js'
 import type { ClaudeMessage } from './json.js'
 import type { ClaudeCards } from './session-cards.js'
 import type { UsageQuery } from './usage.js'
-
-/** The SDK query a Claude session runs on: the surface of it we use, what its input carries, and its options. */
 
 /** One message for the CLI to read, as the session's input stream holds it. `sentAs`: the id the CLI is given it under when not its own (a resend, `ClaudeRaceRetry`) */
 export type ClaudeInput = { text: string; uuid: ReturnType<typeof randomUUID>; parentNote: boolean; origin?: InputOrigin; quiet?: boolean; sentAs?: ReturnType<typeof randomUUID> }
@@ -114,8 +114,8 @@ export function flagSettings(opts: Pick<CreateSessionOpts, 'autoCompactTokens'>,
 
 /** The options a session's `query()` starts with */
 export function claudeQueryOptions({ sessionId, opts, executablePath, servers, permissionOptions, codeIntelligence, spawn, canUseTool }: ClaudeQueryInputs) {
+  const { role } = agentTextOf(opts, CLAUDE_SUBAGENT_TOOL)
   return withoutCrossSessionMessaging({
-    // The host's address and this session's credential, for a script the agent writes (#1405)
     env: hostAccessEnv(opts.hostAccess),
     cwd: opts.cwd,
     model: opts.model,
@@ -145,7 +145,6 @@ export function claudeQueryOptions({ sessionId, opts, executablePath, servers, p
      * version's SDK already passes it); an older CLI refuses an unknown option and would not start.
      */
     extraArgs: { 'thinking-display': 'summarized' },
-    // MCP servers — the Centralu tools and any attached external apps (including approved MCP servers). See mcpServers().
     ...(Object.keys(servers).length > 0 ? { mcpServers: servers } : {}),
     /*
      * Which settings files get read (settingSourcesFor): assistant/coordination sessions **never read instructions from a
@@ -159,14 +158,7 @@ export function claudeQueryOptions({ sessionId, opts, executablePath, servers, p
     ...settingSourcesFor(opts),
     // A folder to read outside the working folder (#142 — an inherited handoff note). Without it, this asks (measured in CreateSessionOpts.readableDirs).
     ...(opts.readableDirs?.length ? { additionalDirectories: opts.readableDirs } : {}),
-    ...(opts.centraluTools
-      ? {
-          // The role is guaranteed here, not by AGENTS.md, which the person can and should edit
-          ...(opts.systemPromptAppend
-            ? { systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: opts.systemPromptAppend } }
-            : {}),
-        }
-      : {}),
+    ...(role ? { systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: role } } : {}),
     ...permissionOptions,
     ...flagSettings(opts, codeIntelligence),
     // A usage probe starts no server of the person's: those in ~/.claude.json would run for a read that needs none (#726)

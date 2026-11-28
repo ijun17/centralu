@@ -341,7 +341,7 @@ export const COMMENT_SHARE_HELD = {
     'packages/agent-host/src/adapters/codex/reasoning-parts.ts': 47,
     'packages/agent-host/src/adapters/codex/server-requests.ts': 38,
     'packages/agent-host/src/adapters/codex/slash-commands.ts': 44,
-    'packages/agent-host/src/adapters/codex/thread-open.ts': 57,
+    'packages/agent-host/src/adapters/codex/thread-open.ts': 55,
     'packages/agent-host/src/adapters/codex/thread-servers.ts': 46,
     'packages/agent-host/src/adapters/codex/token-readings.ts': 49,
     'packages/agent-host/src/adapters/contract.ts': 72,

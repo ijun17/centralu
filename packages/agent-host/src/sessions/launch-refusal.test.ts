@@ -76,6 +76,16 @@ describe('launching a tool that declares limits', () => {
     expect(world.store.settings.appSetting('orchestrator_tool')).toBe('claude')
   })
 
+  it('refuses switching a session with role text pinned to a tool that takes none, and leaves it on its tool', async () => {
+    const world = limitedWorld()
+    const p = (await world.rpc('projects.add', { path: dir })) as { id: string }
+    await world.rpc('projects.setTrusted', { projectId: p.id, trusted: true })
+    const s = (await world.rpc('agents.createSession', { projectId: p.id, cwd: dir, tool: 'claude' })) as { id: string }
+    world.mgr.sessionInfo(s.id)!.roleAppend = 'A pinned role.'
+    await expect(world.rpc('agents.switchTool', { sessionId: s.id, tool: 'codex' })).rejects.toThrow(/Limited.*an app's builder/)
+    expect(world.codexAdapter.lastOpts).toBeNull()
+  })
+
   it('leaves a tool without limits as it was', async () => {
     const world = managerWorld()
     const p = (await world.rpc('projects.add', { path: dir })) as { id: string }

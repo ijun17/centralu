@@ -23,7 +23,7 @@ import { UNTRUSTED_LINES } from '../mail/frame.js'
  * paths call. The names the callers still import are re-exported from here.
  */
 export { AGENT_BUDGET_CHARS, AGENT_TOOLS, APP_ACCESS_BUDGET_CHARS, APP_ACCESS_TOOLS, APP_BUDGET_CHARS, APP_TOOLS, COMMAND_TOOLS, COMMANDS_INSTRUCTION, COMPACT_BUDGET_CHARS, COMPACT_TOOLS, DELEGATE_BUDGET_CHARS, DELEGATE_TOOLS, MAIL_BUDGET_CHARS, MAIL_TOOLS, assistantInstructions, CENTRALU_TOOLS, READER_BUDGET_CHARS, READER_TOOLS, REPO_WORK_FIRST, readerFirst, readerInstructions, RESIDENT_BUDGET_CHARS, SCOPED_INSTRUCTIONS, TOOL_ARGS } from './tool-definitions.js'
-export { callForm, codexToolInstructionsFor, commandsFor, DEFAULT_RARE_TIER, FILL, instructionsFor, notAToolText, centraluToolSchemas, profileAllows, RARE_COMMANDS, RARE_TIERS, setRareTier, toolDefsFor, toolInstructionsFor } from './tool-seats.js'
+export { callForm, commandsFor, DEFAULT_RARE_TIER, FILL, instructionsFor, notAToolText, centraluToolSchemas, profileAllows, RARE_COMMANDS, RARE_TIERS, setRareTier, toolDefsFor } from './tool-seats.js'
 export type { RareTier } from './tool-seats.js'
 export { trustedJsonText } from './tool-answers.js'
 
@@ -447,7 +447,7 @@ const HANDLERS: ToolHandlers = {
     return {
       text:
         `Proposed the "${spec.name}" MCP server. An approval card appeared on screen, and once the person approves it, ` +
-        `that server becomes a user-folder app and this session restarts — after the restart, the conversation continues and the new tools appear under the app-${spec.name} server. ` +
+        `that server becomes a user-folder app and this session restarts — after the restart, the conversation continues and the app tool reaches the new tools as "${spec.name}". ` +
         'It is not installed until approved.',
     }
   },
@@ -477,7 +477,7 @@ const HANDLERS: ToolHandlers = {
     return {
       text:
         `Created the "${spec.name}" app (${where}, id ${r.appId}): ${r.dir}\n` +
-        `It is the app exactly as the template gives it (a counter). In a session it attaches as the app-${r.appId} server. The app comes up the first time it is needed.\n` +
+        `It is the app exactly as the template gives it (a counter). A session's app tool calls it as "${r.appId}". The app comes up the first time it is needed.\n` +
         next,
     }
   },
