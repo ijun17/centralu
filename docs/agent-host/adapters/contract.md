@@ -65,7 +65,11 @@ Implementation rules:
   Codex: a child thread's `item/*` notifications arrive on the parent's connection with the child's `threadId`; the
   parent's `spawnAgent` item names the child in `receiverThreadIds` on `item/completed`, and a child's items that arrive
   before that (measured: the child's first notification came in the same millisecond, before the link) are held and
-  replayed. Only official routes are used — the SDK's stream and the app-server's notifications, never the tools'
+  replayed. Under multi-agent v2 (a model's own runtime, `Model.multiAgentVersion`; codex-cli 0.172.0, recorded in
+  `recordings/codex-0.172.0/subagents-v2.jsonl`, #2553) there is no `spawnAgent` item: the parent's `subAgentActivity` item of kind
+  `started` names the child (`agentThreadId`, `agentPath`) as soon as it starts, `interacted` is a message or follow-up task
+  sent to it, and `completed` or `interrupted` is the end of a turn of its (read from the child's own `turn/completed`, so no row);
+  `list_agents` sends no item at all (#2552). Only official routes are used — the SDK's stream and the app-server's notifications, never the tools'
   transcript files. The manager stores the steps in `subagent_messages`, apart from the conversation, and sends them on
   as cards. A file a subagent changed is still reported as the session's (`files_touched`), and a commit it made is
   attributed to the session (#50).
@@ -82,7 +86,7 @@ Implementation rules:
     (`scripts/probe-background-tasks.mts`, CLI 2.1.282, SDK 0.3.263): `interrupt()` mid-turn stops a background
     subagent (`task_notification` stopped, in the same millisecond) and **leaves a backgrounded shell running**;
     `stopTask(id)` stops one task with the same three messages; `close()` kills what is left and emits nothing.
-  - **Codex** lists each child thread a `spawnAgent` item named while the thread is active, and ends it with the
+  - **Codex** lists each child thread a `spawnAgent` item (or a v2 `subAgentActivity` that `started`) named while the thread is active, and ends it with the
     child's `turn/completed` status. Measured (`scripts/probe-codex-background.mts`, codex-cli 0.160.0):
     `turn/interrupt` on the parent's turn **leaves the child running**; `turn/interrupt` on the child's own turn stops
     it, which is the per-task stop. Codex's interrupt does not kill a command the child was running.

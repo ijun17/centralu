@@ -1,4 +1,4 @@
-import { loadRecording, recordedFolders, type Recording } from '../frames/replay.test-helpers.js'
+import { loadRecording, newestVersion, recordedFolders, type Recording } from '../frames/replay.test-helpers.js'
 
 /**
  * What the real Codex app-server sent, for the tests that read one answer or notification rather than a whole session
@@ -22,12 +22,12 @@ export const hasCentraluBridge = (recording: Recording): boolean => threadConfig
 /** Whether the recorded session's folder was trusted: an untrusted one is marked so in its thread's config, and its project documents are not read */
 export const wasProjectTrusted = (recording: Recording): boolean => threadConfig(recording)?.project_doc_max_bytes !== 0
 
-/** The recorded app-server version's folder: the newest, as a re-recording on a version bump replaces the old one */
-export const recordedVersion = (): string => {
-  const numbers = (dir: string) => dir.replace(/^codex-/, '').split('.').map(Number)
-  const newer = (a: string, b: string) => numbers(a).reduce((order, n, i) => order || n - (numbers(b)[i] ?? 0), 0)
-  return recordedFolders(CODEX_RECORDINGS).map((f) => f.dir).sort(newer).at(-1)!
-}
+/**
+ * The recorded app-server version's folder: the newest that holds the plain `basic` run, as a re-recording on a version bump replaces
+ * the old one. A scenario recorded alone on a newer CLI (the multi-agent v2 run, #2553) sits in its own folder and is asked for by
+ * name (`newestVersion(CODEX_RECORDINGS, scenario)`)
+ */
+export const recordedVersion = (): string => newestVersion(CODEX_RECORDINGS, 'basic')
 
 const fileOf = (scenario: string): string => recordedFolders(CODEX_RECORDINGS).find((f) => f.dir === recordedVersion())!.file(scenario)
 

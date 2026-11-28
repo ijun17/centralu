@@ -1,4 +1,4 @@
-{"header":{"tool":"codex","version":"0.172.0","model":"gpt-5.6-luna","scenario":"subagents-v2","preset":"auto","protocolVersion":1,"os":"darwin","recorded":"2026-11-28"}}
+{"header":{"tool":"codex","version":"0.172.0","model":"gpt-6-luna","scenario":"subagents-v2","preset":"auto","protocolVersion":1,"os":"darwin","recorded":"2026-11-28"}}
 {"t":0,"dir":"out","msg":{"id":"12596d-1","method":"initialize","params":{"clientInfo":{"name":"centralu","title":"Centralu","version":"0.0.0-dev"},"capabilities":null}}}
 {"t":67,"dir":"in","msg":{"id":"12596d-1","result":{"userAgent":"centralu/0.172.0 (<os>; <arch>) unknown (centralu; 0.0.0-dev)","codexHome":"<tmp>/frames-data/codex-home","platformFamily":"unix","platformOs":"macos"}}}
 {"t":68,"dir":"out","msg":{"method":"initialized"}}
