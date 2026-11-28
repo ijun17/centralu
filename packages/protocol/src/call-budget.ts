@@ -34,7 +34,6 @@ const LONG_CALLS: ReadonlySet<string> = new Set([
   'machines.update', // Installs beside and waits for the sessions there to finish (#1399); a wait that outlasts it is the row's to show
   'agents.resolveMcpProposal', // Restarts the Assistant on approval
   'agents.resolveSkillProposal', // Same
-  'agents.deleteOrchestratorSkill', // Same
   'agents.deleteAssistantSkill', // Same
   // A clone takes as long as the repository does; past this budget the screen says it is still cloning
   'projects.create',

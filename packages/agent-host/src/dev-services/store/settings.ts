@@ -98,8 +98,11 @@ export function listSetting(
  * deleted the old keys). A build the store's floor admits (v75 to v78) reads the new key first and the old one when it
  * is missing, and writes both: an old key it left would bring back what this build deletes, after a second rollback.
  */
+/** The tool the Assistant runs on, and the default of an app's agent with no project (`ToolRegistry.defaultToolFor`) */
+export const ASSISTANT_TOOL_KEY = 'assistant_tool'
+
 const OLD_SETTING_KEYS: ReadonlyMap<string, string> = new Map([
-  ['assistant_tool', 'orchestrator_tool'],
+  [ASSISTANT_TOOL_KEY, 'orchestrator_tool'],
   ['assistant_mcp_proposals', 'orchestrator_mcp_proposals'],
   ['assistant_skill_proposals', 'orchestrator_skill_proposals'],
   ['assistant_skills', 'orchestrator_skills'],

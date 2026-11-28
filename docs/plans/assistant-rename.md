@@ -129,7 +129,7 @@ same N−1 that moves the role writes only `is_orchestrator`, which is why it is
 - `agents.orchestratorSkills` and `agents.deleteOrchestratorSkill` have no `assistant` twin yet: step 4 adds one as
   step 3 did for `orchestrator.*`, and a later build drops the old names.
 
-### 3.3 What step 4 built (the release after beta.55)
+### 3.3 What step 4 built (the release after beta.55; superseded by §3.4 from #2532 on)
 
 Every machine's previous release is beta.54 or later (owner, recorded on #2133), so every build a person can go back to
 reads the new forms (step 3). A linked machine is another matter: the hub connects to any machine of the same protocol

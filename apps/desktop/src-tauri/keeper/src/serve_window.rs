@@ -78,7 +78,7 @@ impl ServeChoice {
                 format!("the data folder's centralu serve speaks protocol {serve} and this window {window}; the window runs its own host")
             }
             ServeChoice::TooOld { serve, min } => {
-                format!("the data folder's centralu serve is Centralu {serve}, older than {min}, the oldest this window works with; the window runs its own host until Centralu is updated there")
+                format!("the data folder's centralu serve is Centralu {serve}, older than {min}, the oldest this window works with; the window runs its own host, which a serve host still running holds the data folder from until Centralu is updated there or that host is stopped (centralu serve --stop)")
             }
             ServeChoice::WindowUnknown => "this window's protocol could not be read; it runs its own host".into(),
         }
@@ -102,9 +102,11 @@ pub fn choose(line: Option<&ServeLine>, window: Option<&WindowBundle>) -> ServeC
     ServeChoice::Use
 }
 
-/// Whether `version` is a release before `min`, as `isSupportedVersion` (protocol/src/semver.ts) judges it: a local
-/// build (`<base>.local.N`) is its base, and a build from source (`0.0.0-…`) or a version that does not parse is not judged.
+/// Whether `version` is a release before `min`, as `isSupportedVersion` (protocol/src/semver.ts) judges it: build
+/// metadata (`+…`) is dropped, a local build (`<base>.local.N`) is its base, and a build from source (`0.0.0-…`) or a
+/// version that does not parse is not judged.
 fn older_release(version: &str, min: &str) -> bool {
+    let version = version.split_once('+').map_or(version, |(v, _)| v);
     let base = version.split_once(".local.").map_or(version, |(b, _)| b);
     if base.starts_with("0.0.0") {
         return false;

@@ -21,6 +21,7 @@ import { verifyThenStamp, withoutVersion } from '../scripts/release-verify.mjs'
 // @ts-expect-error — as above
 import { buildId } from '../packages/agent-host/scripts/build-id.mjs'
 import { bundleInfoText } from '../packages/agent-host/scripts/bundle-host.mjs'
+import { MIN_SUPPORTED_VERSION } from '../packages/protocol/src/semver.js'
 
 const dirs: string[] = []
 const temp = () => {
@@ -253,8 +254,10 @@ await runSteps(process.cwd(), '0.2.0-beta.4', [[process.execPath, ['-e', ${JSON.
     writeFileSync(join(root, 'notes.txt'), 'x\n')
     expect(buildId(root)).toBe(`${sha}-dirty`)
     // The bundle record states the id it is given as its commit (called, not read: no esbuild)
-    const info = JSON.parse(bundleInfoText({ root: resolve('.'), buildId: `${sha}-dirty` })) as { commit: string }
+    const info = JSON.parse(bundleInfoText({ root: resolve('.'), buildId: `${sha}-dirty` })) as { commit: string; minPeerVersion: string }
     expect(info.commit).toBe(`${sha}-dirty`)
+    // The oldest peer, which the Windows window holds a `centralu serve` to (keeper serve_window.rs, #2532)
+    expect(info.minPeerVersion).toBe(MIN_SUPPORTED_VERSION)
     // bundle.mjs works the id out from the repository root and hands that one id to both, host script and record
     const bundle = readFileSync(resolve('packages/agent-host/scripts/bundle.mjs'), 'utf8')
     expect(bundle).toContain("import { buildId } from './build-id.mjs'")

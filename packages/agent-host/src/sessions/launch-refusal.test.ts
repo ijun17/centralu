@@ -83,3 +83,13 @@ describe('launching a tool that declares limits', () => {
     expect(world.codexAdapter.lastOpts?.permissionPreset).toBe('safe')
   })
 })
+
+/** An app's agent with no project runs on the Assistant's tool (#2532: read under the key's new name, which step 79 left alone) */
+describe("the default tool of an app's agent with no project", () => {
+  it("follows the Assistant's tool", async () => {
+    const world = managerWorld()
+    expect(world.mgr.toolRegistry.defaultToolFor(null)).toBe('claude')
+    await world.rpc('assistant.configure', { tool: 'codex' })
+    expect(world.mgr.toolRegistry.defaultToolFor(null)).toBe('codex')
+  })
+})

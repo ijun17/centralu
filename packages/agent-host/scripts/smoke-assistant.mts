@@ -32,7 +32,7 @@ await rpc('sessions.rename', { sessionId: worker.id, name: 'readme-owner' })
 log('target session:', worker.id, '(readme-owner)')
 
 const ORC_TOOL = (process.env.ORC_TOOL ?? 'claude') as 'claude' | 'codex'
-let orc = await rpc('orchestrator.get', {})
+let orc = await rpc('assistant.get', {})
 if (ORC_TOOL !== 'claude') {
   orc = await rpc('agents.switchTool', { sessionId: orc.id, tool: ORC_TOOL })
   log(`switched the Assistant to ${ORC_TOOL}`)

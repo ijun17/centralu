@@ -73,8 +73,13 @@ fn a_serve_older_than_the_windows_oldest_peer_leaves_the_window_its_bundled_host
     assert_eq!(windows_plan(Some(&serve("0.1.0-beta.57")), 1), Some(Host::Serve), "the minimum itself");
     assert_eq!(windows_plan(Some(&serve("0.1.0-beta.100")), 1), Some(Host::Serve), "beta.100 is after beta.57");
     assert_eq!(windows_plan(Some(&serve("0.0.0-dev")), 1), Some(Host::Serve), "a build from source");
+    assert_eq!(windows_plan(Some(&serve("0.1.0-beta.56+abc123")), 1), Some(Host::Bundle), "build metadata dropped");
+    assert_eq!(windows_plan(Some(&serve("not-a-version")), 1), Some(Host::Serve), "a version that does not parse");
     let line = parse_connection_line(&serve("0.1.0-beta.56")).unwrap();
     assert_eq!(choose(Some(&line), Some(&WindowBundle { protocol: 1, min_peer: None })), ServeChoice::Use, "a window bundle that names no minimum");
+    let unversioned = ServeLine { version: None, ..line };
+    let window = WindowBundle { protocol: 1, min_peer: Some("0.1.0-beta.57".into()) };
+    assert_eq!(choose(Some(&unversioned), Some(&window)), ServeChoice::Use, "a line that says no version");
 }
 
 #[test]

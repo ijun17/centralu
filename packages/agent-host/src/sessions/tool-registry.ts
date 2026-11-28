@@ -2,6 +2,7 @@ import type { LaunchDemands, ToolName } from '@cc/protocol'
 import { launchRefusal } from '@cc/protocol'
 import type { AgentAdapter } from '../adapters/contract.js'
 import { registeredTool } from '../adapters/registry.js'
+import { ASSISTANT_TOOL_KEY } from '../dev-services/store/settings.js'
 import type { DelegationHost } from './delegation-flow.js'
 import type { ProjectRegistry } from './project-registry.js'
 
@@ -56,7 +57,7 @@ export class ToolRegistry {
       const project = this.host.projectRow(projectId)
       return this.firstTool(project?.defaultTool)
     }
-    return this.firstTool(this.host.store.settings.appSetting('orchestrator_tool'))
+    return this.firstTool(this.host.store.settings.appSetting(ASSISTANT_TOOL_KEY))
   }
 
   /**

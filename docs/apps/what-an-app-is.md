@@ -117,7 +117,7 @@ visibility is not read as the default: the side that is wrong stays closed.
   (a manifest only). Its calls go through the same path as every app's, are recorded, and can be
   removed. Servers approved earlier are moved over when the host starts; moving them again changes
   nothing (#152).
-- The proposal itself waits in `orchestrator_mcp_proposals` until the person answers. Every change to
+- The proposal itself waits in `assistant_mcp_proposals` until the person answers. Every change to
   that list (and to the skill proposal list) is announced by the host with
   `assistant_proposals_changed`, sent after the write, and the screen re-reads on it: not on the
   Assistant's `tool_call`, which arrives before anything is saved (#703). A pending proposal

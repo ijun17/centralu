@@ -174,7 +174,7 @@ const SKIP: Record<string, string> = {
     'agents.installTool', 'agents.cancelInstallTool', 'agents.signIn', 'agents.cancelSignIn', 'agents.applyVersions', 'updates.apply', 'updates.answerApply', 'updates.reportApply', 'host.stop', 'host.handover', 'processes.stop', 'commands.stop',
   ]),
   ...skipped('destructive, or writes outside the temporary store', [
-    'agents.archiveIfAtRest', 'agents.deleteAgentChild', 'agents.deleteOrchestratorSkill', 'agents.deleteAssistantSkill', 'trash.purgeRuns', 'trash.purgeSubagentSteps', 'trash.restoreSubagentSteps', 'fs.move', 'fs.importFile', 'projects.delete', 'projects.create', 'worktrees.createManager', 'worktrees.setTrunk', 'themes.save', 'themes.import',
+    'agents.archiveIfAtRest', 'agents.deleteAgentChild', 'agents.deleteAssistantSkill', 'trash.purgeRuns', 'trash.purgeSubagentSteps', 'trash.restoreSubagentSteps', 'fs.move', 'fs.importFile', 'projects.delete', 'projects.create', 'worktrees.createManager', 'worktrees.setTrunk', 'themes.save', 'themes.import',
   ]),
   ...skipped('needs something that does not exist here: a pending proposal, a running task, a failed turn, an image, a subagent run, a running command, an open app view, a shared app, a consent, a mail thread', [
     'agents.resolveMcpProposal', 'agents.resolveSkillProposal', 'agents.stopBackgroundTask', 'messages.image', 'sessions.clearError', 'messages.subagent', 'messages.subagentTrashed', 'trash.readRun', 'subagents.trash', 'commands.log', 'commands.resize', 'apps.viewFrame', 'apps.recoverView', 'apps.readResource', 'apps.invoke', 'apps.restart', 'apps.setShared', 'projectConsents.revoke', 'host.send',
