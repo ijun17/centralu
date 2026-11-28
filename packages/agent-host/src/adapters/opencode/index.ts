@@ -7,6 +7,7 @@ import { presetEnv } from './config.js'
 import { findOpenCode } from './install.js'
 import { openCodeRefusal } from './refusal.js'
 import { OPENCODE_SURFACE } from './surface.js'
+import { readOpenCodeCall } from './tool-call.js'
 import { openCodeUsageReader } from './usage.js'
 import { execText } from '../../os/exec.js'
 
@@ -54,7 +55,7 @@ export function openCodeProfile(): AcpProfile {
     capabilities: CAPABILITIES,
     surface: OPENCODE_SURFACE,
     infersCompaction: true,
-    shape: { refusalOf: openCodeRefusal },
+    shape: { refusalOf: openCodeRefusal, readCall: readOpenCodeCall },
     localUsage,
     async launch(opts) {
       const l = findOpenCode()

@@ -221,9 +221,10 @@ for (const dir of readdirSync(RECORDINGS)) {
         expect(reads).toHaveLength(1)
         expect(of(events, 'tool_result').find((r) => r.callId === reads[0]!.callId)).toMatchObject({ ok: false, summary: expect.stringContaining('missing-file.txt') })
         expect(of(events, 'tool_output_delta').some((d) => d.text.includes('boom'))).toBe(true)
-        // As the tool reports it: `completed`, with the exit code only in its raw output (`metadata.exit: 3`). A command that failed reads ok (#2045)
+        // OpenCode ends both commands `completed`; only `metadata.exit` tells them apart (3, then 0 for one that prints EXIT=3), #2045
         const commands = of(events, 'tool_call').filter((c) => c.summary.tool === 'Bash')
-        expect(of(events, 'tool_result').find((r) => r.callId === commands[0]!.callId)?.ok).toBe(true)
+        const okOf = (i: number) => of(events, 'tool_result').find((r) => r.callId === commands[i]!.callId)?.ok
+        if (dir.startsWith('opencode-')) expect([okOf(0), okOf(1)]).toEqual([false, true])
         expect(of(events, 'turn_complete')).toHaveLength(1)
         expect(of(events, 'error')).toEqual([])
       })
@@ -263,7 +264,7 @@ for (const dir of readdirSync(RECORDINGS)) {
         expect(recording.frames.filter((f) => f.dir === 'out' && f.msg?.method === 'session/cancel')).toHaveLength(2)
         const { events } = await replay(dir, 'interrupt-tool')
         const call = of(events, 'tool_call')[0]!
-        expect(of(events, 'tool_result').filter((r) => r.callId === call.callId)).toHaveLength(1)
+        expect(of(events, 'tool_result').filter((r) => r.callId === call.callId)).toMatchObject([{ ok: false }])
         expect(of(events, 'state_change').filter((e) => e.state === 'waiting_input').map((e) => e.reason)).toEqual(['interrupted'])
         expect(of(events, 'turn_complete')).toHaveLength(1)
         expect(of(events, 'error')).toEqual([])
