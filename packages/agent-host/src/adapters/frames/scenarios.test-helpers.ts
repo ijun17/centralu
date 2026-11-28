@@ -475,6 +475,26 @@ export const SCENARIOS: readonly Scenario[] = [
     },
   },
   {
+    /*
+     * Codex's multi-agent v2 (#2553, #2552): a child started by `collaboration.spawn_agent`, which arrives as `subAgentActivity` items (started,
+     * interacted, completed) and not as a `collabAgentToolCall` `spawnAgent`, then `send_message`, `followup_task`, `list_agents` (which sends no
+     * item at all) and `wait_agent`. Which runtime a model uses is its own (`Model.multiAgentVersion`): gpt-5.6-luna, the usual model of
+     * the recordings, declares v1, so this asks for the smallest model that declares v2 (`probe-codex-multiagent-models.mts` lists them)
+     */
+    name: 'subagents-v2',
+    tools: ['codex'],
+    preset: 'auto',
+    model: 'gpt-6-luna',
+    async run(d) {
+      await turn(
+        d,
+        'Use your agent tools, each exactly once, in this order: spawn_agent to start one child agent whose task is to reply with the single word ready; ' +
+          'send_message to that child with the text hello; followup_task to that child with the task "reply with the single word done"; ' +
+          'list_agents; wait_agent until the child has finished. Then answer me with one short sentence and do nothing else.',
+      )
+    },
+  },
+  {
     // A command that exits with an error: the card ends not ok with the command's own words, and the turn goes on to say so
     name: 'command-failed',
     tools: ['codex'],
