@@ -191,13 +191,14 @@ by its `machine_status`.
   answered one list from its mirror, a fact about that answer, and it outlives the outage it was written in whenever a
   list read lands after the machine's resync or fails (#1611). It still draws a tool mark as not asleep, but only while
   the machine is away (`isMirrored`). An away row stays listed and dimmed, and `wake` refuses it: waking would only
-  fail at the hub, and the machine's own resync does the waking once it is back. The reconnect recovery
-  (`recoverAfterReconnect`) and a machine's resync wake by one rule (`wakeable` in `@cc/core`, #2163): not an away
-  row, not one the hub lists from its mirror, and not one in a turn with no process, which the host continues itself
-  (#1618). A broadcast missed in the gap never comes again, so the reconnect reads again every list one keeps
+  fail at the hub. **A reconnect wakes nothing** (#2538), neither the reconnect recovery (`recoverAfterReconnect`) nor a
+  machine's resync: a turn an update cut is continued by its host (#1618), and so is a session at rest whose background
+  work the update's stop ended (#1902). A host that restarted for any other reason took that work with its processes, and
+  its rows come back with no task running, so waking them would only start
+  processes nobody asked for. A session at rest wakes when it is written to. A broadcast missed in the gap never comes again, so the reconnect reads again every list one keeps
   (`store/events/rereads.ts`: themes, settings, projects, consents, external apps, proposals), the same table the
-  broadcasts' handler reads, and with it the two whose broadcasts carry the change itself (host requests, machines;
-  the wake waits for the machines). Both ends of a host connection (this
+  broadcasts' handler reads, and with it the two whose broadcasts carry the change itself (host requests, machines).
+  Both ends of a host connection (this
   window's and a hub's link to a machine) number events with one cursor (`EventCursor` in `@cc/common`).
 - **An away session is not working** (#1822, `unheard` in `@cc/protocol`): nothing says its turn still runs. The hub
   lists a mirrored `working` row as `idle`, and a `machine_status` that finds the machine away sets its rows the same
@@ -208,10 +209,7 @@ by its `machine_status`.
      no longer has leaves (deleted there, or the machine was unlinked), with what it held cleared as
      `session_deleted` clears it (#163); a new one joins;
   2. re-read the history of every open conversation of that machine (the hub does not replay a remote's gap; the
-     conversations are read again, as a host resync does for every one, #173);
-  3. wake that machine's sessions that were live before and are not now (a remote host that restarted without a
-     keeper), and none of any other machine, and none of a row the hub still lists from its mirror (its `live` is last
-     heard, not a fact).
+     conversations are read again, as a host resync does for every one, #173). It wakes nothing (above).
 
   A resync is whole when both lists were read and neither came back marked `unreachable` for a machine that is up
   (the hub's call to it failed). Otherwise the machine is owed a read, taken at its next `machine_status` that finds it

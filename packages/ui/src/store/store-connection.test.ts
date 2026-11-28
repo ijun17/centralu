@@ -4,7 +4,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { isAway } from '@cc/core'
-import { pausedOnBackground, type MachineInfo, type NormalizedEvent } from '@cc/protocol'
+import { pausedOnBackground, SessionState, type MachineInfo, type NormalizedEvent } from '@cc/protocol'
 // eslint-disable-next-line no-restricted-imports -- the runtime ui knows only ports, but tests are contractually required to use MockPlatform instead of ad-hoc mocking (see the header of platform/src/mock/index.ts)
 import { MockPlatform } from '@cc/platform/mock'
 import { PENDING_EVENTS_MAX, PENDING_EVENTS_MAX_AGE_MS, useStore } from './store.js'
@@ -653,61 +653,27 @@ describe('linked machines (#82)', () => {
     expect(s['box.ml-a']!.pendingApproval).toMatchObject({ requestId: 'rq-m' })
   })
 
-  it('a resync wakes only that machine\'s sessions that were live and are not now', async () => {
+  it('a resync wakes none of that machine\'s sessions, whatever each was doing before the host there restarted (#2538)', async () => {
     const mock = new MockPlatform()
     mock.machinesList = [box()]
     const remote = await mock.projects.add('/srv/app', 'box')
+    const work = [{ id: 'bg-1', kind: 'shell' as const, description: 'npm run dev', status: 'running' as const }]
+    const ids = SessionState.options.flatMap((state) => {
+      const id = `box.mw-${state}`
+      mock.sessions.set(id, sessionInfo(id, { projectId: remote.id, machine: 'box', state }))
+      mock.sessions.set(`${id}-work`, sessionInfo(`${id}-work`, { projectId: remote.id, machine: 'box', state, backgroundTasks: work }))
+      return [id, `${id}-work`]
+    })
     mock.sessions.set('mw-local', sessionInfo('mw-local'))
-    mock.sessions.set('box.mw-1', sessionInfo('box.mw-1', { projectId: remote.id, machine: 'box' }))
-    mock.sessions.set('box.mw-idle', sessionInfo('box.mw-idle', { projectId: remote.id, machine: 'box', live: false }))
     await useStore.getState().attach(mock)
     const resume = vi.spyOn(mock.agents, 'resumeSession')
 
-    // The remote host restarted without a keeper: its processes are gone. This computer's session died too, unannounced
-    mock.sessions.get('box.mw-1')!.live = false
-    mock.sessions.get('mw-local')!.live = false
-    mock.emit({ type: 'machine_resync', machineId: 'box' })
+    // The host there restarted: its processes are gone. This computer's session died too, unannounced
+    for (const id of [...ids, 'mw-local']) mock.sessions.get(id)!.live = false
+    await useStore.getState().recoverMachine('box')
 
-    await vi.waitFor(() => expect(resume).toHaveBeenCalledWith('box.mw-1'))
-    expect(resume.mock.calls.map(([id]) => id)).toEqual(['box.mw-1'])
-  })
-
-  it('a resync leaves a session the machine continues itself to it, and counts only what it wakes (#1618 review D4)', async () => {
-    const mock = new MockPlatform()
-    mock.machinesList = [box()]
-    const remote = await mock.projects.add('/srv/app', 'box')
-    mock.sessions.set('box.mc-rest', sessionInfo('box.mc-rest', { projectId: remote.id, machine: 'box' }))
-    mock.sessions.set('box.mc-cut', sessionInfo('box.mc-cut', { projectId: remote.id, machine: 'box', state: 'working' }))
-    await useStore.getState().attach(mock)
-    const resume = vi.spyOn(mock.agents, 'resumeSession')
-
-    // An update stopped the host there: the session at rest lost its process, and the one in a turn waits for its Continue
-    mock.sessions.get('box.mc-rest')!.live = false
-    mock.sessions.get('box.mc-cut')!.live = false
-    mock.emit({ type: 'machine_resync', machineId: 'box' })
-
-    await vi.waitFor(() => expect(resume).toHaveBeenCalledWith('box.mc-rest'))
-    await settle()
-    expect(resume.mock.calls.map(([id]) => id)).toEqual(['box.mc-rest'])
-    expect(useStore.getState().toast).toMatch(/resuming 1 session$/)
-  })
-
-  it('a reconnect leaves a session in a turn with no process to the host that continues it, as a resync does (#2163)', async () => {
-    const mock = new MockPlatform()
-    mock.sessions.set('rc-rest', sessionInfo('rc-rest'))
-    mock.sessions.set('rc-cut', sessionInfo('rc-cut', { state: 'working' }))
-    await useStore.getState().attach(mock)
-    const resume = vi.spyOn(mock.agents, 'resumeSession')
-
-    mock.setConnectionState('disconnected')
-    mock.sessions.get('rc-rest')!.live = false
-    mock.sessions.get('rc-cut')!.live = false
-    mock.setConnectionState('connected')
-
-    await vi.waitFor(() => expect(resume).toHaveBeenCalledWith('rc-rest'))
-    await settle()
-    expect(resume.mock.calls.map(([id]) => id)).toEqual(['rc-rest'])
-    expect(useStore.getState().toast).toMatch(/resuming 1 session$/)
+    expect(resume).not.toHaveBeenCalled()
+    expect(useStore.getState().toast).toBeNull()
   })
 
   it('a reconnect reads again every list a broadcast keeps, the themes too: one missed in the gap never comes again (#2163)', async () => {
