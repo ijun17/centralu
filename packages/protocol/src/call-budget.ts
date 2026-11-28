@@ -17,9 +17,8 @@ export const APP_CAPABILITY_QUESTION_MS = 5 * 60_000
 export const APP_CALL_TIMEOUT_MS = 10 * 60_000
 
 /**
- * Calls that can revive a session: Codex's thread/resume rereads the whole rollout (550 MB took 13.5 s, larger ones
- * over 25 s), which only grows; 180 s covers the 7 GB class at that ratio. The manager's 150 s stage limit sits inside,
- * so a named reason reaches the screen.
+ * Calls that can revive a session: Codex's thread/resume rereads the whole rollout (550 MB took 13.5 s), so 180 s covers
+ * the 7 GB class at that ratio. The manager's 150 s stage limit sits inside, so a named reason reaches the screen.
  */
 const LONG_CALL_BUDGET_MS = 180_000
 const LONG_CALLS: ReadonlySet<string> = new Set([
