@@ -18,6 +18,8 @@
 // A file's mode counts too (git diff --raw): a symbolic link or a submodule is deep, and a file executable in the
 // new commit at least light, whatever its name says. A TypeScript or JavaScript file whose change is only in comments,
 // spaces and blank lines is at most light (#2352, `commentsOnly`): a comment fix in a deep file does not make the change deep.
+// A new test file that holds only plain tests is at most light too (#2563, `plainNewTest`), judged by its syntax. An edit to
+// a test file there was, and any helpers file, keep their tier: a line slipped into a test weakens it without removing one.
 //
 // --base defaults to origin/main, --head to HEAD; the change is what head adds over where it left
 // base. The rules are read from base, so a change cannot loosen the rules that judge it; a base
@@ -174,10 +176,12 @@ export function modeTier(entry) {
 /**
  * One file's tier: { path, tier, rules }, and `tests` when it took the tier of the file it tests (a test
  * of a deep file guards that boundary, so weakening it is deep too), `commentsOnly` (the tier its name
- * gives) when only its comments changed and that put it lower, or `mode` when its mode put it higher
- * (`entry`: its modes before and after, from `changedEntries`; none for a bare path).
+ * gives) when only its comments changed and that put it lower, `newTest` (likewise) when the change adds it as a new
+ * test file that only adds plain tests (`plainNewTest`, #2563: a new check weakens no boundary; an edit to a test there
+ * was stays at its subject's tier, since a line slipped into a test weakens it without removing one), or `mode` when its
+ * mode put it higher (`entry`: its modes before and after, from `changedEntries`; none for a bare path).
  */
-export function tierOfFile(path, rules, entry = null, commentsOnly = false) {
+export function tierOfFile(path, rules, entry = null, commentsOnly = false, newTest = false) {
   const p = String(path).split('\\').join('/').replace(/^\.\//, '')
   let best = { path: p, ...ownTier(p, rules, entry?.oldMode === MODES.absent) }
   for (const s of subjectsOf(p)) {
@@ -185,6 +189,7 @@ export function tierOfFile(path, rules, entry = null, commentsOnly = false) {
     if (rank(t.tier) > rank(best.tier)) best = { path: p, ...t, tests: s }
   }
   if (commentsOnly && rank(best.tier) > rank(COMMENT_ONLY_TIER)) best = { path: p, tier: COMMENT_ONLY_TIER, rules: [], commentsOnly: best.tier }
+  else if (newTest && rank(best.tier) > rank(NEW_TEST_TIER)) best = { path: p, tier: NEW_TEST_TIER, rules: [], newTest: best.tier }
   const m = modeTier(entry)
   if (m && rank(m.tier) > rank(best.tier)) best = { path: p, tier: m.tier, rules: [], mode: m.mode }
   return best
@@ -194,10 +199,11 @@ export function tierOfFile(path, rules, entry = null, commentsOnly = false) {
  * A change's tier: { tier, files, because, counts }. `because` is the files at that tier, the ones that
  * put it there; `counts` how many files fell in each tier. No files at all is auto: nothing to review.
  * `modes`: each path's modes (`changedEntries`), when they are known; `commentsOnly`: the paths whose change
- * is only in comments, spaces and blank lines (`commentsOnly`), when their contents were read.
+ * is only in comments, spaces and blank lines (`commentsOnly`), and `newTests` the test files the change adds that hold
+ * only plain tests (`plainNewTest`), when their contents were read.
  */
-export function classify(paths, rules, modes = new Map(), commentsOnly = new Set()) {
-  const files = [...new Set(paths)].map((p) => tierOfFile(p, rules, modes.get(p) ?? null, commentsOnly.has(p)))
+export function classify(paths, rules, modes = new Map(), commentsOnly = new Set(), newTests = new Set()) {
+  const files = [...new Set(paths)].map((p) => tierOfFile(p, rules, modes.get(p) ?? null, commentsOnly.has(p), newTests.has(p)))
   const tier = files.map((f) => f.tier).reduce(higher, 'auto')
   const counts = Object.fromEntries(TIERS.map((t) => [t, files.filter((f) => f.tier === t).length]).filter(([, n]) => n))
   return { tier, files, because: files.filter((f) => f.tier === tier), counts }
@@ -207,6 +213,7 @@ export function classify(paths, rules, modes = new Map(), commentsOnly = new Set
 export function reasonOf(file, rules) {
   if (file.mode) return file.mode
   if (file.commentsOnly) return `only comments changed, else ${file.commentsOnly}`
+  if (file.newTest) return `a new file of plain tests, else ${file.newTest}`
   if (!file.rules.length) return `no rule matches: ${rules.fallback}`
   return `${file.rules.join(', ')}${file.tests ? `, as the test of ${file.tests}` : ''}`
 }
@@ -240,6 +247,7 @@ export function report(result, rules) {
     lines.push(`  ${f.path}${f.tests ? ` (a test of ${f.tests}, which takes its tier)` : ''}`)
     if (f.mode) lines.push(`      ${f.mode}, so ${f.tier} whatever its name says`)
     else if (f.commentsOnly) lines.push(`      only its comments, spaces and blank lines changed, so at most ${COMMENT_ONLY_TIER} (by its name: ${f.commentsOnly})`)
+    else if (f.newTest) lines.push(`      a new test file of plain tests, so at most ${NEW_TEST_TIER} (by its name: ${f.newTest})`)
     else if (!f.rules.length) lines.push(`      no rule matches it, so ${rules.fallback} (${RULES_FILE} "fallback")`)
     for (const id of f.rules) lines.push(`      ${id}: ${byId.get(id).why}`)
   }
@@ -337,6 +345,60 @@ export function commentsOnly(path, before, after, ts) {
   return a !== null && b !== null && JSON.stringify(a) === JSON.stringify(b)
 }
 
+// --- A new test file of plain tests (#2563) -----------------------------------------------------
+
+/** The most a new test file of plain tests takes: a new check weakens no boundary, and it is still reviewed */
+export const NEW_TEST_TIER = 'light'
+
+/** A test file by its name, x.test.<code extension>; its helpers (x.test-helpers.*) never count */
+const TEST_FILE = /\.test\.[cm]?[jt]sx?$/
+/** The calls that declare tests, called bare at the top level: there none is skipped, focused, failing, concurrent or a table */
+const TEST_CALLS = new Set(['it', 'test', 'describe'])
+/** What vitest gives a plain test: anything else it exports (vi, the hooks) changes how tests run */
+const PLAIN_VITEST = new Set(['it', 'test', 'describe', 'expect'])
+/** A module the new file may import besides vitest: one of the repository's own, by a relative path */
+const RELATIVE = /^\.\.?\//
+/** Names that reach past the test's own values: the process, the global object, mocks and hooks, code made at run time */
+const REACHING = new Set(['vi', 'vitest', 'process', 'globalThis', 'global', 'window', 'self', 'require', 'eval', 'Function', 'constructor', 'beforeEach', 'beforeAll', 'afterEach', 'afterAll', 'onTestFinished', 'onTestFailed'])
+
+/**
+ * Whether `text`, a test file `path` the change adds, holds only plain tests (`ts`: the typescript package), read by its
+ * syntax. A speed check, not a trust boundary: the light review still reads the new file for what it reaches (the disk, the
+ * network, other processes) and for checks that check nothing, and a relative module it imports can do anything (reviewed
+ * at its own tier). Each top-level statement is an import that binds names, from vitest (it, test, describe and expect only)
+ * or by a relative path, never a built-in or a package, or a call of the bare name it, test or describe. Nowhere does the
+ * file name what reaches past its own tests' values (`REACHING`), take a member of it, test or describe (`.skip`, `.only`,
+ * `.fails`, `['skip']`), read `import.meta` or import a module at run time. A name bound to `it` and called with `.skip`
+ * inside a suite still counts: it changes only the new file's own tests. An edit to a test file there was, and a helpers
+ * file, never count: a line slipped into a test, or a hook or mock added above it, weakens it without removing a line.
+ * Without `ts`, or a file that does not parse cleanly: false.
+ */
+export function plainNewTest(path, text, ts) {
+  if (!TEST_FILE.test(path) || !ts) return false
+  const sf = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, ts.ScriptKind[scriptKindOf(path)])
+  if (!Array.isArray(sf.parseDiagnostics) || sf.parseDiagnostics.length) return false
+  const testCall = (s) => ts.isExpressionStatement(s) && ts.isCallExpression(s.expression) && ts.isIdentifier(s.expression.expression) && TEST_CALLS.has(s.expression.expression.text)
+  const plainImport = (s) => {
+    if (!ts.isImportDeclaration(s) || !s.importClause || !ts.isStringLiteral(s.moduleSpecifier)) return false
+    const from = s.moduleSpecifier.text
+    if (RELATIVE.test(from)) return true
+    const named = s.importClause.namedBindings
+    return from === 'vitest' && !s.importClause.name && named !== undefined && ts.isNamedImports(named) && named.elements.every((e) => PLAIN_VITEST.has((e.propertyName ?? e.name).text))
+  }
+  if (!sf.statements.every((s) => testCall(s) || plainImport(s))) return false
+  let plain = true
+  const visit = (node) => {
+    if (!plain) return
+    if (ts.isIdentifier(node) && REACHING.has(node.text)) plain = false
+    else if ((ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) && ts.isIdentifier(node.expression) && TEST_CALLS.has(node.expression.text)) plain = false
+    else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) plain = false
+    else if (ts.isMetaProperty(node) && node.keywordToken === ts.SyntaxKind.ImportKeyword) plain = false
+    else ts.forEachChild(node, visit)
+  }
+  visit(sf)
+  return plain
+}
+
 // --- Reading a checkout -------------------------------------------------------------------------
 
 // git started here, not through scripts/interrupts.mjs: the board runs main's copy of this file alone (queue-integrate.mjs)
@@ -405,25 +467,47 @@ function commentOnlyPaths(root, entries, rules) {
   // loaded only when a file is judged: it takes longer than the rest of a run
   const ts = judged.length ? typescriptAt(root) : null
   if (!ts) return new Set()
-  const utf8 = new TextDecoder('utf-8', { fatal: true })
-  // as text only when it is UTF-8: two bytes that both decode to U+FFFD would look alike. A git that fails, an
-  // interrupted one too, throws: tierOfChange's callers answer that as deep, or stop on the interrupt
-  const text = (sha) => {
-    const bytes = execFileSync('git', ['cat-file', 'blob', sha], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 })
-    try {
-      return utf8.decode(bytes)
-    } catch {
-      return null
-    }
-  }
   return new Set(
     judged
       .filter((e) => {
-        const [before, after] = [text(e.oldSha), text(e.newSha)]
+        const [before, after] = [blobText(root, e.oldSha), blobText(root, e.newSha)]
         return before !== null && after !== null && commentsOnly(e.path, before, after, ts)
       })
       .map((e) => e.path),
   )
+}
+
+/**
+ * The test files among `entries` (`changedEntries`) the change adds as plain files of plain tests (`plainNewTest`), of
+ * those named so that they take more than NEW_TEST_TIER, read from git by their blobs. No other is read.
+ */
+function newTestPaths(root, entries, rules) {
+  const judged = entries.filter((e) => e.oldMode === MODES.absent && PLAIN_FILES.includes(e.newMode) && TEST_FILE.test(e.path) && rank(tierOfFile(e.path, rules).tier) > rank(NEW_TEST_TIER))
+  const ts = judged.length ? typescriptAt(root) : null
+  if (!ts) return new Set()
+  return new Set(
+    judged
+      .filter((e) => {
+        const after = blobText(root, e.newSha)
+        return after !== null && plainNewTest(e.path, after, ts)
+      })
+      .map((e) => e.path),
+  )
+}
+
+const utf8 = new TextDecoder('utf-8', { fatal: true })
+
+/**
+ * A blob's text, or null when it is not UTF-8: two bytes that both decode to U+FFFD would look alike. A git that fails, an
+ * interrupted one too, throws: tierOfChange's callers answer that as deep, or stop on the interrupt
+ */
+function blobText(root, sha) {
+  const bytes = execFileSync('git', ['cat-file', 'blob', sha], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 })
+  try {
+    return utf8.decode(bytes)
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -440,6 +524,7 @@ export function tierOfChange({ root, base, head, rulesRef = base }) {
     found.rules,
     new Map(entries.map((e) => [e.path, e])),
     commentOnlyPaths(root, entries, found.rules),
+    newTestPaths(root, entries, found.rules),
   )
   return { ...result, rulesFrom: found.from, line: tierLine(result, found.rules), text: report(result, found.rules) }
 }
