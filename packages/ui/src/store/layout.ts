@@ -29,7 +29,7 @@ const CENTER_FLOOR = 300
 
 /**
  * The conversation's CSS minimum: CENTER_FLOOR while the window leaves SIDEBAR_MIN beside it, then less (#2455, *owner,
- * 2026-11-29*). The sidebar keeps SIDEBAR_MIN at any width, the narrowest at which its names read; below it they were
+ * 2026-11-29*). The sidebar keeps SIDEBAR_MIN at any width, the narrowest at which its names read; narrower, they are
  * cut to a letter. Two fixed minimums would push the conversation past the window's right edge below their sum (#2362).
  * `100%` is the lanes' row, the window.
  */

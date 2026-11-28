@@ -272,17 +272,13 @@ export function Inbox() {
                 ]}
               />
             </div>
+            {/* Narrow, the hints wrap a key with its word, never between them */}
             <span className="ml-auto flex flex-wrap items-center justify-end gap-1 text-2xs text-ink-faint">
-              <Kbd>↑</Kbd>
-              <Kbd>↓</Kbd> Move
-              <Kbd>↵</Kbd> Open
-              {tab === 'waiting' && choices > 0 && (
-                <>
-                  <Kbd>1-{choices}</Kbd> Choose
-                </>
-              )}
-              <Kbd>D</Kbd> Done
-              <Kbd>esc</Kbd> Close
+              <Hint keys={['↑', '↓']} word="Move" />
+              <Hint keys={['↵']} word="Open" />
+              {tab === 'waiting' && choices > 0 && <Hint keys={[`1-${choices}`]} word="Choose" />}
+              <Hint keys={['D']} word="Done" />
+              <Hint keys={['esc']} word="Close" />
             </span>
           </header>
         )}
@@ -414,6 +410,17 @@ function useRoomRight(panel: RefObject<HTMLElement | null>, shown: boolean): num
   return room
 }
 
+function Hint({ keys, word }: { keys: string[]; word: string }) {
+  return (
+    <span className="flex items-center gap-1">
+      {keys.map((k) => (
+        <Kbd key={k}>{k}</Kbd>
+      ))}{' '}
+      {word}
+    </span>
+  )
+}
+
 function Nothing() {
   return (
     <p className="px-4 py-10 text-center text-md text-ink-muted" data-testid="inbox-empty">
@@ -437,16 +444,16 @@ function SessionRow({ it, project, active, settled, onOpen }: { it: InboxItem; p
     >
       <div className="flex items-center">
         <button
-          className="flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-3 pr-3 text-left @max-[34rem]:flex-wrap @max-[34rem]:gap-y-0.5"
+          className="flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-3 pr-3 text-left @max-[32rem]:flex-wrap @max-[32rem]:gap-y-0.5"
           onClick={onOpen}
           data-testid={`inbox-item-${it.id}`}
         >
           <StateDot state={it.state} />
           {/* Narrow, the name takes what the line leaves and the project at most two fifths: cut, so neither wraps to a line of its own */}
-          <span className={`truncate text-md @max-[34rem]:grow @max-[34rem]:basis-0 ${it.unread ? 'text-ink' : 'text-ink-muted'}`}>
+          <span className={`truncate text-md @max-[32rem]:grow @max-[32rem]:basis-0 ${it.unread ? 'text-ink' : 'text-ink-muted'}`}>
             {it.name}
           </span>
-          <span className="truncate text-xs text-ink-faint @max-[34rem]:max-w-2/5">
+          <span className="truncate text-xs text-ink-faint @max-[32rem]:max-w-2/5">
             {project}
           </span>
           {/* Which machine it waits on (#82): an approval answered here acts there. A proposal is this host's */}
@@ -454,12 +461,12 @@ function SessionRow({ it, project, active, settled, onOpen }: { it: InboxItem; p
             <SessionMachineTag sessionId={it.id} testId={`inbox-machine-${it.id}`} />
           )}
           {/*
-            Narrower than the panel's full width (#2455), the state and time take a line of their own under the name, in from
-            the dot: on the name's line they cannot shrink, so they would run out of the button and be drawn under Continue
+            The state gives way with the name, so nothing runs out of the button under Continue (#2455). Narrow, the state and
+            time take a line of their own under the name, in from the dot, the state's words wrapping rather than cut
           */}
-          <span className="ml-auto flex shrink-0 items-center gap-2.5 @max-[34rem]:ml-0 @max-[34rem]:min-w-0 @max-[34rem]:shrink @max-[34rem]:basis-full @max-[34rem]:pl-5">
+          <span className="ml-auto flex min-w-0 items-center gap-2.5 @max-[32rem]:ml-0 @max-[32rem]:basis-full @max-[32rem]:pl-5">
             <span
-              className="max-w-64 truncate text-xs text-ink-faint @max-[34rem]:max-w-none @max-[34rem]:whitespace-normal"
+              className="max-w-64 truncate text-xs text-ink-faint @max-[32rem]:max-w-none @max-[32rem]:whitespace-normal"
               title={it.arrival ? arrivalAsks(it.arrival.asks) : undefined}
               data-testid={it.arrival ? `inbox-arrival-asks-${it.id}` : undefined}
             >
@@ -514,7 +521,7 @@ function WaitingTime({ since }: { since: number | null }) {
   const now = useLabelNow(since === null ? null : next)
   const elapsed = since === null ? 0 : Math.max(0, now - since)
   return (
-    <span className={`readout w-16 shrink-0 text-right text-xs @max-[34rem]:w-auto ${waitingTone(elapsed)}`}>
+    <span className={`readout w-16 shrink-0 text-right text-xs @max-[32rem]:w-auto ${waitingTone(elapsed)}`}>
       {formatWaiting(elapsed)}
     </span>
   )
