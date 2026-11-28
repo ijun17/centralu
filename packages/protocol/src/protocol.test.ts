@@ -1264,7 +1264,8 @@ describe('turnsRunning', () => {
 describe("the Assistant's values under both names (#2133)", () => {
   it('reads both kinds as the Assistant, and no other kind', () => {
     expect(['orchestrator', 'assistant', 'worker', 'coordinator', undefined, 'Assistant'].map(isAssistantKind)).toEqual([true, true, false, false, false, false])
-    expect(ASSISTANT_KIND).toBe('orchestrator')
+    // Sent under the new name since #2532; a peer of beta.57 to beta.84 still sends the old one
+    expect(ASSISTANT_KIND).toBe('assistant')
   })
 
   it('reads a directing seat as the Assistant under either kind or a coordinator (#2162)', () => {

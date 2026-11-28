@@ -17,7 +17,6 @@ describe('the method classification (#1405)', () => {
       'trash.empty',
       'agents.deleteSession',
       'agents.deleteAgentChild',
-      'agents.deleteOrchestratorSkill',
       'agents.deleteAssistantSkill',
       'projects.delete',
       'projects.add',
@@ -54,7 +53,7 @@ describe('the method classification (#1405)', () => {
     // #1970: a program of this user must not be able to plant a system end
     expect(limitedRight('host.systemEnding', {})).toBe('window')
     for (const m of ['host.send', 'host.hubOffer', 'host.setHubAuto', 'host.readSession', 'host.apps', 'host.appCall', 'host.appCancel', 'host.appNotice', 'host.mail', 'host.mailRows', 'host.mailMove', 'host.cards', 'host.answerCard', 'host.stopTask']) expect(limitedRight(m, {}), m).toBe('link')
-    for (const m of ['orchestrator.tool', 'orchestrator.tools']) expect(limitedRight(m, {}), m).toBe('bridge')
+    for (const m of ['assistant.tool', 'assistant.tools']) expect(limitedRight(m, {}), m).toBe('bridge')
   })
 
   it("never lets the limited credential read or write the person's mail: every mail.* call is the window's (#1347)", () => {

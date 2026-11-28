@@ -9,7 +9,7 @@ import { readJsonObjects } from '../dev-services/store/json.js'
 const clampLine = (text: string): string => (text.length > 500 ? `${text.slice(0, 499)}…` : text)
 
 /** The app_setting key where the Assistant's MCP proposal list lives (propose_mcp_server flow) */
-const MCP_PROPOSALS_KEY = 'orchestrator_mcp_proposals'
+const MCP_PROPOSALS_KEY = 'assistant_mcp_proposals'
 /**
  * The **old** directory of approved MCP servers (before M4 A-7): approved servers live as apps in the user folder, and this key
  * is read only by the migration (migrateApprovedMcpServers), never loaded into an adapter.
@@ -18,8 +18,8 @@ const LEGACY_MCP_SERVERS_KEY = 'orchestrator_mcp_servers'
 
 /** Assistant skills (#71) — live in the DB, not as files (a worker can write files but cannot
  * write to the DB) */
-const SKILL_PROPOSALS_KEY = 'orchestrator_skill_proposals'
-const SKILLS_KEY = 'orchestrator_skills'
+const SKILL_PROPOSALS_KEY = 'assistant_skill_proposals'
+const SKILLS_KEY = 'assistant_skills'
 /** Skill budget (the answer to #71's open question): cap count and length so it does not erode the
  * system prompt */
 const SKILL_MAX_COUNT = 10
@@ -63,7 +63,7 @@ export class AssistantProposals {
     private readonly apps: () => ExternalApps | undefined,
     /**
      * Called after a proposal list changed (a proposal saved, approved or dismissed), once the change is saved.
-     * The host turns it into the `orchestrator_proposals_changed` event, so a screen re-reads after the write, not
+     * The host turns it into the `assistant_proposals_changed` event, so a screen re-reads after the write, not
      * after a guess about which tool call made it (#703).
      */
     private readonly changed: () => void = () => {},

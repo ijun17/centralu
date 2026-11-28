@@ -159,7 +159,7 @@ export class StepsV65 extends MigrationRange {
              ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
           )
           const drop = this.db.prepare(`DELETE FROM app_settings WHERE key = ? AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = ?)`)
-          // The keys as they were when this step shipped, not the live `RENAMED_SETTINGS`: a step does the same on every store
+          // The keys as they were when this step shipped, not the live list in store/settings.ts: a step does the same on every store
           for (const [old, renamed] of [
             ['orchestrator_tool', 'assistant_tool'],
             ['orchestrator_mcp_proposals', 'assistant_mcp_proposals'],

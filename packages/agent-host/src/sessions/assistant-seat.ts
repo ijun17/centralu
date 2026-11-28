@@ -59,7 +59,7 @@ export type AssistantSeatHost = Pick<DelegationForks, 'forkFor'> &
   updateSettings(
     sessionId: string,
     s: { model?: string | null; effort?: string | null; verbosity?: string | null; serviceTier?: string | null; permissionPreset?: PermissionPreset },
-    by: 'person' | 'orchestrator',
+    by: 'person' | 'assistant',
   ): Promise<SessionInfo & { applied: SettingsApplied }>
   createSession(params: { projectId: string; cwd: string; tool: ToolName | null; permissionPreset: PermissionPreset }): Promise<SessionInfo>
   firstTool(preferred?: ToolName | null): ToolName | null
@@ -300,7 +300,7 @@ export function centraluToolsFor(
          * this hand's: the screen toasts it, since to the person's eyes a value changed by a hand other than their
          * own is identical to a value quietly changing on its own.
          */
-        const info = await host.updateSettings(sessionId, s, 'orchestrator')
+        const info = await host.updateSettings(sessionId, s, 'assistant')
         return { ok: true, ...(info.applied === 'after_turn' ? { deferred: true } : {}) }
       } catch (e) {
         return { ok: false, error: (e as Error).message }

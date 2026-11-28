@@ -767,7 +767,7 @@ describe('the Assistant marker (kind)', () => {
     const s = seeded()
     mk(s, 'orc', null, 'orchestrator')
     expect(s.sessions.assistantId()).toBe('orc')
-    expect(s.sessions.listSessions().find((x) => x.id === 'orc')?.kind).toBe('orchestrator')
+    expect(s.sessions.listSessions().find((x) => x.id === 'orc')?.kind).toBe('assistant')
     // A demotion persists through the same path
     mk(s, 'orc', null, 'worker')
     expect(s.sessions.assistantId()).toBeNull()
@@ -793,6 +793,8 @@ describe('the Assistant marker (kind)', () => {
     mk(before, 'central', null, 'orchestrator')
     before.close()
     const raw = new Database(file)
+    // A v25 build knew only the old column, which this build no longer writes (#2532)
+    raw.exec(`UPDATE sessions SET is_orchestrator = is_assistant`)
     raw.pragma('user_version = 25')
     raw.close()
 

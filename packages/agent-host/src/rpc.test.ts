@@ -236,6 +236,19 @@ describe('parameters at the boundary', () => {
   })
 })
 
+/**
+ * The Assistant's methods under the role's old name, removed by #2532 (docs/plans/assistant-rename.md §3.4): a caller is
+ * told which name took its place and to update Centralu, not that the method is unknown
+ */
+describe("the Assistant's old method names", () => {
+  it('answer with the new name and an update, and any other missing method stays unknown', async () => {
+    const rpc = createRpcHandler({} as SessionManager, new Map(), {})
+    await expect(rpc('orchestrator.get', {})).rejects.toThrow('orchestrator.get is now assistant.get: update Centralu on the computer that sent this')
+    await expect(rpc('agents.deleteOrchestratorSkill', { name: 'x' })).rejects.toThrow('is now agents.deleteAssistantSkill: update Centralu')
+    await expect(rpc('orchestrator.nothing', {})).rejects.toThrow('Unknown method: orchestrator.nothing')
+  })
+})
+
 /** Who may ask to be a trusted dev browser tab (docs/security-boundaries/dev-browser-tabs.md): a limited socket without a session only */
 describe('host.devTabCode and host.trustDevTab', () => {
   it('give a code only to a limited caller without a session, and refuse a full caller’s trust call', async () => {

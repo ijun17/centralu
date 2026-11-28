@@ -38,7 +38,7 @@ export class SessionSettings {
   async updateSettings(
     sessionId: string,
     s: { model?: string | null; effort?: string | null; verbosity?: string | null; serviceTier?: string | null; permissionPreset?: PermissionPreset },
-    by: 'person' | 'orchestrator' = 'person',
+    by: 'person' | 'assistant' = 'person',
   ): Promise<SessionInfo & { applied: SettingsApplied }> {
     const m = this.host.openSession(sessionId)
     // Checked before anything is changed: a preset the tool cannot keep would be saved, shown as in force, and refuse the

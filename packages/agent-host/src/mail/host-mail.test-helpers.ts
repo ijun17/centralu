@@ -8,13 +8,13 @@ export const HOST = 'hub-aaaaaaaa'
 export const NOW = 1_800_000_000_000
 export const at = (id: string): string => sessionAddress(HOST, id)
 
-export type Sess = { name: string; projectId: string | null; askedBy?: string; kind?: 'worker' | 'orchestrator' }
+export type Sess = { name: string; projectId: string | null; askedBy?: string; kind?: 'worker' | 'assistant' }
 const SESSIONS: Record<string, Sess> = {
   a: { name: 'alpha', projectId: 'p1' },
   b: { name: 'beta', projectId: 'p1' },
   c: { name: 'gamma', projectId: 'p2' },
   x: { name: 'xi', projectId: 'px' },
-  orc: { name: 'Assistant', projectId: null, kind: 'orchestrator' },
+  orc: { name: 'Assistant', projectId: null, kind: 'assistant' },
   w: { name: 'worker', projectId: 'p1', askedBy: 'a' },
   o: { name: 'orchestrated', projectId: 'p1', askedBy: 'orc' },
 }

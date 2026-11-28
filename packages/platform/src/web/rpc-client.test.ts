@@ -252,7 +252,6 @@ describe('RpcClient — budget for a call ending in a revival (#164)', () => {
     'agents.forkConversation',
     'agents.resolveMcpProposal',
     'agents.resolveSkillProposal',
-    'agents.deleteOrchestratorSkill',
     'agents.deleteAssistantSkill',
   ] as const
 

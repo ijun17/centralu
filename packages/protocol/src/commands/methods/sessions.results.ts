@@ -62,10 +62,6 @@ export const sessionsResults = {
     proposals: z.array(z.object({ name: z.string(), content: z.string(), why: z.string().optional() })),
   }),
   'agents.resolveSkillProposal': z.object({ ok: z.literal(true) }),
-  'agents.orchestratorSkills': z.object({
-    skills: z.array(z.object({ name: z.string(), content: z.string() })),
-  }),
-  'agents.deleteOrchestratorSkill': z.object({ ok: z.literal(true) }),
   'agents.assistantSkills': z.object({
     skills: z.array(z.object({ name: z.string(), content: z.string() })),
   }),

@@ -240,7 +240,7 @@ describe('a building session tries out its own app (C-3)', () => {
     expect(o.centraluBridge).toEqual({ url: 'ws://127.0.0.1:5999', token: 'tok' })
     expect(mgr.tools.toolProfileOf(builder!.id)).toBe('builder')
     // The list the bridge (Codex) asks for is the same profile: every profile reaches its apps through `app` (#2231)
-    const tools = (await rpc('orchestrator.tools', { sessionId: builder!.id })) as { name: string }[]
+    const tools = (await rpc('assistant.tools', { sessionId: builder!.id })) as { name: string }[]
     expect(tools.map((t) => t.name)).toEqual(['check', 'app'])
     await expect(mgr.runCentraluTool(builder!.id, 'list_sessions', {})).rejects.toThrow(/Not a tool of this session: list_sessions/)
   })
@@ -267,7 +267,7 @@ describe('a building session tries out its own app (C-3)', () => {
     expect(viaSession.isError).toBeFalsy()
     expect(viaSession.text).toMatch(new RegExp(`^check ${projectId.slice(0, 8)}/notes: passed`))
     // The bridge (Codex) path goes through the same door
-    const viaBridge = (await rpc('orchestrator.tool', { sessionId: builder!.id, name: 'check', args: {} })) as { text: string }
+    const viaBridge = (await rpc('assistant.tool', { sessionId: builder!.id, name: 'check', args: {} })) as { text: string }
     expect(viaBridge.text).toContain('show — reads, model+app, screen ui://notes/index.html')
     // apps.check, called by the UI, is the same decision
     const viaRpc = (await rpc('apps.check', { appId: 'notes', projectId })) as { ok: boolean; findings: unknown[] }
@@ -276,12 +276,12 @@ describe('a building session tries out its own app (C-3)', () => {
 
   it('the Assistant and an ordinary session have no check', async () => {
     const orch = await mgr.assistant()
-    expect(((await rpc('orchestrator.tools', { sessionId: orch.id })) as { name: string }[]).map((t) => t.name)).not.toContain('check')
+    expect(((await rpc('assistant.tools', { sessionId: orch.id })) as { name: string }[]).map((t) => t.name)).not.toContain('check')
     const worker = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as SessionInfo
     // An ordinary session has the reader set (#320) — read-only, and no check in it
     expect(mgr.tools.toolProfileOf(worker.id)).toBe('reader')
     expect(claude.last().toolProfile).toBe('reader')
-    expect(((await rpc('orchestrator.tools', { sessionId: worker.id })) as { name: string }[]).map((t) => t.name)).not.toContain('check')
+    expect(((await rpc('assistant.tools', { sessionId: worker.id })) as { name: string }[]).map((t) => t.name)).not.toContain('check')
     await expect(mgr.runCentraluTool(worker.id, 'check', {})).rejects.toThrow(/Not a tool of this session/)
   })
 })

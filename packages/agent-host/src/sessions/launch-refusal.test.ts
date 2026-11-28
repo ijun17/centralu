@@ -71,9 +71,9 @@ describe('launching a tool that declares limits', () => {
 
   it('refuses a tool that takes no role text as the Assistant, and keeps the one chosen', async () => {
     const world = limitedWorld()
-    await world.rpc('orchestrator.configure', { tool: 'claude' })
-    await expect(world.rpc('orchestrator.configure', { tool: 'codex' })).rejects.toThrow(/Limited.*role instructions/)
-    expect(world.store.settings.appSetting('orchestrator_tool')).toBe('claude')
+    await world.rpc('assistant.configure', { tool: 'claude' })
+    await expect(world.rpc('assistant.configure', { tool: 'codex' })).rejects.toThrow(/Limited.*role instructions/)
+    expect(world.store.settings.appSetting('assistant_tool')).toBe('claude')
   })
 
   it('leaves a tool without limits as it was', async () => {
@@ -81,5 +81,15 @@ describe('launching a tool that declares limits', () => {
     const p = (await world.rpc('projects.add', { path: dir })) as { id: string }
     await world.rpc('agents.createSession', { projectId: p.id, cwd: dir, tool: 'codex', permissionPreset: 'safe' })
     expect(world.codexAdapter.lastOpts?.permissionPreset).toBe('safe')
+  })
+})
+
+/** An app's agent with no project runs on the Assistant's tool (#2532: read under the key's new name, which step 79 left alone) */
+describe("the default tool of an app's agent with no project", () => {
+  it("follows the Assistant's tool", async () => {
+    const world = managerWorld()
+    expect(world.mgr.toolRegistry.defaultToolFor(null)).toBe('claude')
+    await world.rpc('assistant.configure', { tool: 'codex' })
+    expect(world.mgr.toolRegistry.defaultToolFor(null)).toBe('codex')
   })
 })

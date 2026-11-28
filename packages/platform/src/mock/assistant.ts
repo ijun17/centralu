@@ -24,7 +24,7 @@ export class AssistantMock {
       const info = mockSessionInfo({
         id,
         projectId: null,
-        kind: 'orchestrator',
+        kind: 'assistant',
         tool: this.assistantTool,
         externalId: null,
         name: 'Assistant',

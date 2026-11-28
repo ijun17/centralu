@@ -251,13 +251,11 @@ describe('parties that go and parties that take over (§7.7)', () => {
     expect(w.records.pendingFor(A, w.clock.t + 10_000)).toHaveLength(1)
   })
 
-  it('partyGone leaves a row sent to the role for the next Assistant, under either name (#2133)', () => {
+  it('partyGone leaves a row sent to the role for the next Assistant (#2133)', () => {
     const w = world()
-    const old = w.send(A, { to: [ORC], via: ['orchestrator'], text: 'to the role' }).message
-    const renamed = w.send(B, { to: [ORC], via: ['assistant'], text: 'to the role, as a later build writes it' }).message
+    const role = w.send(A, { to: [ORC], via: ['assistant'], text: 'to the role' }).message
     w.mail.stops.partyGone(ORC)
-    expect(w.rowOf(old.id, ORC).settled).toBeNull()
-    expect(w.rowOf(renamed.id, ORC).settled).toBeNull()
+    expect(w.rowOf(role.id, ORC).settled).toBeNull()
   })
 
   it('handOver gives the tasks the original gave a child that moves again from the heir, one for one, with their cause, delivery and release (#1936)', () => {
@@ -372,13 +370,13 @@ describe('parties that go and parties that take over (§7.7)', () => {
     const w = world()
     w.sessions.set('orc2', { projectId: null, name: 'next' })
     const ORC2 = addr('orc2')
-    const viaRole = w.send(A, { to: [ORC], via: ['orchestrator'], text: 'to the Assistant' }).message
+    const viaRole = w.send(A, { to: [ORC], via: ['assistant'], text: 'to the Assistant' }).message
     const direct = w.send(B, { to: [ORC], text: 'to this session by name' }).message
     due(w)
     w.records.markDelivered(ORC, [viaRole.id, direct.id], w.clock.t, 2)
     w.records.markRead(ORC, [viaRole.id], w.clock.t)
     expect(w.mail.handoffs.roleMoved(ORC2)).toBe(1)
-    expect(w.rowOf(viaRole.id, ORC2)).toMatchObject({ via: 'orchestrator', deliveredAt: null, readAt: null, turnSeq: null })
+    expect(w.rowOf(viaRole.id, ORC2)).toMatchObject({ via: 'assistant', deliveredAt: null, readAt: null, turnSeq: null })
     expect(w.records.recipient(viaRole.id, ORC)).toBeUndefined()
     expect(w.rowOf(direct.id, ORC).deliveredAt).not.toBeNull()
     expect(w.records.pendingFor(ORC2, w.clock.t + 10_000).map((p) => p.message.kind)).toEqual(['message', 'notice'])

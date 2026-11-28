@@ -16,13 +16,13 @@ export class SessionRecords {
   upsertSession(s: SessionInfo): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, is_assistant, last_read_seq, waiting_since, created_at, model, effort, verbosity, service_tier, permission_preset, imported_from, worktree_path, worktree_branch, worktree_base, parent_session_id, scope_session_ids, role_append, app_id, asked_by_session_id, forked_from_session_id, context_used, context_window, context_exactness, interruption)
-         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @isAssistant, @isAssistant, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @verbosity, @serviceTier, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch, @worktreeBase, @parentSessionId, @scopeSessionIds, @roleAppend, @appId, @askedBy, @forkedFrom, @contextUsed, @contextWindow, @contextExactness, @interruption)
+        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, is_assistant, last_read_seq, waiting_since, created_at, model, effort, verbosity, service_tier, permission_preset, imported_from, worktree_path, worktree_branch, worktree_base, parent_session_id, scope_session_ids, role_append, app_id, asked_by_session_id, forked_from_session_id, context_used, context_window, context_exactness, interruption)
+         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @isAssistant, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @verbosity, @serviceTier, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch, @worktreeBase, @parentSessionId, @scopeSessionIds, @roleAppend, @appId, @askedBy, @forkedFrom, @contextUsed, @contextWindow, @contextExactness, @interruption)
          ON CONFLICT(id) DO UPDATE SET
            tool = excluded.tool,
            external_id = excluded.external_id, name = excluded.name, auto_named = excluded.auto_named,
            state = excluded.state, last_read_seq = excluded.last_read_seq,
-           is_orchestrator = excluded.is_orchestrator, is_assistant = excluded.is_assistant,
+           is_assistant = excluded.is_assistant,
            waiting_since = excluded.waiting_since, model = excluded.model, effort = excluded.effort,
            verbosity = excluded.verbosity,
            service_tier = excluded.service_tier,
@@ -43,10 +43,9 @@ export class SessionRecords {
         ...s,
         autoNamed: s.autoNamed ? 1 : 0,
         /*
-         * The marker (#13) rides the ordinary upsert too — with two write paths, only one would end up fixed. Written to both
-         * columns (#2133): `is_assistant`, which this build reads (step 4, after store step v69 copied it once and kept out
-         * the builds that write only the old column), and `is_orchestrator`, which the build of v68 reads and a person can
-         * go back to (docs/plans/assistant-rename.md §3.2)
+         * The marker (#13) rides the ordinary upsert too — with two write paths, only one would end up fixed. Only `is_assistant`
+         * since #2532: every build the store's floor admits reads it, and `is_orchestrator` stays unread until a later step
+         * drops it (docs/plans/assistant-rename.md §3.4)
          */
         isAssistant: isAssistantKind(s.kind) ? 1 : 0,
         effort: s.effort ?? null,

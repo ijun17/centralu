@@ -67,7 +67,7 @@ export class LinkedHost {
   }
 
   /**
-   * Refuses a session a hub's Assistant may not direct (`sendFromHub`, a settings change `by: 'orchestrator'`): this
+   * Refuses a session a hub's Assistant may not direct (`sendFromHub`, a settings change `by: 'assistant'`): this
    * host's assistant or a coordinator, which a hub is not shown (remote-hub.md §3.4), or none at all
    */
   directedFromHub(sessionId: string): void {

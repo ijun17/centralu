@@ -22,7 +22,7 @@ export type AssistantSlice = {
   openAssistant(): Promise<void>
   /** Creates the session if there is none (#63). `false`: it was never born, and the caller puts the text back (#180). */
   askAssistant(text: string): Promise<boolean>
-  /** Chosen before a session exists; kept here because the host holds it write-only (`orchestrator.configure`). */
+  /** Chosen before a session exists; kept here because the host holds it write-only (`assistant.configure`). */
   assistantTool: ToolName | null
   completeIntro(tool: ToolName): Promise<void>
   /**

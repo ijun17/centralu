@@ -11,14 +11,6 @@ const CentraluToolResult = z.object({
 
 /** Results of the `assistant` methods, read through `parseRpcResult`. Params and what each method does: ./assistant.params.ts */
 export const assistantResults = {
-  'orchestrator.get': SessionInfo,
-  'orchestrator.peek': SessionInfo.nullable(),
-  'orchestrator.configure': z.object({ ok: z.literal(true) }),
-  'orchestrator.tools': z.array(
-    z.object({ name: z.string(), description: z.string(), inputSchema: z.unknown() }),
-  ),
-  'orchestrator.tool': CentraluToolResult,
-  // The same five under the new name (./assistant.params.ts)
   'assistant.get': SessionInfo,
   'assistant.peek': SessionInfo.nullable(),
   'assistant.configure': z.object({ ok: z.literal(true) }),

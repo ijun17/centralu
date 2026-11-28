@@ -64,7 +64,7 @@ describe("the Centralu tools see only this app's sessions", () => {
   const setup = async () => {
     const p = await addProject()
     const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
-    const orc = (await rpc('orchestrator.get', {})) as { id: string }
+    const orc = (await rpc('assistant.get', {})) as { id: string }
     // The tools are passed to the adapter when the session is created — test that exact instance.
     const tools = adapter.lastCentraluTools!
     return { p, a, orc, tools }
@@ -116,7 +116,7 @@ describe("the Centralu tools see only this app's sessions", () => {
     const p = (await rpc('projects.add', { path: projectPath })) as { id: string }
     const a = (await rpc('agents.createSession', { projectId: p.id, cwd: projectPath, tool: 'claude' })) as { id: string }
     await rpc('sessions.rename', { sessionId: a.id, name: 'WORKER_NAME_SENTINEL' })
-    const orc = (await rpc('orchestrator.get', {})) as { id: string }
+    const orc = (await rpc('assistant.get', {})) as { id: string }
     const tools = adapter.lastCentraluTools!
     await tools.sendToSession(a.id, 'let me know when it is done', true)
     adapter.handleOf(a.id)!.emitDelta('HOSTILE_REPORT_SENTINEL')
@@ -442,19 +442,6 @@ describe("the Centralu tools see only this app's sessions", () => {
     expect(r.text).toContain(a.id)
   })
 
-  // #2133 step 3: the methods under the role's new name are answered as the old ones, for a window or bridge of a later release
-  it('answers the assistant.* methods as the orchestrator.* ones (#2133)', async () => {
-    expect(await rpc('assistant.peek', {})).toBeNull()
-    await rpc('assistant.configure', { tool: 'claude' })
-    const { a, orc } = await setup()
-    expect(await rpc('assistant.get', {})).toEqual(await rpc('orchestrator.get', {}))
-    expect(await rpc('assistant.peek', {})).toEqual(await rpc('orchestrator.peek', {}))
-    expect(await rpc('assistant.tools', { sessionId: orc.id })).toEqual(await rpc('orchestrator.tools', { sessionId: orc.id }))
-    expect(await rpc('assistant.tools', { sessionId: a.id })).toEqual(await rpc('orchestrator.tools', { sessionId: a.id }))
-    const listed = (await rpc('assistant.tool', { sessionId: orc.id, name: 'list_sessions', args: {} })) as { text: string }
-    expect(listed.text).toContain(a.id)
-  })
-
   it('a plain session can be switched', async () => {
     const { a } = await setup()
     const r = await mgr.processes.switchTool(a.id, 'codex')
@@ -615,7 +602,7 @@ describe("an ordinary session's reader set (#320)", () => {
     expect(adapter.lastOpts?.toolProfile).toBe('reader')
 
     // What the bridge (Codex) is offered: exactly the reader set, asking another project, starting agents here (#561) and attaching apps (#371)
-    const offered = ((await rpc('orchestrator.tools', { sessionId: a1.id })) as { name: string }[]).map((t) => t.name)
+    const offered = ((await rpc('assistant.tools', { sessionId: a1.id })) as { name: string }[]).map((t) => t.name)
     expect(offered).toEqual(['update_centralu', 'read_session', 'recall', 'app_guide', 'ask_project', 'start_agent', 'agent_session', 'find_apps', 'attach_app', 'detach_app', 'app', 'mail', 'compact_self'])
   })
 
@@ -684,7 +671,7 @@ describe("an ordinary session's reader set (#320)", () => {
     expect((await a1.tools.listSessions()).map((s) => s.sessionId)).toContain(a2.id)
     expect((await a1.tools.readSession(a2.id)).ok).toBe(true)
     expect(mgr.tools.toolProfileOf(a1.id)).toBe('reader')
-    expect(await rpc('orchestrator.tools', { sessionId: a1.id })).not.toEqual([])
+    expect(await rpc('assistant.tools', { sessionId: a1.id })).not.toEqual([])
 
     await rpc('agents.createSession', { projectId: shop.id, cwd: shop.path, tool: 'claude' })
     expect(adapter.lastOpts?.centraluTools).toBeDefined()
@@ -917,9 +904,9 @@ describe('assistant skills — propose -> approve -> load into prompt (#71)', ()
    * #703: a screen re-reads the proposal lists on this event, so it goes out when a list changes (and the unit test in
    * assistant-proposals.test.ts holds that it goes out after the save), or a card stays invisible.
    */
-  it('broadcasts orchestrator_proposals_changed after each saved change to a proposal list', async () => {
+  it('broadcasts assistant_proposals_changed after each saved change to a proposal list', async () => {
     const orc = await mgr.assistant()
-    const changed = () => events.filter((e) => e.type === 'orchestrator_proposals_changed').length
+    const changed = () => events.filter((e) => e.type === 'assistant_proposals_changed').length
     const before = changed()
 
     await mgr.runCentraluTool(orc.id, 'propose_skill', { name: 'notify-skill', content: 'procedure' })
@@ -959,7 +946,7 @@ describe('the commands tier through the host (#512)', () => {
 
   it("keeps each proposal's card: the run saves what the card lists, and approving it is still the person's", async () => {
     const orc = await mgr.assistant()
-    const offered = (await rpc('orchestrator.tools', { sessionId: orc.id })) as { name: string }[]
+    const offered = (await rpc('assistant.tools', { sessionId: orc.id })) as { name: string }[]
     expect(offered.map((t) => t.name)).toEqual(expect.arrayContaining(['centralu_commands', 'centralu_help', 'centralu_run']))
     expect(offered.map((t) => t.name)).not.toContain('propose_skill')
 

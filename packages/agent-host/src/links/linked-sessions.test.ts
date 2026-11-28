@@ -66,7 +66,7 @@ describe('reading a linked machine for the hub’s assistant', () => {
     })
     await reader.updateSettings('m1.w1', { model: 'opus' })
     // The machine broadcasts the change as the Assistant's, so the hub's window still raises its toast
-    expect(calls).toEqual([['agents.updateSettings', expect.objectContaining({ model: 'opus', by: 'orchestrator' })]])
+    expect(calls).toEqual([['agents.updateSettings', expect.objectContaining({ model: 'opus', by: 'assistant' })]])
   })
 
   it("changes no setting of a session the machine hides, though the machine would (#1941 review)", async () => {

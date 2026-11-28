@@ -207,8 +207,8 @@ class Driver {
     const { host, pHere, pThere, here } = this.w
     let s: Json
     if (kind === 'assistant') {
-      await host.rpc('orchestrator.configure', { tool: this.cli })
-      s = await host.rpc('orchestrator.get', {})
+      await host.rpc('assistant.configure', { tool: this.cli })
+      s = await host.rpc('assistant.get', {})
     } else if (kind === 'builder') {
       s = await host.rpc('apps.createBuilder', { appId: 'counter', projectId: pThere.id, tool: this.cli })
     } else {

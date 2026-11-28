@@ -464,12 +464,12 @@ describe('a hub linked to another host (#82)', () => {
   })
 
   it('connects to a remote on another app version when the protocol matches, naming the older side so an update is offered; another protocol is held (#689)', async () => {
-    const remote = await remoteHost(0, new Store(), { version: '0.1.0-beta.50' })
-    let line = lineFor(remote.port, { version: '0.1.0-beta.50' })
+    const remote = await remoteHost(0, new Store(), { version: '0.1.0-beta.58' })
+    let line = lineFor(remote.port, { version: '0.1.0-beta.58' })
     const hub = await hubHost(() => line)
     await eventually(() => status(hub) === 'connected')
     const info = hub.links.list()[0]!
-    expect(info.versions).toMatchObject({ older: 'remote', compatible: true, remote: { version: '0.1.0-beta.50' } })
+    expect(info.versions).toMatchObject({ older: 'remote', compatible: true, remote: { version: '0.1.0-beta.58' } })
     const u = await ui(hub.port)
     await expect(u.call('sessions.list')).resolves.toEqual([])
 
@@ -1547,7 +1547,7 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
     // A rolled-back host is older than the hub, so the link does not open to it (plan §4) and no hello
     // comes: on a real Windows PC every rollback timed out and put the newer version back
     // Both after the mail switch (docs/plans/mailbox.md D28): a rollback within one side of it runs
-    const before = '0.1.0-beta.50'
+    const before = '0.1.0-beta.58'
     const { hub, u, setStarts } = await setup({ startsVersion: RELEASE, busy: false, oldVersion: before })
     await u.call('machines.update', { machineId: 'm1' })
     await eventually(() => status(hub) === 'connected')
@@ -1925,7 +1925,7 @@ describe('machines.update waits for the sessions there to finish (#1399)', () =>
       return { state, deps: { autoUpdate: () => state.on, followRetryMs: 150 } satisfies Partial<LinkDeps>, old: OLDER }
     }
     /** An older release of the hub's own channel: versions of two channels are never ranked, so none is older */
-    const OLDER = '0.1.0-beta.50'
+    const OLDER = '0.1.0-beta.58'
 
     it('starts an update by itself once it finds the machine older, stops the turns and terminals there at once, and has the next host continue the turns', async () => {
       const a = auto()

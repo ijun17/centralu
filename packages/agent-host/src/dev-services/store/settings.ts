@@ -93,19 +93,19 @@ export function listSetting(
 }
 
 /**
- * The settings the Assistant rename (#2133, docs/plans/assistant-rename.md §3.2) gives a new key, by their old key.
- * Callers name the old key. A write or delete reaches both keys; a read takes the new key first, and the old key only
- * when the new one is missing. Store step v69 copied every old key into its new key once (and deleted a new key whose
- * old key was gone) and raised the store's floor to 68, so every build that can open the store writes and deletes both
- * keys: the new key is never the stale one. Both keys are still written because the build of v68, which a person can
- * go back to, reads only the old one. `orchestrator_mcp_servers` keeps its name: no build since M4 A-7 writes it, it is
- * only read to be moved into apps.
+ * The settings the Assistant rename (#2133, docs/plans/assistant-rename.md §3.4) gave a new key, with the old key a
+ * delete also removes. Callers name the new key, which is the only one read and written since #2532 (store step 79
+ * deleted the old keys). A build the store's floor admits (v75 to v78) reads the new key first and the old one when it
+ * is missing, and writes both: an old key it left would bring back what this build deletes, after a second rollback.
  */
-export const RENAMED_SETTINGS: ReadonlyMap<string, string> = new Map([
-  ['orchestrator_tool', 'assistant_tool'],
-  ['orchestrator_mcp_proposals', 'assistant_mcp_proposals'],
-  ['orchestrator_skill_proposals', 'assistant_skill_proposals'],
-  ['orchestrator_skills', 'assistant_skills'],
+/** The tool the Assistant runs on, and the default of an app's agent with no project (`ToolRegistry.defaultToolFor`) */
+export const ASSISTANT_TOOL_KEY = 'assistant_tool'
+
+const OLD_SETTING_KEYS: ReadonlyMap<string, string> = new Map([
+  [ASSISTANT_TOOL_KEY, 'orchestrator_tool'],
+  ['assistant_mcp_proposals', 'orchestrator_mcp_proposals'],
+  ['assistant_skill_proposals', 'orchestrator_skill_proposals'],
+  ['assistant_skills', 'orchestrator_skills'],
 ])
 
 /** What belongs to this install: its settings, the workspace snapshot and the cache of a tool's commands */
@@ -171,26 +171,11 @@ export class SettingsRecords {
    * person who had turned the thing off (the same trade `showIgnored` makes in the UI).
    */
   appSetting(key: string): string | null {
-    const read = this.db.prepare<unknown[], { value: string }>(`SELECT value FROM app_settings WHERE key = ?`)
-    const renamed = RENAMED_SETTINGS.get(key)
-    // The new key first (#2133 step 4, `RENAMED_SETTINGS`)
-    if (renamed !== undefined) {
-      const row = read.get(renamed)
-      if (row) return row.value
-    }
-    return read.get(key)?.value ?? null
+    return this.db.prepare<unknown[], { value: string }>(`SELECT value FROM app_settings WHERE key = ?`).get(key)?.value ?? null
   }
 
   setAppSetting(key: string, value: string): void {
-    const write = this.db.prepare(
-      `INSERT INTO app_settings (key, value) VALUES (?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    )
-    const renamed = RENAMED_SETTINGS.get(key)
-    this.db.transaction(() => {
-      write.run(key, value)
-      if (renamed !== undefined) write.run(renamed, value)
-    })()
+    this.db.prepare(`INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(key, value)
   }
 
   /**
@@ -205,10 +190,10 @@ export class SettingsRecords {
   /** Deletes a setting — reading it back afterward is "never written" (null). Where an old key is cleaned up once everything is migrated off it (M4 A-7) */
   deleteAppSetting(key: string): void {
     const remove = this.db.prepare(`DELETE FROM app_settings WHERE key = ?`)
-    const renamed = RENAMED_SETTINGS.get(key)
+    const old = OLD_SETTING_KEYS.get(key)
     this.db.transaction(() => {
       remove.run(key)
-      if (renamed !== undefined) remove.run(renamed)
+      if (old !== undefined) remove.run(old)
     })()
   }
 }

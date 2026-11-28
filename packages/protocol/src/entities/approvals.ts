@@ -336,11 +336,11 @@ export function isMachineChange(d: ApprovalDetail): boolean {
  * The `about` of the Assistant's card for a change to its settings or the trash ("apply updates when idle", deleting
  * for good, emptying), on an `other` detail. Allow or deny only, and the host remembers nothing.
  */
-export const ASSISTANT_CHANGE = 'orchestrator_change'
+export const ASSISTANT_CHANGE = 'assistant_change'
 
-/** `assistant_change` is the same card's `about` under the role's new name, which a host of a later release sends (#2133) */
+/** `orchestrator_change` is the same card's `about` under the role's old name, which a linked machine of beta.57 to beta.84 sends (#2532) */
 export function isAssistantChange(d: ApprovalDetail): boolean {
-  return d.kind === 'other' && (d.about === ASSISTANT_CHANGE || d.about === 'assistant_change')
+  return d.kind === 'other' && (d.about === ASSISTANT_CHANGE || d.about === 'orchestrator_change')
 }
 
 /**

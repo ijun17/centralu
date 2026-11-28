@@ -352,7 +352,7 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     /** Absent from an older host and on a tool's own switch, which never touches it: the receiver keeps its value */
     permissionPreset: PermissionPreset.optional(),
     /** Absent: the Assistant. `tool`: the tool switched by itself (docs/protocol.md §2) */
-    // `assistant`: the same as `orchestrator`, under the role's new name, which a host of a later release sends (#2133)
+    // `orchestrator`: the same as `assistant`, under the role's old name, which a host of beta.57 to beta.84 sends (#2532)
     by: z.enum(['orchestrator', 'tool', 'assistant']).optional(),
     /** A client's `agents.updateSettings`: no toast. A flag, not a `by` word, which an older build fails to parse (§2) */
     person: z.boolean().optional(),
@@ -460,9 +460,9 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
   z.object({ ...appScoped, type: z.literal('external_app_questions_changed') }),
   // Sent after the write: a screen must not guess the moment from the Assistant's `tool_call`, which comes before the
   // save. Refetch `agents.mcpProposals` and `agents.skillProposals`
-  z.object({ ...appScoped, type: z.literal('orchestrator_proposals_changed') }),
-  // The same event under the role's new name, which a host of a later release sends (#2133 step 4); this build sends the old one
   z.object({ ...appScoped, type: z.literal('assistant_proposals_changed') }),
+  // The same event under the role's old name, which a linked machine of beta.57 to beta.84 sends (#2532)
+  z.object({ ...appScoped, type: z.literal('orchestrator_proposals_changed') }),
   // Settings refetches `projectConsents.list`
   z.object({ ...appScoped, type: z.literal('project_consents_changed') }),
   // A project changed without this window asking (docs/protocol.md §2): the list is re-read. `added`: a folder the person

@@ -307,13 +307,8 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'agents.resolveMcpProposal': HUB,
   'agents.skillProposals': HUB,
   'agents.resolveSkillProposal': HUB,
-  'agents.orchestratorSkills': HUB,
-  'agents.deleteOrchestratorSkill': HUB,
   'agents.assistantSkills': HUB,
   'agents.deleteAssistantSkill': HUB,
-  'orchestrator.get': HUB,
-  'orchestrator.peek': HUB,
-  'orchestrator.configure': HUB,
   'assistant.get': HUB,
   'assistant.peek': HUB,
   'assistant.configure': HUB,
@@ -419,8 +414,6 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'host.credentials': HUB,
 
   // ── Callbacks of the hub's own agents ───────────────────────────────────────────────────
-  'orchestrator.tools': INTERNAL,
-  'orchestrator.tool': INTERNAL,
   'assistant.tools': INTERNAL,
   'assistant.tool': INTERNAL,
 }

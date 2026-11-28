@@ -38,7 +38,7 @@ describe('registry defaults', () => {
     store.projects.setProjectDefaultTool(project.id, 'claude')
     expect(await emptyRpc('projects.list', {})).toEqual([expect.objectContaining({ id: project.id, defaultTool: null })])
     expect(await emptyRpc('agents.detect', {})).toEqual([])
-    await expect(emptyRpc('orchestrator.get', {})).rejects.toMatchObject({
+    await expect(emptyRpc('assistant.get', {})).rejects.toMatchObject({
       code: 'tool_not_installed', message: expect.stringContaining('No agent adapter is available'),
     })
     await expect(emptyManager.createSession({ projectId: project.id, cwd: project.path, tool: null, permissionPreset: 'normal' })).rejects.toMatchObject({
@@ -389,7 +389,7 @@ describe('a settings change actually takes effect', () => {
     await rpc('agents.updateSettings', { sessionId: s.id, model: 'opus', by: 'orchestrator' })
 
     const changed = events.filter((e) => e.type === 'settings_changed')
-    expect(changed).toMatchObject([{ model: 'opus', by: 'orchestrator' }])
+    expect(changed).toMatchObject([{ model: 'opus', by: 'assistant' }])
     expect(changed[0]).not.toHaveProperty('person')
   })
 
@@ -402,7 +402,7 @@ describe('a settings change actually takes effect', () => {
     await rpc('agents.updateSettings', { sessionId: s.id, model: 'opus', by: 'assistant' })
 
     const changed = events.filter((e) => e.type === 'settings_changed')
-    expect(changed).toMatchObject([{ model: 'opus', by: 'orchestrator' }])
+    expect(changed).toMatchObject([{ model: 'opus', by: 'assistant' }])
     expect(changed[0]).not.toHaveProperty('person')
   })
 

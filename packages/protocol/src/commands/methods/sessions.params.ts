@@ -88,12 +88,6 @@ export const sessionsParams = {
   /** Assistant skills: deleting exists because a skill that can only be added is worse than none (#71) */
   'agents.skillProposals': z.object({}),
   'agents.resolveSkillProposal': z.object({ name: z.string(), approve: z.boolean() }),
-  'agents.orchestratorSkills': z.object({}),
-  'agents.deleteOrchestratorSkill': z.object({ name: z.string() }),
-  /*
-   * The same two under the role's new name. The window calls the old ones: it may be attached to an older host that
-   * lacks these (docs/plans/assistant-rename.md §3.2)
-   */
   'agents.assistantSkills': z.object({}),
   'agents.deleteAssistantSkill': z.object({ name: z.string() }),
   /**

@@ -2,6 +2,7 @@ import type { LaunchDemands, SessionInfo, ToolName } from '@cc/protocol'
 import { ASSISTANT_DEMANDS, isAssistantKind, ASSISTANT_KIND } from '@cc/protocol'
 import { rpcError } from '../rpc-error.js'
 import { BRIDGE_ANSWER_MS } from '../adapters/contract.js'
+import { ASSISTANT_TOOL_KEY } from '../dev-services/store/settings.js'
 import type { DelegationHost } from './delegation-flow.js'
 import { assistantHome } from './assistant-home.js'
 import { AssistantProposals, type ProposalOutcome } from './assistant-proposals.js'
@@ -39,7 +40,7 @@ export class AssistantSlot {
       host.store.settings,
       () => this.host.appsHub?.rt,
       // The manager wraps its `emit` after its modules are made; the callback looks it up when a list changes, not now
-      () => this.host.emit({ type: 'orchestrator_proposals_changed' }),
+      () => this.host.emit({ type: 'assistant_proposals_changed' }),
     )
   }
 
@@ -133,7 +134,7 @@ export class AssistantSlot {
     // Refused as its launch would be (#1562): a choice saved here is the Assistant every window opens
     const refused = this.host.refusal(tool, ASSISTANT_DEMANDS)
     if (refused) throw unfitError(refused)
-    this.host.store.settings.setAppSetting('orchestrator_tool', tool)
+    this.host.store.settings.setAppSetting(ASSISTANT_TOOL_KEY, tool)
   }
 
   /** The Assistant being created (#839): a second ask while it is made waits on this one, never makes another */
@@ -185,7 +186,7 @@ export class AssistantSlot {
      * The tool follows the choice made on the onboarding screen (configureAssistant): hardcoding 'claude' let someone with only
      * Codex installed pass onboarding ("Codex is ready") and still be unable to open the Assistant (#63).
      */
-    const configured = this.host.store.settings.appSetting('orchestrator_tool')
+    const configured = this.host.store.settings.appSetting(ASSISTANT_TOOL_KEY)
     const info = await this.host.createSession({
       projectId: null,
       // The marker is born together with the session — stamping it separately would leave a window with no
