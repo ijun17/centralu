@@ -123,6 +123,8 @@ const HELD: Record<string, (recording: Recording) => Held> = {
     const blocks = new Map<string, number>()
     /** The reasoning items that said something of what they thought */
     const thoughts = new Set<string>()
+    /** The person's thread: a child agent's items arrive on the same connection under its own, and are drawn in its card */
+    let thread: string | undefined
     for (const f of recording.frames) {
       if (f.dir === 'exit') {
         ended = true
@@ -136,6 +138,7 @@ const HELD: Record<string, (recording: Recording) => Held> = {
         if (m.method === 'initialize' && ended && held.steps.length > 0) held.steps.push({ kind: 'restart' })
         if (m.method === 'initialize') ended = false
         if (m.method === 'turn/start') {
+          thread ??= String(p.threadId)
           held.steps.push({ kind: 'prompt', text: (p.input as { text?: string }[]).map((i) => i.text ?? '').join(''), ...(running ? { during: true } : {}) })
           held.order.push('prompt')
           running = true
@@ -149,6 +152,7 @@ const HELD: Record<string, (recording: Recording) => Held> = {
         } else if (m.method === 'turn/interrupt') held.steps.push({ kind: 'stop' })
         continue
       }
+      if (thread && p.threadId && p.threadId !== thread) continue
       const item = p.item as { type: string; id: string; text?: string; server?: string; tool?: string } | undefined
       if (m.method === 'turn/completed') running = false
       else if (m.method === 'item/started' && item?.type === 'agentMessage') {
@@ -533,6 +537,8 @@ export const REPLAYS: Replay[] = [
   { tool: 'codex', scenario: 'big-output', shows: oneLongAnswer },
   { tool: 'codex', scenario: 'interrupt', stopAt: 'folded', shows: stopped },
   { tool: 'codex', scenario: 'queued' },
+  // Codex multi-agent v2: the child is announced by a subAgentActivity item, not a spawnAgent call
+  { tool: 'codex', scenario: 'subagents-v2' },
   {
     tool: 'codex',
     scenario: 'failed',
