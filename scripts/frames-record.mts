@@ -67,6 +67,7 @@ async function main(): Promise<number> {
   let agy: ReturnType<typeof temporaryAgy> | null = null
   // OpenCode keeps its settings, sessions and cache by the XDG folders: a run gets folders of its own (a config OpenCode also reads from the home folder, `~/.opencode`, is not moved)
   if (tool === 'opencode') for (const [name, folder] of [['XDG_CONFIG_HOME', 'config'], ['XDG_DATA_HOME', 'data'], ['XDG_STATE_HOME', 'state'], ['XDG_CACHE_HOME', 'cache']] as const) process.env[name] = join(data, 'opencode', folder)
+  const openCodeConfig = process.env.OPENCODE_CONFIG_CONTENT
   let claudeConfig: { finish(): void; mcpConfig(): string } | null = null
   let failed = 0
   // An interrupted run still puts a refreshed sign-in back and takes its temporary folder away
@@ -99,6 +100,12 @@ async function main(): Promise<number> {
       const seeded: string[] = []
       try {
         const run: { preset?: string } = runAs(tool, scenario.drive)
+        const toolModel = scenario.drive.modelFor?.[tool]
+        if (tool === 'opencode') {
+          const config = toolModel ? JSON.stringify({ model: toolModel }) : openCodeConfig
+          if (config === undefined) delete process.env.OPENCODE_CONFIG_CONTENT
+          else process.env.OPENCODE_CONFIG_CONTENT = config
+        }
         // An ACP agent reaches Centralu's tools through the stdio bridge, which asks a host: this run's is a fixed-answer one
         const given = ACP_TOOLS.includes(tool) ? scenario.drive.session?.() : undefined
         if (given?.centraluTools) bridge = await startBridgeHost(given.centraluTools, given.toolProfile ?? 'reader')
@@ -111,7 +118,7 @@ async function main(): Promise<number> {
         const frames = files.flatMap((file) => readFileSync(join(raw, file), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)))
         const dir = join(ADAPTERS, ADAPTER_FOLDER[tool] ?? 'acp', 'recordings', `${tool === 'claude' ? 'claude-code' : tool}-${version.replace(/^(agent|codex-cli) /, '').split(/[-\s]/)[0]}`)
         mkdirSync(dir, { recursive: true })
-        const header = { header: { tool, version, model: scenario.model ?? modelOf(tool), scenario: scenario.name, preset: run.preset ?? 'normal', protocolVersion: 1, os: process.platform, recorded: new Date().toISOString().slice(0, 10) } }
+        const header = { header: { tool, version, model: toolModel ?? scenario.model ?? modelOf(tool), scenario: scenario.name, preset: run.preset ?? 'normal', protocolVersion: 1, os: process.platform, recorded: new Date().toISOString().slice(0, 10) } }
         writeFileSync(join(dir, `${scenario.name}.jsonl`), [header, ...bridgeAsPlaceholders(scrub(frames, cwd))].map((l) => JSON.stringify(l)).join('\n') + '\n')
         console.log(`[record] ${tool} ${scenario.name}: ${frames.length} frames, ${events.length} events -> ${dir}`)
         const left = foldersLeft(cwd, seeded)
