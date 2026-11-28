@@ -9,7 +9,6 @@ import type {
   ToolStatus,
 } from '@cc/protocol/client'
 import {
-  wakeable,
   readNotifyPolicy,
   sanitizeArrangements,
   sanitizeGridPanels,
@@ -518,7 +517,6 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
     // The pinned views this window shows are leased to its connection, which just ended (#392)
     void holdPinnedViews(get, set)
 
-    const wasLive = Object.values(s.sessions).filter((x) => x.live)
     const platform = s.platform
     const generation = ++recoveryGeneration
 
@@ -579,15 +577,5 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
       if (focused) holding.add(focused)
       for (const id of holding) if (get().sessions[id]) void get().loadHistory(id)
     }
-
-    const alive = new Set(listed.filter((x) => x.live).map((x) => x.id))
-    // docs/state-management.md §7 (`wakeable`), judged against the machine list read after the drop
-    await machinesRead
-    const toWake = wasLive.filter((x) => !alive.has(x.id) && wakeable(get().sessions[x.id], get().machines))
-    if (toWake.length === 0) return
-
-    set({ toast: `Reconnected — resuming ${toWake.length} session${toWake.length > 1 ? 's' : ''}` })
-    // The merge already reflects the host's `live: false`, so `wake` never mistakenly thinks it is already alive
-    for (const x of toWake) await get().wake(x.id)
   },
 })

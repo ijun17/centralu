@@ -2,6 +2,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { defineConfig } from '@playwright/test'
 import { e2eEngine, e2eReplayPart } from './engine.js'
+import { MAIN_URL, REUSE_ENV } from '../tooling/dev-server-checkout.js'
 
 /**
  * Only the startup-screen test runs on its **own** server.
@@ -104,7 +105,7 @@ export default defineConfig({
   globalSetup: './warm-engine.ts',
   // A dev server that died and was started again is said as a warning, even in a green run (#651)
   globalTeardown: './web-server-report.ts',
-  use: { baseURL: 'http://127.0.0.1:5174', trace: 'off', browserName: BROWSER },
+  use: { baseURL: MAIN_URL, trace: 'off', browserName: BROWSER },
   projects: [
     { name: 'replay', testMatch: REPLAY_SPEC, testIgnore: leftOut, use: { baseURL: REPLAY_URL }, workers: 1 },
     { name: 'app', testIgnore: [STARTUP_SPEC, RECOVERY_SPEC, LINKED_SPEC, REPLAY_SPEC, ...leftOut] },
@@ -116,11 +117,11 @@ export default defineConfig({
   ].filter((p) => (replayPart === 'only' ? p.name === 'replay' : replayPart === 'skip' ? p.name !== 'replay' : true)),
   webServer: [
     {
-      command: `${SERVE('http://127.0.0.1:5174')} pnpm --filter @cc/web exec vite --port 5174 --strictPort`,
-      url: 'http://127.0.0.1:5174',
-      // Reuse a dev server already running locally, but always start a fresh one in CI, since
-      // attaching to someone else's server there would leave it unclear what was tested
-      reuseExistingServer: !process.env.CI,
+      command: `${SERVE(MAIN_URL)} pnpm --filter @cc/web exec vite --port ${new URL(MAIN_URL).port} --strictPort`,
+      url: MAIN_URL,
+      // Every checkout's `pnpm dev` listens there too: `pnpm e2e` (tooling/with-e2e-lock.ts) says to reuse it only when it
+      // serves this checkout, outside CI, and refuses any other (#2451). Unset, as for Playwright started by hand: never
+      reuseExistingServer: process.env[REUSE_ENV] === 'true',
       timeout: 60000,
     },
     {

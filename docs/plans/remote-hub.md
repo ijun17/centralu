@@ -172,7 +172,7 @@ and the dock badge are computed in the UI from session state, so they work once 
 are routed.
 
 **Recovery.** The UI rebuilds its session list from `sessions.list` after every reconnect and
-wakes sessions that were live. So the hub must:
+(before #2538) woke sessions that were live. So the hub must:
 
 1. answer for an unreachable machine from a **headers-only mirror** in its own store (additive
    migration), keeping the last-known `live` value plus an "unreachable" mark, so the UI neither

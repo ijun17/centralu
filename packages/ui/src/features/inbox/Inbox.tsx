@@ -2,7 +2,8 @@ import { usePresence } from '../../components/presence.js'
 import { groupTasks, openTaskCount, shownTasks, taskKey, type InboxItem } from '@cc/core'
 import { useLabelNow } from '../../app/useLabelNow.js'
 import { nextWaitingTick } from '../../app/labelClock.js'
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { EDGE } from '../../components/anchored.js'
 import { useKeepInView } from '../../app/useKeepInView.js'
 import { isTextEntry, pressesItself } from '../../app/keys.js'
 import { useStore } from '../../store/store.js'
@@ -190,6 +191,7 @@ export function Inbox() {
 
   // Goes back up the way it came down (usePresence keeps it for its exit)
   const { shown, leaving } = usePresence(open)
+  const room = useRoomRight(panelRef, shown)
   if (!shown) return null
 
   return (
@@ -215,7 +217,8 @@ export function Inbox() {
         aria-label="Inbox"
         // Leaving, it takes no keys and no focus (focusReturn.ts)
         inert={leaving}
-        className={`${leaving ? 'cc-drop-out pointer-events-none' : 'cc-drop'} absolute left-0 top-full z-40 mt-1 flex max-h-[calc(100vh/var(--text-zoom)-3.5rem)] w-[560px] max-w-[calc(92vw/var(--text-zoom))] flex-col overflow-hidden rounded-bubble border border-line bg-surface-side shadow-(--shadow-modal) focus:outline-none`}
+        className={`${leaving ? 'cc-drop-out pointer-events-none' : 'cc-drop'} absolute left-0 top-full z-40 mt-1 flex max-h-[calc(100vh/var(--text-zoom)-3.5rem)] w-[560px] flex-col overflow-hidden rounded-bubble border border-line bg-surface-side shadow-(--shadow-modal) focus:outline-none`}
+        style={room === null ? undefined : { maxWidth: room }}
         data-testid="inbox"
       >
         {/*
@@ -223,7 +226,7 @@ export function Inbox() {
           (no edge bar), the row's actions as capsules.
         */}
         {!mailThread && (
-          <header className="flex items-baseline gap-2 border-b border-line px-4 py-2.5">
+          <header className="flex flex-wrap items-baseline gap-x-2 gap-y-1.5 border-b border-line px-4 py-2.5">
             {/*
               The list's keys are this screen's heart: a switch by pointer hands them back to the list, so ↑ ↓ walk it. The arrow keys on the switch stay
               on it, as a radio group's do
@@ -269,17 +272,13 @@ export function Inbox() {
                 ]}
               />
             </div>
-            <span className="ml-auto flex items-center gap-1 text-2xs text-ink-faint">
-              <Kbd>↑</Kbd>
-              <Kbd>↓</Kbd> Move
-              <Kbd>↵</Kbd> Open
-              {tab === 'waiting' && choices > 0 && (
-                <>
-                  <Kbd>1-{choices}</Kbd> Choose
-                </>
-              )}
-              <Kbd>D</Kbd> Done
-              <Kbd>esc</Kbd> Close
+            {/* Narrow, the hints wrap a key with its word, never between them */}
+            <span className="ml-auto flex flex-wrap items-center justify-end gap-1 text-2xs text-ink-faint">
+              <Hint keys={['↑', '↓']} word="Move" />
+              <Hint keys={['↵']} word="Open" />
+              {tab === 'waiting' && choices > 0 && <Hint keys={[`1-${choices}`]} word="Choose" />}
+              <Hint keys={['D']} word="Done" />
+              <Hint keys={['esc']} word="Close" />
             </span>
           </header>
         )}
@@ -390,6 +389,38 @@ function Pane({ leaving, children }: { leaving: boolean; children: ReactNode }) 
   )
 }
 
+/**
+ * How wide the panel may be: from where it hangs (under the capsule) to EDGE short of the window's right edge (#2455). It
+ * narrows rather than shifts, so it stays under the capsule it drops from. Layout pixels: the rect is zoomed (anchored.ts)
+ */
+function useRoomRight(panel: RefObject<HTMLElement | null>, shown: boolean): number | null {
+  const [room, setRoom] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    if (!shown) return
+    const read = () => {
+      const from = panel.current?.offsetParent?.getBoundingClientRect().left
+      if (from === undefined) return
+      const zoom = Number(getComputedStyle(document.documentElement).getPropertyValue('--text-zoom')) || 1
+      setRoom(Math.floor((window.innerWidth - from) / zoom) - EDGE)
+    }
+    read()
+    window.addEventListener('resize', read)
+    return () => window.removeEventListener('resize', read)
+  }, [panel, shown])
+  return room
+}
+
+function Hint({ keys, word }: { keys: string[]; word: string }) {
+  return (
+    <span className="flex items-center gap-1">
+      {keys.map((k) => (
+        <Kbd key={k}>{k}</Kbd>
+      ))}{' '}
+      {word}
+    </span>
+  )
+}
+
 function Nothing() {
   return (
     <p className="px-4 py-10 text-center text-md text-ink-muted" data-testid="inbox-empty">
@@ -407,30 +438,35 @@ function SessionRow({ it, project, active, settled, onOpen }: { it: InboxItem; p
   return (
     <li
       data-cursor={active || undefined}
-      className={`rounded-field transition-colors ${
+      className={`@container rounded-field transition-colors ${
         active ? 'bg-surface-hover/50' : 'hover:bg-surface-hover/25'
       }`}
     >
       <div className="flex items-center">
         <button
-          className="flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-3 pr-3 text-left"
+          className="flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-3 pr-3 text-left @max-[32rem]:flex-wrap @max-[32rem]:gap-y-0.5"
           onClick={onOpen}
           data-testid={`inbox-item-${it.id}`}
         >
           <StateDot state={it.state} />
-          <span className={`truncate text-md ${it.unread ? 'text-ink' : 'text-ink-muted'}`}>
+          {/* Narrow, the name takes what the line leaves and the project at most two fifths: cut, so neither wraps to a line of its own */}
+          <span className={`truncate text-md @max-[32rem]:grow @max-[32rem]:basis-0 ${it.unread ? 'text-ink' : 'text-ink-muted'}`}>
             {it.name}
           </span>
-          <span className="truncate text-xs text-ink-faint">
+          <span className="truncate text-xs text-ink-faint @max-[32rem]:max-w-2/5">
             {project}
           </span>
           {/* Which machine it waits on (#82): an approval answered here acts there. A proposal is this host's */}
           {!it.proposal && !it.arrival && (
             <SessionMachineTag sessionId={it.id} testId={`inbox-machine-${it.id}`} />
           )}
-          <span className="ml-auto flex shrink-0 items-center gap-2.5">
+          {/*
+            The state gives way with the name, so nothing runs out of the button under Continue (#2455). Narrow, the state and
+            time take a line of their own under the name, in from the dot, the state's words wrapping rather than cut
+          */}
+          <span className="ml-auto flex min-w-0 items-center gap-2.5 @max-[32rem]:ml-0 @max-[32rem]:basis-full @max-[32rem]:pl-5">
             <span
-              className="max-w-64 truncate text-xs text-ink-faint"
+              className="max-w-64 truncate text-xs text-ink-faint @max-[32rem]:max-w-none @max-[32rem]:whitespace-normal"
               title={it.arrival ? arrivalAsks(it.arrival.asks) : undefined}
               data-testid={it.arrival ? `inbox-arrival-asks-${it.id}` : undefined}
             >
@@ -485,7 +521,7 @@ function WaitingTime({ since }: { since: number | null }) {
   const now = useLabelNow(since === null ? null : next)
   const elapsed = since === null ? 0 : Math.max(0, now - since)
   return (
-    <span className={`readout w-16 text-right text-xs ${waitingTone(elapsed)}`}>
+    <span className={`readout w-16 shrink-0 text-right text-xs @max-[32rem]:w-auto ${waitingTone(elapsed)}`}>
       {formatWaiting(elapsed)}
     </span>
   )
