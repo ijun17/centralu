@@ -80,18 +80,9 @@ importers:
       '@tauri-apps/api':
         specifier: ^2.11.1
         version: 2.11.1
-      '@tauri-apps/plugin-dialog':
-        specifier: ^2.7.2
-        version: 2.7.2
       '@tauri-apps/plugin-global-shortcut':
         specifier: ^2.3.2
         version: 2.3.2
-      '@tauri-apps/plugin-notification':
-        specifier: ^2.3.3
-        version: 2.3.3
-      '@tauri-apps/plugin-opener':
-        specifier: ^2.5.4
-        version: 2.5.4
       react:
         specifier: ^19.2.8
         version: 19.2.8
@@ -120,15 +111,9 @@ importers:
 
   apps/web:
     dependencies:
-      '@cc/core':
-        specifier: workspace:*
-        version: link:../../packages/core
       '@cc/platform':
         specifier: workspace:*
         version: link:../../packages/platform
-      '@cc/protocol':
-        specifier: workspace:*
-        version: link:../../packages/protocol
       '@cc/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -151,9 +136,6 @@ importers:
       react-dom:
         specifier: ^19.2.8
         version: 19.2.8(react@19.2.8)
-      tailwindcss:
-        specifier: ^4.3.3
-        version: 4.3.3
       vite:
         specifier: ^8.2.1
         version: 8.2.1(@types/node@22.20.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)(yaml@2.9.1)
@@ -1158,9 +1140,6 @@ packages:
 
   '@tauri-apps/plugin-notification@2.3.3':
     resolution: {integrity: sha512-Zw+ZH18RJb41G4NrfHgIuofJiymusqN+q8fGUIIV7vyCH+5sSn5coqRv/MWB9qETsUs97vmU045q7OyseCV3Qg==}
-
-  '@tauri-apps/plugin-opener@2.5.4':
-    resolution: {integrity: sha512-1HnPkb+AmgO29HBazm4uPLKB+r7zzcTBW1d0fyYp1uP+jwtpoiNDGKMMzz58SFp49nOIrxdE3aUJtT57lfO9CQ==}
 
   '@types/better-sqlite3@9.6.0':
     resolution: {integrity: sha512-ZEEwBSgMu7GYJOynoagg5X9JbxfL6dTJDsgViJIqh67jV44kyOr9RXfmFjLK5rzC4MWssP06t9hu/JwGDnUbCg==}
@@ -3674,10 +3653,6 @@ snapshots:
       '@tauri-apps/api': 2.11.1
 
   '@tauri-apps/plugin-notification@2.3.3':
-    dependencies:
-      '@tauri-apps/api': 2.11.1
-
-  '@tauri-apps/plugin-opener@2.5.4':
     dependencies:
       '@tauri-apps/api': 2.11.1
 

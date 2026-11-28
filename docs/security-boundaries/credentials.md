@@ -112,8 +112,9 @@ that it shows them (`hello.shows`), one at a time, oldest first.
   linked machine's session asks on the hub and is relayed only once allowed (with the hub's link, which holds that
   machine's token). A linked machine's own limited callers are refused there: no window there shows host requests, and
   the hub does not show a machine's (`requests.*` are never forwarded).
-- **Residual.** A window built with `dev:live` holds the limited credential and is a window all the same: it shows
-  the card, and its Allow is refused (`window`), so the person answers in the app's own window.
+- **A `dev:live` page** holds the limited credential: it is sent no card (a limited socket gets no `host_request` event,
+  as it could not answer one), so the person answers in the app's own window. The person may trust such a tab to send
+  as them, never with more rights ([dev-browser-tabs.md](dev-browser-tabs.md)).
 
 **Who holds what, today.** Built so far: the credential, the classification (slices 1 and 2), the card (slice 3), and
 the keeper handing the token to windows only (slice 4, [keeper.md](keeper.md)): a script that asks

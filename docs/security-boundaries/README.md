@@ -25,6 +25,7 @@ them is reviewed at the deep tier (`.centralu/tiers.json`, `pnpm tier`).
 | [project-trust.md](project-trust.md) | Repository configuration and project trust; git before trust |
 | [local-data-and-transport.md](local-data-and-transport.md) | The data folder, Antigravity's agent and its token, local transport |
 | [credentials.md](credentials.md) | Who holds full power: the full and the limited credential; Cursor's sign-in, read for its usage |
+| [dev-browser-tabs.md](dev-browser-tabs.md) | A `dev:live` tab the person trusted to send as them: a host-issued key, until the tab closes |
 | [remote-host.md](remote-host.md) | The remote host (`centralu serve`): what holds it |
 | [remote-host-residuals.md](remote-host-residuals.md) | The remote host: what it leaves open |
 | [keeper.md](keeper.md) | The keeper's control socket and the front door |

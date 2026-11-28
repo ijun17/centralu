@@ -37,7 +37,7 @@ export function rereadFor(e: NormalizedEvent, set: StoreSet, get: StoreGet): boo
   return true
 }
 
-// Resolves when the machine list is read: which sessions a reconnect may wake is judged against it (`wakeable`)
+// Resolves when the machine list is read: the rows a hub listed from a machine's mirror are recovered against it
 export function rereadAll(get: StoreGet, set: StoreSet): Promise<void> {
   for (const read of new Set(Object.values(READS))) void read(get, set)
   // These two broadcasts carry the change itself, so their handlers read nothing

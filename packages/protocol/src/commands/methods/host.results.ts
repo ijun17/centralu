@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { HostRequest, UpdateStatus } from '../../entities.js'
+import { DevTab, HostRequest, UpdateStatus } from '../../entities.js'
 import { LinkedAppCallResult, LinkedAppsResult } from '../../linked-apps.js'
 import {
   HostActivity,
@@ -77,7 +77,11 @@ export const hostResults = {
   ]),
   'host.handover': z.object({ ok: z.literal(true) }),
   'host.systemEnding': z.object({ ok: z.literal(true) }),
-  'host.trustDevTab': z.object({ ok: z.literal(true) }),
+  'host.devTabCode': z.object({ code: z.string() }),
+  /** `key`: what the tab presents in its next hellos (`devTabKey`) until `expiresAt`; absent from an older host */
+  'host.trustDevTab': z.object({ ok: z.literal(true), key: z.string().optional(), expiresAt: z.number().optional() }),
+  'host.devTabs': z.array(DevTab),
+  'host.revokeDevTab': z.object({ ok: z.literal(true) }),
   // `mail`: this host takes `host.mail`, so the hub's task for a child here says to mail
   // `apps`: this host answers `host.apps` and `host.appCall`
   // `tasks`: this host takes the hub's tasks as mail and reports them back (`host.mail` with `task`)

@@ -112,6 +112,7 @@ export const NOT_GUARDS: Readonly<Record<string, readonly string[]>> = {
     'tooling/dependency-cruiser.test.ts',
     'tooling/desktop-csp.test.ts',
     'tooling/dev-live.test.ts',
+    'tooling/dev-server-checkout.test.ts',
     'tooling/e2e-affected.test.ts',
     'tooling/e2e-engine.test.ts',
     'tooling/e2e-flaky-report.test.ts',

@@ -14,7 +14,7 @@ import { useLayoutEffect, useRef, useState, type RefObject } from 'react'
 /** Between the button and the popover: flush, it is unclear where the button ends */
 const GAP = 4
 /** Off the window's edge: flush against it reads as cut off */
-const EDGE = 8
+export const EDGE = 8
 
 export type Placement = { top: number; left: number; maxHeight: number }
 

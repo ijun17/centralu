@@ -610,7 +610,8 @@ running, possibly the very session doing the work.
   native Windows are two machines to it, so a run in each does not wait for the other). A second run waits and prints who holds it; a lock whose holder
   is gone (killed) is taken over, with a line saying so. There is no time limit: a long run holds it as long as it runs.
   Run `CI=1 pnpm e2e`; do not start `playwright` by hand, which skips the lock, and do not wrap the runners in a
-  waiting loop of your own: the runners' lock is the only one.
+  waiting loop of your own: the runners' lock is the only one. Every checkout's `pnpm dev` takes the suite's port 5174:
+  a local run reuses that server only when it serves this checkout, and refuses any other (`tooling/dev-server-checkout.ts`).
 - **Several agents on one machine:** limit test workers (`pnpm exec vitest run --maxWorkers=4`).
   Unlimited, each run takes every core, and timing-sensitive tests fail for load, not for bugs.
 - **Ask before anything that raises an OS permission prompt** (screen capture, camera,

@@ -364,10 +364,13 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
    */
   'host.systemEnding': 'window',
   /**
-   * A local `dev:live` browser tab asking the person (via a card with a pairing code and origin) to attribute
-   * messages on that single open WebSocket as human rather than script. Never grants full/window rights.
+   * A dev browser tab asking the person to send as them (transport/dev-tabs.ts): the code is the host's and harmless to
+   * hand out, the trust is the person's card, and the list and its take-back are the window's. Never widens a right
    */
+  'host.devTabCode': 'everyday',
   'host.trustDevTab': 'asks',
+  'host.devTabs': 'window',
+  'host.revokeDevTab': 'window',
   'host.hubOffer': 'link',
   // From a hub that offered on the same connection only (rpc.ts), as `host.hubOffer` (#2067 item 2)
   'host.mail': 'link',

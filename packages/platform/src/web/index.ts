@@ -36,6 +36,8 @@ export type WebPlatformOptions = {
   hostUrl?: string
   token: string
   WebSocketImpl?: typeof WebSocket
+  /** A dev browser tab's key, sent in each hello (`RpcClientOptions.devTabKey`) */
+  devTabKey?: () => string | null
   /**
    * The two things Node cannot do: a real trash is `NSFileManager trashItem` or the freedesktop spec, not an unlink
    * into a temp folder. Absent in a browser, where the port answers `supported: false`.
@@ -388,7 +390,7 @@ function viewToolResult(r: { text: string; isError?: boolean; result?: unknown }
 
 export function createWebPlatform(opts: WebPlatformOptions): Platform {
   const url = new URL(opts.hostUrl ?? 'ws://127.0.0.1:5175')
-  const rpc = new RpcClient({ url: url.toString(), token: opts.token, WebSocketImpl: opts.WebSocketImpl })
+  const rpc = new RpcClient({ url: url.toString(), token: opts.token, WebSocketImpl: opts.WebSocketImpl, ...(opts.devTabKey ? { devTabKey: opts.devTabKey } : {}) })
   opts.onRpcClient?.(rpc)
   rpc.connect()
 
@@ -639,6 +641,10 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
     requests: {
       list: () => rpc.call('requests.list', {}),
       answer: (requestId, decision) => rpc.call('requests.answer', { requestId, decision }),
+      devTabs: () => rpc.call('host.devTabs', {}),
+      revokeDevTab: async (id) => {
+        await rpc.call('host.revokeDevTab', { id })
+      },
     },
     capabilities: defaultCapabilities(opts.capabilities),
     async dispose() {

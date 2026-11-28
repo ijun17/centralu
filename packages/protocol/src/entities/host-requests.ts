@@ -23,3 +23,12 @@ export type HostRequestOutcome = z.infer<typeof HostRequestOutcome>
 
 /** In a window's hello: without such a window holding the token the host refuses at once; an older window says none */
 export const SHOWS_HOST_REQUESTS = 'host_requests'
+
+/** A dev browser tab the person trusted (docs/security-boundaries/dev-browser-tabs.md), as Settings lists it: never its key */
+export const DevTab = z.object({
+  id: z.string(),
+  origin: z.string(),
+  grantedAt: z.number(),
+  expiresAt: z.number(),
+})
+export type DevTab = z.infer<typeof DevTab>

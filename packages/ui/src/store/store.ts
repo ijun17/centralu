@@ -42,14 +42,13 @@ export { inlineFrameShown, inlineViewsFromHistory, registerPinnedFrame } from '.
 import { eventActions } from './events/index.js'
 import { layoutActions } from './layout.js'
 export {
-  CENTER_FLOOR,
+  centerFloor,
   PANEL_DEFAULT,
   PANEL_MAX,
   PANEL_MIN,
   SIDEBAR_DEFAULT,
   SIDEBAR_MAX,
   SIDEBAR_MIN,
-  sidebarFloor,
 } from './layout.js'
 import { PANEL_DEFAULT, SIDEBAR_DEFAULT } from './layout.js'
 import { navigationActions, navigating } from './navigation.js'

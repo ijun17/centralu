@@ -78,7 +78,7 @@ export default defineConfig({
     projects: [
       {
         extends: true,
-        test: { name: 'unit', include: LISTED ? listed(false) : ['packages/**/*.test.{ts,tsx}', 'tooling/**/*.test.ts'], exclude: [...EXCLUDE, APP_RUNTIME] },
+        test: { name: 'unit', include: LISTED ? listed(false) : ['packages/**/*.test.{ts,tsx}', 'apps/web/src/**/*.test.ts', 'tooling/**/*.test.ts'], exclude: [...EXCLUDE, APP_RUNTIME] },
       },
       {
         extends: true,
