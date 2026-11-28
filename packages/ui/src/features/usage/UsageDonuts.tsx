@@ -255,7 +255,7 @@ export function UsageDonuts() {
         content={
           <span className="block">
             <span className="block text-ink">No agent connected</span>
-            <span className="mt-1 block text-ink-faint">Install or sign in to Claude Code or Codex</span>
+            <span className="mt-1 block text-ink-faint">Install or sign in to Claude Code, Codex or another coding agent</span>
           </span>
         }
       >

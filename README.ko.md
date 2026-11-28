@@ -38,9 +38,12 @@ Centralu는 에이전트를 직접 돌리지 않고, 이미 쓰고 계신 CLI를
 |---|---|
 | **Node 22.14 이상** | 호스트 사이드카가 이 위에서 돕니다. 이보다 낮은 22.x에서는 번들된 데이터베이스가 죽습니다. 없으면 켤 때 무엇이 필요한지 앱이 말해줍니다 |
 | **`claude` CLI** + 로그인 | Claude Code 세션용 — `npm i -g @anthropic-ai/claude-code` |
-| **`codex` CLI** + 로그인 | Codex 세션용 — `npm i -g @openai/codex`. 안 쓰면 없어도 됩니다 |
+| **`codex` CLI** + 로그인 | Codex 세션용 — `npm i -g @openai/codex` |
+| **Cursor CLI** (`agent`) + 로그인 | Cursor 세션용 — `curl https://cursor.com/install -fsS \| bash` (Windows: `irm 'https://cursor.com/install?win32=true' \| iex`) |
+| **`opencode` CLI** | OpenCode 세션용 — `npm i -g opencode-ai` |
+| **Antigravity** | 따로 설치할 것 없음 — Centralu가 Antigravity 줄에서 설치하고 Google 로그인까지 해줍니다 |
 
-둘 중 하나만 있어도 시작할 수 있습니다. 첫 화면이 무엇을 찾았는지 보여주고, 없는
+이 중 하나만 있어도 시작할 수 있습니다. 첫 화면이 무엇을 찾았는지 보여주고, 없는
 쪽은 설치 명령까지 적어줍니다.
 
 ## 설치
