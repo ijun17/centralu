@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import { App, prepareFirstPaint, useStore } from '@cc/ui'
+import { devTabKey } from './dev-tab-key.js'
 import { createWebPlatform, type RpcClient } from '@cc/platform/web'
 import { createMockPlatform } from '@cc/platform/mock'
 import type { Platform } from '@cc/platform/ports'
@@ -23,7 +24,8 @@ let rpcClient: RpcClient | null = null
 // A failure is a screen to draw: thrown, it leaves a blank page
 const started = startPlatform<Platform>(location.search, import.meta.env, {
   mock: seedMock,
-  host: (opts) => createWebPlatform({ ...opts, onRpcClient: (c) => (rpcClient = c) }),
+  // A dev tab presents the key of the person's trust in every hello, so a reload keeps it (dev-tab-key.ts)
+  host: (opts) => createWebPlatform({ ...opts, onRpcClient: (c) => (rpcClient = c), ...(import.meta.env.DEV ? { devTabKey: devTabKey.read } : {}) }),
 })
 
 function seedMock(): Platform {

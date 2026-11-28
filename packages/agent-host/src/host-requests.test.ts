@@ -2,12 +2,13 @@
 import { describe, expect, it } from 'vitest'
 import { HostRequest as HostRequestSchema, type HostRequest, type NormalizedEvent, type TrashedSession } from '@cc/protocol'
 import { HostRequests, quotedName, type HostRequestsDeps } from './host-requests.js'
+import { DevTabs } from './transport/dev-tabs.js'
 
 const row = (id: string, name: string, extra: Partial<TrashedSession> = {}): TrashedSession =>
   ({ id, name, tool: 'claude', project: null, deletedAt: 1000, messages: 4, bytes: 2048, conversationFile: 'keep', worktree: null, ...extra })
 
 /** A host with a trash, a window that may or may not be attached, and every call it is asked to make recorded */
-function harness(opts: { trash?: TrashedSession[]; canShow?: boolean; limits?: HostRequestsDeps['limits']; failPurge?: string } = {}) {
+function harness(opts: { trash?: TrashedSession[]; canShow?: boolean; limits?: HostRequestsDeps['limits']; failPurge?: string; devTabs?: DevTabs } = {}) {
   let trash = opts.trash ?? [row('s1', 'Fix the parser'), row('m1.s2', 'Remote work', { machine: 'Laptop' })]
   const events: NormalizedEvent[] = []
   const calls: [string, unknown][] = []
@@ -37,6 +38,7 @@ function harness(opts: { trash?: TrashedSession[]; canShow?: boolean; limits?: H
     // The host's sessions by name: "named" has one, "unnamed" has none, "long" is all format characters
     sessionName: (id) => ({ named: 'Assistant', long: String.fromCharCode(0x202e).repeat(200) })[id] ?? null,
     limits: opts.limits,
+    ...(opts.devTabs ? { devTabs: opts.devTabs } : {}),
     rpc: async (method, params, ctx) => {
       if (!Object.hasOwn(lists, method)) {
         rights.set(method, ctx?.rights)
@@ -376,45 +378,76 @@ describe('a host request (#1405)', () => {
     expect(h.calls).toEqual([])
   })
 
-  it('host.trustDevTab shows the origin, pairing code, and linked-machine scope, and resolves on Allow', async () => {
-    const h = harness()
-    const asked = h.requests.ask('host.trustDevTab', { code: 'K7M-4P2' }, { client: null, origin: 'http://127.0.0.1:5174' }, new AbortController().signal)
+  it('host.trustDevTab shows the code the host gave this tab, and answers Allow with a key that trusts only that socket', async () => {
+    const devTabs = new DevTabs()
+    const h = harness({ devTabs })
+    const code = devTabs.issueCode(7)
+    const asked = h.requests.ask('host.trustDevTab', { code }, { client: null, origin: 'http://127.0.0.1:5174', socket: 7 }, new AbortController().signal)
     const card = await h.nextCard()
     expect(card.method).toBe('host.trustDevTab')
     expect(card.question).toContain('"http://127.0.0.1:5174"')
-    expect(card.question).toContain('K7M-4P2')
-    expect(card.question).toContain('linked machines')
-    expect(card.question).toContain('limited credential')
+    expect(card.question).toContain(code)
+    expect(card.question).toContain('linked computers')
+    expect(card.question).toContain('Settings → Permissions')
+    expect(devTabs.trusts(7)).toBe(false)
     expect(h.requests.answer(card.requestId, 'allow')).toBe(true)
-    await expect(asked).resolves.toEqual({ ok: true })
-    // Trust state lives on the transport socket, never invokes an RPC handler directly
+    const { key } = (await asked) as { key: string }
+    expect(key).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    expect(devTabs.trusts(7)).toBe(true)
+    expect(devTabs.trusts(8)).toBe(false)
+    // Trust is the registry's, never a call through the router
     expect(h.calls).toEqual([])
   })
 
-  it('generic() propagates from.trustedDev to deps.rpc while keeping rights: limited', async () => {
-    const h = harness()
-    const asked = h.requests.ask(
-      'agents.deleteSession',
-      { sessionId: 's1' },
-      { client: null, trustedDev: true },
-      new AbortController().signal,
-    )
-    const card = await h.nextCard()
-    expect(h.requests.answer(card.requestId, 'allow')).toBe(true)
-    await asked
+  it('a card’s call runs as its tab’s trust stands when it runs, with the limited credential’s rights', async () => {
+    const devTabs = new DevTabs()
+    const h = harness({ devTabs })
+    devTabs.grant('http://127.0.0.1:5174', 7)
+    const run = async (sessionId: string) => {
+      const asked = h.requests.ask('agents.deleteSession', { sessionId }, { client: null, socket: 7 }, new AbortController().signal)
+      const card = await h.nextCard()
+      return { asked, card }
+    }
+    const trusted = await run('s1')
+    h.requests.answer(trusted.card.requestId, 'allow')
+    await trusted.asked
     expect(h.rights.get('agents.deleteSession')).toBe('limited')
     expect(h.trustedDevs.get('agents.deleteSession')).toBe(true)
+    // Taken back while the card stood: the call is a script's
+    const revoked = await run('m1.s2')
+    devTabs.revoke(devTabs.list()[0]!.id)
+    h.requests.answer(revoked.card.requestId, 'allow')
+    await revoked.asked
+    expect(h.trustedDevs.get('agents.deleteSession')).toBeUndefined()
   })
 
-  it('host.trustDevTab rejects malformed codes, missing origins, and denials without raising invalid cards', async () => {
-    const h = harness()
-    expect((await caught(h.requests.ask('host.trustDevTab', { code: 'bad' }, { client: null, origin: 'http://127.0.0.1:5174' }, new AbortController().signal))).data?.refused).toBe('not_done')
-    expect((await caught(h.requests.ask('host.trustDevTab', { code: 'K7M-4P2' }, { client: null }, new AbortController().signal))).data?.refused).toBe('not_done')
-    expect(h.raised()).toEqual([])
-
-    const denied = h.requests.ask('host.trustDevTab', { code: 'K7M-4P2' }, { client: null, origin: 'http://127.0.0.1:5174' }, new AbortController().signal)
-    const card = await h.nextCard()
-    h.requests.answer(card.requestId, 'deny')
+  it('host.trustDevTab raises no card for a code the host did not give this socket, another origin, a session, a serve host or a tab gone meanwhile', async () => {
+    const devTabs = new DevTabs()
+    const h = harness({ devTabs })
+    const tab = { client: null, origin: 'http://127.0.0.1:5174', socket: 7 }
+    const ask = (params: unknown, from: Parameters<HostRequests['ask']>[2], signal = new AbortController().signal) => h.requests.ask('host.trustDevTab', params, from, signal)
+    // The requester picks the code: refused, and so is the host's own code asked from another socket
+    expect((await caught(ask({ code: 'K7M-4P2' }, tab))).data?.refused).toBe('not_done')
+    const other = devTabs.issueCode(8)
+    expect((await caught(ask({ code: other }, tab))).data?.refused).toBe('not_done')
+    expect((await caught(ask({ code: devTabs.issueCode(7) }, { ...tab, origin: 'http://tauri.localhost' }))).data?.refused).toBe('not_done')
+    expect((await caught(ask({ code: devTabs.issueCode(7) }, { client: null, socket: 7 }))).data?.refused).toBe('not_done')
+    expect((await caught(ask({ code: devTabs.issueCode(7) }, { ...tab, session: 'sess-1' }))).data?.refused).toBe('not_done')
+    expect((await caught(harness().requests.ask('host.trustDevTab', { code: 'K7M-4P2' }, tab, new AbortController().signal))).data?.refused).toBe('not_done')
+    // One code raises one card: the same code again is refused
+    const code = devTabs.issueCode(7)
+    const denied = ask({ code }, tab)
+    expect((await caught(ask({ code }, tab))).data?.refused).toBe('not_done')
+    h.requests.answer((await h.nextCard()).requestId, 'deny')
     expect((await caught(denied)).data?.refused).toBe('denied')
+    expect(h.raised()).toHaveLength(1)
+    // Allowed after its tab went: no key and no trust
+    const leaving = new AbortController()
+    const late = ask({ code: devTabs.issueCode(7) }, tab, leaving.signal)
+    const card = await h.nextCard()
+    leaving.abort()
+    h.requests.answer(card.requestId, 'allow')
+    await caught(late)
+    expect(devTabs.list()).toEqual([])
   })
 })

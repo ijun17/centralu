@@ -30,6 +30,8 @@ export type RpcClientOptions = {
   maxPendingCalls?: number
   /** The most bytes of unsent frames that may wait for a connection */
   maxQueuedBytes?: number
+  /** A dev browser tab's key from the person's trust (`host.trustDevTab`), read at each hello: the host restores the trust on the new socket */
+  devTabKey?: () => string | null
 }
 
 /** `frame`: null once sent over an authenticated socket; only such a call is rejected on a disconnect */
@@ -79,6 +81,7 @@ export class RpcClient {
   private ready = false
   /** Connection rights reported by `hello_ok` (`'limited'` on limited credentials, `'full'` otherwise; null while disconnected) */
   private connectionRights: 'full' | 'limited' | null = null
+  private devTrusted = false
   private attempt = 0
   private closed = false
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined
@@ -97,6 +100,7 @@ export class RpcClient {
     this.cursor.forget()
     this.ready = false
     this.connectionRights = null
+    this.devTrusted = false
     this.clearTimers()
     // Detached first: close() is asynchronous, and the old onclose would clear the new socket and open another
     // reconnect, two sockets applying each streaming delta twice (measured)
@@ -138,6 +142,11 @@ export class RpcClient {
     return this.connectionRights
   }
 
+  /** Whether this socket's hello restored the person's trust in this dev browser tab (`devTabKey`) */
+  get trustedDev(): boolean {
+    return this.devTrusted
+  }
+
   connect(): void {
     if (this.closed) return
     // The backoff timer and updateEndpoint can overlap: never two sockets
@@ -145,6 +154,7 @@ export class RpcClient {
     this.clearTimers()
     this.ready = false
     this.connectionRights = null
+    this.devTrusted = false
     this.emitConn('connecting')
     const ws = new this.WS(this.opts.url)
     this.ws = ws
@@ -161,6 +171,7 @@ export class RpcClient {
           // This window shows the cards of the limited credential's calls (#1405); a host counts on it only with the token
           shows: [SHOWS_HOST_REQUESTS],
           ...this.cursor.resumeFrom(),
+          ...devTabKeyField(this.opts.devTabKey?.()),
         }),
       )
     }
@@ -184,6 +195,7 @@ export class RpcClient {
     this.ws = null
     this.ready = false
     this.connectionRights = null
+    this.devTrusted = false
     this.clearTimers()
     if (this.closed) return
     // Its answer never comes, even after a reconnect; left alone, a session would sit at 'working' for good
@@ -213,6 +225,7 @@ export class RpcClient {
       this.greeted = true
       this.ready = true
       this.connectionRights = frame.rights ?? 'full'
+      this.devTrusted = frame.trustedDev === true
       this.attempt = 0
       // protocol.md §1: a gap that cannot be replayed is read from the snapshot, and so is what the screen held when a
       // new host is met
@@ -366,6 +379,7 @@ export class RpcClient {
     this.closed = true
     this.ready = false
     this.connectionRights = null
+    this.devTrusted = false
     this.clearTimers()
     this.detach(this.ws)
     this.ws = null
@@ -373,4 +387,8 @@ export class RpcClient {
       this.take(id)?.reject(rpcError('Connection closed', 'connection_closed', false))
     }
   }
+}
+
+function devTabKeyField(key: string | null | undefined): { devTabKey?: string } {
+  return key ? { devTabKey: key } : {}
 }

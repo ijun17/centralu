@@ -6,6 +6,8 @@ import type { WindowRpc } from './sessions/window-rpc.js'
 import { plainQuoted } from './sessions/tool-answers.js'
 import { rpcError } from './rpc-error.js'
 import { asItRuns, effectOf, namedTargets } from './host-request-targets.js'
+import { isDevTabOrigin, type DevTabs } from './transport/dev-tabs.js'
+import type { RequestFrom } from './transport/server.js'
 
 /**
  * Host requests (#1405): a call made with the limited credential that cannot be undone or widens what runs unasked (`asks` in
@@ -46,17 +48,11 @@ export type HostRequestsDeps = {
   canShow: () => boolean
   /** A session's name, to say on a card which session's process asked (#1405); null when there is none */
   sessionName?: (sessionId: string) => string | null
+  /** The dev browser tabs the person trusted (transport/dev-tabs.ts); absent on a `centralu serve` host, which refuses the ask */
+  devTabs?: DevTabs
   now?: () => number
   limits?: Partial<typeof HOST_REQUEST_LIMITS>
 }
-
-/**
- * Who asked, as the hello said it: what the program called itself (never checked), the session whose credential it holds
- * (#1405), the dev browser `Origin` header (browser-enforced, though spoofable by local processes — the pairing code on the
- * desktop card is the real approval boundary), and whether this open socket was already trusted as a local dev tab for human
- * message attribution
- */
-export type RequestFrom = { client: string | null; session?: string; origin?: string; trustedDev?: true }
 
 type Waiting = { request: HostRequest; settle: (answer: 'allow' | 'deny' | null, outcome: HostRequestOutcome) => void }
 
@@ -102,23 +98,31 @@ export class HostRequests {
   }
 
   /**
-   * A local `dev:live` browser tab asking to attribute messages on its single open WebSocket as typed by the person
-   * rather than as a script. The card displays the reported `Origin` header and the tab's 6-char pairing code — the code
-   * match in the desktop window is the security boundary (local processes can spoof `Origin`). Never grants full/window rights.
+   * A dev browser tab asking to send as the person (docs/security-boundaries/dev-browser-tabs.md). The code on the card is
+   * the one the host gave this socket (`host.devTabCode`), so the person compares the host's code with the tab's; any local
+   * program can set the `Origin` header and raise this card, which is why the card asks for the match. The answer is the
+   * tab's key, which restores the trust on its reconnects; the socket's rights stay the limited credential's.
    */
-  private async trustDevTab(params: unknown, from: RequestFrom, signal: AbortSignal): Promise<{ ok: true }> {
+  private async trustDevTab(params: unknown, from: RequestFrom, signal: AbortSignal): Promise<{ ok: true; key: string; expiresAt: number }> {
+    const notDone = (why: string) => refused('not_done', `host.trustDevTab was not done: ${why}.`)
+    const devTabs = this.deps.devTabs
+    if (!devTabs) throw notDone('only a desktop host trusts a dev browser tab, not a centralu serve host')
+    if (from.session !== undefined || from.socket === undefined) throw notDone('only a dev browser tab holding the limited credential asks to be trusted')
+    if (!isDevTabOrigin(from.origin)) throw notDone('it did not come from a local dev browser origin (127.0.0.1 or localhost on port 5173 or 5174)')
     const runs = asItRuns('host.trustDevTab', params)
-    if (!runs.ok) throw refused('not_done', `host.trustDevTab was not done: ${runs.why}.`)
-    if (!from.origin) throw refused('not_done', 'host.trustDevTab was not done: no dev browser origin was provided.')
+    if (!runs.ok) throw notDone(runs.why)
     const code = str(fields(runs.params).code)
+    if (!devTabs.takeCode(from.socket, code)) throw notDone('the code is not the one this host gave this tab; ask again from the tab')
     const question =
-      `Trust the dev browser tab at ${plainQuoted(from.origin, 120)} (code ${code}) to send messages as you? ` +
-      'Messages from this open tab (including to linked machines) will be recorded as typed by you rather than as a script until the tab reloads or disconnects. ' +
-      'It stays on the limited credential: approvals, deletions, mail, and security settings still require the Centralu desktop window. ' +
-      'Allow only if you clicked Trust this tab and see the same code there.'
+      `Let the dev browser tab at ${plainQuoted(from.origin, 120)} send messages as you? It shows the code ${code}. ` +
+      'Its messages, also to linked computers, then read as typed by you rather than by a script, until the tab is closed, for at most 24 hours. ' +
+      'It keeps the rights of a program on this computer: approvals, deletions, mail and settings stay with this window. ' +
+      'Allow only if you clicked "Trust this tab" and the tab shows the same code. Settings → Permissions takes it back.'
     const answer = await this.card('host.trustDevTab', question, from, signal)
     if (answer.decision !== 'allow') throw unanswered('host.trustDevTab', answer.outcome)
-    return { ok: true }
+    // A tab gone while the card stood never gets the key: a grant nobody holds would only wait out its 24 hours in Settings
+    if (signal.aborted) throw unanswered('host.trustDevTab', 'withdrawn')
+    return { ok: true, ...devTabs.grant(from.origin, from.socket) }
   }
 
   /**
@@ -147,7 +151,9 @@ export class HostRequests {
       throw refused('not_done', `${method} was not done: what its card named changed while it stood (${now.ok ? `now ${now.text}` : now.why}).`)
     }
     // It runs as the call it was: a limited credential's (a script's createSession is told from a window's by it, §8.1)
-    return this.deps.rpc(method, runs.params, { client: -1, rights: 'limited', label: from.client, ...(from.trustedDev ? { trustedDev: true as const } : {}) })
+    // Its tab's trust as it stands now, not when the card was raised: one taken back meanwhile is a script's call
+    const trusted = from.socket !== undefined && this.deps.devTabs?.trusts(from.socket) === true
+    return this.deps.rpc(method, runs.params, { client: -1, rights: 'limited', label: from.client, ...(trusted ? { trustedDev: true as const } : {}) })
   }
 
   /** The requests waiting, oldest first */

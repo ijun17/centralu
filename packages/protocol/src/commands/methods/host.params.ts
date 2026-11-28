@@ -215,8 +215,15 @@ export const hostParams = {
    * --window` and cannot write to a host it did not start. `cancelled`: the announced end was called off
    */
   'host.systemEnding': z.object({ cancelled: z.boolean().optional() }),
-  /** Local dev:live tab pairing code for human message attribution on this socket only */
+  /**
+   * A local dev browser tab's pairing (docs/security-boundaries/dev-browser-tabs.md): `host.devTabCode` gives this socket a
+   * code the host chose, `host.trustDevTab` raises the person's card showing it and answers with the tab's key
+   */
+  'host.devTabCode': z.object({}),
   'host.trustDevTab': z.object({ code: z.string().regex(/^[A-Z0-9]{3}-[A-Z0-9]{3}$/) }),
+  /** The window's list of trusted dev browser tabs, and taking one back */
+  'host.devTabs': z.object({}),
+  'host.revokeDevTab': z.object({ id: z.string().regex(/^[0-9a-f]{8}$/) }),
   /**
    * docs/plans/remote-hub.md §12.7: sent at every connect and when its switch changes. This host calls that hub back only
    * on the connection the offer came in on, and shows it "not reachable" once that is gone.

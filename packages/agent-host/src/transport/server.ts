@@ -7,7 +7,6 @@ import {
   HoldCallParams,
   PROTOCOL_VERSION,
   ProtocolErrorCode,
-  RpcMethods,
   type HostBuild,
   type HostHandover,
   type HostLogon,
@@ -31,6 +30,7 @@ import { answerKeyProve, HostSigningKey, linkAddressOf, verifyKeyHello, type Key
 import { DrainCut, type Drain } from '../drain.js'
 import { peerAnswer, rpcError } from '../rpc-error.js'
 import { durationText } from '../timing.js'
+import { isDevTabOrigin, type DevTabs } from './dev-tabs.js'
 
 /** The WS server (docs/protocol.md §1), identical in dev and prod; loopback binding plus a token handshake generated at startup */
 /**
@@ -63,8 +63,8 @@ export type RpcContext = {
    */
   session?: string
   /**
-   * The person explicitly approved this open local `dev:live` browser socket via a pairing card (`host.trustDevTab`)
-   * for human message attribution only. Never grants full/window rights and never outlives the socket.
+   * A dev browser tab the person trusted to send as them (transport/dev-tabs.ts): attribution only, never a right; the
+   * call keeps the limited credential's rights
    */
   trustedDev?: true
   /**
@@ -74,19 +74,17 @@ export type RpcContext = {
   window?: true
 }
 
-export type RpcHandler = (method: string, params: unknown, ctx?: RpcContext) => Promise<unknown>
+/** The same, as a caller inside the host builds it (a card's run, the Assistant's window calls): `rights` defaults to full */
+export type CallContext = Omit<RpcContext, 'rights'> & { rights?: RpcContext['rights'] }
 
 /**
- * Local Vite dev origins that may ask the person to trust an open browser tab for human message attribution
- * (`host.trustDevTab`). Separate from `allowedOrigins` / `CC_HOST_ALLOWED_ORIGINS` so a proxy, Tauri WebView,
- * or origin-less native client never enters this path.
+ * Who asked, as the hello said it: what the program called itself (never checked), the session whose credential it holds
+ * (#1405), the `Origin` header (any local process can set it), and the socket it asked on (`RpcContext.client`), whose
+ * trust as a dev browser tab is read from dev-tabs.ts when the call runs
  */
-const DEV_TAB_ORIGINS: ReadonlySet<string> = new Set([
-  'http://127.0.0.1:5173',
-  'http://127.0.0.1:5174',
-  'http://localhost:5173',
-  'http://localhost:5174',
-])
+export type RequestFrom = { client: string | null; session?: string; origin?: string; socket?: number }
+
+export type RpcHandler = (method: string, params: unknown, ctx?: RpcContext) => Promise<unknown>
 
 export const DEFAULT_ALLOWED_ORIGINS = [
   'http://127.0.0.1:5173',
@@ -194,9 +192,14 @@ export type HostServerOptions = {
   onAsk?: (
     method: string,
     params: unknown,
-    from: { client: string | null; session?: string; origin?: string; trustedDev?: true },
+    from: RequestFrom,
     signal: AbortSignal,
   ) => Promise<unknown>
+  /**
+   * The dev browser tabs the person trusted (dev-tabs.ts): which limited sockets send as the person, restored at a hello that
+   * presents its key. Absent on a `centralu serve` host
+   */
+  devTabs?: DevTabs
   /** The host's state a conditional right reads (method-rights.ts `RightsHost`); without it every such call asks */
   rightsHost?: RightsHost
   /**
@@ -278,6 +281,8 @@ export class HostServer {
   private http: Server
   private clients = new Set<WebSocket>()
   private showing = new Set<WebSocket>()
+  /** The sockets in with the limited credential, which get no card's events (`sees`) */
+  private limitedOnes = new Set<WebSocket>()
   private lastClient = 0
   private handshakeTimers = new Map<WebSocket, ReturnType<typeof setTimeout>>()
   /**
@@ -449,7 +454,15 @@ export class HostServer {
     const body = JSON.stringify(event)
     const entry = this.log.append(event, body.length)
     const frame = `{"kind":"event","seq":${entry.seq},"event":${body}}`
-    for (const ws of this.clients) this.sendTo(ws, frame)
+    for (const ws of this.clients) if (this.sees(ws, event)) this.sendTo(ws, frame)
+  }
+
+  /**
+   * Whether a socket gets an event, live or replayed: a card waiting for the person is not for a socket holding the limited
+   * credential, which cannot answer it and would only show an Allow that is always refused, and read what other programs asked
+   */
+  private sees(ws: WebSocket, event: NormalizedEvent): boolean {
+    return !(this.limitedOnes.has(ws) && (event.type === 'host_request' || event.type === 'host_request_resolved'))
   }
 
   /**
@@ -557,8 +570,6 @@ export class HostServer {
     let authed = false
     let bridgeOf: string | null = null
     let limited = false
-    let trustedDev = false
-    let trustingDev = false
     let session: string | undefined
     let label: string | null = null
     const leaving = new AbortController()
@@ -737,7 +748,10 @@ export class HostServer {
           this.showing.add(ws)
           this.opts.onShowing?.(this.showing.size)
         }
-        this.greet(ws, frame.data.afterSeq ?? 0, frame.data.streamEpoch, limited)
+        if (limited) this.limitedOnes.add(ws)
+        const devKey = frame.data.devTabKey
+        const trustedDev = devKey !== undefined && limited && session === undefined && isDevTabOrigin(origin) && (this.opts.devTabs?.restore(devKey, origin, client) ?? false)
+        this.greet(ws, frame.data.afterSeq ?? 0, frame.data.streamEpoch, { limited, trustedDev })
         return
       }
 
@@ -769,91 +783,18 @@ export class HostServer {
        * a linked machine's session is judged on this host, where it started, and never relayed
        */
       if (limited) {
-        if (method === 'host.trustDevTab') {
-          const who = `client=${client} label=${JSON.stringify(label)} origin=${JSON.stringify(origin)}`
-          if (this.opts.servedBy === 'serve' || this.opts.fullCredentials !== undefined) {
-            console.error(`[agent-host] refused "host.trustDevTab" (${who}): serve host`)
-            return this.sendError(ws, id, {
-              code: 'internal',
-              message: 'host.trustDevTab is only available on a local desktop host, not a centralu serve host',
-              retryable: false,
-              data: { refused: 'rights', rights: 'asks' },
-            })
-          }
-          if (session !== undefined) {
-            console.error(`[agent-host] refused "host.trustDevTab" (${who}): session credential`)
-            return this.sendError(ws, id, {
-              code: 'internal',
-              message: 'A session credential cannot ask to trust a dev browser tab',
-              retryable: false,
-              data: { refused: 'rights', rights: 'asks' },
-            })
-          }
-          if (origin === null || !DEV_TAB_ORIGINS.has(origin)) {
-            console.error(`[agent-host] refused "host.trustDevTab" (${who}): non-dev origin`)
-            return this.sendError(ws, id, {
-              code: 'internal',
-              message: 'host.trustDevTab is only allowed from a local dev browser origin (127.0.0.1 or localhost on port 5173 or 5174)',
-              retryable: false,
-              data: { refused: 'rights', rights: 'asks' },
-            })
-          }
-          const parsed = RpcMethods['host.trustDevTab'].params.safeParse(params)
-          if (!parsed.success) {
-            console.error(`[agent-host] refused "host.trustDevTab" (${who}): invalid params`)
-            return this.sendError(ws, id, {
-              code: 'internal',
-              message: `host.trustDevTab was not done: ${parsed.error.issues[0]?.message ?? 'invalid parameters'}.`,
-              retryable: false,
-              data: { refused: 'not_done' },
-            })
-          }
-          if (trustedDev) {
-            this.sendTo(ws, JSON.stringify({ kind: 'res', id, ok: true, result: { ok: true } }))
-            return
-          }
-          if (trustingDev) {
-            console.error(`[agent-host] refused "host.trustDevTab" (${who}): already waiting`)
-            return this.sendError(ws, id, {
-              code: 'internal',
-              message: 'A trust request for this dev browser tab is already waiting in the Centralu window',
-              retryable: false,
-              data: { refused: 'not_done' },
-            })
-          }
-          if (!this.opts.onAsk) {
-            console.error(`[agent-host] refused "host.trustDevTab" (${who}): no host-request handler`)
-            const refusal = limitedRefusal(method, params, this.opts.rightsHost ?? null)
-            return this.sendError(ws, id, {
-              code: 'internal',
-              message: refusal?.message ?? 'host.trustDevTab requires the Centralu window',
-              retryable: false,
-              data: { refused: 'rights', rights: refusal?.rights ?? 'asks' },
-            })
-          }
-          trustingDev = true
-          try {
-            const result = await this.opts.onAsk(method, parsed.data, { client: label, origin }, leaving.signal)
-            if (!leaving.signal.aborted) {
-              trustedDev = true
-              console.error(`[agent-host] trusted dev tab for human message attribution (${who})`)
-            }
-            this.sendTo(ws, JSON.stringify({ kind: 'res', id, ok: true, result }))
-          } catch (err) {
-            const data: unknown = err !== null && typeof err === 'object' && 'data' in err ? err.data : undefined
-            this.sendError(ws, id, { code: 'internal', message: errorMessage(err), retryable: err instanceof DrainCut, ...(data !== undefined ? { data } : {}) })
-          } finally {
-            trustingDev = false
-          }
-          return
-        }
         const refusal = limitedRefusal(method, params, this.opts.rightsHost ?? null)
         if (refusal?.rights === 'asks' && this.opts.onAsk) {
           try {
             const result = await this.opts.onAsk(
               method,
               params,
-              { client: label, ...(session ? { session } : {}), ...(trustedDev ? { trustedDev: true as const } : {}) },
+              {
+                client: label,
+                ...(session ? { session } : {}),
+                ...(origin !== null ? { origin } : {}),
+                socket: client,
+              },
               leaving.signal,
             )
             this.sendTo(ws, JSON.stringify({ kind: 'res', id, ok: true, result }))
@@ -881,7 +822,7 @@ export class HostServer {
             label,
             ...(covered ? { covered: true } : {}),
             ...(session ? { session } : {}),
-            ...(trustedDev ? { trustedDev: true as const } : {}),
+            ...(limited && this.opts.devTabs?.trusts(client) ? { trustedDev: true as const } : {}),
             ...(this.showing.has(ws) ? { window: true as const } : {}),
           })
         const result = await (this.opts.drain ? this.opts.drain.track(`rpc ${method}`, run) : run())
@@ -909,6 +850,8 @@ export class HostServer {
       this.fullBy.delete(ws)
       this.hubLinks.delete(ws)
       if (this.showing.delete(ws)) this.opts.onShowing?.(this.showing.size)
+      this.limitedOnes.delete(ws)
+      this.opts.devTabs?.release(client)
       leaving.abort()
       if (this.byClient.get(client) === ws) this.byClient.delete(client)
       this.failCalls(ws, 'The connection ended before it answered')
@@ -1011,7 +954,7 @@ export class HostServer {
     for (const call of [...pending.values()]) call.reject(rpcError(why, 'internal', { retryable: false }))
   }
 
-  private helloOk(resyncRequired: boolean, limited = false): string {
+  private helloOk(resyncRequired: boolean, { limited = false, trustedDev = false }: { limited?: boolean; trustedDev?: boolean } = {}): string {
     return JSON.stringify({
       kind: 'hello_ok',
       protocolVersion: PROTOCOL_VERSION,
@@ -1024,6 +967,7 @@ export class HostServer {
       ...(this.opts.handover?.() ? { handover: this.opts.handover() } : {}),
       ...(this.opts.updateContinued ? { updateContinued: this.opts.updateContinued() } : {}),
       ...(limited ? { rights: 'limited' as const } : {}),
+      ...(trustedDev ? { trustedDev: true as const } : {}),
     })
   }
 
@@ -1034,17 +978,17 @@ export class HostServer {
    * cursor where it was, and the next reconnect would ask for the same oversized window, a loop that never converges (the
    * livelock of #91; measured: a 2,000 x 50 kB history replayed to a stalled peer left 99.6 MB buffered)
    */
-  private greet(ws: WebSocket, afterSeq: number, streamEpoch: string | undefined, limited: boolean): void {
+  private greet(ws: WebSocket, afterSeq: number, streamEpoch: string | undefined, rights: { limited: boolean; trustedDev: boolean }): void {
     const window = this.log.since(afterSeq, streamEpoch)
     const hub = this.hubLinks.has(ws)
-    const frames = window.events.filter((e) => hub || e.event.type !== 'host_credential_used').map((e) => JSON.stringify({ kind: 'event', seq: e.seq, event: e.event }))
-    let bytes = ws.bufferedAmount + wireBytes(this.helloOk(window.resyncRequired, limited))
+    const frames = window.events.filter((e) => (hub || e.event.type !== 'host_credential_used') && this.sees(ws, e.event)).map((e) => JSON.stringify({ kind: 'event', seq: e.seq, event: e.event }))
+    let bytes = ws.bufferedAmount + wireBytes(this.helloOk(window.resyncRequired, rights))
     for (const f of frames) bytes += wireBytes(f)
     if (bytes > this.limits.replayBudgetBytes) {
-      this.sendTo(ws, this.helloOk(true, limited))
+      this.sendTo(ws, this.helloOk(true, rights))
       return
     }
-    this.sendTo(ws, this.helloOk(window.resyncRequired, limited))
+    this.sendTo(ws, this.helloOk(window.resyncRequired, rights))
     for (const f of frames) this.sendTo(ws, f)
   }
 

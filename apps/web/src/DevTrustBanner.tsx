@@ -1,54 +1,38 @@
 import { useEffect, useRef, useState } from 'react'
-import { ShellBanner } from '@cc/ui'
+import { errorMessage } from '@cc/protocol/client'
+import { Button, ShellBanner } from '@cc/ui'
 import type { RpcClient } from '@cc/platform/web'
-
-const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-
-/** Random 6-char pairing code (`XXX-XXX`) shown in both this browser tab and the desktop approval card */
-function makePairingCode(): string {
-  const bytes = new Uint8Array(6)
-  crypto.getRandomValues(bytes)
-  const chars = Array.from(bytes, (b) => CODE_ALPHABET[b % CODE_ALPHABET.length] ?? 'A')
-  return `${chars.slice(0, 3).join('')}-${chars.slice(3).join('')}`
-}
+import { devTabKey } from './dev-tab-key.js'
 
 /**
- * Shown only in `apps/web` (`pnpm dev:live`) when connected with the limited credential.
- * Lets the person approve this open browser tab once in the real Centralu desktop window
- * so messages sent from here are recorded as typed by the person rather than as a script.
- * Trust lives only in memory on the host for this open WebSocket and resets automatically
- * on disconnect or page reload.
+ * Shown only in `apps/web` (`pnpm dev:live`) while connected with the limited credential and not trusted: lets the person
+ * trust this tab in the Centralu window, so what is sent from here is theirs and not a script's. The code is the host's
+ * (`host.devTabCode`), shown here and on the window's card. The trust's key stays in this tab (dev-tab-key.ts) and is
+ * presented at every reconnect; one the host no longer takes (expired, taken back in Settings, or a restarted host) is
+ * dropped, and this banner offers the trust again (docs/security-boundaries/dev-browser-tabs.md).
  */
 export function DevTrustBanner({ rpc }: { rpc: RpcClient }) {
-  const [limited, setLimited] = useState(() => rpc.connectionState === 'connected' && rpc.rights === 'limited')
+  const [limited, setLimited] = useState(false)
   const [trusted, setTrusted] = useState(false)
   const [dismissed, setDismissed] = useState(false)
   const [pendingCode, setPendingCode] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /** Each connection's own: an answer to a request from an earlier socket changes nothing */
   const reqGenRef = useRef(0)
 
   useEffect(() => {
-    const reset = (isLimited: boolean) => {
+    const settle = () => {
       reqGenRef.current += 1
-      setLimited(isLimited)
-      // Trust is bound strictly to one open WebSocket; clear local state on disconnect/reconnect
-      setTrusted(false)
       setPendingCode(null)
       setError(null)
+      const connected = rpc.connectionState === 'connected'
+      const isLimited = connected && rpc.rights === 'limited'
+      setLimited(isLimited)
+      setTrusted(isLimited && rpc.trustedDev)
+      if (isLimited && !rpc.trustedDev) devTabKey.forget()
     }
-    const isConnected = rpc.connectionState === 'connected'
-    if (isConnected) setLimited(rpc.rights === 'limited')
-    else reset(false)
-
-    const off = rpc.onConnectionChange((state) => {
-      if (state === 'disconnected' || state === 'connecting') {
-        reset(false)
-        return
-      }
-      if (state === 'connected') {
-        reset(rpc.rights === 'limited')
-      }
-    })
+    settle()
+    const off = rpc.onConnectionChange(settle)
     return () => {
       reqGenRef.current += 1
       off()
@@ -57,36 +41,33 @@ export function DevTrustBanner({ rpc }: { rpc: RpcClient }) {
 
   if (!limited || trusted || dismissed) return null
 
-  const requestTrust = () => {
-    if (pendingCode || rpc.connectionState !== 'connected' || rpc.rights !== 'limited') return
+  const requestTrust = async () => {
+    if (pendingCode) return
     const gen = ++reqGenRef.current
-    const code = makePairingCode()
-    setPendingCode(code)
     setError(null)
-    void rpc
-      .call('host.trustDevTab', { code })
-      .then(() => {
-        if (reqGenRef.current !== gen) return
-        setTrusted(true)
-        setPendingCode(null)
-      })
-      .catch((err: unknown) => {
-        if (reqGenRef.current !== gen) return
-        setPendingCode(null)
-        setError(err instanceof Error ? err.message : String(err))
-      })
+    try {
+      const { code } = await rpc.call('host.devTabCode', {})
+      if (reqGenRef.current !== gen) return
+      setPendingCode(code)
+      const { key } = await rpc.call('host.trustDevTab', { code })
+      if (reqGenRef.current !== gen) return
+      if (key) devTabKey.keep(key)
+      setTrusted(true)
+    } catch (err) {
+      if (reqGenRef.current !== gen) return
+      setError(errorMessage(err))
+    }
+    setPendingCode(null)
   }
 
   return (
     <ShellBanner testId="dev-trust-banner" role="status">
       {pendingCode ? (
         <span className="min-w-0 flex-1 truncate" data-testid="dev-trust-pending">
-          Confirm code <strong className="font-mono text-ink">{pendingCode}</strong> in the Centralu desktop window to send messages as you…
+          Allow it in the Centralu window if it shows the code <strong className="font-mono text-ink">{pendingCode}</strong>
         </span>
       ) : (
-        <span className="min-w-0 flex-1 truncate">
-          Dev preview (limited): messages sent from this tab are tagged as a script.
-        </span>
+        <span className="min-w-0 flex-1 truncate">Dev preview (limited): messages sent from this tab are tagged as a script.</span>
       )}
       {error && (
         <span className="min-w-0 max-w-[40%] truncate text-danger" title={error} data-testid="dev-trust-error">
@@ -95,20 +76,12 @@ export function DevTrustBanner({ rpc }: { rpc: RpcClient }) {
       )}
       {!pendingCode && (
         <>
-          <button
-            className="shrink-0 rounded-md border border-line px-2 py-0.5 text-ink hover:border-line-strong"
-            onClick={requestTrust}
-            data-testid="dev-trust-button"
-          >
+          <Button size="xs" onClick={() => void requestTrust()} data-testid="dev-trust-button">
             {error ? 'Try again' : 'Trust this tab'}
-          </button>
-          <button
-            className="shrink-0 text-ink-faint hover:text-ink"
-            onClick={() => setDismissed(true)}
-            data-testid="dev-trust-dismiss"
-          >
+          </Button>
+          <Button size="xs" variant="ghost" onClick={() => setDismissed(true)} data-testid="dev-trust-dismiss">
             Dismiss
-          </button>
+          </Button>
         </>
       )}
     </ShellBanner>

@@ -51,6 +51,7 @@ import { markOwnChildren } from './dev-services/strays.js'
 import { hostLogPath, startupBanner, teeStderrToFile } from './log-file.js'
 import { hostDrain } from './drain.js'
 import { HostRequests } from './host-requests.js'
+import { DevTabs } from './transport/dev-tabs.js'
 import { credentialsReport, readCredentialFile, UsedCredentials, usedEvent, type FullCredential, type KeyCredential } from './lifecycle/serve-credentials.js'
 import { UsedCredentialsFile, usedCredentialsPath } from './lifecycle/used-credentials-file.js'
 import { realOs } from './os/real.js'
@@ -778,6 +779,8 @@ const activity = (): ActivitySnapshot => ({
 const updateAtRest = (besides?: string): boolean =>
   updateAtRestOf({ automatic: autoApplyUpdates.read(), draining: hostDrain.draining, activity: activity(), ...(besides !== undefined ? { besides } : {}) })
 mgr.useUpdateAtRest(updateAtRest)
+/** The dev browser tabs the person trusted (transport/dev-tabs.ts); a `centralu serve` host has no dev browser tab to trust */
+const devTabs = launch.startedByServe || launch.serveState ? undefined : new DevTabs()
 /**
  * The limited credential's calls that wait for the person (#1405, host-requests.ts): raised while a window that shows
  * them is attached, run through the router once allowed, as a call this host serves (a drain before a stop refuses or cuts it)
@@ -788,6 +791,7 @@ const requests: HostRequests = new HostRequests({
   canShow: (): boolean => server.showsHostRequests(),
   // Which session a session credential's card says asked (#1405)
   sessionName: (sessionId) => mgr.sessionName(sessionId),
+  ...(devTabs ? { devTabs } : {}),
 })
 /** The full credentials a socket said hello with on this host, for `host.credentials` once they are gone (#1405 review) */
 const usedCredentials = new UsedCredentials()
@@ -826,6 +830,7 @@ const router: Router = new Router({
     stopGate: launch.startedByServe && !launch.underKeeper ? createStopGate({ drain: hostDrain, activity: () => activityCounts(activity()) }) : undefined,
     // A sign-in's serve says it waits to take over, or gave up (#1224): kept for every hello, and told to who is connected
     systemEnding: systemEndingTold,
+    ...(devTabs ? { devTabs } : {}),
     handover: (h) => {
       handover = h
       server.broadcast({ type: 'host_handover', handover: h })
@@ -893,6 +898,7 @@ const server = new HostServer({
   onRpc: router.handle,
   // A limited call that cannot be undone waits for the person's card (#1405)
   onAsk: (method, params, from, signal): Promise<unknown> => requests.ask(method, params, from, signal),
+  ...(devTabs ? { devTabs } : {}),
   // What a conditional right reads of this host (method-rights.ts): an idle update of a machine that follows this hub (#1508), and whether applying an update is what Automatic updates would do now (#1509)
   rightsHost: { followsHub: (machineId) => links.followsHub(machineId), updateAtRest: () => updateAtRest() },
   // A card nobody can see is withdrawn once no window shows them for a while (host-requests.ts)
