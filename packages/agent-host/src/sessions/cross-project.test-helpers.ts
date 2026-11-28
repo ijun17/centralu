@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { NormalizedEvent, ToolName } from '@cc/protocol'
-import type { AgentAdapter, CreateSessionOpts, EventSink, InputObserver, SessionHandle } from '../adapters/contract.js'
+import type { Attachment, NormalizedEvent, ToolName } from '@cc/protocol'
+import { withAttachmentPaths, type AgentAdapter, type CreateSessionOpts, type EventSink, type InputObserver, type SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { eventually } from '../../../../tooling/test-timing.js'
 import type { AgentSessionActions } from './agent-session-actions.js'
@@ -40,9 +40,9 @@ export class CrossHandle implements SessionHandle {
   origins: unknown[] = []
   /** The inputs that went in without a turn (`SessionHandle.send`'s `opts.quiet`) */
   quiet: string[] = []
-  send(text: string, opts?: { id?: string; origin?: unknown; quiet?: boolean }) {
+  send(text: string, opts?: { id?: string; origin?: unknown; quiet?: boolean; attachments?: readonly Attachment[] }) {
     this.origins.push(opts?.origin)
-    this.sent.push(text)
+    this.sent.push(withAttachmentPaths(text, opts?.attachments))
     this.ids.push(opts?.id)
     // Quiet input is taken without a turn: it changes no state
     if (opts?.quiet) {
@@ -53,7 +53,7 @@ export class CrossHandle implements SessionHandle {
   }
   /** A test sets this to make the tool say it took a tracked input as it starts the turn, as Claude does (`InputObserver.accepted`) */
   acceptsAtOnce = false
-  sendTracked(text: string, observer?: InputObserver, opts?: { origin?: unknown; id?: string }): Promise<void> {
+  sendTracked(text: string, observer?: InputObserver, opts?: { origin?: unknown; id?: string; attachments?: readonly Attachment[] }): Promise<void> {
     const done = new Promise<void>((resolve, reject) => this.receipts.push({
       resolve: () => { observer?.complete(); resolve() },
       reject: (e) => { observer?.fail(e); reject(e) },

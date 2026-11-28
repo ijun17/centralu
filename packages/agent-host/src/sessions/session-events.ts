@@ -549,7 +549,7 @@ export class SessionEvents {
      * view's message (it came from outside the conversation, B-4), or work the app asked for (D-1) */
     fromAppVia: AppMessageVia = 'inline',
     /** `inputId`: the name this message goes in under when it joins a running turn, for the tool to name it back (`turnInputs`, `turnStartInputs`) */
-    sendInput?: (handle: SessionHandle, text: string, inputId?: string) => void,
+    sendInput?: (handle: SessionHandle, text: string, inputId?: string, attachments?: readonly Attachment[]) => void,
     /** What the message rests on, read once the session is awake and before anything is written: a reason refuses it. A wake or a restart
      * waited out here takes seconds, and the trust a task was let through on can go meanwhile */
     stillAllowed?: () => string | null,
@@ -640,16 +640,17 @@ export class SessionEvents {
       : relayed && from && relayedText !== undefined ? relayedText
       : from && (relayed || (this.host.tools.directs(sessionId) && !this.host.tools.directs(from.sessionId) && !isHubSender(from.sessionId)))
         ? untrustedSourceSessionNotification(from.sessionId)
-        : attachments?.length
-          ? `${text}\n\n${attachments.map((a) => `@${a.path}`).join('\n')}`
-          : text
-    const { input, notice } = this.withRootAppsNotice(sessionId, adapterText)
+        : null
+    // Only the sender's own words carry its files: a framed or swapped text never names them, as it never names the words
+    const files = adapterText === null && attachments?.length ? attachments : undefined
+    const toAgent = files ? { attachments: files } : {}
+    const { input, notice } = this.withRootAppsNotice(sessionId, adapterText ?? text)
     // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
     this.host.cardRests.turnAsked(sessionId)
-    if (sendInput) sendInput(h, input, inputId)
+    if (sendInput) sendInput(h, input, inputId, files)
     // Not with a line of Centralu's in front of it: that message is not only the person's words
-    else if (fromPerson === true && !notice) h.send(input, { origin: { kind: 'human' }, id: inputId })
-    else h.send(input, { id: inputId })
+    else if (fromPerson === true && !notice) h.send(input, { origin: { kind: 'human' }, id: inputId, ...toAgent })
+    else h.send(input, { id: inputId, ...toAgent })
     // It takes messages again: what could not be told it before goes in now (#1186)
     this.host.reports.deliverHeld(sessionId)
   }

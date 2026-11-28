@@ -55,7 +55,7 @@ const CAPABILITIES: AdapterCapabilities = {
   //   skill as `skills/system/run-workflow/SKILL.md` into the session's project at `session/new`; Windows 1.4.3 writes none
   //   (#2320, docs/plans/antigravity-acp.md §1 has the cause)
   // - System prompt & role text: passed through `_meta.antigravity.systemPrompt.append` on session/new, session/load, and session/resume
-  // - Not offered yet: untrusted projects (it reads the project's own instruction files, as the other ACP tools), images in the prompt
+  // - Not offered yet: untrusted projects (it reads the project's own instruction files, as the other ACP tools)
   ...ACP_CAPABILITIES,
   autoTitle: false,
   instructionChannel: 'developer',

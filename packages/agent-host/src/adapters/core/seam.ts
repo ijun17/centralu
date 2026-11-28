@@ -1,4 +1,4 @@
-import type { NormalizedEvent } from '@cc/protocol'
+import type { Attachment, NormalizedEvent } from '@cc/protocol'
 import type { AgentProcess } from '../contract.js'
 import type { InputReceipt } from '../input-receipts.js'
 import type { ToolLaunch } from './tool-process.js'
@@ -21,6 +21,8 @@ export type TurnInput = {
   readonly text: string
   /** The turn Centralu started to compact the session (`SessionEvents.sendCompact`), never the person's `/compact` */
   readonly compact: boolean
+  /** The files the message carries, for the wire to hand over its own way (`SessionHandle.send`) */
+  readonly attachments?: readonly Attachment[]
 }
 
 /**

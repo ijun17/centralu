@@ -1,5 +1,6 @@
 import type {
   AdapterCapabilities,
+  Attachment,
   ModelOption,
   UsageSnapshot,
   ApprovalDecision,
@@ -45,6 +46,15 @@ export * from './contract/surface.js'
  * interruption the person and the Assistant are told of. A Stop of ours ends a turn with `interrupted`.
  */
 export const INTERRUPTED_BY_TOOL = 'interrupted_by_tool'
+
+/**
+ * A message's attachments as the agent reads them in text: one `@<path>` line each after a blank line, which the CLI resolves
+ * itself (a project file relative to the session's folder, a pasted image by its saved absolute path). The one wording for every
+ * tool and for every attachment an ACP agent is not handed as content (`promptContent`)
+ */
+export function withAttachmentPaths(text: string, attachments: readonly Pick<Attachment, 'path'>[] | undefined): string {
+  return attachments?.length ? `${text}\n\n${attachments.map((a) => `@${a.path}`).join('\n')}` : text
+}
 
 export type CreateSessionOpts = {
   /** Absent: the adapter spawns its tool itself, as a child of this host */
@@ -311,9 +321,10 @@ export interface SessionHandle {
    * `id`: a name the host gives the input, which `turnInputs` then reports back (a UUID). `quiet`: appended to the conversation without
    * starting a turn, and read with the next message that does (Claude's `shouldQuery: false`). Only an adapter with `quietInput` takes
    * it; the mailbox's mail that must not wake goes this way. `compact`: this is Centralu's own compact command
-   * (`SessionEvents.sendCompact`), for a tool that can tell its compaction only from that turn (ACP, §5.6); others ignore it
+   * (`SessionEvents.sendCompact`), for a tool that can tell its compaction only from that turn (ACP, §5.6); others ignore it.
+   * `attachments`: the files the message carries; a tool that takes no file of its own names each by path (`withAttachmentPaths`)
    */
-  send(text: string, opts?: { origin?: InputOrigin; id?: string; quiet?: boolean; compact?: boolean }): void
+  send(text: string, opts?: { origin?: InputOrigin; id?: string; quiet?: boolean; compact?: boolean; attachments?: readonly Attachment[] }): void
   /**
    * A note for the model that never starts a turn and never interrupts one (#1492): Claude takes it as quiet input, read with
    * the next message or at the running turn's next tool round; Codex steers it into the regular turn that is running
@@ -347,7 +358,7 @@ export interface SessionHandle {
    */
   turnStartInputs?(): readonly string[] | null
   /** Completes after the consuming turn is recorded. The observer runs synchronously, before later turn frames. */
-  sendTracked?(text: string, observer?: InputObserver, opts?: { origin?: InputOrigin; id?: string }): Promise<void>
+  sendTracked?(text: string, observer?: InputObserver, opts?: { origin?: InputOrigin; id?: string; attachments?: readonly Attachment[] }): Promise<void>
   /** The matcher is computed by core and passed along by the UI (boundary rule: the host does not know core) */
   /**
    * The approval response. **Returns whether it reached anything** (false = no such request exists).

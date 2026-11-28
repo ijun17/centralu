@@ -2,8 +2,8 @@ import { query, type SettingSource } from '@anthropic-ai/claude-agent-sdk'
 import { randomUUID } from 'node:crypto'
 import { centraluInputId, type InputReceipt } from '../input-receipts.js'
 import { isUuid } from '../../uuid.js'
-import type { InputObserver } from '../contract.js'
-import type { ApprovalDecision, ApprovalScope, PermissionPreset, QuestionAnswer } from '@cc/protocol'
+import { withAttachmentPaths, type InputObserver } from '../contract.js'
+import type { ApprovalDecision, ApprovalScope, Attachment, PermissionPreset, QuestionAnswer } from '@cc/protocol'
 import { ClaudeLinks } from './exe-link.js'
 import { StartGate } from './start-gate.js'
 import type { UsageQuery } from './usage.js'
@@ -82,9 +82,9 @@ export class ClaudeSession implements SessionHandle {
    * From the first input: the CLI says whether it can track only in a turn's init, so what goes before (a wake of a resumed session) waits
    * for that, and a CLI that cannot track takes it when written (`onInit`). Gone once the CLI said it cannot
    */
-  sendTracked?: (text: string, observer?: InputObserver, opts?: { origin?: InputOrigin; id?: string }) => Promise<void> = (text, observer, opts) => {
+  sendTracked?: (text: string, observer?: InputObserver, opts?: { origin?: InputOrigin; id?: string; attachments?: readonly Attachment[] }) => Promise<void> = (text, observer, opts) => {
     const receipt = this.ledger.track(observer, opts?.id)
-    this.sendInput(text, receipt.id, receipt, opts?.origin)
+    this.sendInput(withAttachmentPaths(text, opts?.attachments), receipt.id, receipt, opts?.origin)
     return receipt.done
   }
   /** The wait for the CLI to say it read input given it at rest (`TurnStartWait`) */
@@ -537,8 +537,8 @@ export class ClaudeSession implements SessionHandle {
   }
 
   /** Every input goes out under an id with Centralu's mark, so its line in the transcript reads back as Centralu's (`centraluInputId`) */
-  send(text: string, opts?: { origin?: InputOrigin; id?: string; quiet?: boolean }): void {
-    this.sendInput(text, opts?.id !== undefined && isUuid(opts.id) ? opts.id : centraluInputId(), undefined, opts?.origin, opts?.quiet)
+  send(text: string, opts?: { origin?: InputOrigin; id?: string; quiet?: boolean; attachments?: readonly Attachment[] }): void {
+    this.sendInput(withAttachmentPaths(text, opts?.attachments), opts?.id !== undefined && isUuid(opts.id) ? opts.id : centraluInputId(), undefined, opts?.origin, opts?.quiet)
   }
 
   /**

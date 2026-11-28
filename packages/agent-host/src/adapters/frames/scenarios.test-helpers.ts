@@ -1,4 +1,4 @@
-import { alwaysAllowKey, type NormalizedEvent, type PermissionPreset } from '@cc/protocol'
+import { alwaysAllowKey, type Attachment, type NormalizedEvent, type PermissionPreset } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, SessionHandle } from '../contract.js'
 import { fakeApps, fakeCentraluTools } from './fakes.test-helpers.js'
 import type { ReplayState } from './replay.test-helpers.js'
@@ -61,7 +61,7 @@ export type Scenario = {
 }
 
 const ended = (e: NormalizedEvent) => e.type === 'turn_complete' || e.type === 'error' || (e.type === 'state_change' && e.state === 'waiting_input')
-const turn = async (d: Driver, text: string, opts?: { compact?: boolean }) => {
+const turn = async (d: Driver, text: string, opts?: { compact?: boolean; attachments?: readonly Attachment[] }) => {
   d.session().send(text, opts)
   return d.waitFor(`the end of the turn "${text.slice(0, 30)}"`, ended)
 }
@@ -331,6 +331,15 @@ export const SCENARIOS: readonly Scenario[] = [
     async run(d) {
       d.seed({ 'picture.png': PNG })
       await turn(d, 'Use the Read tool on picture.png and tell me, in one word, its colour.')
+    },
+  },
+  {
+    // An image attached to the message, which an ACP agent is handed as an image block in the prompt (acp-adapter.md §5.8)
+    name: 'attachment',
+    tools: [...ACP_TOOLS, 'antigravity'],
+    async run(d) {
+      d.seed({ 'picture.png': PNG })
+      await turn(d, 'What colour is the attached image? One word.', { attachments: [{ kind: 'image', path: 'picture.png', name: 'picture.png', mime: 'image/png' }] })
     },
   },
   {

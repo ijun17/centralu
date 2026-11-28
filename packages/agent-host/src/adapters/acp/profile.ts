@@ -9,7 +9,7 @@ export const ACP_CAPABILITIES: AdapterCapabilities = {
   contextUsage: 'exact',
   resume: true,
   autoTitle: true,
-  attachments: [],
+  attachments: ['image', 'file'],
   verbosities: [],
   exclusiveWriter: false,
   backgroundTasks: false,

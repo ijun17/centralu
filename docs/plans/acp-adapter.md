@@ -642,6 +642,19 @@ ACP has no standard sub-agent update. Cursor's `subagent_spawned` / `subagent_st
 calls. A tool that cannot report background work is never idle while it holds a process (`sessionIdle`), which keeps
 sleep and swaps safe meanwhile.
 
+### 5.8 Attachments (#2479)
+
+A message's attachments go with its input through the core's queue, and the wire builds the `session/prompt` from them
+(`acp/prompt-content.ts`, owner's coordinator: native ACP image blocks). The prompt is the text block, then one
+`{type: 'image', data, mimeType}` block per attachment that is an image (kind `image` or an `image/*` mime), when the
+agent's `initialize` advertised `promptCapabilities.image` (Cursor, OpenCode and Antigravity all do, recorded), the file
+reads (a relative path from the session's folder), it is within the ceiling an image coming out has (`IMAGE_MAX_BYTES`)
+and its bytes are a whole picture of a known format, which also gives the `mimeType`. Every other attachment, a plain file
+included, is named in the text as an `@<path>` line, the same words Claude and Codex are given (`withAttachmentPaths`),
+so nothing an agent cannot take fails the turn: it gets what every ACP tool got before. The files are read before the
+prompt is written, in the turn's own start, so the queue's order stands; a Stop pressed during that read ends the turn
+and the prompt is never sent. A recording of each tool (`attachment` scenario) is still to be made.
+
 ## 6. Centralu's tools through mcpServers
 
 `session/new` and `session/load` take the session's MCP servers, so Centralu's tools reach an ACP agent the way they
@@ -674,7 +687,7 @@ Values for the ACP adapter, decided per profile and, where marked, from the `ini
 | `contextUsage` | `none` | no `usage_update` (bundle); `exact` for a tool that sends it |
 | `resume` | true | `loadSession` or `sessionCapabilities.resume` |
 | `autoTitle` | true | `session_info_update` |
-| `attachments` | `['image']` | `promptCapabilities.image` |
+| `attachments` | `['image', 'file']` | images as content blocks when `promptCapabilities.image`, else by path (§5.8) |
 | `verbosities` | `[]` | |
 | `exclusiveWriter` | false | ACP promises no lock |
 | `backgroundTasks`, `builtInSubagents` | false | until PR 2 |

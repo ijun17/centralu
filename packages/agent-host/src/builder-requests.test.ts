@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterCapabilities, Attachment, NormalizedEvent, SessionInfo, ToolName } from '@cc/protocol'
-import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from './adapters/contract.js'
+import { withAttachmentPaths, type AgentAdapter, type CreateSessionOpts, type EventSink, type SessionHandle } from './adapters/contract.js'
 import { storePermissionBook } from './app-permission-book.js'
 import { storeRunLedger } from './app-run-ledger.js'
 import { runtimeViewSource } from './app-view-source.js'
@@ -30,8 +30,8 @@ class Handle implements SessionHandle {
   constructor(readonly sessionId: string) {
     this.externalId = `ext-${sessionId}`
   }
-  send(text: string) {
-    toAgent.set(this.sessionId, [...(toAgent.get(this.sessionId) ?? []), text])
+  send(text: string, opts?: { attachments?: readonly Attachment[] }) {
+    toAgent.set(this.sessionId, [...(toAgent.get(this.sessionId) ?? []), withAttachmentPaths(text, opts?.attachments)])
   }
   respondApproval() {
     return false

@@ -1,8 +1,8 @@
-import { hostAccessEnv } from '../contract.js'
+import { hostAccessEnv, withAttachmentPaths } from '../contract.js'
 import type { InputObserver, InputOrigin } from '../contract.js'
 import { launchPreset } from '../edit-grant.js'
 import { followsPersonsPolicy } from './launch-config.js'
-import { endsStreamRow, streamRowKind, type ApprovalDecision, type ApprovalScope, type PermissionPreset } from '@cc/protocol'
+import { endsStreamRow, streamRowKind, type ApprovalDecision, type ApprovalScope, type Attachment, type PermissionPreset } from '@cc/protocol'
 import { toolCommand } from '../../tool-launch.js'
 import type { CreateSessionOpts, EventSink, SessionHandle } from '../contract.js'
 import { CodexClient } from './client.js'
@@ -426,8 +426,8 @@ export class CodexSession implements SessionHandle {
   }
 
   // The origin is Claude's: Codex has no such stamp. `id` goes to `turn/start` as the message's client id, which the turn it starts names (#1604)
-  sendTracked(text: string, observer?: InputObserver, opts?: { origin?: InputOrigin; id?: string }): Promise<void> {
-    return this.ledger.sendTracked(text, observer, opts?.id)
+  sendTracked(text: string, observer?: InputObserver, opts?: { origin?: InputOrigin; id?: string; attachments?: readonly Attachment[] }): Promise<void> {
+    return this.ledger.sendTracked(withAttachmentPaths(text, opts?.attachments), observer, opts?.id)
   }
 
   /**
@@ -448,8 +448,8 @@ export class CodexSession implements SessionHandle {
     return this.startInputs
   }
 
-  send(text: string, opts?: { id?: string }): void {
-    this.ledger.send(text, opts?.id)
+  send(text: string, opts?: { id?: string; attachments?: readonly Attachment[] }): void {
+    this.ledger.send(withAttachmentPaths(text, opts?.attachments), opts?.id)
   }
 
   /** Inputs waiting to start a turn: behind a compact or review turn, or written and not answered (`MidTurnLedger.waiting`) */
