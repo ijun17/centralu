@@ -1,7 +1,7 @@
 import type { Attachment } from '@cc/protocol'
 import { realOs } from '../../os/real.js'
 import { withAttachmentPaths } from '../contract.js'
-import { IMAGE_MAX_BYTES, sniffImage } from '../images.js'
+import { imageEventFromDisk } from '../images.js'
 
 /** A message as `session/prompt` takes it, its attachments included (docs/plans/acp-adapter.md §5.8): ACP's content blocks */
 export type PromptBlock = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
@@ -9,21 +9,14 @@ export type PromptBlock = { type: 'text'; text: string } | { type: 'image'; data
 const looksLikeImage = (a: Attachment): boolean => a.kind === 'image' || a.mime?.startsWith('image/') === true
 
 /**
- * The picture an attachment is, as an image block, or null when it is not handed over as one: a file that is gone or cannot be
- * read, one larger than an image event may be (the same ceiling as an image coming out), or bytes that are no whole picture of a
- * format the window draws. The mime comes from the bytes: an agent that is handed a type its bytes are not fails the turn
+ * The picture an attachment is, as an image block, read as an image coming out is (`imageEventFromDisk`: its size ceiling, and
+ * bytes that are a whole picture), or null when it is not handed over as one. The mime comes from the bytes: an agent that is
+ * handed a type its bytes are not fails the turn
  */
 async function imageBlock(a: Attachment, cwd: string): Promise<PromptBlock | null> {
-  const { files, paths } = realOs()
-  const path = paths.path.isAbsolute(a.path) ? a.path : paths.path.join(cwd, a.path)
-  try {
-    if ((await files.promises.stat(path)).size > IMAGE_MAX_BYTES) return null
-    const buf = await files.promises.readFile(path)
-    const seen = sniffImage(buf)
-    return seen?.complete ? { type: 'image', data: buf.toString('base64'), mimeType: seen.mime } : null
-  } catch {
-    return null
-  }
+  const { path } = realOs().paths
+  const read = await imageEventFromDisk('', path.isAbsolute(a.path) ? a.path : path.join(cwd, a.path))
+  return read.type === 'message_image' && read.data ? { type: 'image', data: read.data, mimeType: read.mime } : null
 }
 
 /**

@@ -1,6 +1,5 @@
-import { writeFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { realOs } from '../../os/real.js'
 import type { PermissionPreset, StoredMessage } from '@cc/protocol'
 import { CENTRALU_MCP_NAME } from '../../apps/contract.js'
 import type { AgentProcess, CreateSessionOpts } from '../contract.js'
@@ -294,7 +293,8 @@ describe("Antigravity's agent as `agy acp` 1.5.2 runs it, replayed", () => {
   it('attachment: the attached picture goes in the prompt as an image block after the text, and the agent answers from it', async () => {
     const folder = temporaryFolder('agy-attachment-')
     try {
-      writeFileSync(join(folder.path, 'picture.png'), PNG)
+      const { files, paths } = realOs()
+      files.writeFileSync(paths.path.join(folder.path, 'picture.png'), PNG)
       const w = world(recording15('attachment'))
       const handle = await open(w, 'normal', undefined, { cwd: folder.path })
       handle.send('What colour is the attached image? One word.', { attachments: [{ kind: 'image', path: 'picture.png', name: 'picture.png', mime: 'image/png' }] })

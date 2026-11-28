@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import { dirname, extname, join, relative } from 'node:path'
 import { isObj, type Obj } from '../../json-value.js'
 import { systemSettingsFolder } from '../../os.js'
-import type { CreateSessionOpts } from '../contract.js'
+import { readsRepoFiles, type CreateSessionOpts } from '../contract.js'
 import { presetEnv, type OpenCodeConfigs } from './config.js'
 
 /**
@@ -45,7 +45,7 @@ export function openCodeLaunchEnv(
   env: Readonly<Record<string, string | undefined>>,
   home = homedir(),
 ): Record<string, string> {
-  const repoFiles = opts.projectTrusted === true && !opts.noSettingFiles ? {} : REPO_FILES_OFF
+  const repoFiles = readsRepoFiles(opts) ? {} : REPO_FILES_OFF
   const seen = { ...env, ...repoFiles }
   return { ...repoFiles, ...presetEnv(opts.permissionPreset, seen, readOpenCodeConfigs(opts.cwd, seen, home)) }
 }

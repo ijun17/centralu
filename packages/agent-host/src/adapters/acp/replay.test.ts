@@ -228,7 +228,7 @@ for (const dir of readdirSync(RECORDINGS)) {
         // OpenCode ends both commands `completed`; only `metadata.exit` tells them apart (3, then 0 for one that prints EXIT=3), #2045
         const commands = of(events, 'tool_call').filter((c) => c.summary.tool === 'Bash')
         const okOf = (i: number) => of(events, 'tool_result').find((r) => r.callId === commands[i]!.callId)?.ok
-        if (dir.startsWith('opencode-')) expect([okOf(0), okOf(1)]).toEqual([false, true])
+        expect([okOf(0), okOf(1)]).toEqual([false, true])
         expect(of(events, 'turn_complete')).toHaveLength(1)
         expect(of(events, 'error')).toEqual([])
       })

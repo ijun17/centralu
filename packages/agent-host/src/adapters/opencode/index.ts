@@ -1,7 +1,7 @@
 import type { AdapterCapabilities, ToolDescriptor } from '@cc/protocol'
 import { AcpAdapter } from '../acp/adapter.js'
 import { ACP_CAPABILITIES, type AcpProfile } from '../acp/profile.js'
-import type { DetectResult } from '../contract.js'
+import { readsRepoFiles, type DetectResult } from '../contract.js'
 import { openCodeLaunchEnv } from './config-files.js'
 import { findOpenCode } from './install.js'
 import { openCodeRefusal } from './refusal.js'
@@ -61,6 +61,8 @@ export function openCodeProfile(): AcpProfile {
       const l = findOpenCode()
       return l ? { command: l.command, args: [...l.args, 'acp', '--print-logs', '--log-level', 'ERROR'], env: openCodeLaunchEnv(opts, process.env) } : null
     },
+    // Whether the project's files reach it is fixed when the process starts (`openCodeLaunchEnv`), so a trust change restarts it
+    launchSettingsFingerprint: (settings) => JSON.stringify({ v: 1, repoFiles: readsRepoFiles(settings) }),
     installedVersion: version,
     async detect(): Promise<DetectResult> {
       if (!findOpenCode()) return { tool: DESCRIPTOR.name, installed: false, loggedIn: false, detail: 'OpenCode not found (npm i -g opencode-ai)', setup: { state: 'not_installed', install: 'terminal', signIn: 'none' } }

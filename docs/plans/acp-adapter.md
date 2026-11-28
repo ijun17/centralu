@@ -18,7 +18,7 @@ this one is the newer: the later sections are the design as proposed, kept for i
 | Question (§14) | Answer | What PR 1 does |
 |---|---|---|
 | Role text | Left out | An ACP tool declares `roleText: false`: it cannot be the orchestrator, a coordinator or an app's agent yet. Later: measure whether a leading prompt block marked as Centralu's carries it |
-| Untrusted projects | Not offered (fail safe) | `keepsRepoFilesOut: false`: refused in an untrusted project; revisited when what each tool reads is known. OpenCode: kept out (§0.7) |
+| Untrusted projects | Not offered (fail safe) until what each tool reads is known | OpenCode is kept from the project's files and runs there (§0.7). Cursor and Antigravity have no way to be kept out (`keepsRepoFilesOut: false`): refused in an untrusted project |
 | OpenCode's `/compact` | Accepted for PR 3 only | Not in PR 1: only inside the compact turn Centralu started, ended `end_turn`, next reading smaller; `trigger: manual`, no summary |
 | `safe` on Cursor | Not offered | Not mapped to Cursor's `ask` mode, which is a different promise. Since the review of #1562, Normal and Edits are not offered either (§0.6): `presets: ['auto']`, and whether Cursor stays offered under Auto only is the owner's to decide |
 | Idle sleep | Measure first | `sleep: false`; memory measured below, decided with the numbers |
@@ -651,9 +651,10 @@ agent's `initialize` advertised `promptCapabilities.image` (Cursor, OpenCode and
 reads (a relative path from the session's folder), it is within the ceiling an image coming out has (`IMAGE_MAX_BYTES`)
 and its bytes are a whole picture of a known format, which also gives the `mimeType`. Every other attachment, a plain file
 included, is named in the text as an `@<path>` line, the same words Claude and Codex are given (`withAttachmentPaths`),
-so nothing an agent cannot take fails the turn: it gets what every ACP tool got before. The files are read before the
-prompt is written, in the turn's own start, so the queue's order stands; a Stop pressed during that read ends the turn
-and the prompt is never sent. A recording of each tool (`attachment` scenario) is still to be made.
+so nothing an agent cannot take fails the turn. The files are read before the prompt is written, in the turn's own
+start, so the queue's order stands; a Stop pressed during that read ends the turn and the prompt is never sent. Each tool
+has a recording (`attachment` scenario) in which the agent names the colour of the attached picture: Cursor 2026.10.22,
+OpenCode 1.19.4 (on a free model that takes images; its default free one answers that it cannot see them) and `agy acp` 1.5.2.
 
 ## 6. Centralu's tools through mcpServers
 

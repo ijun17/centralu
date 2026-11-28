@@ -845,10 +845,6 @@ describe('attachments in the ACP prompt', () => {
     expect(await prompted(folder({ 'shot.png': PNG }), [{ kind: 'file', path: 'shot.png', name: 'shot.png' }])).toEqual([{ type: 'text', text: 'What colour?\n\n@shot.png' }])
   })
 
-  it('no attachments: the one text block, as before', async () => {
-    expect(await prompted(folder(), undefined)).toEqual([{ type: 'text', text: 'What colour?' }])
-    expect(await prompted(folder(), [])).toEqual([{ type: 'text', text: 'What colour?' }])
-  })
 
   it('keeps the queue’s order: a message sent behind one whose picture is being read is the next prompt, not the first', async () => {
     const w = world(withImages, { cwd: folder({ 'picture.png': PNG }) })

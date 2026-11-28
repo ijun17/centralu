@@ -82,9 +82,9 @@ export class ClaudeSession implements SessionHandle {
    * From the first input: the CLI says whether it can track only in a turn's init, so what goes before (a wake of a resumed session) waits
    * for that, and a CLI that cannot track takes it when written (`onInit`). Gone once the CLI said it cannot
    */
-  sendTracked?: (text: string, observer?: InputObserver, opts?: { origin?: InputOrigin; id?: string; attachments?: readonly Attachment[] }) => Promise<void> = (text, observer, opts) => {
+  sendTracked?: (text: string, observer?: InputObserver, opts?: { origin?: InputOrigin; id?: string }) => Promise<void> = (text, observer, opts) => {
     const receipt = this.ledger.track(observer, opts?.id)
-    this.sendInput(withAttachmentPaths(text, opts?.attachments), receipt.id, receipt, opts?.origin)
+    this.sendInput(text, receipt.id, receipt, opts?.origin)
     return receipt.done
   }
   /** The wait for the CLI to say it read input given it at rest (`TurnStartWait`) */

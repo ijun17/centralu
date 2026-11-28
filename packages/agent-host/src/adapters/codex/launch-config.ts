@@ -1,7 +1,7 @@
 import { realpathSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import type { PermissionPreset } from '@cc/protocol'
-import type { CreateSessionOpts } from '../contract.js'
+import { readsRepoFiles, type CreateSessionOpts } from '../contract.js'
 
 /**
  * Permission preset to Codex permission options.
@@ -40,7 +40,7 @@ export function permissionOptionsFor(preset: PermissionPreset): Record<string, u
  *   - `project_doc_max_bytes: 0`: measured on the Assistant (a planted AGENTS.md stopped being followed); `~/.codex/AGENTS.md` still loads
  */
 export function repoFilesConfig(opts: Pick<CreateSessionOpts, 'cwd' | 'projectTrusted' | 'noSettingFiles'>): Record<string, unknown> {
-  if (opts.projectTrusted === true && !opts.noSettingFiles) return {}
+  if (readsRepoFiles(opts)) return {}
   const keys = new Set<string>()
   for (const start of [resolve(opts.cwd), realPathOr(opts.cwd)]) {
     for (let dir = start; ; dir = dirname(dir)) {

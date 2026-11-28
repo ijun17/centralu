@@ -53,7 +53,7 @@ export class CrossHandle implements SessionHandle {
   }
   /** A test sets this to make the tool say it took a tracked input as it starts the turn, as Claude does (`InputObserver.accepted`) */
   acceptsAtOnce = false
-  sendTracked(text: string, observer?: InputObserver, opts?: { origin?: unknown; id?: string; attachments?: readonly Attachment[] }): Promise<void> {
+  sendTracked(text: string, observer?: InputObserver, opts?: { origin?: unknown; id?: string }): Promise<void> {
     const done = new Promise<void>((resolve, reject) => this.receipts.push({
       resolve: () => { observer?.complete(); resolve() },
       reject: (e) => { observer?.fail(e); reject(e) },

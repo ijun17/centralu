@@ -1,5 +1,5 @@
 import type { ModelOption, ToolName } from '@cc/protocol'
-import type { AgentAdapter, AgentProcess, LimitsAnswer, AgentSpawnSpec, CreateSessionOpts, EventSink, LocalUsage, ProcessSource, SessionHandle } from '../contract.js'
+import type { AgentAdapter, AgentProcess, LimitsAnswer, AgentSpawnSpec, CreateSessionOpts, EventSink, LaunchSettings, LocalUsage, ProcessSource, SessionHandle } from '../contract.js'
 import { toolResultEvent } from '../tool-result.js'
 import { spawnLocalAgent } from '../local-process.js'
 import type { AcpProfile } from './profile.js'
@@ -29,7 +29,12 @@ export abstract class AcpAdapter implements AgentAdapter {
     if (sweep) this.sweepSessionFiles = sweep
     const listModels = profile.listModels?.bind(profile)
     if (listModels) this.listModels = listModels
+    const fingerprint = profile.launchSettingsFingerprint?.bind(profile)
+    if (fingerprint) this.launchSettingsFingerprint = fingerprint
   }
+
+  /** What the launch derives from a session's settings (the profile's), when it derives any */
+  readonly launchSettingsFingerprint?: (settings: LaunchSettings) => string
 
   /** The tool's limits (the profile's `listUsage`), when it can read them */
   readonly listUsage?: () => Promise<LimitsAnswer>

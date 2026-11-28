@@ -426,8 +426,8 @@ export class CodexSession implements SessionHandle {
   }
 
   // The origin is Claude's: Codex has no such stamp. `id` goes to `turn/start` as the message's client id, which the turn it starts names (#1604)
-  sendTracked(text: string, observer?: InputObserver, opts?: { origin?: InputOrigin; id?: string; attachments?: readonly Attachment[] }): Promise<void> {
-    return this.ledger.sendTracked(withAttachmentPaths(text, opts?.attachments), observer, opts?.id)
+  sendTracked(text: string, observer?: InputObserver, opts?: { origin?: InputOrigin; id?: string }): Promise<void> {
+    return this.ledger.sendTracked(text, observer, opts?.id)
   }
 
   /**

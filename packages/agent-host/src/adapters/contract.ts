@@ -215,6 +215,11 @@ export type CreateSessionOpts = {
   hostAccess?: { url: string; credential: string }
 }
 
+/** Whether the project's own files may reach this session's tool (`projectTrusted`, `noSettingFiles`): absent trust is untrusted */
+export function readsRepoFiles(opts: Pick<CreateSessionOpts, 'projectTrusted' | 'noSettingFiles'>): boolean {
+  return opts.projectTrusted === true && !opts.noSettingFiles
+}
+
 /** The seat a session's Centralu tools are for: the Assistant's when the caller named none. One answer for the adapters (the tools' server, Claude's disallowed tools, Codex's instructions) */
 export function toolProfileOf(opts: Pick<CreateSessionOpts, 'toolProfile'>): ToolProfile {
   return opts.toolProfile ?? 'assistant'
@@ -358,7 +363,7 @@ export interface SessionHandle {
    */
   turnStartInputs?(): readonly string[] | null
   /** Completes after the consuming turn is recorded. The observer runs synchronously, before later turn frames. */
-  sendTracked?(text: string, observer?: InputObserver, opts?: { origin?: InputOrigin; id?: string; attachments?: readonly Attachment[] }): Promise<void>
+  sendTracked?(text: string, observer?: InputObserver, opts?: { origin?: InputOrigin; id?: string }): Promise<void>
   /** The matcher is computed by core and passed along by the UI (boundary rule: the host does not know core) */
   /**
    * The approval response. **Returns whether it reached anything** (false = no such request exists).

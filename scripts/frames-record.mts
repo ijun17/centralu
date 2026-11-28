@@ -100,7 +100,8 @@ async function main(): Promise<number> {
       const seeded: string[] = []
       try {
         const run: { preset?: string } = runAs(tool, scenario.drive)
-        const toolModel = scenario.drive.modelFor?.[tool]
+        // Only OpenCode's run is set up so (its inline config); another tool's entry would name a model the run did not use
+        const toolModel = tool === 'opencode' ? scenario.drive.modelFor?.[tool] : undefined
         if (tool === 'opencode') {
           const config = toolModel ? JSON.stringify({ model: toolModel }) : openCodeConfig
           if (config === undefined) delete process.env.OPENCODE_CONFIG_CONTENT

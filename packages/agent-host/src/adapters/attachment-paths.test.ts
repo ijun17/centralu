@@ -45,23 +45,20 @@ describe('attachments named by path', () => {
     expect(withAttachmentPaths('Look at these', undefined)).toBe('Look at these')
   })
 
-  it('are what Claude Code reads, for a send and for a tracked send', async () => {
+  it('are what Claude Code reads', async () => {
     const handle = await new ClaudeAdapter().createSession({ sessionId: 'att-claude', cwd: '/tmp', permissionPreset: 'normal' }, () => {})
     handle.send('Look at these', { origin: { kind: 'human' }, attachments: FILES })
-    void handle.sendTracked?.('Look at these', undefined, { attachments: FILES }).catch(() => {})
-    await until(() => wire.claude.length === 2)
-    expect(wire.claude.map((m) => (m.message as { content: { text: string }[] }).content[0]!.text)).toEqual([SENT, SENT])
+    await until(() => wire.claude.length === 1)
+    expect(wire.claude.map((m) => (m.message as { content: { text: string }[] }).content[0]!.text)).toEqual([SENT])
     await handle.dispose()
   })
 
-  it('are what Codex reads in its turn, for a send and for a tracked send', async () => {
+  it('are what Codex reads in its turn', async () => {
     const turns = () => wire.codex.filter((r) => r.method === 'turn/start')
     const handle = await new CodexAdapter().createSession({ sessionId: 'att-codex', cwd: '/tmp', permissionPreset: 'normal' }, () => {})
     handle.send('Look at these', { attachments: FILES })
     await until(() => turns().length === 1)
-    void handle.sendTracked?.('Look at these', undefined, { attachments: FILES }).catch(() => {})
-    await until(() => turns().length === 2)
-    expect(turns().map((r) => r.params?.input)).toEqual([[{ type: 'text', text: SENT }], [{ type: 'text', text: SENT }]])
+    expect(turns().map((r) => r.params?.input)).toEqual([[{ type: 'text', text: SENT }]])
     await handle.dispose()
   })
 })

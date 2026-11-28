@@ -117,8 +117,8 @@ export class CoreSession<W extends ToolWire = ToolWire> {
     void this.enqueue(text, opts?.id ?? null, opts?.compact === true, undefined, opts?.origin, opts?.attachments)
   }
 
-  sendTracked(text: string, observer?: InputObserver, opts?: { origin?: InputOrigin; id?: string; attachments?: readonly Attachment[] }): Promise<void> {
-    return this.enqueue(text, opts?.id ?? null, false, observer, opts?.origin, opts?.attachments)
+  sendTracked(text: string, observer?: InputObserver, opts?: { origin?: InputOrigin; id?: string }): Promise<void> {
+    return this.enqueue(text, opts?.id ?? null, false, observer, opts?.origin)
   }
 
   private enqueue(text: string, named: string | null, compact: boolean, observer?: InputObserver, origin?: InputOrigin, attachments?: readonly Attachment[]): Promise<void> {
