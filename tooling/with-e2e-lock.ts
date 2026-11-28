@@ -15,6 +15,8 @@
  *    command has ended. The exit code is then 130 or 143 (128 plus the signal's number, as a shell reports it), whatever
  *    the command exited with: Playwright told to stop ends its run with 1, which would read as a failed test.
  * A command a signal the runner never saw ended gives 128 plus that signal's number.
+ * For the main config, the server on its port is reused only when it serves this checkout, and any other is refused
+ * (tooling/dev-server-checkout.ts, #2451).
  * Windows has no signals. A console's Ctrl-C reaches every process on the console, the command too, so it is not passed on
  * there (`child.kill` would end Playwright outright, without its teardown and report): the runner waits for the command to
  * end and gives the lock back. Anything else that ends the runner there ends it outright, and nothing above runs.
@@ -24,6 +26,7 @@ import { createRequire } from 'node:module'
 import { relative, resolve } from 'node:path'
 import { AFFECTED, changedFiles, configOf, configReached, engineOutput, mergeBase, reachesScreen, readListing, runAffected, specFilter, specsReaching, type Engine, type Listing } from './e2e-affected.js'
 import { acquireLock, passesSignalOn, runsInTurn, signalExit, withoutSeparator, type Held } from './e2e-lock.js'
+import { tellMainServer } from './dev-server-checkout.js'
 
 const [program, ...rest] = process.argv.slice(2)
 const args = withoutSeparator(rest)
@@ -74,6 +77,15 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 process.off('SIGINT', onInt)
 process.off('SIGTERM', onTerm)
 console.error('e2e lock: taken')
+
+// The main config's server shares its port with every checkout's `pnpm dev` (#2451)
+try {
+  if (program === 'playwright') await tellMainServer(commandArgs, configOf, process.env)
+} catch (err) {
+  held.release()
+  console.error(`e2e: ${err instanceof Error ? err.message : String(err)}`)
+  process.exit(1)
+}
 
 // Each run named in the lock at once, and its start time filled in as soon as it is known (on Windows that takes seconds):
 // a runner killed in between must not leave Playwright running with the lock free
