@@ -188,9 +188,12 @@ describe('creating an app stands up its building session', () => {
     expect(mgr.appSessions.builderRoleOf(mgr.sessionInfo(worker.id)!, repo)).toBeNull()
   })
 
-  it("a builder whose app's manifest cannot be read keeps the role pinned on its row, not one naming the app by its id", async () => {
+  it("a builder's role is rebuilt while its manifest reads, and is the pinned one, not one naming the app by its id, once it does not", async () => {
     const { app, builder } = await create({ projectId, id: 'notes', name: 'Notes' })
     mgr.sessionInfo(builder!.id)!.roleAppend = 'The pinned role.'
+    claude.seen = []
+    await mgr.processes.restartSession(builder!.id)
+    expect(claude.last().systemPromptAppend).toBe(builderRole(app, repo))
     writeFileSync(join(app.dir, 'centralu.app.json'), '{ not json')
     rt.refresh()
     expect(rt.list().find((a) => a.appId === 'notes')?.status).toBe('invalid')
