@@ -5,6 +5,7 @@ import { ToolSignIns } from './tool-sign-ins.js'
 import { Drain, DrainCut } from './drain.js'
 import { createStopGate } from './lifecycle/stop-gate.js'
 import type { SessionManager } from './sessions/manager.js'
+import { DevTabs } from './transport/dev-tabs.js'
 
 /**
  * Checks that a settings field does not silently disappear at the RPC boundary.
@@ -232,5 +233,19 @@ describe('parameters at the boundary', () => {
 
   it('host.stop still checks it can stop before it reads its parameters', async () => {
     await expect(rpc('host.stop', { ifIdle: 'yes' })).rejects.toThrow(/quit the app instead/)
+  })
+})
+
+/** Who may ask to be a trusted dev browser tab (docs/security-boundaries/dev-browser-tabs.md): a limited socket without a session only */
+describe('host.devTabCode and host.trustDevTab', () => {
+  it('give a code only to a limited caller without a session, and refuse a full caller’s trust call', async () => {
+    const rpc = createRpcHandler({} as SessionManager, new Map(), { devTabs: new DevTabs() })
+    await expect(rpc('host.devTabCode', {}, { client: 1, rights: 'limited' })).resolves.toEqual({ code: expect.stringMatching(/^[A-Z2-9]{3}-[A-Z2-9]{3}$/) })
+    for (const ctx of [{ client: 1, rights: 'full' as const }, { client: 1, rights: 'limited' as const, session: 's1' }, { client: 1 }]) {
+      await expect(rpc('host.devTabCode', {}, ctx)).rejects.toThrow('Only a dev browser tab holding the limited credential asks to be trusted')
+    }
+    await expect(rpc('host.trustDevTab', { code: 'K7M-4P2' }, { client: 1, rights: 'full' })).rejects.toThrow('Only a dev browser tab holding the limited credential')
+    const serve = createRpcHandler({} as SessionManager, new Map(), {})
+    await expect(serve('host.devTabCode', {}, { client: 1, rights: 'limited' })).rejects.toThrow('Only a desktop host trusts a dev browser tab')
   })
 })

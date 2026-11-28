@@ -1,4 +1,4 @@
-import type { HostRequest } from '@cc/protocol/client'
+import type { DevTab, HostRequest } from '@cc/protocol/client'
 
 /**
  * Calls of the limited credential the host holds for the person to allow or deny (#1405, docs/protocol.md §1); raised
@@ -7,4 +7,7 @@ import type { HostRequest } from '@cc/protocol/client'
 export interface HostRequestsPort {
   list(): Promise<HostRequest[]>
   answer(requestId: string, decision: 'allow' | 'deny'): Promise<{ ok: boolean }>
+  /** The dev browser tabs the person trusted on such a card, until each is closed or a day passes; taken back here */
+  devTabs(): Promise<DevTab[]>
+  revokeDevTab(id: string): Promise<void>
 }

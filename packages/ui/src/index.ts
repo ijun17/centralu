@@ -10,5 +10,6 @@ export { applyCachedTypography, applyTypography, typographyOf } from './app/typo
 export { prepareFirstPaint } from './app/firstPaint.js'
 export { formatBytes, formatDuration } from './app/format.js'
 export { ShellBanner } from './components/ShellBanner.js'
+export { Button } from './components/Button.js'
 // The desktop's own dialogs (quit, switch build, restart) count as open layers too, so y/n/a do not answer a card behind them
 export { useOpenLayer } from './components/Modal.js'
