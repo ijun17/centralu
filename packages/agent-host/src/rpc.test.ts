@@ -234,3 +234,16 @@ describe('parameters at the boundary', () => {
     await expect(rpc('host.stop', { ifIdle: 'yes' })).rejects.toThrow(/quit the app instead/)
   })
 })
+
+/**
+ * The Assistant's methods under the role's old name, removed by #2532 (docs/plans/assistant-rename.md §3.4): a caller is
+ * told which name took its place and to update Centralu, not that the method is unknown
+ */
+describe("the Assistant's old method names", () => {
+  it('answer with the new name and an update, and any other missing method stays unknown', async () => {
+    const rpc = await createRpcHandler({} as SessionManager, new Map(), {})
+    await expect(rpc('orchestrator.get', {})).rejects.toThrow('orchestrator.get is now assistant.get: update Centralu on the computer that sent this')
+    await expect(rpc('agents.deleteOrchestratorSkill', { name: 'x' })).rejects.toThrow('is now agents.deleteAssistantSkill: update Centralu')
+    await expect(rpc('orchestrator.nothing', {})).rejects.toThrow('Unknown method: orchestrator.nothing')
+  })
+})

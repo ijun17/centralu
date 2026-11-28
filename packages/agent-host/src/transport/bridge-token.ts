@@ -32,15 +32,13 @@ export function bridgeSessionOf(hostToken: string, given: string): string | null
 
 /** Every RPC the bridge sends (centralu-bridge.mjs) and nothing more: each names its `sessionId`, and the host judges what that session may do */
 const BRIDGE_METHODS: ReadonlySet<string> = new Set([
-  'orchestrator.tools',
-  'orchestrator.tool',
   'assistant.tools',
   'assistant.tool',
 ])
 
 /**
  * Why a connection with the bridge credential of `boundSession` may not make this call, or null: the call must name that
- * session (`orchestrator.tools` without one lists the full assistant set)
+ * session (`assistant.tools` without one lists the full assistant set)
  */
 export function bridgeRefusal(boundSession: string, method: string, params: unknown): string | null {
   if (!BRIDGE_METHODS.has(method)) return `A Codex bridge's credential cannot call ${method}`

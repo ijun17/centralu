@@ -20,8 +20,9 @@ export const SessionKind = z.enum(['worker', 'orchestrator', 'coordinator', 'ass
 export type SessionKind = z.infer<typeof SessionKind>
 
 /**
- * Whether a kind is the Assistant: sent as `'orchestrator'`, a later release sends `'assistant'` (#2532,
- * docs/plans/assistant-rename.md step 5), and a peer may meet either. Readers ask this (lint: `guard/assistant-kind`).
+ * Whether a kind is the Assistant: sent as `'assistant'` since #2532, and as `'orchestrator'` by a linked machine of
+ * beta.57 to beta.84, which a hub still connects (docs/plans/assistant-rename.md §3.4). Readers ask this (lint:
+ * `guard/assistant-kind`).
  */
 export function isAssistantKind(kind: unknown): boolean {
   return kind === 'orchestrator' || kind === 'assistant'
@@ -32,8 +33,8 @@ export function isAssistantOrCoordinator(kind: unknown): boolean {
   return isAssistantKind(kind) || kind === 'coordinator'
 }
 
-/** The Assistant's kind as this build sends and stores it: the value every supported release parses */
-export const ASSISTANT_KIND = 'orchestrator' satisfies SessionKind
+/** The Assistant's kind as this build sends it: every release from beta.54 on parses it, and a link to an older one is refused (`MIN_SUPPORTED_VERSION`) */
+export const ASSISTANT_KIND = 'assistant' satisfies SessionKind
 
 export const SessionInfo = z.object({
   id: z.string(),

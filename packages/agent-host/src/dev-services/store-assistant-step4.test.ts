@@ -3,13 +3,13 @@
  * the new ones once, deleting a new settings key whose old key is gone, and raises the store's floor to 68, not to its own
  * version: the build of v68 (beta.54 on), which writes both forms, still opens the store, and a build of v67 or before,
  * which writes only the old form, does not. Step 74 (#2258) raises the floor to 70, so the store this checks is the one the build of v73 leaves.
+ * Read through the rows: since #2532 the live settings read only the new key, and step 79 deletes the old ones.
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import type Database from 'better-sqlite3'
 import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import { Store, StoreTooNewError } from './store.js'
 import type { MigrationStep } from './store/migrations/context.js'
-import { RENAMED_SETTINGS } from './store/settings.js'
 
 const LATEST = new Store().latestKnownVersion
 /** The last build whose store's floor step 69 sets */
@@ -86,14 +86,12 @@ describe('#2133 step 4 in the store: v69', () => {
       del(db, 'orchestrator_skills')
       del(db, 'orchestrator_tool')
     })
-    const s = open(LATEST, file)
+    const s = open(V73, file)
     try {
-      expect(s.settings.appSetting('orchestrator_skills')).toBeNull()
-      expect(s.settings.appSetting('orchestrator_tool')).toBeNull()
-      // The rows are gone, not only unread
       expect([row(s.raw, 'assistant_skills'), row(s.raw, 'assistant_tool')]).toEqual([null, null])
       // What was not removed is kept under both keys
-      expect(s.settings.appSetting('orchestrator_skill_proposals')).toBe('[{"name":"p","content":"y"}]')
+      expect(row(s.raw, 'assistant_skill_proposals')).toBe('[{"name":"p","content":"y"}]')
+      expect(row(s.raw, 'orchestrator_skill_proposals')).toBe('[{"name":"p","content":"y"}]')
       expect(row(s.raw, 'assistant_mcp_proposals')).toBe('[{"name":"m"}]')
     } finally {
       s.close()
@@ -103,37 +101,27 @@ describe('#2133 step 4 in the store: v69', () => {
   it('takes the old key over a stale new one: a build that changed only the old key served the store', () => {
     const file = v68Store()
     raw(file, (db) => put(db, 'orchestrator_tool', 'claude'))
-    const s = open(LATEST, file)
+    const s = open(V73, file)
     try {
-      expect(s.settings.appSetting('orchestrator_tool')).toBe('claude')
       expect(row(s.raw, 'assistant_tool')).toBe('claude')
     } finally {
       s.close()
     }
   })
 
-  it('runs once: after it, the new key is read first, and a write or delete still reaches both keys', () => {
+  it('runs once: a second open runs nothing, so a new key whose old key is absent is no longer deleted', () => {
     const file = v68Store()
     const s = open(V73, file)
-    try {
-      expect(s.schemaVersion).toBe(V73)
-      put(s.raw, 'assistant_tool', 'opencode')
-      expect(s.settings.appSetting('orchestrator_tool')).toBe('opencode')
-      for (const [old, renamed] of RENAMED_SETTINGS) {
-        s.settings.setAppSetting(old, '"v"')
-        expect([row(s.raw, old), row(s.raw, renamed)]).toEqual(['"v"', '"v"'])
-        s.settings.deleteAppSetting(old)
-        expect([row(s.raw, old), row(s.raw, renamed)]).toEqual([null, null])
-      }
-    } finally {
-      s.close()
-    }
-    // A second open runs nothing: a new key whose old key is absent is no longer deleted
-    raw(file, (db) => put(db, 'assistant_tool', 'codex'))
+    expect(s.schemaVersion).toBe(V73)
+    s.close()
+    raw(file, (db) => {
+      del(db, 'orchestrator_tool')
+      put(db, 'assistant_tool', 'codex')
+    })
     const again = open(V73, file)
     try {
       expect(again.migrationsRun).toBe(0)
-      expect(again.settings.appSetting('orchestrator_tool')).toBe('codex')
+      expect(row(again.raw, 'assistant_tool')).toBe('codex')
     } finally {
       again.close()
     }
@@ -147,7 +135,7 @@ describe('#2133 step 4 in the store: v69', () => {
 
     const v68 = open(68, file)
     expect(v68.migrationsRun).toBe(0)
-    expect(v68.settings.appSetting('orchestrator_tool')).toBe('codex')
+    expect(row(v68.raw, 'orchestrator_tool')).toBe('codex')
     v68.close()
 
     expect(() => open(67, file)).toThrow(StoreTooNewError)

@@ -1,7 +1,8 @@
 # Renaming the orchestrator role to Assistant (#2133)
 
 > **Status: steps 1 and 2 built (as one change), step 3 built (both shipped in beta.54); step 4 built for the release after
-> beta.55 (§3.3 says what it switched and what it left); the contract step (N+2: drops, folder move) not started, #2532.** The owner decided on 2026-11-08 (recorded on #2133):
+> beta.55 (§3.3 says what it switched and what it left); the contract step built without the folder move and the column drop (§3.4,
+> #2532; the folder move follows under #2532, the column drop is #2578).** The owner decided on 2026-11-08 (recorded on #2133):
 > - the orchestrator role becomes **Assistant** everywhere it is named, internal identifiers and stored values included;
 > - the mail address `orchestrator` becomes `assistant`, with no alias period;
 > - the current icon stays.
@@ -43,7 +44,7 @@ Each step is one PR on `dev`, landing with the next dev → main PR.
 | 1 and 2. Words and code (built) | The screen, docs, the role prompt, tool descriptions and the help topic say Assistant. The mail address is `assistant`, and `orchestrator` is refused as an unknown name is, with the role's address in the refusal. File, type and function names follow. `OrchestratorTools` and its family become `CentraluTools`, since it is the tool set every session with Centralu tools gets. Two values that never leave one build take the new name now: the tool profile (`ToolProfile` `'assistant'`) and the screen's view (`'assistant'`). A workspace an earlier build saved with view `'orchestrator'` still opens the Assistant's screen. The role's session an earlier build named "Orchestrator" is renamed "Assistant" once at the host's start (`AssistantSlot.renameFromOldName`), unless the person renamed it. Otherwise mail to `orchestrator` would still reach it by name | The address `orchestrator` stops working at once (owner: no alias). The previous release, going back, shows the role's session as "Assistant" and does not reopen the Assistant's screen from a workspace this build saved | release N |
 | 3. Read both (built) | protocol: `assistant.*` methods added beside `orchestrator.*`, answered alike under the same rights, routes and bridge token; every caller keeps the old ones (§3.1); `SessionKind` gains `'assistant'`, `by` accepts `'assistant'`, the event `assistant_proposals_changed` and the approval `about: 'assistant_change'` are read beside the old ones, and every reader of the kind goes through `isAssistantKind` (lint `guard/assistant-kind`); stored: an expand step (68) adds `sessions.is_assistant`, copied from `is_orchestrator` and written beside it, the `app_settings` keys are written and deleted under both names and read under the old one, `via` and the hub sender read both; folders: `<data>/assistant` is used if present, else `<data>/orchestrator`. The mail refusal reason `orchestrator_asks` became `assistant_asks` outright: it is not stored or sent to another host | none; every value written and sent is still the old one | release N |
 | 4. Read new (built) | store step v69 copies the old forms once and raises the floor to 68; the new form is read first and both are still written; the Codex bridge calls `assistant.*`; mail rows' `via` is written `'assistant'`; `agents.assistantSkills` and `agents.deleteAssistantSkill` are added beside the old ones. What reaches a linked machine or a window of another release stays old (§3.3) | none visible; a build older than N can no longer open the store | release N+1 |
-| 5. Contract (not started, #2532) | drop `is_orchestrator` and the old keys, the old `via` and sender; send `'assistant'` where §3.3 kept the old value; move the folders, carrying the saved conversation (below); the `orchestrator.*` methods go once no supported release calls them | a build older than N+1 can no longer open the store | release N+2 or later |
+| 5. Contract (built but the folders, §3.4, #2532) | the old keys and `via` deleted (store step 79), `is_orchestrator` no longer written (dropped by #2578); `'assistant'` sent where §3.3 kept the old value; the `orchestrator.*` methods removed; a peer before beta.57 told to update; the folders move, carrying the saved conversation (below), in a later change of #2532 | a linked machine or `centralu serve` before beta.57 is not used; the store's floor stays | release N+2 or later |
 
 No alias has two consequences in step 1. A worker the person names "Assistant" is reachable only by its id, since
 the role's address wins over a session name. Mail to `orchestrator` falls through to the name lookup, so a role
@@ -164,6 +165,38 @@ replaced; the step runs once; the build of v68 opens the store and the build of 
 | `by: 'orchestrator'` | kept | sent by the hub's Assistant to a linked machine |
 | `orchestrator_proposals_changed` | kept | relayed from a linked machine to the hub (`links/qualifier.ts`) |
 | approval `about: 'orchestrator_change'` (`ASSISTANT_CHANGE`) | kept | a linked machine's cards are shown by the hub |
+
+### 3.4 What step 5 built (#2532)
+
+The owner decided on 2026-11-29 to cut off the builds before step 4 (beta.57), and to keep the store open to every build
+a person can go back to (recorded on #2532).
+
+**Who is told to update.** `MIN_SUPPORTED_VERSION` is 0.1.0-beta.57: a hub holds a link to a machine below it at
+"versions differ" and offers the update (`compareVersions`). The window on Windows uses no `centralu serve` below it and
+runs its own host: the window's `bundle-info.json` says `minPeerVersion`, and `serve_window.rs` `choose` compares the
+serve's connection line with it. A caller of a removed method is answered "`<old>` is now `<new>`: update Centralu on the
+computer that sent this" (`RENAMED_METHODS`, `rpc.ts`), not the unknown-method error. A protocol version 2 was not taken:
+it would refuse beta.57 to beta.84 too, which work with this build. A hub of beta.45 to beta.56 that links to this
+build is not refused (the hello carries no version): it reads `'assistant'` from beta.54 on, and below that fails to parse
+the Assistant's session.
+
+**Store.** Step 79 deletes the four old `app_settings` keys and rewrites the old `via` to `'assistant'`; it is not
+breaking, and the floor stays 75. `is_orchestrator` is neither read nor written, but stays: the builds of v75 to v78 still
+write it, and dropping it would raise the floor to 79 (#2578). A delete of a renamed setting still removes the old key
+too: a build of v78 a person goes back to writes both, and reads the old one where the new one is missing.
+
+| Value | Written | Read |
+|---|---|---|
+| `sessions.is_assistant` | yes | yes |
+| `sessions.is_orchestrator` | no | no |
+| the four renamed `app_settings` keys | the new key | the new key |
+| mail rows' `via` | `'assistant'` | `'assistant'` |
+| the hub's sender | `_hub-assistant` | either: rows recorded before keep the old one, and a machine of beta.57 to beta.84 still records it |
+
+**Wire.** `SessionKind` `'assistant'`, `by: 'assistant'`, `assistant_proposals_changed` and `about: 'assistant_change'`
+are sent; the old values are still read (`isAssistantKind`, `isAssistantChange`, the event and `by` enums), since a
+machine or hub of beta.57 to beta.84 sends them. `orchestrator.*`, `agents.orchestratorSkills` and
+`agents.deleteOrchestratorSkill` are removed, and the window no longer asks again under the old name.
 
 ## 4. What is not renamed
 

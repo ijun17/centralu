@@ -171,7 +171,7 @@ fn start_plan(app: &AppHandle) -> Start {
         let choice = match (&serve, &found) {
             (Some(launcher), Some(host_dir)) => {
                 let line = serve_window::ask_connection(launcher, serve_window::ASK_TIMEOUT).and_then(|o| serve_window::parse_connection_line(&o));
-                serve_window::choose(line.as_ref(), serve_window::bundle_protocol(host_dir))
+                serve_window::choose(line.as_ref(), serve_window::bundle_info(host_dir).as_ref())
             }
             _ => ServeChoice::NoAnswer,
         };

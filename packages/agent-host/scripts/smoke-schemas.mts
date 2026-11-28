@@ -63,8 +63,6 @@ const CASES: Partial<Record<RpcMethodName, unknown>> = {
   'agents.interrupt': { sessionId: S },
   'agents.clearBackgroundTasks': { sessionId: S },
   'agents.resumeSession': { sessionId: S },
-  'orchestrator.get': {},
-  'orchestrator.tools': {},
   'assistant.get': {},
   'assistant.tools': {},
   'grid.get': { tagged: true },
@@ -111,7 +109,6 @@ const CASES: Partial<Record<RpcMethodName, unknown>> = {
   // Reads that need nothing, or only the project or session made above
   'agents.mcpProposals': {},
   'agents.skillProposals': {},
-  'agents.orchestratorSkills': {},
   'agents.assistantSkills': {},
   'agents.sleepPolicy': {},
   'agents.versions': {},
@@ -119,7 +116,6 @@ const CASES: Partial<Record<RpcMethodName, unknown>> = {
   'agents.worktreeStatus': { sessionId: S },
   'usage.history': { from: '2020-01-01T00:00:00Z', to: '2100-01-01T00:00:00Z', groupBy: 'day', by: 'tool' },
   'subagents.usage': {},
-  'orchestrator.peek': {},
   'assistant.peek': {},
   'git.ignoredEntries': { projectId: P },
   'projects.inspect': { path: cwd },
@@ -147,7 +143,6 @@ const CASES: Partial<Record<RpcMethodName, unknown>> = {
   // Writes into the temporary store that the checks after them do not read
   'projects.setAgentInstructions': { projectId: P, text: '' },
   'projects.setWorktreeSetup': { projectId: P, setup: null },
-  'orchestrator.configure': { tool: 'claude' },
   'assistant.configure': { tool: 'claude' },
   'git.cancel': { projectId: P },
   'fs.resolve': { projectId: P, path: 'a.txt' },
@@ -231,13 +226,11 @@ const ok: string[] = []
 const bad: { m: string; issues: string }[] = []
 const failed: { m: string; why: string }[] = []
 
-// orchestrator.tool can only be called by the Assistant itself — get its id first
+// assistant.tool can only be called by the Assistant itself — get its id first
 try {
-  const orc = (await rpc('orchestrator.get', {})) as { id: string }
-  CASES['orchestrator.tool'] = { sessionId: orc.id, name: 'list_sessions', args: {} }
+  const orc = (await rpc('assistant.get', {})) as { id: string }
   CASES['assistant.tool'] = { sessionId: orc.id, name: 'list_sessions', args: {} }
 } catch {
-  SKIP['orchestrator.tool'] = 'could not create the Assistant'
   SKIP['assistant.tool'] = 'could not create the Assistant'
 }
 

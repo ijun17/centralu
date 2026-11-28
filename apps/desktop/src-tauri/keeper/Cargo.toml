@@ -15,15 +15,16 @@ name = "centralu_keeper_core"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-
-# `flock`, `setsid`, `umask`, the peer uid of a unix socket, descriptor passing (#280).
 # `content-verify`: a keeper running from verified content verifies and copies the next build's
 # content itself before handing over to it (docs/plans/thin-shell.md §4, §10 step 5), with the same
-# code and keys as the shell. Not new to the workspace: the shell links it, and through it
-# ed25519-dalek, sha2 and base64. Unix only, like the keeper.
+# code and keys as the shell; and the window on Windows compares a `centralu serve`'s version with the
+# oldest peer it works with by its `Version` (`serve_window.rs`, #2532). Not new to the workspace: the
+# shell links it on every platform, and through it ed25519-dalek, sha2 and base64.
+content-verify = { path = "../../content-verify" }
+
+# `flock`, `setsid`, `umask`, the peer uid of a unix socket, descriptor passing (#280).
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-content-verify = { path = "../../content-verify" }
 # The limited credential's HMAC (`keeper/limited.rs`) and a content file's hash (`keeper/content.rs`); already linked
 # through content-verify.
 sha2 = "0.10"

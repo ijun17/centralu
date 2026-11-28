@@ -53,8 +53,8 @@ export const UpdateSettingsParams = z.object({
   serviceTier: z.string().nullable().optional(),
   permissionPreset: PermissionPreset.optional(),
   /**
-   * Absent: a person's client, no toast. A linked machine's Assistant tool sends `orchestrator` (later `assistant`,
-   * docs/plans/assistant-rename.md), toasted as the Assistant's; an older host strips it. This build sends the first.
+   * Absent: a person's client, no toast. A hub's Assistant tool sends `assistant` (`orchestrator` from a hub of beta.57
+   * to beta.84, docs/plans/assistant-rename.md §3.4), toasted as the Assistant's; an older host strips it.
    */
   by: z.enum(['orchestrator', 'assistant']).optional(),
 })

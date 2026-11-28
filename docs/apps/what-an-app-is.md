@@ -119,7 +119,7 @@ visibility is not read as the default: the side that is wrong stays closed.
   nothing (#152).
 - The proposal itself waits in `orchestrator_mcp_proposals` until the person answers. Every change to
   that list (and to the skill proposal list) is announced by the host with
-  `orchestrator_proposals_changed`, sent after the write, and the screen re-reads on it: not on the
+  `assistant_proposals_changed`, sent after the write, and the screen re-reads on it: not on the
   Assistant's `tool_call`, which arrives before anything is saved (#703). A pending proposal
   counts as waiting on the person: the Assistant's sidebar row, the top-bar count, the waiting
   list and the next-waiting jump carry it like an approval. Two re-reads cover a missed broadcast:

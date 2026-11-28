@@ -46,7 +46,7 @@ grants have no field: an unknown field is refused by name, and so is `sessionToo
 reader set is always on, owner decision 2026-10-20); the trust commands below handle trust, rules, grants and the limits,
 each behind its own card where it widens. "Automatic updates" turned on (`autoUpdate`) is a
 setting that asks (as is turning off the approval notification, below): with both on, code arrives and the window relaunches without a later question, which is what
-`update_centralu` is kept from doing. The card offers allow and deny only (`orchestrator_change`; an older window's "always"
+`update_centralu` is kept from doing. The card offers allow and deny only (`assistant_change`; an older window's "always"
 is read as allow, once). Turning off the notification for an approval asks too, and so does turning off the sound while it still
 notifies: they are what tells the person a card waits, and the Assistant should not decide that they stop hearing of one.
 

@@ -12,7 +12,7 @@ fn line(takes: &str, protocol: u32) -> String {
 fn reads_the_protocol_and_whether_it_takes_window_from_the_last_connection_line() {
     assert_eq!(
         parse_connection_line(&line(r#","takes":["from","window"]"#, 1)),
-        Some(ServeLine { protocol_version: 1, takes_window: true })
+        Some(ServeLine { protocol_version: 1, takes_window: true, version: Some("0.1.0".into()) })
     );
     // A serve from before --window: `takes` without it, or no `takes` at all (beta.28)
     assert_eq!(parse_connection_line(&line(r#","takes":["from"]"#, 1)).map(|l| l.takes_window), Some(false));
@@ -24,20 +24,23 @@ fn reads_the_protocol_and_whether_it_takes_window_from_the_last_connection_line(
 
 #[test]
 fn uses_only_a_serve_that_takes_window_and_speaks_the_windows_protocol() {
-    let ok = ServeLine { protocol_version: 2, takes_window: true };
-    assert_eq!(choose(Some(&ok), Some(2)), ServeChoice::Use);
-    assert_eq!(choose(Some(&ok), Some(1)), ServeChoice::ProtocolDiffers { serve: 2, window: 1 });
-    assert_eq!(choose(Some(&ServeLine { protocol_version: 2, takes_window: false }), Some(2)), ServeChoice::NoWindow);
-    assert_eq!(choose(None, Some(2)), ServeChoice::NoAnswer);
+    let ok = ServeLine { protocol_version: 2, takes_window: true, version: None };
+    let window = |protocol| WindowBundle { protocol, min_peer: None };
+    assert_eq!(choose(Some(&ok), Some(&window(2))), ServeChoice::Use);
+    assert_eq!(choose(Some(&ok), Some(&window(1))), ServeChoice::ProtocolDiffers { serve: 2, window: 1 });
+    assert_eq!(choose(Some(&ServeLine { takes_window: false, ..ok.clone() }), Some(&window(2))), ServeChoice::NoWindow);
+    assert_eq!(choose(None, Some(&window(2))), ServeChoice::NoAnswer);
     assert_eq!(choose(Some(&ok), None), ServeChoice::WindowUnknown);
-    for c in [ServeChoice::Use, ServeChoice::NoAnswer, ServeChoice::NoWindow, ServeChoice::WindowUnknown, ServeChoice::ProtocolDiffers { serve: 2, window: 1 }] {
+    let too_old = ServeChoice::TooOld { serve: "0.1.0-beta.56".into(), min: "0.1.0-beta.57".into() };
+    for c in [ServeChoice::Use, ServeChoice::NoAnswer, ServeChoice::NoWindow, ServeChoice::WindowUnknown, ServeChoice::ProtocolDiffers { serve: 2, window: 1 }, too_old] {
         assert!(!c.text().is_empty());
     }
 }
 
 /// A packaged Windows window with serve installed in its data folder, the serve's answer read as the window reads it
 fn windows_plan(serve_said: Option<&str>, window_protocol: u32) -> Option<Host> {
-    let choice = choose(serve_said.and_then(parse_connection_line).as_ref(), Some(window_protocol));
+    let window = WindowBundle { protocol: window_protocol, min_peer: Some("0.1.0-beta.57".into()) };
+    let choice = choose(serve_said.and_then(parse_connection_line).as_ref(), Some(&window));
     let f = Facts {
         os: Os::Windows,
         build: Build::Release,
@@ -60,16 +63,32 @@ fn an_older_serve_a_serve_on_another_protocol_and_one_that_did_not_answer_leave_
     assert_eq!(windows_plan(None, 1), Some(Host::Bundle), "no answer");
 }
 
+/// #2532: a serve older than the oldest peer the window's build works with lacks the Assistant's new names the window
+/// calls, so the window runs its own host; a local build counts as its base, a build from source is not judged
+#[test]
+fn a_serve_older_than_the_windows_oldest_peer_leaves_the_window_its_bundled_host() {
+    let serve = |version: &str| format!("{{\"v\":1,\"port\":1,\"version\":\"{version}\",\"protocolVersion\":1,\"takes\":[\"window\"]}}");
+    assert_eq!(windows_plan(Some(&serve("0.1.0-beta.56")), 1), Some(Host::Bundle), "before the minimum");
+    assert_eq!(windows_plan(Some(&serve("0.1.0-beta.56.local.3")), 1), Some(Host::Bundle), "a local build of an older base");
+    assert_eq!(windows_plan(Some(&serve("0.1.0-beta.57")), 1), Some(Host::Serve), "the minimum itself");
+    assert_eq!(windows_plan(Some(&serve("0.1.0-beta.100")), 1), Some(Host::Serve), "beta.100 is after beta.57");
+    assert_eq!(windows_plan(Some(&serve("0.0.0-dev")), 1), Some(Host::Serve), "a build from source");
+    let line = parse_connection_line(&serve("0.1.0-beta.56")).unwrap();
+    assert_eq!(choose(Some(&line), Some(&WindowBundle { protocol: 1, min_peer: None })), ServeChoice::Use, "a window bundle that names no minimum");
+}
+
 #[test]
 fn reads_the_windows_protocol_from_its_bundled_hosts_bundle_info() {
     let dir = std::env::temp_dir().join(format!("cc-bundle-info-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("bundle-info.json"), r#"{"commit":"c","protocolVersion":3}"#).unwrap();
-    assert_eq!(bundle_protocol(&dir), Some(3));
+    assert_eq!(bundle_info(&dir), Some(WindowBundle { protocol: 3, min_peer: None }));
+    std::fs::write(dir.join("bundle-info.json"), r#"{"protocolVersion":3,"minPeerVersion":"0.1.0-beta.57"}"#).unwrap();
+    assert_eq!(bundle_info(&dir).and_then(|b| b.min_peer), Some("0.1.0-beta.57".into()));
     std::fs::write(dir.join("bundle-info.json"), "not json").unwrap();
-    assert_eq!(bundle_protocol(&dir), None);
+    assert_eq!(bundle_info(&dir), None);
     let _ = std::fs::remove_dir_all(&dir);
-    assert_eq!(bundle_protocol(&dir), None);
+    assert_eq!(bundle_info(&dir), None);
 }
 
 #[test]

@@ -38,8 +38,8 @@ const methods = () => RecordingSocket.last!.sent.map((f) => f.method).filter((m)
 const turn = () => new Promise((r) => setTimeout(r, 0))
 
 /**
- * The window calls the Assistant's methods by their new names (docs/plans/assistant-rename.md §3.3), and a host that does not
- * know them (older than beta.54, or beta.57 for the skills) gets the same call under the old name.
+ * The window calls the Assistant's methods by their new names only (docs/plans/assistant-rename.md §3.4): every host it
+ * can meet from #2532 on knows them, so a host that does not is not asked again under the old name.
  */
 describe("the window's calls to the Assistant", () => {
   it('use the new names', async () => {
@@ -55,23 +55,16 @@ describe("the window's calls to the Assistant", () => {
     await p.dispose()
   })
 
-  it('ask a host that does not know a new name again under the old one, and pass on any other failure', async () => {
+  it('pass on a host that does not know a new name, without asking under the old one', async () => {
     const p = createWebPlatform({ token: 't', WebSocketImpl: RecordingSocket as unknown as typeof WebSocket })
     const socket = RecordingSocket.last!
     socket.ready()
     const asked = p.agents.assistant()
     await turn()
     socket.unknown()
+    await expect(asked).rejects.toThrow('Unknown method: assistant.get')
     await turn()
-    expect(methods()).toEqual(['assistant.get', 'orchestrator.get'])
-    socket.unknown()
-    await expect(asked).rejects.toThrow('Unknown method: orchestrator.get')
-    const skills = p.agents.assistantSkills()
-    await turn()
-    const call = socket.sent.at(-1)!
-    socket.receive({ kind: 'res', id: call.id, ok: false, error: { code: 'internal', message: 'disk full', retryable: false } })
-    await expect(skills).rejects.toThrow('disk full')
-    expect(methods().slice(2)).toEqual(['agents.assistantSkills'])
+    expect(methods()).toEqual(['assistant.get'])
     await p.dispose()
   })
 })

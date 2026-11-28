@@ -47,6 +47,14 @@ function protocolVersion(root) {
   return Number(m[1])
 }
 
+/** `MIN_SUPPORTED_VERSION`, the oldest peer this build works with, read from the source as `protocolVersion` is */
+function minPeerVersion(root) {
+  const src = readFileSync(join(root, 'packages/protocol/src/semver.ts'), 'utf8')
+  const m = /export const MIN_SUPPORTED_VERSION = '([^']+)'/.exec(src)
+  if (!m) throw new Error('could not find MIN_SUPPORTED_VERSION in packages/protocol/src/semver.ts')
+  return m[1]
+}
+
 /** `bundle-info.json`'s text: what the launcher and the keeper read of a host folder before they start it */
 export function bundleInfoText({ root, buildId }) {
   return (
@@ -54,6 +62,8 @@ export function bundleInfoText({ root, buildId }) {
       {
         commit: buildId,
         protocolVersion: protocolVersion(root),
+        // The window on Windows uses the data folder's `centralu serve` only from this version on (#2532, keeper serve_window.rs)
+        minPeerVersion: minPeerVersion(root),
         // The host answers a `prove` before hello (#838): `centralu serve` reads this to say `proof` in the connection line
         hostProof: 1,
         // The host takes its token as the first line on stdin (#538): a keeper hands it over there instead of in the environment

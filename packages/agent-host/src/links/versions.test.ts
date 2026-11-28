@@ -6,16 +6,16 @@ const side = (version: string, protocolVersion = 1, dev = false) => ({ version, 
 
 describe('the version check before a link connects (docs/plans/remote-hub.md §4)', () => {
   it('connects when both sides run the same version', () => {
-    const v = compareVersions(side('0.1.0-beta.51'), side('0.1.0-beta.51'), false)
+    const v = compareVersions(side('0.1.0-beta.71'), side('0.1.0-beta.71'), false)
     expect(v).toMatchObject({ older: null, compatible: true })
     expect(mayConnect(v)).toBe(true)
   })
 
   it('connects on one protocol whatever the app versions, and names the older side so an update is offered (#689)', () => {
-    const remoteOlder = compareVersions(side('0.1.0-beta.51'), side('0.1.0-beta.50'), false)
+    const remoteOlder = compareVersions(side('0.1.0-beta.71'), side('0.1.0-beta.70'), false)
     expect(remoteOlder.older).toBe('remote')
     expect(mayConnect(remoteOlder)).toBe(true)
-    const hubOlder = compareVersions(side('0.1.0-beta.50'), side('0.1.0-beta.51'), false)
+    const hubOlder = compareVersions(side('0.1.0-beta.70'), side('0.1.0-beta.71'), false)
     expect(hubOlder.older).toBe('hub')
     expect(mayConnect(hubOlder)).toBe(true)
   })
@@ -39,7 +39,7 @@ describe('the version check before a link connects (docs/plans/remote-hub.md §4
   })
 
   it('a dev build has no newer; it connects on one protocol', () => {
-    const v = compareVersions(side('0.1.0-beta.50', 1, true), side('0.1.0-beta.51'), false)
+    const v = compareVersions(side('0.1.0-beta.70', 1, true), side('0.1.0-beta.71'), false)
     expect(v.older).toBeNull()
     expect(mayConnect(v)).toBe(true)
     expect(mayConnect(compareVersions(side('0.1.0', 1, true), side('0.1.0', 2), false))).toBe(false)
@@ -52,15 +52,15 @@ describe('the version check before a link connects (docs/plans/remote-hub.md §4
   })
 
   it('does not connect a remote older than the minimum supported version, and names it as the side to update (#1143)', () => {
-    const old = compareVersions(side('0.1.0-beta.50'), side('0.1.0-beta.44'), true)
+    const old = compareVersions(side('0.1.0-beta.70'), side('0.1.0-beta.44'), true)
     expect(old).toMatchObject({ compatible: false, accepted: false, older: 'remote' })
     expect(mayConnect(old)).toBe(false)
-    expect(mayConnect(compareVersions(side('0.1.0-beta.50'), side(MIN_SUPPORTED_VERSION), false))).toBe(true)
+    expect(mayConnect(compareVersions(side('0.1.0-beta.70'), side(MIN_SUPPORTED_VERSION), false))).toBe(true)
     // A local build of the minimum is the minimum; a remote run from source has no release to check
-    expect(mayConnect(compareVersions(side('0.1.0-beta.50'), side(`${MIN_SUPPORTED_VERSION}.local.1`), false))).toBe(true)
-    expect(mayConnect(compareVersions(side('0.1.0-beta.50'), side('0.1.0-beta.44', 1, true), false))).toBe(true)
+    expect(mayConnect(compareVersions(side('0.1.0-beta.70'), side(`${MIN_SUPPORTED_VERSION}.local.1`), false))).toBe(true)
+    expect(mayConnect(compareVersions(side('0.1.0-beta.70'), side('0.1.0-beta.44', 1, true), false))).toBe(true)
     // A remote host from source says `0.0.0-dev` on its connection line, before its hello can say it is a dev build
-    expect(mayConnect(compareVersions(side('0.1.0-beta.50'), side('0.0.0-dev'), false))).toBe(true)
+    expect(mayConnect(compareVersions(side('0.1.0-beta.70'), side('0.0.0-dev'), false))).toBe(true)
     expect(heldOnMinimum(old)).toBe(true)
     expect(heldOnMinimum(compareVersions(side('0.2.0', 2), side('0.1.0', 1), false))).toBe(false)
   })
@@ -74,6 +74,6 @@ describe('the version check before a link connects (docs/plans/remote-hub.md §4
   })
 
   it('keeps what the person accepted per pair: either side moving asks again', () => {
-    expect(acceptanceKey(side('0.1.0-beta.50'), side('0.1.0-beta.51'))).not.toBe(acceptanceKey(side('0.1.0-beta.50'), side('0.1.0-beta.52')))
+    expect(acceptanceKey(side('0.1.0-beta.70'), side('0.1.0-beta.71'))).not.toBe(acceptanceKey(side('0.1.0-beta.70'), side('0.1.0-beta.72')))
   })
 })

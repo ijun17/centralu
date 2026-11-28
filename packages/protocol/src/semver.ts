@@ -54,8 +54,11 @@ function split(raw: string): [number[], string | null] {
 const LOCAL_BUILD =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*\.local\.[1-9]\d*$/
 
-/** The oldest peer this build works with (docs/protocol.md §4) */
-export const MIN_SUPPORTED_VERSION = '0.1.0-beta.45'
+/**
+ * The oldest peer this build works with (docs/protocol.md §4). beta.57 since #2532: a peer before it lacks the Assistant's
+ * new names this build sends and calls (docs/plans/assistant-rename.md §3.4)
+ */
+export const MIN_SUPPORTED_VERSION = '0.1.0-beta.57'
 
 /**
  * A local build counts as the release it was cut from. A build from source (`0.0.0-dev`) or a version that is no

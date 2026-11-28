@@ -2,7 +2,8 @@
  * The Assistant's marker under both names (#2133, docs/plans/assistant-rename.md): store step v68 adds
  * `sessions.is_assistant` and copies `is_orchestrator` into it, and the build of v68 writes both and reads
  * `is_orchestrator`. Step 4 (v69) copies the marker once more, keeps out the builds that write only `is_orchestrator`,
- * and reads `is_assistant`; it still writes both, for the build of v68 a person can go back to.
+ * and reads `is_assistant`; it still wrote both, for the build of v68 a person could go back to. Since #2532 only
+ * `is_assistant` is written: the floor (75) keeps out every build that reads `is_orchestrator`.
  */
 import { describe, expect, it } from 'vitest'
 import type Database from 'better-sqlite3'
@@ -68,13 +69,14 @@ describe("the Assistant's marker under both names (#2133)", () => {
     }
   })
 
-  it('writes both columns', () => {
+  it('writes only the new column, and leaves the old one as it was (#2532)', () => {
     const s = store(LATEST)
     try {
-      s.sessions.upsertSession(session('a', 'orchestrator'))
+      s.sessions.upsertSession(session('a', 'assistant'))
       s.sessions.upsertSession(session('w', 'worker'))
-      expect(markers(s)).toEqual([{ id: 'a', old: 1, new: 1 }, { id: 'w', old: 0, new: 0 }])
-      // A session read back and written again keeps its marker in both
+      expect(markers(s)).toEqual([{ id: 'a', old: 0, new: 1 }, { id: 'w', old: 0, new: 0 }])
+      // A session read back and written again keeps its marker, and an old column a build of v78 wrote stays untouched
+      s.raw.exec(`UPDATE sessions SET is_orchestrator = 1 WHERE id = 'a'`)
       s.sessions.upsertSession({ ...session('a', 'worker'), ...s.sessions.listSessions().find((x) => x.id === 'a') })
       expect(markers(s)).toEqual([{ id: 'a', old: 1, new: 1 }, { id: 'w', old: 0, new: 0 }])
     } finally {
@@ -96,7 +98,7 @@ describe("the Assistant's marker under both names (#2133)", () => {
       s.upgrade()
       expect(markers(s)).toEqual([{ id: 'a', old: 0, new: 0 }, { id: 'b', old: 1, new: 1 }])
       expect(s.sessions.assistantId()).toBe('b')
-      expect(s.sessions.listSessions().map((x) => [x.id, x.kind])).toEqual([['a', 'worker'], ['b', 'orchestrator']])
+      expect(s.sessions.listSessions().map((x) => [x.id, x.kind])).toEqual([['a', 'worker'], ['b', 'assistant']])
     } finally {
       s.close()
     }
@@ -113,7 +115,7 @@ describe("the Assistant's marker under both names (#2133)", () => {
       expect(s.sessions.assistantId()).toBe('w')
       // Only the new column is read: a row whose old column alone says Assistant (no build that opens this store writes that) is not one
       s.raw.exec(`UPDATE sessions SET is_orchestrator = 1 WHERE id = 'a'`)
-      expect(s.sessions.listSessions().map((x) => [x.id, x.kind])).toEqual([['a', 'worker'], ['w', 'orchestrator']])
+      expect(s.sessions.listSessions().map((x) => [x.id, x.kind])).toEqual([['a', 'worker'], ['w', 'assistant']])
     } finally {
       s.close()
     }

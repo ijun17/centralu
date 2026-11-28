@@ -181,6 +181,22 @@ export type MachinesPort = {
 
 type RpcContext = { client: number; rights?: 'full' | 'limited'; label?: string | null; covered?: boolean; trustedDev?: true; window?: true }
 
+/**
+ * The Assistant's methods under the role's old name, retired by #2532 (docs/plans/assistant-rename.md §3.4), by their new
+ * name. A window calls them before beta.81 and the Codex bridge before beta.57, but each comes with its own host; what
+ * else sends one is of an older build, and is told to update, as a hub refuses to link to such a machine
+ * (`MIN_SUPPORTED_VERSION`).
+ */
+const RENAMED_METHODS: ReadonlyMap<string, string> = new Map([
+  ['orchestrator.get', 'assistant.get'],
+  ['orchestrator.peek', 'assistant.peek'],
+  ['orchestrator.configure', 'assistant.configure'],
+  ['orchestrator.tools', 'assistant.tools'],
+  ['orchestrator.tool', 'assistant.tool'],
+  ['agents.orchestratorSkills', 'agents.assistantSkills'],
+  ['agents.deleteOrchestratorSkill', 'agents.deleteAssistantSkill'],
+])
+
 /** RPC routing. Parameters are validated exactly once, at the boundary (docs/protocol.md §4) */
 export function createRpcHandler(
   mgr: SessionManager,
@@ -189,7 +205,7 @@ export function createRpcHandler(
 ) {
   const reportUiCrash = createUiCrashLog((line) => console.error(line))
   /**
-   * The Centralu tools the bridge offers a session (`orchestrator.tools`, `assistant.tools`): the full list when no session is given
+   * The Centralu tools the bridge offers a session (`assistant.tools`): the full list when no session is given
    * (for compatibility), only that session's bundle when one is known (#69: the manager takes a subset), and nothing for a session
    * with no bundle, since the full list would advertise tools its calls are refused
    */
@@ -328,12 +344,6 @@ export function createRpcHandler(
 
   /** The answer of a method that only does something: `ack(work)` runs the work as an argument and answers `{ ok: true }` */
   const ack = (_done?: unknown) => ({ ok: true as const })
-  // `agents.deleteOrchestratorSkill` and its twin under the role's new name (#2133 step 4)
-  const deleteAssistantSkill = async (name: string) => {
-    const r = await mgr.assistantSlot.deleteAssistantSkill(name)
-    if (!r.ok) throw rpcError(r.error ?? 'unknown skill')
-    return { ok: true as const }
-  }
 
   /**
    * Who wrote a call's text when a script (the limited credential) made it (§8.1, #1468): its label, from the connection and
@@ -411,11 +421,12 @@ export function createRpcHandler(
       if (!r.ok) throw rpcError(r.error ?? 'unknown proposal')
       return { ok: true as const }
     },
-    'agents.orchestratorSkills': async () => ({ skills: mgr.assistantSlot.assistantSkills() }),
-    'agents.deleteOrchestratorSkill': async ({ name }) => deleteAssistantSkill(name),
-    // The same two under the role's new name (#2133 step 4)
     'agents.assistantSkills': async () => ({ skills: mgr.assistantSlot.assistantSkills() }),
-    'agents.deleteAssistantSkill': async ({ name }) => deleteAssistantSkill(name),
+    'agents.deleteAssistantSkill': async ({ name }) => {
+      const r = await mgr.assistantSlot.deleteAssistantSkill(name)
+      if (!r.ok) throw rpcError(r.error ?? 'unknown skill')
+      return { ok: true as const }
+    },
     'agents.listExternalSessions': async ({ projectId, tool, limit }) => {
       return mgr.externals.listExternalSessions(projectId, tool, limit)
     },
@@ -436,8 +447,8 @@ export function createRpcHandler(
       const { sessionId, by, ...settings } = p
       // `by` comes only from a hub's Assistant, which directs no Assistant nor coordinator here (#1941)
       if (by) mgr.linkedHost.directedFromHub(sessionId)
-      // `assistant` is the same hand under the role's new name (#2133); this build records and broadcasts it as `orchestrator`
-      return await mgr.updateSettings(sessionId, settings, by ? 'orchestrator' : 'person')
+      // `orchestrator` is the same hand under the role's old name, from a hub of beta.57 to beta.84 (#2532)
+      return await mgr.updateSettings(sessionId, settings, by ? 'assistant' : 'person')
     },
     'agents.switchTool': async ({ sessionId, tool }) => {
       return mgr.processes.switchTool(sessionId, tool)
@@ -539,10 +550,6 @@ export function createRpcHandler(
     'projects.createPreview': async ({ name, parent, source }) => {
       return mgr.projectCreation.projectCreatePreview(name, parent, source)
     },
-    'orchestrator.get': async () => mgr.assistant(),
-    'orchestrator.peek': async () => mgr.assistantSlot.assistantPeek(),
-    'orchestrator.configure': async (p) => ack(mgr.assistantSlot.configureAssistant(p.tool)),
-    // #2133 step 3: the same methods under the role's new name, answered alike; nothing calls them until step 4
     'assistant.get': async () => mgr.assistant(),
     'assistant.peek': async () => mgr.assistantSlot.assistantPeek(),
     'assistant.configure': async (p) => ack(mgr.assistantSlot.configureAssistant(p.tool)),
@@ -706,11 +713,6 @@ export function createRpcHandler(
     'apps.sendError': async ({ appId, projectId, at }, ctx) => sendErrorToBuilder(builderDeps('apps.sendError', ctx), { appId, projectId }, at),
     'apps.askBuilder': async ({ appId, projectId, text, attachments, instanceId }, ctx) =>
       askBuilder(builderDeps('apps.askBuilder', ctx), { ref: { appId, projectId }, text, attachments, instanceId }),
-    'orchestrator.tools': async ({ sessionId }) => sessionToolSchemas(sessionId),
-    'orchestrator.tool': async ({ sessionId, name, args }) => {
-      return mgr.runCentraluTool(sessionId, name, args)
-    },
-    // #2133 step 3: the bridge's two methods under the role's new name, answered alike
     'assistant.tools': async ({ sessionId }) => sessionToolSchemas(sessionId),
     'assistant.tool': async ({ sessionId, name, args }) => {
       return mgr.runCentraluTool(sessionId, name, args)
@@ -1069,6 +1071,7 @@ export function createRpcHandler(
      * transport says so for everything but a swap's cut): asking again gets the same answer.
      */
     if (!h) {
+      if (RENAMED_METHODS.has(method)) throw rpcError(`${method} is now ${RENAMED_METHODS.get(method)}: update Centralu on the computer that sent this`)
       throw rpcError(`Unknown method: ${method}. This Centralu host does not have it; the window may be from another build.`)
     }
     /*

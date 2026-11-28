@@ -25,7 +25,6 @@ With the limited credential: runs.
 - `agents.listExternalSessions`
 - `agents.mcpProposals`
 - `agents.models`
-- `agents.orchestratorSkills`
 - `agents.restartSession`
 - `agents.resumeSession`
 - `agents.send`
@@ -108,9 +107,6 @@ With the limited credential: runs.
 - `messages.search`
 - `messages.subagent`
 - `messages.subagentTrashed`
-- `orchestrator.configure`
-- `orchestrator.get`
-- `orchestrator.peek`
 - `prefs.get`
 - `processes.stop`
 - `processes.strays`
@@ -158,7 +154,6 @@ With the limited credential: waits for the person's card in the window and runs 
 - `agents.archiveIfAtRest`
 - `agents.deleteAgentChild`
 - `agents.deleteAssistantSkill`
-- `agents.deleteOrchestratorSkill`
 - `agents.deleteSession`
 - `agents.installTool`
 - `agents.signIn`
@@ -271,5 +266,3 @@ With the limited credential: refused: a session's own tool channel, which a Code
 
 - `assistant.tool`
 - `assistant.tools`
-- `orchestrator.tool`
-- `orchestrator.tools`

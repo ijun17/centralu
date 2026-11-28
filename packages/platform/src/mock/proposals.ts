@@ -11,7 +11,7 @@ export class ProposalsMock {
   saveProposal(spec: { mcp: { name: string; command: string; args: string[]; why?: string } } | { skill: { name: string; content: string; why?: string } }): void {
     if ('mcp' in spec) this.mcpProposalList.push(spec.mcp)
     else this.skillProposalList.push(spec.skill)
-    this.emit({ type: 'orchestrator_proposals_changed' })
+    this.emit({ type: 'assistant_proposals_changed' })
   }
   /** Reads of either list (#703) */
   proposalReads = 0
@@ -26,7 +26,7 @@ export class ProposalsMock {
       if (at === -1) throw mockError(`No pending proposal named "${name}"`)
       const [hit] = this.mcpProposalList.splice(at, 1)
       if (approve && hit) this.mcpApproved.push(hit.name)
-      this.emit({ type: 'orchestrator_proposals_changed' })
+      this.emit({ type: 'assistant_proposals_changed' })
     },
     skillProposals: async () => {
       this.proposalReads++
@@ -37,7 +37,7 @@ export class ProposalsMock {
       if (at === -1) throw mockError(`No pending skill proposal named "${name}"`)
       const [hit] = this.skillProposalList.splice(at, 1)
       if (approve && hit) this.skillList.push({ name: hit.name, content: hit.content })
-      this.emit({ type: 'orchestrator_proposals_changed' })
+      this.emit({ type: 'assistant_proposals_changed' })
     },
     assistantSkills: async () => ({ skills: [...this.skillList] }),
     deleteAssistantSkill: async (name: string) => {

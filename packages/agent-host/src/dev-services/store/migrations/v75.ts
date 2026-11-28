@@ -85,6 +85,26 @@ export class StepsV75 extends MigrationRange {
           this.db.exec(`DELETE FROM approval_rules WHERE substr(matcher, -1) = '*'`)
         },
       },
+      {
+        to: 79,
+        breaksOlderReaders: false,
+        /**
+         * The Assistant's old stored forms go (#2532, docs/plans/assistant-rename.md §3.4): the four `app_settings` keys under the role's old name,
+         * and the old `via` on mail rows sent to the role, rewritten `'assistant'`. From this build on only the new forms are read.
+         *
+         * **Not breaking.** Every build the floor (75) admits reads the new key first, and the old key only where the new one is missing, which
+         * step 69 left nowhere; it reads a row's `via` under either word, and writes `'assistant'`. `sessions.is_orchestrator` stays: those
+         * builds still write it, so dropping it would keep them out (#2578).
+         */
+        run: () => {
+          const has = (table: string) => this.db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`).get(table) !== undefined
+          // The keys as they were when this step shipped, not the live list in store/settings.ts
+          if (has('app_settings')) {
+            this.db.exec(`DELETE FROM app_settings WHERE key IN ('orchestrator_tool', 'orchestrator_mcp_proposals', 'orchestrator_skill_proposals', 'orchestrator_skills')`)
+          }
+          if (has('mail_recipients')) this.db.exec(`UPDATE mail_recipients SET via = 'assistant' WHERE via = 'orchestrator'`)
+        },
+      },
     ]
   }
 

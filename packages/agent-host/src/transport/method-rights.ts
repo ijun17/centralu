@@ -114,8 +114,6 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'agents.resolveMcpProposal': 'window',
   'agents.skillProposals': 'everyday',
   'agents.resolveSkillProposal': 'window',
-  'agents.orchestratorSkills': 'everyday',
-  'agents.deleteOrchestratorSkill': 'asks',
   'agents.assistantSkills': 'everyday',
   'agents.deleteAssistantSkill': 'asks',
   'agents.exportHandoffRecord': 'everyday',
@@ -175,12 +173,6 @@ export const METHOD_RIGHTS: { readonly [M in RpcMethodName]: Rights } = {
   'trash.empty': 'asks',
 
   // The Assistant
-  'orchestrator.get': 'everyday',
-  'orchestrator.peek': 'everyday',
-  'orchestrator.configure': 'everyday',
-  'orchestrator.tools': 'bridge',
-  'orchestrator.tool': 'bridge',
-  // #2133 step 3: the same five under the role's new name, with the same rights
   'assistant.get': 'everyday',
   'assistant.peek': 'everyday',
   'assistant.configure': 'everyday',

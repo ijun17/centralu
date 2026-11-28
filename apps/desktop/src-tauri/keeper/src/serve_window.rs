@@ -6,7 +6,8 @@
 //! left with no host, where without serve it starts its own. So:
 //!
 //!   - before choosing it, the window asks the serve (`serve --connection`, `ask_connection`): only one whose line
-//!     lists `window` in `takes` and speaks the window's protocol is used (`choose`);
+//!     lists `window` in `takes`, speaks the window's protocol and is not older than the oldest peer the window's
+//!     build works with (`minPeerVersion`, #2532: one before beta.57 lacks the Assistant's new names) is used (`choose`);
 //!   - a `serve --window` that ends before its ready line hands the next attempt to the bundled host
 //!     (`ServeFallback`). If a host holds the data folder all the same, the bundled host's start is refused by the
 //!     folder's lock, with the message that names who holds it.
@@ -15,6 +16,7 @@
 //! same everywhere.
 
 use crate::host_proc::{HostStatus, StatusSink};
+use content_verify::version::Version;
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -29,6 +31,8 @@ pub struct ServeLine {
     pub protocol_version: u32,
     /// `takes` lists `window`: this serve has `--window`.
     pub takes_window: bool,
+    /// Its Centralu version, when the line says one.
+    pub version: Option<String>,
 }
 
 /// The connection line among whatever the launcher printed: the last line that is a `v: 1` object with a protocol.
@@ -43,7 +47,8 @@ pub fn parse_connection_line(stdout: &str) -> Option<ServeLine> {
             .get("takes")
             .and_then(|t| t.as_array())
             .is_some_and(|t| t.iter().any(|x| x.as_str() == Some("window")));
-        Some(ServeLine { protocol_version, takes_window })
+        let version = v.get("version").and_then(|v| v.as_str()).map(str::to_string);
+        Some(ServeLine { protocol_version, takes_window, version })
     })
 }
 
@@ -57,7 +62,9 @@ pub enum ServeChoice {
     NoWindow,
     /// It speaks another protocol than the window; its host would refuse the window's hello.
     ProtocolDiffers { serve: u32, window: u32 },
-    /// The window's own protocol could not be read (`bundle_protocol`).
+    /// It is older than the oldest peer the window's build works with.
+    TooOld { serve: String, min: String },
+    /// The window's own protocol could not be read (`bundle_info`).
     WindowUnknown,
 }
 
@@ -70,28 +77,56 @@ impl ServeChoice {
             ServeChoice::ProtocolDiffers { serve, window } => {
                 format!("the data folder's centralu serve speaks protocol {serve} and this window {window}; the window runs its own host")
             }
+            ServeChoice::TooOld { serve, min } => {
+                format!("the data folder's centralu serve is Centralu {serve}, older than {min}, the oldest this window works with; the window runs its own host until Centralu is updated there")
+            }
             ServeChoice::WindowUnknown => "this window's protocol could not be read; it runs its own host".into(),
         }
     }
 }
 
-pub fn choose(line: Option<&ServeLine>, window_protocol: Option<u32>) -> ServeChoice {
+pub fn choose(line: Option<&ServeLine>, window: Option<&WindowBundle>) -> ServeChoice {
     let Some(line) = line else { return ServeChoice::NoAnswer };
     if !line.takes_window {
         return ServeChoice::NoWindow;
     }
-    let Some(window) = window_protocol else { return ServeChoice::WindowUnknown };
-    if line.protocol_version != window {
-        return ServeChoice::ProtocolDiffers { serve: line.protocol_version, window };
+    let Some(window) = window else { return ServeChoice::WindowUnknown };
+    if line.protocol_version != window.protocol {
+        return ServeChoice::ProtocolDiffers { serve: line.protocol_version, window: window.protocol };
+    }
+    if let (Some(serve), Some(min)) = (line.version.as_deref(), window.min_peer.as_deref()) {
+        if older_release(serve, min) {
+            return ServeChoice::TooOld { serve: serve.into(), min: min.into() };
+        }
     }
     ServeChoice::Use
 }
 
-/// The protocol the window's bundled host speaks: `protocolVersion` in its `bundle-info.json`.
-pub fn bundle_protocol(host_dir: &Path) -> Option<u32> {
+/// Whether `version` is a release before `min`, as `isSupportedVersion` (protocol/src/semver.ts) judges it: a local
+/// build (`<base>.local.N`) is its base, and a build from source (`0.0.0-…`) or a version that does not parse is not judged.
+fn older_release(version: &str, min: &str) -> bool {
+    let base = version.split_once(".local.").map_or(version, |(b, _)| b);
+    if base.starts_with("0.0.0") {
+        return false;
+    }
+    matches!((Version::parse(base), Version::parse(min)), (Ok(v), Ok(m)) if v < m)
+}
+
+/// What the window's bundled host says of itself in its `bundle-info.json`, as far as choosing the serve goes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowBundle {
+    /// `protocolVersion`: the protocol it speaks.
+    pub protocol: u32,
+    /// `minPeerVersion`: the oldest Centralu it works with (`MIN_SUPPORTED_VERSION`); absent from a bundle before #2532.
+    pub min_peer: Option<String>,
+}
+
+pub fn bundle_info(host_dir: &Path) -> Option<WindowBundle> {
     let text = std::fs::read_to_string(host_dir.join("bundle-info.json")).ok()?;
     let v: serde_json::Value = serde_json::from_str(&text).ok()?;
-    v.get("protocolVersion").and_then(|p| p.as_u64()).map(|p| p as u32)
+    let protocol = v.get("protocolVersion").and_then(|p| p.as_u64())? as u32;
+    let min_peer = v.get("minPeerVersion").and_then(|p| p.as_str()).map(str::to_string);
+    Some(WindowBundle { protocol, min_peer })
 }
 
 /// How long the window waits for `serve --connection`: it probes the recorded port (2 s at most) after Node starts.
