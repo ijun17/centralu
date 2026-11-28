@@ -722,22 +722,17 @@ test('A goal badge appears in the header once a goal is set, and disappears once
 })
 
 /**
- * When the host dies, the supervisor relaunches it, but the new host knows nothing of the agents
- * that were alive — their processes died along with it. So every session used to sit dormant on
- * screen, and the person had to click each one to wake it. The UI is the one thing that knows
- * what was running, so this uses that to bring them back automatically.
+ * A reconnect wakes no session (#2538): a turn an update cut, and the background work that stop ended, are the host's to
+ * continue (#1618, #1902); any other session waits to be written to. A wake the window started on its own would start a
+ * process nobody asked for.
  */
-test('Working sessions revive on their own after a disconnect and reconnect', async ({ page }) => {
+test('a session the host lost stays asleep after a disconnect and reconnect, and the window wakes nothing', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
 
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
 
-  /*
-    The host died: the process is gone and the connection drops. The host that starts next finds the turn it lost and
-    lists the session at rest (host-tenure.ts); only a turn an update cut stays `working`, and that host continues it
-    itself, so the window does not wake that one (#1618, #2163)
-  */
+  // The host died: the process is gone and the connection drops. The host that starts next lists the session at rest
   await page.evaluate((sid) => {
     const m = (window as any).__mock
     const s = m.sessions.get(sid)
@@ -752,16 +747,12 @@ test('Working sessions revive on their own after a disconnect and reconnect', as
   // The supervisor relaunched it
   await page.evaluate(() => (window as any).__mock.setConnectionState('connected'))
 
-  /*
-    The UI's live flag stays stale at true even after the disconnect, so checking only that would
-    prove nothing. This checks whether **the host's own actual state** has come back to life —
-    proof that revival really happened.
-  */
+  // The reconnect's reread has landed when the row reads as the host lists it; a wake would have been asked by then
   await expect
-    .poll(async () => page.evaluate((sid) => (window as any).__mock.sessions.get(sid).live, id), {
-      timeout: 5000,
-    })
-    .toBe(true)
+    .poll(async () => page.evaluate((sid) => (window as any).__store.getState().sessions[sid].live, id))
+    .toBe(false)
+  expect(await page.evaluate(() => (window as any).__mock.resumeCalls)).toEqual([])
+  expect(await page.evaluate((sid) => (window as any).__mock.sessions.get(sid).live, id)).toBe(false)
 })
 
 /**
