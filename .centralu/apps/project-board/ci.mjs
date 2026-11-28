@@ -191,7 +191,7 @@ const PENDING_STATUS = new Set(['queued', 'in_progress', 'waiting', 'requested',
  * One reported check as passed, failed or pending. `kind` is `run` (a check run: status +
  * conclusion) or `status` (a commit status: state).
  */
-export function checkState(c) {
+function checkState(c) {
   if (c.kind === 'status') {
     if (c.state === 'success') return 'passed'
     if (c.state === 'pending') return 'pending'
@@ -456,7 +456,7 @@ const MIN_SIGNATURE = 20
  * The failure texts an issue quotes (#368 lists the known intermittent failures): every line of its
  * code blocks and every inline code span, long enough to say something.
  */
-export function flakeSignatures(issueText) {
+function flakeSignatures(issueText) {
   const text = String(issueText ?? '')
   const out = new Set()
   const add = (s) => {
@@ -475,7 +475,7 @@ const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
  * a temp-folder suffix (letters and digits mixed, such as `O0htlN`) matches any, numbers match any
  * number, and whitespace any whitespace.
  */
-export function signaturePattern(sig) {
+function signaturePattern(sig) {
   const src = sig
     .split(/…|\.\.\./)
     .map((piece) =>

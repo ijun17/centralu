@@ -26,7 +26,6 @@ import {
   TOOL_ARGS,
   agentCallsFor,
   callForm,
-  codexToolInstructionsFor,
   instructionsFor,
   centraluToolSchemas,
   profileAllows,
@@ -37,7 +36,8 @@ import {
   toolDefsFor,
   type RareTier,
 } from './centralu-tools.js'
-import { TOOL_PROFILES, definitionChars, residentCost, servedDefinitions, servedInstructions } from './tool-cost.js'
+import { servedInstructions } from './agent-text.js'
+import { TOOL_PROFILES, definitionChars, residentCost, servedDefinitions } from './tool-cost.js'
 import { commandsFor, commandsSentence, namedCall } from './tool-seats.js'
 import { movedChildrenNote } from './handoff-children.js'
 
@@ -289,10 +289,8 @@ describe('the reader set', () => {
   it('sends repository work to an attached app\'s help first, only where an app is attached at the start', () => {
     expect(instructionsFor('reader', undefined, true, 'Agent')).toBe(readerInstructions('Agent', true))
     expect(readerInstructions('Agent', true)).toContain(REPO_WORK_FIRST)
-    expect(codexToolInstructionsFor('reader', undefined, true, 'spawn_agent')).toContain(REPO_WORK_FIRST)
     // No app, no help to read: the line does not ride in that session's every request
     expect(instructionsFor('reader')).not.toContain(REPO_WORK_FIRST)
-    expect(codexToolInstructionsFor('reader')).not.toContain(REPO_WORK_FIRST)
     // The Assistant does no repository work itself
     for (const apps of [false, true]) expect(instructionsFor('assistant', undefined, apps)).not.toContain(REPO_WORK_FIRST)
     // The same words whichever apps they are
@@ -310,10 +308,6 @@ describe('the reader set', () => {
     // #1038's `machine` 2,612; plus #1451's compact_self (453, loaded: its words are the instruction on when to use it)
     const claude = residentCost('reader', DEFERRED_SERVER)
     expect(claude.residentChars + claude.instructionsChars).toBeLessThanOrEqual(2850 + COMPACT_BUDGET_CHARS)
-  })
-
-  it('gives Codex the reader instructions in its developer text', () => {
-    expect(codexToolInstructionsFor('reader', undefined, false, 'spawn_agent')).toContain(readerInstructions('spawn_agent'))
   })
 
   // #1587: Codex read "not your Agent tool", Claude's name for it, and chose its own spawn_agent for long work

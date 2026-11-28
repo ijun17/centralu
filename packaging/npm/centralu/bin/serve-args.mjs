@@ -65,7 +65,7 @@ export const CHILD_FLAG = '--detached-child='
  * What `--from` takes (#1223): a hub's name, short and of characters that cannot break the sentence a refused host says
  * it in, nor a command line. The hub sends its own host name, cleaned the same way (`hubNameForRemote`, links/tunnel.ts)
  */
-export const FROM_RE = /^[A-Za-z0-9._-]{1,64}$/
+const FROM_RE = /^[A-Za-z0-9._-]{1,64}$/
 
 /**
  * What the arguments after `serve` ask for: `{ mode, port }` (plus `child` for a detached launcher,

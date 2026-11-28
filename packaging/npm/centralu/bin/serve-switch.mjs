@@ -550,7 +550,7 @@ export async function beforeHostStart({ dataDir, env, version, platform = proces
 }
 
 /** What `--detach` and `serve` say while a switch is under way there */
-export function switchingMessage(gate) {
+function switchingMessage(gate) {
   return `an update from ${gate.by} started at ${clockOf(gate.startedAt)} is switching versions here; no host starts until it ends`
 }
 

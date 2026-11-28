@@ -60,7 +60,7 @@ export const ALLOWED = {
 
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
 /** Text as HTML text or a double-quoted attribute value. */
-export const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ESC[c])
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ESC[c])
 
 // Placeholders for finished HTML inside a line of text being worked on. Private-use characters the
 // input cannot contain (they are replaced first), so no input can forge one.
@@ -73,7 +73,7 @@ const SLOT = /(\d+)/g
  * https and mailto. Resolved against the item's own address the way GitHub resolves a relative link.
  * The URL parser drops tabs and newlines first, so `java\tscript:` is caught here too.
  */
-export function safeHref(raw, base) {
+function safeHref(raw, base) {
   const s = String(raw ?? '').trim()
   if (!s) return null
   try {
@@ -89,7 +89,7 @@ export function safeHref(raw, base) {
  * declares (view-tools.mjs VIEW_CSP). Anything else becomes a link, so the view never asks another
  * server for anything.
  */
-export function imageSrc(raw) {
+function imageSrc(raw) {
   try {
     const u = new URL(String(raw ?? '').trim())
     const host = u.hostname.toLowerCase()

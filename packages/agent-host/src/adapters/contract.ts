@@ -242,7 +242,7 @@ export function hostAccessEnv(access: CreateSessionOpts['hostAccess']): Record<s
  */
 export type LaunchSettings = Pick<
   CreateSessionOpts,
-  'cwd' | 'model' | 'effort' | 'verbosity' | 'serviceTier' | 'permissionPreset' | 'projectTrusted' | 'noSettingFiles' | 'toolProfile' | 'systemPromptAppend' | 'noCodeIntelligence'
+  'cwd' | 'model' | 'effort' | 'verbosity' | 'serviceTier' | 'permissionPreset' | 'projectTrusted' | 'noSettingFiles' | 'toolProfile' | 'noCodeIntelligence'
 >
 
 /** A single previous session kept by the tool (a tool's own type never reaches this far) */

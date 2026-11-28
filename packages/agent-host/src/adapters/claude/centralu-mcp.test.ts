@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { CentraluTools } from '../contract.js'
 import { readerInstructions, SCOPED_INSTRUCTIONS } from '../../sessions/centralu-tools.js'
 import { ClaudeAdapter } from './index.js'
-import { CLAUDE_SUBAGENT_TOOL, centraluMcp } from './centralu-mcp.js'
+import { CLAUDE_SUBAGENT_TOOL, type centraluMcp } from './centralu-mcp.js'
+import { ClaudeServers } from './session-servers.js'
 
 /**
  * What the in-process server registers — read from the SDK's own server, the list `tools/list`
@@ -10,7 +11,9 @@ import { CLAUDE_SUBAGENT_TOOL, centraluMcp } from './centralu-mcp.js'
  * deferred behind tool search (sdk.d.ts, `alwaysLoad`).
  */
 function registered(profile: Parameters<typeof centraluMcp>[1]) {
-  const server = centraluMcp({} as CentraluTools, profile, 'probe') as unknown as {
+  const servers = new ClaudeServers({ sessionId: 'probe', opts: { sessionId: 'probe', cwd: '/tmp', permissionPreset: 'normal', centraluTools: {} as CentraluTools, toolProfile: profile } })
+  servers.load()
+  const server = servers.centraluToolsServer as unknown as {
     instance: { _registeredTools: Record<string, { _meta?: Record<string, unknown> }>; server: { _instructions?: string } }
   }
   const tools = Object.fromEntries(

@@ -56,7 +56,7 @@ import { short } from './util.mjs'
 import { systemNow } from './clock.mjs'
 
 /** A dispatch GitHub refused (no workflow_dispatch trigger, a permission): no new batch for this long. */
-export const BATCH_OFF_MS = 60 * 60_000
+const BATCH_OFF_MS = 60 * 60_000
 /** A merge into the batch branch whose answer was lost and which the branch does not show: no new batch for this long, so a GitHub that keeps failing is not built against in a loop. */
 export const LOST_OFF_MS = 5 * 60_000
 const RED = new Set(['failed', 'failing'])

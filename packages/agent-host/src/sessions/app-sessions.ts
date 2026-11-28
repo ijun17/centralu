@@ -15,7 +15,7 @@ import type {
   SessionInfo,
   ToolName,
 } from '@cc/protocol'
-import { appKeyOf, atRest, noSuchAppText, sameApp } from '@cc/protocol'
+import { appKeyOf, atRest, BUILDER_DEMANDS, noSuchAppText, sameApp } from '@cc/protocol'
 import type { AgentAdapter, SessionHandle } from '../adapters/contract.js'
 import type { MemoryGate } from './memory-gate.js'
 import type { Store } from '../dev-services/store.js'
@@ -249,7 +249,9 @@ export class AppSessions {
       cwd,
       tool: tool ?? fallback,
       // The default a new session gets (owner decision 2026-11-05): a builder exists only in a trusted project or the user folder
-      permissionPreset: 'auto',
+      permissionPreset: BUILDER_DEMANDS.permissionPreset,
+      // Read at launch only when the app cannot be (`builderRoleOf`), and by builds that read no other; it also marks the
+      // row as one that demands role text (`sessionDemands`)
       roleAppend: builderRole(app, cwd),
       appId: ref.appId,
       builderOf: ref,
@@ -276,6 +278,13 @@ export class AppSessions {
     if (!m.appId) return null
     const ref: AppRef = { projectId: m.projectId, appId: m.appId }
     return this.builderMap()[builderKey(ref)] === m.id ? ref : null
+  }
+
+  /** A builder's role for its app as it is now (`sessionRole`); null for another session, or an app not listed or unreadable */
+  builderRoleOf(m: Pick<SessionInfo, 'id' | 'appId' | 'projectId'>, cwd: string): string | null {
+    const ref = this.builderRefOf(m)
+    const app = ref ? this.host.appsHub?.rt?.list().find((a) => sameApp(a, ref)) : undefined
+    return app && app.status !== 'invalid' ? builderRole(app, cwd) : null
   }
 
   /**

@@ -15,7 +15,6 @@ export const ACP_CAPABILITIES: AdapterCapabilities = {
   backgroundTasks: false,
   midTurnInput: false,
   toolDeferral: false,
-  instructionChannel: 'server',
   processModel: 'per-session',
   builtInSubagents: false,
   peerMessaging: false,

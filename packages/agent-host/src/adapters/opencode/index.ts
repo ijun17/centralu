@@ -16,7 +16,7 @@ import { execText } from '../../os/exec.js'
  * context in tokens and the model's window, so the share is exact. Every preset, through its inline config
  * (`config.ts`), which reads the person's own (`config-files.ts`). In an untrusted project it is kept from the project's
  * own files (`openCodeLaunchEnv`); ACP has no field for Centralu's role text, so it cannot be the Assistant, a
- * coordinator or an app's agent yet. A second prompt during a turn is folded into it (measured), so input waits for
+ * coordinator or an app's builder (a way to give it is #2479). A second prompt during a turn is folded into it (measured), so input waits for
  * the turn's end instead (`midTurnInput: false`, the core's queue).
  */
 const CAPABILITIES: AdapterCapabilities = {

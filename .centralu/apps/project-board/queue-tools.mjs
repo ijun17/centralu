@@ -81,7 +81,7 @@ let telling = false
  * server posts it, after every tick. One at a time, in order; one Centralu did not take is tried again a few times
  * (a restart), then marked failed. A session on an older Centralu gets no address, and its watch command still works.
  */
-export async function tellSessions(now = clock()) {
+async function tellSessions(now = clock()) {
   if (telling) return
   telling = true
   try {
@@ -161,7 +161,7 @@ const COUNTS = [
  * are in the queue's order (those fixed after a conflict first, then as they were queued: queueOrder), which a poll does not change (it sets `updatedAt` on every read, so by that the
  * order followed whichever was read last); those ended come newest first.
  */
-export function queueView({ all = false } = {}) {
+function queueView({ all = false } = {}) {
   const q = readQueue(dataDir())
   const order = ['attention', 'ci', 'waiting', 'merged', 'closed']
   const items = q.items

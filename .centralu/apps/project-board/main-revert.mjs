@@ -35,20 +35,20 @@ export function landedItem(q, sha, subject) {
  * job up, a timeout or a lost runner failed, so nothing of the commit ran) or `test` (a step of the job's own work
  * failed). Empty for a hunt recorded before the guard told them apart.
  */
-export const kindText = (red) =>
+const kindText = (red) =>
   red?.kind === 'infrastructure' ? 'infrastructure failure' : red?.kind === 'setup' ? 'setup failure, after a rerun' : red?.kind === 'test' ? 'test failure' : ''
 
 /** What failed, in one line: the jobs, the kind of failure and the first failing line */
-export const failureLine = (red) => {
+const failureLine = (red) => {
   const kind = kindText(red)
   return `${red.jobs?.length ? red.jobs.join(', ') : 'CI'} failed at ${short(red.red)}${kind ? ` (${kind})` : ''}${red.line ? `: ${red.line}` : ''}`
 }
 
 /** The branch a revert is pushed to: one per culprit */
-export const revertBranch = (sha) => `revert/${String(sha).slice(0, 12)}`
+const revertBranch = (sha) => `revert/${String(sha).slice(0, 12)}`
 
 /** The revert's title: `revert: <the culprit's subject, without its pull request>`, short enough for a squash subject */
-export function revertTitle(subject) {
+function revertTitle(subject) {
   const title = `revert: ${String(subject ?? '').replace(PR_SUFFIX, '')}`
   return title.length <= 64 ? title : `${title.slice(0, 63).trimEnd()}…`
 }
@@ -92,7 +92,7 @@ export async function commitWithout({ dir, repo, base, shas, branch, message }) 
 }
 
 /** A revert of `sha` on the default branch's tip, pushed to `branch` (`commitWithout`): `{ sha, tip }` or `{ error }` */
-export async function revertCommit({ dir, repo, defaultBranch, sha, branch, message }) {
+async function revertCommit({ dir, repo, defaultBranch, sha, branch, message }) {
   const root = await topLevel(dir)
   const remote = await remoteFor(root, repo)
   if (!remote) return { error: `the checkout at ${root} has no remote for github.com/${repo}` }
@@ -103,7 +103,7 @@ export async function revertCommit({ dir, repo, defaultBranch, sha, branch, mess
 }
 
 /** The issue a red main files: title and body */
-export function redIssue({ red, culprit, how, why, did, ref }) {
+function redIssue({ red, culprit, how, why, did, ref }) {
   const pr = culprit ? prOfSubject(culprit.subject) : null
   const infra = !culprit && red.kind === 'infrastructure'
   const title = infra

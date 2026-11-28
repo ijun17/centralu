@@ -73,7 +73,8 @@ describe('what the ACP tools keep alike', () => {
       subagentTool: 'invoke_subagent',
       roleText: true,
     })
-    expect(ACP_CAPABILITIES).toMatchObject({ approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: ['image', 'file'], midTurnInput: false, instructionChannel: 'server', processModel: 'per-session', roleText: false })
+    expect(ACP_CAPABILITIES).toMatchObject({ approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: ['image', 'file'], midTurnInput: false, processModel: 'per-session', roleText: false })
+    expect(ACP_CAPABILITIES.instructionChannel).toBeUndefined()
   })
 })
 

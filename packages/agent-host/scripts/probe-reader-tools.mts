@@ -24,8 +24,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
 import type { CentraluTools } from '../src/adapters/contract.js'
-import { centraluMcp } from '../src/adapters/claude/centralu-mcp.js'
-import { APP_ACCESS_TOOLS, DELEGATE_TOOLS, CENTRALU_TOOLS, READER_TOOLS, runCentraluTool } from '../src/sessions/centralu-tools.js'
+import { CLAUDE_SUBAGENT_TOOL, centraluMcp } from '../src/adapters/claude/centralu-mcp.js'
+import { APP_ACCESS_TOOLS, DELEGATE_TOOLS, CENTRALU_TOOLS, READER_TOOLS, instructionsFor, runCentraluTool } from '../src/sessions/centralu-tools.js'
 
 const claude = execFileSync('which', ['claude']).toString().trim()
 const cwd = mkdtempSync(join(tmpdir(), 'cc-reader-'))
@@ -86,7 +86,7 @@ const VARIANTS: Record<string, () => Record<string, unknown>> = {
   'four, assistant text': () => ({ centralu: server(CENTRALU_TOOLS.filter((t) => CANDIDATES.includes(t.name)), true) }),
   'four, re-worded': () => ({ centralu: server(FOUR, true) }),
   'reader set, all loaded': () => ({ centralu: server(READER_TOOLS, true) }),
-  'shipped (app_guide deferred)': () => ({ centralu: centraluMcp(fake, 'reader', 'probe') }),
+  'shipped (app_guide deferred)': () => ({ centralu: centraluMcp(fake, 'reader', 'probe', instructionsFor('reader', undefined, false, CLAUDE_SUBAGENT_TOOL)) }),
   'reader set, all deferred': () => ({ centralu: server(READER_TOOLS, false) }),
   // #371: the set as #320 shipped it (no ask_project), and ask_project deferred rather than loaded as shipped
   '#320 set, before ask_project': () => ({ centralu: server(READER_TOOLS.map((t) => ({ ...t, load: !('deferred' in t) })), false) }),

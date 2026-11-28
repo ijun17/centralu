@@ -492,7 +492,7 @@ export const CENTRALU_TOOLS = [
   {
     name: 'create_session',
     description:
-      'Creates one worker session (#13). Use it when no session suits the work; it appears at once in the list the person sees. Deleting it asks the person.',
+      'Creates one worker session (#13). Use it when no session suits the work; it appears at once in the list the person sees.',
     schema: z.object({
       project: z
         .string()
@@ -561,7 +561,7 @@ export const CENTRALU_TOOLS = [
     description:
       '**Proposes** installing an MCP server to the person — when a capability like browser automation (Playwright) is needed. ' +
       'This tool installs nothing (the propose rule). If the person approves, that server becomes a user-folder app and ' +
-      'this session restarts — after the restart, its tools appear under the `app-<name>` server.',
+      'this session restarts — after the restart, the app tool reaches its tools.',
     schema: z.object({
       /*
        * The character rule is only written down here for reference — the decision is made in the
@@ -595,7 +595,7 @@ export const CENTRALU_TOOLS = [
        * The character rule is only written down here for reference — the decision is made in the
        * one place, the runtime's door (`createApp`) (#93).
        */
-      id: z.string().describe('App id (for example, resource-search) — lowercase letters, digits, and hyphens, 32 characters or fewer, and must not start with "centralu" or "app-". Becomes both the folder name and the session\'s server name app-<id>.'),
+      id: z.string().describe('App id (for example, resource-search) — lowercase letters, digits, and hyphens, 32 characters or fewer, and must not start with "centralu" or "app-". Becomes the folder name and the name the app tool calls it by.'),
       name: z.string().describe('The name shown to the person (for example, Resource Search).'),
       project: z.string().optional().describe('Project name or id. If omitted, a new project that is the app.'),
       parent: z.string().optional().describe('Without project: the full path of the folder its folder goes in. ~/Centralu if omitted.'),
@@ -951,8 +951,8 @@ const notYour = (subagentTool: string | undefined, before: string, after: string
 /**
  * What an ordinary session reaches for first, one need per entry (#564). A tool that joins the reader seat and
  * answers a need the person states in words adds its line here. Every entry rides in every ordinary session's
- * every request, on Claude as the server's instructions and on Codex in the thread's developer instructions
- * (codexToolInstructionsFor); the cost and the selection with and without them are in docs/tool-cost.md §11.
+ * every request, on every tool that is told them (agent-text.ts); the cost and the selection with and without them are
+ * in docs/tool-cost.md §11.
  *
  * `subagentTool` is what the session's CLI calls its own subagent tool, which its adapter declares
  * (`AdapterCapabilities.subagentTool`): Claude's `Agent`, Codex's `spawn_agent` (#1587). A model reads the name it
@@ -994,8 +994,8 @@ export const READER_BUDGET_CHARS = 1960
 
 /**
  * The ceiling for what each profile carries in every request (#513), in characters of its resident definitions plus the
- * server instructions the model is sent (`residentCost` in tool-cost.ts), in the default rare-commands tier. Codex carries
- * the same plus the 52-character header its developer instructions put over them (#525, codexToolInstructionsFor). Like
+ * instructions the model is sent (`residentCost` in tool-cost.ts), in the default rare-commands tier. Codex and Antigravity
+ * carry the same plus the 46-character heading their one text puts over them (`TOOLS_HEADING`, agent-text.ts). Like
  * READER_BUDGET_CHARS, raising one is a decision about that seat's every request. The reader is the sum of its sets'
  * ceilings. How each moved, with the measures: docs/tool-cost.md §17.
  */
@@ -1006,7 +1006,7 @@ export const RESIDENT_BUDGET_CHARS: Record<ToolProfile, number> = {
   reader: READER_BUDGET_CHARS + DELEGATE_BUDGET_CHARS + AGENT_BUDGET_CHARS + APP_ACCESS_BUDGET_CHARS + MAIL_BUDGET_CHARS + COMPACT_BUDGET_CHARS + APP_BUDGET_CHARS,
 }
 
-/** The building session's MCP guide — the role (the app's place and rules) is applied by roleAppend */
+/** The building session's tool instructions; the app's place and rules are its role (`builderRole`), which does not repeat these */
 export const BUILDER_INSTRUCTIONS = [
   "You are the session that builds one Centralu app. This server's check inspects your app; the app tool calls its tools.",
   'After changing an app file, call check to confirm the result — do not leave testing to the person.',
@@ -1030,7 +1030,7 @@ export const assistantInstructions = (subagentTool?: string): string => [
   // #1233: work handed out is heard of when it ends; a send to a busy session waits as mail, reported only with reportBack (#2258, docs/plans/mailbox.md §10.6.2)
   "create_session's firstMessage reports back the same way unless reportBack is false; a send to a busy session waits until it is free.",
   'If a report is not enough, read that session\'s conversation directly with read_session.',
-  'If there is no suitable session to assign work to, make one with create_session; deleting a session asks the person (delete_session).',
+  'If there is no suitable session to assign work to, make one with create_session; delete_session archives one, asking the person when that loses something.',
   // #853: the Assistant's light work outside any project went to its CLI's own subagent, which Centralu never shows
   `For light work outside any project (a web search, a lookup), start a session the person can watch with the start_agent command${notYour(subagentTool, ', ', '')}.`,
   'Make a new project with create_project; add an existing folder, here or on a linked machine, with the add_project command (list_machines names the machines).',
@@ -1041,7 +1041,7 @@ export const assistantInstructions = (subagentTool?: string): string => [
   'Apps: the app tool lists and calls yours; projects that are apps attach on demand (the find_apps command).',
   'If a new capability like browser automation is needed, **propose** it with propose_mcp_server — if the person approves, the app installs it and restarts you. The conversation continues after the restart.',
   'If you keep getting the same request, or discover a way of working unique to this user, **propose** a procedure with propose_skill — an approved skill is always carried in your role from then on.',
-  'To replace a session that has drifted, or move its work to the other CLI, hand it off with handoff_session.',
+  'To replace a session that has drifted, or move its work to another tool, hand it off with handoff_session.',
   // #1739, #2411: how to judge a request rides in its header, where it is read, not here in every call (docs/plans/cited-requests.md)
   "A session's mailed request is its own words. Read it with the mail command, judge it as its header says, and answer in its thread.",
   'If you do not know the answer to a question about the app, do not guess; point to a GitHub issue: https://github.com/ijun17/centralu/issues',

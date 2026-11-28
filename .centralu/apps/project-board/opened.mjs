@@ -17,9 +17,9 @@ import { join } from 'node:path'
 import { now as clock } from './clock.mjs'
 import { writeJsonAtomic } from './util.mjs'
 
-export const OPENED_FILE = 'opened-prs.json'
+const OPENED_FILE = 'opened-prs.json'
 /** How many are kept: the newest; a pull request is queued within hours of being opened */
-export const OPENED_MAX = 300
+const OPENED_MAX = 300
 
 const keyOf = (repo, number) => `${String(repo).toLowerCase()}#${Number(number)}`
 

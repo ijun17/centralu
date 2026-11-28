@@ -139,6 +139,7 @@ export const AdapterCapabilities = z.object({
   gatesSteps: z.boolean().optional(),
   /** Can defer single Centralu tool definitions until the model asks; the host counts a kept process's prefix by it */
   toolDeferral: z.boolean().optional(),
+  /** How Centralu's tool instructions reach the agent (docs/agent-host/tool-profiles.md "What every tool is told"). Absent: they do not */
   instructionChannel: z.enum(['server', 'developer']).optional(),
   processModel: z.enum(['per-session', 'shared-server']).optional(),
   builtInSubagents: z.boolean().optional(),
@@ -163,7 +164,7 @@ export const AdapterCapabilities = z.object({
   keepsRepoFilesOut: z.boolean().optional(),
   /**
    * Takes Centralu's role text (`systemPromptAppend`). Absent: true. False: it cannot run a session given one (the
-   * Assistant, a coordinator, an app's agent), nor one that must read no setting files.
+   * Assistant, a coordinator, an app's builder), nor one that must read no setting files.
    */
   roleText: z.boolean().optional(),
 })
@@ -187,6 +188,13 @@ export const ASSISTANT_DEMANDS: LaunchDemands = {
   roleText: true,
 }
 
+/** What an app's builder asks of its tool: `auto` (`AppSessions.createAppBuilder`), a trusted project, and its role text */
+export const BUILDER_DEMANDS: LaunchDemands = {
+  permissionPreset: 'auto',
+  projectTrusted: true,
+  roleText: true,
+}
+
 /**
  * Why `label`'s tool cannot run a session that demands this, or null when it can. The one rule for both sides: the host
  * refuses a launch with it, and a picker shows the same words beside a tool it greys out.
@@ -197,7 +205,7 @@ export function launchRefusal(
   demands: LaunchDemands,
 ): string | null {
   if (caps.roleText === false && (demands.roleText || demands.noSettingFiles)) {
-    return `${label} cannot take Centralu's role instructions yet, so it cannot run the Assistant, a coordinator or an app's agent.`
+    return `${label} cannot take Centralu's role instructions yet, so it cannot run the Assistant, a coordinator or an app's builder.`
   }
   if (caps.keepsRepoFilesOut === false && !demands.projectTrusted) {
     return `${label} cannot be kept from reading a project's own files (such as AGENTS.md and its rules), so it runs only in trusted projects.`

@@ -29,6 +29,8 @@ import { parseArgs } from 'node:util'
 import { CENTRALU_TOOLS, commandsFor, instructionsFor, toolDefsFor } from '../src/sessions/centralu-tools.js'
 import { execTool } from '../src/tool-run.js'
 import { CLAUDE_SUBAGENT_TOOL } from '../src/adapters/claude/centralu-mcp.js'
+import { ClaudeAdapter } from '../src/adapters/claude/index.js'
+import { CodexAdapter } from '../src/adapters/codex/index.js'
 import { CODEX_SUBAGENT_TOOL } from '../src/adapters/codex/thread-open.js'
 import { TOOL_PROFILES, residentCost, type ResidentCost } from '../src/sessions/tool-cost.js'
 import { MeasuredHost, bareName, toolCalls, toolResults, type Call, type Json } from './measure-tools/host.mjs'
@@ -108,10 +110,8 @@ const commit = (() => {
   }
 })()
 
-const toolServing = (cli: Cli) =>
-  cli === 'claude'
-    ? { toolDeferral: true, instructionChannel: 'server' as const, subagentTool: CLAUDE_SUBAGENT_TOOL }
-    : { toolDeferral: false, instructionChannel: 'developer' as const, subagentTool: CODEX_SUBAGENT_TOOL }
+// What each adapter declares, so the measure counts what its transport sends (sessions/agent-text.ts)
+const toolServing = (cli: Cli) => (cli === 'claude' ? new ClaudeAdapter() : new CodexAdapter()).capabilities
 
 const definitions = Object.fromEntries(
   (['claude', 'codex'] as const).map((cli) => [cli, Object.fromEntries(TOOL_PROFILES.map((p) => [p, residentCost(p, toolServing(cli))]))]),

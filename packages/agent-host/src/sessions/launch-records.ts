@@ -96,7 +96,7 @@ export class LaunchRecords {
   }
 
   /** The stable inputs an adapter may use for its keeper-swap launch fingerprint. */
-  launchSettingsFor(session: Pick<SessionInfo, 'id' | 'kind' | 'projectId' | 'appId' | 'model' | 'effort' | 'verbosity' | 'serviceTier' | 'permissionPreset' | 'roleAppend'>, cwd: string): LaunchSettings {
+  launchSettingsFor(session: Pick<SessionInfo, 'id' | 'kind' | 'projectId' | 'appId' | 'model' | 'effort' | 'verbosity' | 'serviceTier' | 'permissionPreset'>, cwd: string): LaunchSettings {
     return {
       cwd,
       model: session.model ?? undefined,
@@ -106,7 +106,6 @@ export class LaunchRecords {
       permissionPreset: session.permissionPreset,
       ...this.host.settingFilesFor(session),
       toolProfile: this.host.toolProfileOf(session.id) ?? undefined,
-      systemPromptAppend: session.roleAppend ?? undefined,
       ...(this.codeIntelligenceOffFor(session.id) ? { noCodeIntelligence: true } : {}),
     }
   }

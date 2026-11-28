@@ -1,7 +1,8 @@
 import type { McpServerConfig } from '@anthropic-ai/claude-agent-sdk'
 import { toolProfileOf, type CreateSessionOpts } from '../contract.js'
 import { appCallOf } from '../tool-titles.js'
-import { CENTRALU_MCP_NAME, centraluMcp } from './centralu-mcp.js'
+import { agentTextOf } from '../../sessions/agent-text.js'
+import { CENTRALU_MCP_NAME, CLAUDE_SUBAGENT_TOOL, centraluMcp } from './centralu-mcp.js'
 
 /** What the server set reads of the session it belongs to */
 export type ServersHost = {
@@ -21,8 +22,9 @@ export class ClaudeServers {
 
   /** The servers the session starts with */
   load(): void {
-    if (this.host.opts.centraluTools) {
-      this.centraluToolsServer = centraluMcp(this.host.opts.centraluTools, toolProfileOf(this.host.opts), this.host.opts.sessionId, (this.host.opts.apps?.current().length ?? 0) > 0)
+    const { opts } = this.host
+    if (opts.centraluTools) {
+      this.centraluToolsServer = centraluMcp(opts.centraluTools, toolProfileOf(opts), opts.sessionId, agentTextOf(opts, CLAUDE_SUBAGENT_TOOL).tools)
     }
   }
 

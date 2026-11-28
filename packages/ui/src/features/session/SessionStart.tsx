@@ -1,4 +1,3 @@
-import { isAssistantOrCoordinator } from '@cc/protocol/client'
 import { useEffect, useMemo, useState } from 'react'
 import type { ToolName } from '@cc/protocol/client'
 import { useStore } from '../../store/store.js'
@@ -59,11 +58,10 @@ function ToolSwitch({ sessionId, projectId, tool }: { sessionId: string; project
   const [setupFor, setSetupFor] = useState<ToolName | null>(null)
   // A tool that cannot keep what this project asks (an untrusted project, `launchRefusal`) is left out like one not installed
   const trusted = useStore((s) => !!s.projects[projectId]?.trusted)
-  // Asked with the session's own preset and role (#1562): the switch keeps both, so a tool must keep them too
+  // Asked with the session's own preset (#1562): the switch keeps it, so a tool must keep it too
   const preset = useStore((s) => s.sessions[sessionId]?.permissionPreset ?? 'normal')
-  // Role text by its kind; a builder's fixed role the window does not hold, and the host refuses that switch itself
-  const roleText = useStore((s) => isAssistantOrCoordinator(s.sessions[sessionId]?.kind))
-  const demands = useMemo(() => ({ permissionPreset: preset, projectTrusted: trusted, roleText }), [preset, trusted, roleText])
+  // No role text: only a project's ordinary session with no app starts here (SessionView's `starting`), and none has one
+  const demands = useMemo(() => ({ permissionPreset: preset, projectTrusted: trusted }), [preset, trusted])
   const refusal = useRefusals(list, demands, machine ?? undefined)
 
   /*

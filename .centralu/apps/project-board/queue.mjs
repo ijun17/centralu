@@ -54,21 +54,21 @@ const subjectAttention = (n, { subject, length }) =>
 /** How long after a poll the item is read again, by what it is waiting on. */
 export const POLL_MS = { waiting: 15_000, ci: 90_000, acted: 60_000, attention: 120_000, error: 60_000 }
 /** No run started on a head for this long: CI did not start, which is the session's to look at. */
-export const NO_CI_MS = 15 * 60_000
+const NO_CI_MS = 15 * 60_000
 /** How long the full tier the queue started on a branch it cannot batch may take to report before it says so (#1509 item 4) */
 export const FULL_START_MS = 15 * 60_000
 /** A rerun asked for that GitHub has not started after this long. */
-export const RERUN_STUCK_MS = 10 * 60_000
+const RERUN_STUCK_MS = 10 * 60_000
 /** A required check not reported while nothing else runs (a renamed job, a path-filtered workflow). */
-export const MISSING_MS = 20 * 60_000
+const MISSING_MS = 20 * 60_000
 /** Green, but GitHub has not said CLEAN for this long (UNSTABLE, HAS_HOOKS, UNKNOWN). */
-export const UNCLEAN_MS = 30 * 60_000
+const UNCLEAN_MS = 30 * 60_000
 /** Failures in a row on one item, other than an outage, before the session hears about it. */
 export const ERROR_LIMIT = 3
 /** A 5xx on one item, poll after poll, that the queue paused for each time (1, 2, 4, 8, 15 minutes): about 45 minutes, then the session hears (an outage elsewhere would have let other polls succeed, which start the count over) */
 export const OUTAGE_LIMIT = 6
-export const MAX_EVENTS = 200
-export const MAX_DONE = 40
+const MAX_EVENTS = 200
+const MAX_DONE = 40
 const OK_CONCLUSIONS = new Set(['success', 'neutral', 'skipped'])
 // An unattended queue is strict: CLEAN, and UNSTABLE only where the queue can prove why (runs a
 // successful one made moot, #1015; runs a batch cancelled, batch.mjs). Any other UNSTABLE and
@@ -119,7 +119,7 @@ export function normalize(q) {
  */
 export const queueOrder = (a, b) => (a.front ? 0 : 1) - (b.front ? 0 : 1) || String(a.front ?? a.queuedAt).localeCompare(String(b.front ?? b.queuedAt))
 
-export const keyOf = (repo, pr) => `${String(repo).toLowerCase()}#${pr}`
+const keyOf = (repo, pr) => `${String(repo).toLowerCase()}#${pr}`
 export const itemKey = (item) => keyOf(item.repo, item.pr)
 export const findItem = (q, repo, pr) => q.items.find((i) => itemKey(i) === keyOf(repo, pr) && ACTIVE.has(i.state)) ?? null
 const refIn = (defaultRepo) => (repo, n) => (String(repo).toLowerCase() === String(defaultRepo).toLowerCase() ? `#${n}` : `${repo}#${n}`)
@@ -276,7 +276,7 @@ export function cannotMergeBase(pr, defaultBranch) {
 }
 
 /** The instruction for the session that fixes a conflict: what to merge, and the files. */
-export function conflictInstruction({ base, branch, files }) {
+function conflictInstruction({ base, branch, files }) {
   return `Merge ${base} into ${branch} and push again; conflicted files: ${files.length ? files.join(', ') : 'not known (GitHub says it conflicts)'}.`
 }
 
@@ -550,7 +550,7 @@ export const landsFrom = (landTier) => (landTier === 'quick' ? "lands from its b
 const ranBatch = (alone) => (alone?.tier ? `ran the ${alone.tier === 'full' ? 'full' : 'fast'} tier and ` : '')
 
 /** A finished run whose conclusion is a failure (cancelled, skipped or still going is not). */
-export const FAILED_RUN = new Set(['failure', 'timed_out', 'startup_failure', 'action_required'])
+const FAILED_RUN = new Set(['failure', 'timed_out', 'startup_failure', 'action_required'])
 
 /**
  * Whether a lower's own latest run on its current head stops its stack from landing (#1066): it failed,

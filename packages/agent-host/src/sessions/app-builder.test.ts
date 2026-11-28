@@ -168,6 +168,40 @@ describe('creating an app stands up its building session', () => {
     expect(claude.last().cwd).toBe(repo)
   })
 
+  it("a builder's role is written for its app as it is at each start, not as its row pinned it", async () => {
+    const { app, builder } = await create({ projectId, id: 'notes', name: 'Notes' })
+    mgr.sessionInfo(builder!.id)!.roleAppend = 'An older build wrote this role.'
+    claude.seen = []
+    await mgr.processes.restartSession(builder!.id)
+    expect(claude.last().systemPromptAppend).toBe(builderRole(app, repo))
+  })
+
+  it('a builder whose app cannot be read keeps the role pinned on its row, and another session gets no builder role', async () => {
+    const { app, builder } = await create({ projectId, id: 'notes', name: 'Notes' })
+    mgr.sessionInfo(builder!.id)!.roleAppend = 'The pinned role.'
+    rmSync(app.dir, { recursive: true, force: true })
+    rt.refresh()
+    claude.seen = []
+    await mgr.processes.restartSession(builder!.id)
+    expect(claude.last().systemPromptAppend).toBe('The pinned role.')
+    const worker = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude' })) as { id: string }
+    expect(mgr.appSessions.builderRoleOf(mgr.sessionInfo(worker.id)!, repo)).toBeNull()
+  })
+
+  it("a builder's role is rebuilt while its manifest reads, and is the pinned one, not one naming the app by its id, once it does not", async () => {
+    const { app, builder } = await create({ projectId, id: 'notes', name: 'Notes' })
+    mgr.sessionInfo(builder!.id)!.roleAppend = 'The pinned role.'
+    claude.seen = []
+    await mgr.processes.restartSession(builder!.id)
+    expect(claude.last().systemPromptAppend).toBe(builderRole(app, repo))
+    writeFileSync(join(app.dir, 'centralu.app.json'), '{ not json')
+    rt.refresh()
+    expect(rt.list().find((a) => a.appId === 'notes')?.status).toBe('invalid')
+    claude.seen = []
+    await mgr.processes.restartSession(builder!.id)
+    expect(claude.last().systemPromptAppend).toBe('The pinned role.')
+  })
+
   it('if the session fails to start, the app still exists, the reason comes back, and that app has no building session', async () => {
     claude.fail = true
     const r = await create({ projectId, id: 'notes', name: 'Notes' })

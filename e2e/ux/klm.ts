@@ -35,14 +35,14 @@ export const SECONDS = { K: 0.28, B: 0.1, H: 0.4, M: 1.35 } as const
  * 1.1 s, so that a Fitts-priced P and the textbook P agree where they should. What the numbers are
  * for is comparing two versions of a task, and for that a and b only have to stay fixed.
  */
-export const FITTS = { a: 0.8, b: 0.1 } as const
+const FITTS = { a: 0.8, b: 0.1 } as const
 
 /**
  * Hick–Hyman law, `T = I_C · log2(n + 1)` with I_C = 0.15 s/bit (Card, Moran & Newell 1983, the
  * Model Human Processor's choice reaction; Hick 1952, Hyman 1953). Reported beside a choice among
  * n items as a note: KLM's M already stands for the decision, so adding this too would count it twice.
  */
-export const HICK_BITS_SECONDS = 0.15
+const HICK_BITS_SECONDS = 0.15
 
 export type Box = { x: number; y: number; width: number; height: number }
 export type Point = { x: number; y: number }
@@ -238,7 +238,7 @@ function previousAction(steps: Step[], i: number): Step | undefined {
  * - Rule 4: if a K terminates a constant string (a command name), delete the M before it; if it
  *   terminates a variable string (an argument: a message, a search), keep it.
  */
-export function placeMentals(candidates: Candidate[]): Op[] {
+function placeMentals(candidates: Candidate[]): Op[] {
   const out: Op[] = []
   for (let i = 0; i < candidates.length; i++) {
     const c = candidates[i]!
@@ -292,7 +292,7 @@ export function operatorString(ops: Op[]): string {
 
 export type Counts = Record<Operator, number>
 
-export function countOps(ops: Op[]): Counts {
+function countOps(ops: Op[]): Counts {
   const counts: Counts = { K: 0, P: 0, B: 0, H: 0, M: 0, R: 0 }
   for (const o of ops) counts[o.op]++
   return counts
@@ -321,7 +321,7 @@ export type StepReport = {
  */
 export type Access = 'discoverable' | 'shortcut'
 
-export const ACCESS_ORDER: readonly Access[] = ['discoverable', 'shortcut']
+const ACCESS_ORDER: readonly Access[] = ['discoverable', 'shortcut']
 
 export type TaskResult = {
   id: string
@@ -443,7 +443,7 @@ const opsTotal = (c: Counts) => c.K + c.P + c.B + c.H + c.M
 const cell = (s: string) => s.replace(/\|/g, '\\|')
 
 /** What each group of paths is called in a report, discoverable first: those are the headline */
-export const ACCESS_HEADING: Record<Access, string> = {
+const ACCESS_HEADING: Record<Access, string> = {
   discoverable: 'Discoverable paths: everything needed is on screen (the headline; budgets apply)',
   shortcut: 'Expert paths: need a shortcut known beforehand (reported apart, never the headline)',
 }
