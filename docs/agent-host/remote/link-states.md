@@ -93,7 +93,7 @@ holding anything. A dev build has no older side. A local build (`<base>.local.N`
 
 **After connecting**, the link reads the remote's `sessions.list` and `projects.list` into the mirror, notes which
 sessions it hides (the remote's Assistant and coordinators, remote-hub.md §3.4), and broadcasts `machine_resync`; the
-window re-reads that machine and wakes what died. The link keeps one cursor and epoch per remote, so a dropped socket
+window re-reads that machine and wakes nothing (#2538). The link keeps one cursor and epoch per remote, so a dropped socket
 gets the gap replayed, and a remote that restarted is a new lifetime and a resync. Events of sessions the hub does not
 show are dropped, and session events keep the mirror's names and states current between reads.
 

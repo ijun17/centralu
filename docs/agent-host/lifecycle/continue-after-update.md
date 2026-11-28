@@ -54,8 +54,8 @@ the person's Continue would.
   Check what already happened before repeating a step." Until the note is in, a wake from elsewhere (a window that sees
   the machine back) keeps the turn's state (`RestartPolicy.continuingTurns`), so a hub reading the machine meanwhile does
   not read the turn as ended, and the note goes in once. A window wakes nothing when the machine is back (#2538): the
-  machine continues it. The conversation shows "Centralu was updated during this turn, which stopped it; Centralu continued it on the
-  new version."
+  machine continues it. The conversation shows "Centralu was updated during this turn, which stopped it; Centralu
+  continued it on the new version."
 - **The stop keeps what is owed.** A quitting host's failed delegation waits no longer settle the child's report or
   turn (`DelegationFlow`, `closing`): the next start decides, from the marks the store kept, whether the turn is told as
   stopped (a quit) or continued (an update). Work the person owns gets no "stopped" report in their Inbox; its one report

@@ -194,8 +194,9 @@ by its `machine_status`.
   fail at the hub. **A reconnect wakes nothing** (#2538), neither the reconnect recovery (`recoverAfterReconnect`) nor a
   machine's resync: a turn an update cut is continued by its host (#1618), and so is a session at rest whose background
   work the update's stop ended (#1902). A host that restarted for any other reason took that work with its processes, and
-  its rows come back with no task running, so waking them would only start
-  processes nobody asked for. A session at rest wakes when it is written to. A broadcast missed in the gap never comes again, so the reconnect reads again every list one keeps
+  its rows come back with no task running, so waking them would only start processes nobody asked for. A session at
+  rest wakes when it is written to. A broadcast missed in the gap never comes again, so the reconnect reads again every
+  list one keeps
   (`store/events/rereads.ts`: themes, settings, projects, consents, external apps, proposals), the same table the
   broadcasts' handler reads, and with it the two whose broadcasts carry the change itself (host requests, machines).
   Both ends of a host connection (this

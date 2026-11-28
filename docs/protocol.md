@@ -119,7 +119,7 @@ type NormalizedEvent =
   | { type: 'host_request_resolved'; requestId, outcome }     // #1405: allowed, denied, withdrawn (its program left) or expired (15 minutes)
   | { type: 'orchestrator_proposals_changed' }                // #703: an MCP-server or skill proposal was saved, approved or dismissed — re-read agents.mcpProposals and agents.skillProposals
   | { type: 'machine_status';   machine: MachineInfo }          // #82: a linked machine's link changed state; the whole record (§6)
-  | { type: 'machine_resync';   machineId }                     // #82: re-read that machine's sessions and projects, wake what died (§6)
+  | { type: 'machine_resync';   machineId }                     // #82: re-read that machine's sessions and projects (§6)
   | { type: 'error';            sessionId?, error: ProtocolError }
 ```
 
