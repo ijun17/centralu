@@ -74,3 +74,30 @@ describe('the Codex bridge reading its stdin', () => {
     expect(seen).toEqual([{ text: '한국어' }])
   }, 20_000 * SLOW)
 })
+
+async function initializeResult(instructions: string | undefined): Promise<Record<string, unknown>> {
+  const env: NodeJS.ProcessEnv = { ...process.env, CC_HOST_URL: 'ws://127.0.0.1:9', CC_BRIDGE_TOKEN: 't', CC_SESSION_ID: 's1' }
+  delete env.CC_BRIDGE_INSTRUCTIONS
+  if (instructions !== undefined) env.CC_BRIDGE_INSTRUCTIONS = instructions
+  child = spawn(process.execPath, [bridgePath()], { env })
+  const stdout = child.stdout
+  const answer = new Promise<Record<string, unknown>>((resolve) => {
+    let out = ''
+    stdout.on('data', (d) => {
+      out += String(d)
+      const nl = out.indexOf('\n')
+      if (nl >= 0) resolve((JSON.parse(out.slice(0, nl)) as { result: Record<string, unknown> }).result)
+    })
+  })
+  child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } })}\n`)
+  const result = await answer
+  child.kill()
+  return result
+}
+
+describe("the bridge's initialize answer", () => {
+  it('carries the tool instructions it was started with, and none when it was started without them, as for Codex', async () => {
+    expect((await initializeResult('Use mail to reach the parent.')).instructions).toBe('Use mail to reach the parent.')
+    expect(await initializeResult(undefined)).not.toHaveProperty('instructions')
+  }, 10_000 * SLOW)
+})

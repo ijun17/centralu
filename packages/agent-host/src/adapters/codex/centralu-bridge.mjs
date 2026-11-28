@@ -11,6 +11,7 @@
  *                     of the same user can read this environment (`ps eww`), so it opens only the calls below,
  *                     and only for CC_SESSION_ID (#382)
  *   CC_SESSION_ID     this session's id (the host judges permission by this)
+ *   CC_BRIDGE_INSTRUCTIONS  the tool instructions `initialize` answers with, when the session's tool shows them
  */
 import { WebSocket } from 'ws'
 
