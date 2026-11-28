@@ -1,9 +1,12 @@
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { PermissionPreset, StoredMessage } from '@cc/protocol'
 import { CENTRALU_MCP_NAME } from '../../apps/contract.js'
 import type { AgentProcess, CreateSessionOpts } from '../contract.js'
 import { fakeCentraluTools } from '../frames/fakes.test-helpers.js'
-import { callOrder, of, replaySpawner, type Recording } from '../frames/replay.test-helpers.js'
+import { callOrder, of, replaySpawner, temporaryFolder, type Recording } from '../frames/replay.test-helpers.js'
+import { PNG } from '../frames/scenarios.test-helpers.js'
 import { turnAnswer } from '../../sessions/turn-answer.js'
 import { AntigravityAdapter, antigravityProfile } from './index.js'
 import { agyRecording, driven, fakeInstall, HOST_TEST_ARCHIVE, HOST_TEST_PLATFORM, fakeSignIn, sentFrames, sessionOpts, tempData, turnEnded } from './agent-files.test-helpers.js'
@@ -286,6 +289,24 @@ describe("Antigravity's agent as `agy acp` 1.5.2 runs it, replayed", () => {
     expect(of(w.events, 'tool_result').find((r) => r.callId === denied.callId)).toMatchObject({ ok: false })
     expect(of(w.events, 'approval_resolved').map((r) => r.decision)).toEqual(['deny'])
     expect(of(w.events, 'turn_complete')).toHaveLength(2)
+  })
+
+  it('attachment: the attached picture goes in the prompt as an image block after the text, and the agent answers from it', async () => {
+    const folder = temporaryFolder('agy-attachment-')
+    try {
+      writeFileSync(join(folder.path, 'picture.png'), PNG)
+      const w = world(recording15('attachment'))
+      const handle = await open(w, 'normal', undefined, { cwd: folder.path })
+      handle.send('What colour is the attached image? One word.', { attachments: [{ kind: 'image', path: 'picture.png', name: 'picture.png', mime: 'image/png' }] })
+      await w.event(turnEnded)
+      await handle.dispose()
+      expect(w.state.problems).toEqual([])
+      const prompt = w.sent.flat().find((f) => f.method === 'session/prompt') as { params: { prompt: unknown[] } }
+      expect(prompt.params.prompt).toEqual([{ type: 'text', text: 'What colour is the attached image? One word.' }, { type: 'image', mimeType: 'image/png', data: PNG.toString('base64') }])
+      expect(of(w.events, 'turn_complete')).toHaveLength(1)
+    } finally {
+      folder.remove()
+    }
   })
 
   it('load: a conversation opened again in a new process with session/load; its replay is not shown again', async () => {

@@ -82,7 +82,7 @@ const answeredTurn = async (d: Driver, text: string, decide: 'allow' | 'deny'): 
 }
 
 /** A 2x2 red PNG: an image for a tool to read */
-const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7gP9i18U1AAAAABJRU5ErkJggg==', 'base64')
+export const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7gP9i18U1AAAAABJRU5ErkJggg==', 'base64')
 
 export const SCENARIOS: readonly Scenario[] = [
   {

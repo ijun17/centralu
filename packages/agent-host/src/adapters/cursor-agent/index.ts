@@ -19,8 +19,8 @@ import { cursorSignInStore } from '../../os.js'
  * without asking, inside the folder or outside it, whatever the client advertises (`fs.writeTextFile` included: it calls no
  * `fs/*` method and sends no `session/request_permission` for a write, measured on Windows and macOS), and asks only for
  * commands and deletes: so Safe, Normal and Edits, which ask before a change, cannot be kept, and it runs under Auto only
- * (owner to decide whether Cursor stays offered so); nothing keeps it from reading `.cursor/rules` and `AGENTS.md`, so trusted
- * projects only; ACP has no field for Centralu's role text, so it cannot be the Assistant, a coordinator or an app's
+ * (owner to decide whether Cursor stays offered so); nothing keeps it from reading `.cursor/rules` and `AGENTS.md` (its one switch,
+ * `--disable-project-configs`, leaves out only `.cursor/cli.json`, read in 2026.10.22), so trusted projects only; ACP has no field for Centralu's role text, so it cannot be the Assistant, a coordinator or an app's
  * agent yet.
  */
 const CAPABILITIES: AdapterCapabilities = {
