@@ -18,6 +18,11 @@ export const HelloClient = z.object({
    * while such a window holds the token. Unknown entries are ignored
    */
   shows: z.array(z.string().max(40)).max(16).optional().catch(undefined),
+  /**
+   * The key a dev browser tab was given when the person trusted it (`host.trustDevTab`): the host restores the trust on
+   * this socket only for a key it issued, unexpired and not taken back (docs/security-boundaries/dev-browser-tabs.md)
+   */
+  devTabKey: z.string().regex(/^[A-Za-z0-9_-]{43}$/).optional().catch(undefined),
   /** What the program calls itself, for a card its call raises: never checked, shown quoted, cut to 60 characters */
   client: z.string().max(200).optional().catch(undefined),
   /** A hub's key pairing (docs/protocol.md §1); `token` is then `LINK_AUTH_MARKER`. Shape only: agent-host checks it */

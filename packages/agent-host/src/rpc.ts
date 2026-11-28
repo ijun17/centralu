@@ -1,4 +1,5 @@
 import { scriptLabel } from './mail/script-label.js'
+import type { CallContext } from './transport/server.js'
 import { relative } from 'node:path'
 import type { z } from 'zod'
 import { ThemeFiles } from './themes.js'
@@ -23,6 +24,7 @@ const toInfo = (h: TerminalHandle) => ({
 import type { UpdateService } from './updates.js'
 import type { UpdateApplyBroker } from './update-apply.js'
 import type { HostRequests } from './host-requests.js'
+import type { DevTabs } from './transport/dev-tabs.js'
 import type { AgentVersionService } from './agent-versions.js'
 import type { ToolSignIns } from './tool-sign-ins.js'
 import type { SessionSleeper } from './sessions/sleep.js'
@@ -106,6 +108,8 @@ export type RpcServices = {
   handover?: (h: HostHandover | null) => void
   /** What `host.systemEnding` tells: the system is ending, or (`cancelled`) is no longer (#1970, lifecycle/system-end.ts) */
   systemEnding?: (cancelled: boolean) => void
+  /** The dev browser tabs the person trusted (transport/dev-tabs.ts); absent on a `centralu serve` host, which has no such tabs */
+  devTabs?: DevTabs
   /** What would stop if this host stopped now (`host.activity`, idle.ts `activityCounts`) */
   activity?: () => HostActivity
   /** The windows' answers to an agent's "Apply now" (#665, update-apply.ts) */
@@ -179,13 +183,11 @@ export type MachinesPort = {
   followHub?(): void
 }
 
-type RpcContext = { client: number; rights?: 'full' | 'limited'; label?: string | null; covered?: boolean; trustedDev?: true; window?: true }
-
 /** RPC routing. Parameters are validated exactly once, at the boundary (docs/protocol.md §4) */
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
-  { settleDeletedProjects, deleteOutlook, terminals, updates, commands, externalApps, views, inlineViews, themes, agentVersions, signIns, sleeper, machines, stopHost, stopGate, handover, systemEnding, activity, updateApply, hubs, mailAcross, appsAcross, mail, watches, requests, serveCredentials }: RpcServices = {},
+  { settleDeletedProjects, deleteOutlook, terminals, updates, commands, externalApps, views, inlineViews, themes, agentVersions, signIns, sleeper, machines, stopHost, stopGate, handover, systemEnding, devTabs, activity, updateApply, hubs, mailAcross, appsAcross, mail, watches, requests, serveCredentials }: RpcServices = {},
 ) {
   const reportUiCrash = createUiCrashLog((line) => console.error(line))
   /**
@@ -231,7 +233,7 @@ export function createRpcHandler(
     return machines
   }
   /** The hub that offered apps on the connection a call came in on, and what answers it there (#1938) */
-  const appsHub = (ctx: RpcContext | undefined) => {
+  const appsHub = (ctx: CallContext | undefined) => {
     const hub = ctx ? hubs?.appsOn?.(ctx.client) : undefined
     if (!appsAcross || !hub) throw rpcError("Only a hub that offered apps on this connection uses this computer's apps")
     return { hub, calls: appsAcross.calls, notice: (p: LinkedAppNoticeParams) => appsAcross.notice(hub, p) }
@@ -324,7 +326,7 @@ export function createRpcHandler(
       requireMachines().acceptVersions(RpcMethods['machines.acceptVersions'].params.parse(p).machineId),
     'updates.status': async (p: unknown) => requireUpdates().check(RpcMethods['updates.status'].params.parse(p).force),
     'updates.setAuto': async (p: unknown) => requireUpdates().setAuto(RpcMethods['updates.setAuto'].params.parse(p).enabled),
-  } satisfies Record<string, (p: unknown, ctx?: RpcContext) => Promise<unknown>>
+  } satisfies Record<string, (p: unknown, ctx?: CallContext) => Promise<unknown>>
 
   /** The answer of a method that only does something: `ack(work)` runs the work as an argument and answers `{ ok: true }` */
   const ack = (_done?: unknown) => ({ ok: true as const })
@@ -340,14 +342,14 @@ export function createRpcHandler(
    * never from a field of the call. `_call` is for the compiler only: it must be a name in `SCRIPT_TEXT` (links/routes.ts), the list a
    * hub refuses to forward, so a new caller has to add its call there. Nothing checks that the name is the caller's own, or that a listed name has a caller
    */
-  const scriptAuthor = (_call: ScriptTextCall, ctx?: RpcContext) => (ctx?.rights === 'limited' && !ctx.trustedDev ? { credential: scriptLabel(ctx.label) } : undefined)
+  const scriptAuthor = (_call: ScriptTextCall, ctx?: CallContext) => (ctx?.rights === 'limited' && !ctx.trustedDev ? { credential: scriptLabel(ctx.label) } : undefined)
   /** An app's building session, written to by the person, or by the script that made the call (`scriptAuthor`) */
-  const builderDeps = (call: ScriptTextCall, ctx?: RpcContext): BuilderRequestDeps => {
+  const builderDeps = (call: ScriptTextCall, ctx?: CallContext): BuilderRequestDeps => {
     const fromScript = scriptAuthor(call, ctx)
     return { apps: requireExternalApps(), views, builderOf: (ref) => mgr.appSessions.builderOf(ref), send: (id, t, a) => mgr.inputs.send(id, t, a, undefined, false, fromScript), byScript: fromScript !== undefined }
   }
 
-  const handlers: { [M in Exclude<RpcMethodName, keyof typeof raw>]: (p: z.output<(typeof RpcMethods)[M]['params']>, ctx?: RpcContext) => Promise<unknown> } = {
+  const handlers: { [M in Exclude<RpcMethodName, keyof typeof raw>]: (p: z.output<(typeof RpcMethods)[M]['params']>, ctx?: CallContext) => Promise<unknown> } = {
     // A script (the limited credential) that starts a session with a first message owes nobody a wait: the work is the person's, a task answered in their Inbox (docs/plans/mailbox.md §10.6.3)
     'agents.createSession': async (p, ctx) => {
       // Where a worktree forked from (#1488): in the answer, as a linked computer's hub has no other way to read it
@@ -1058,12 +1060,26 @@ export function createRpcHandler(
     },
     'host.handover': async ({ handover: h }) => ack(handover?.(h)),
     'host.systemEnding': async ({ cancelled }) => ack(systemEnding?.(cancelled === true)),
-    'host.trustDevTab': async (_p) => ({ ok: true as const }),
+    // The code goes to a tab holding the limited credential, which then asks through the person's card (host-requests.ts)
+    'host.devTabCode': async (_p, ctx) => {
+      if (!devTabs) throw rpcError('Only a desktop host trusts a dev browser tab')
+      if (ctx?.rights !== 'limited' || ctx.session !== undefined) throw rpcError('Only a dev browser tab holding the limited credential asks to be trusted')
+      return { code: devTabs.issueCode(ctx.client) }
+    },
+    // A limited caller's call is the card's (host-requests.ts); one that reaches here holds a full credential, already the person's
+    'host.trustDevTab': async () => {
+      throw rpcError('Only a dev browser tab holding the limited credential asks to be trusted')
+    },
+    'host.devTabs': async () => devTabs?.list() ?? [],
+    'host.revokeDevTab': async ({ id }) => {
+      devTabs?.revoke(id)
+      return { ok: true as const }
+    },
   }
 
-  const routes: Record<string, ((p: never, ctx?: RpcContext) => Promise<unknown>) | undefined> = { ...raw, ...handlers }
+  const routes: Record<string, ((p: never, ctx?: CallContext) => Promise<unknown>) | undefined> = { ...raw, ...handlers }
 
-  return async (method: string, params: unknown, ctx?: RpcContext): Promise<unknown> => {
+  return async (method: string, params: unknown, ctx?: CallContext): Promise<unknown> => {
     const name = method as RpcMethodName
     const h = routes[method]
     /*

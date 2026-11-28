@@ -1,4 +1,4 @@
-import type { HostRequest } from '@cc/protocol/client'
+import type { DevTab, HostRequest } from '@cc/protocol/client'
 import type { HostRequestsPort } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { Emit } from './event-bus.js'
@@ -7,6 +7,8 @@ import type { Emit } from './event-bus.js'
 export class HostRequestsMock {
   private readonly open: HostRequest[] = []
   readonly hostRequestAnswers: { requestId: string; decision: 'allow' | 'deny' }[] = []
+  /** The dev browser tabs the person trusted, as a test seeds them */
+  devTabs: DevTab[] = []
   private next = 0
 
   constructor(
@@ -47,6 +49,10 @@ export class HostRequestsMock {
       this.hostRequestAnswers.push({ requestId, decision })
       this.emit({ type: 'host_request_resolved', requestId, outcome: decision === 'allow' ? 'allowed' : 'denied' })
       return { ok: true }
+    },
+    devTabs: async () => this.devTabs.map((t) => ({ ...t })),
+    revokeDevTab: async (id) => {
+      this.devTabs = this.devTabs.filter((t) => t.id !== id)
     },
   }
 }

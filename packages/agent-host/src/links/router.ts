@@ -1,4 +1,5 @@
 import { RpcMethods, callBudgetMs, unheard, type RpcMethodName } from '@cc/protocol'
+import type { CallContext } from '../transport/server.js'
 import { decodeNumber, encodeNumber, findMachine, qualifiedMachine } from './machine-ids.js'
 import { awaySentence, windowAwaySentence } from './machine-reach.js'
 import type { Qualifier } from './qualifier.js'
@@ -19,8 +20,7 @@ import { parseMailId } from '../mail/ids.js'
  */
 
 /** Which window's connection a call came in on (transport/server.ts). Passed to the hub's own handler, never forwarded */
-type RpcContext = { client: number; rights?: 'full' | 'limited'; label?: string | null; covered?: boolean; trustedDev?: true; window?: true }
-export type RpcHandler = (method: string, params: unknown, ctx?: RpcContext) => Promise<unknown>
+export type RpcHandler = (method: string, params: unknown, ctx?: CallContext) => Promise<unknown>
 
 /** One linked machine, as the router needs it (linked-machine-connection.ts implements it) */
 export interface RoutedMachine {
@@ -77,7 +77,7 @@ export interface RoutedMachine {
  * long one and held a short one. A call the hub made itself (`ctx` absent: the Assistant's, an agent's) keeps the link's flat 200 s,
  * as it did: no window is waiting on it, and a delete that takes longer than a window's 30 s is still the Assistant's to wait for.
  */
-const callOn = (m: RoutedMachine, method: string, params: unknown, ctx?: RpcContext): Promise<unknown> =>
+const callOn = (m: RoutedMachine, method: string, params: unknown, ctx?: CallContext): Promise<unknown> =>
   m.call(method, params, ctx === undefined ? undefined : callBudgetMs(method))
 
 /**
@@ -103,7 +103,7 @@ export class MachineUnreachableError extends Error {
   readonly data: { machine: string; reason: 'unreachable' }
   /**
    * The sentence `linked-sessions.ts` gives the model (#1341, #1532): a machine the person disconnected says to connect it.
-   * The person reads the window's (`RpcContext.window`, #1143); a hub, a script, an app or an agent reads the model's
+   * The person reads the window's (`CallContext.window`, #1143); a hub, a script, an app or an agent reads the model's
    */
   constructor(readonly machine: RoutedMachine, forPerson: boolean) {
     super((forPerson ? windowAwaySentence : awaySentence)(machine, 'this works again once its link is back'))
@@ -177,14 +177,14 @@ export class Router {
     return typeof id === 'string' ? findMachine(this.opts.machines(), id) : null
   }
 
-  private async forward(m: RoutedMachine, method: string, params: unknown, ctx?: RpcContext): Promise<unknown> {
+  private async forward(m: RoutedMachine, method: string, params: unknown, ctx?: CallContext): Promise<unknown> {
     if (ctx?.rights === 'limited' && !ctx.trustedDev && SCRIPT_TEXT.has(method)) {
       throw rpcError(`A script's message is not sent to ${m.name}: Centralu there would store it as the person's. Run the script on ${m.name} instead.`)
     }
     /*
      * A call with no socket behind it (`ctx` absent: an agent's, through the host's own use of the router) needs the machine
      * and tries to connect it (#1532). A socket's call (`ctx` given) never does: a window polls and re-reads whatever is on
-     * screen, and the person has Connect for it. Only the person's own window is told where Connect is (`RpcContext.window`)
+     * screen, and the person has Connect for it. Only the person's own window is told where Connect is (`CallContext.window`)
      */
     if (!m.reachable && ctx === undefined) await m.reachForCall?.()
     if (!m.reachable) {
@@ -203,7 +203,7 @@ export class Router {
     params: unknown,
     key: string,
     route: { params?: (p: Obj, q: Qualifier) => Obj; result?: (r: unknown, q: Qualifier) => unknown; orMachine?: boolean; accepts?: (id: string) => boolean },
-    ctx?: RpcContext,
+    ctx?: CallContext,
   ): Promise<unknown> {
     if (!isObj(params)) return this.opts.local(method, params, ctx)
     if (route.orMachine && (params[key] === null || params[key] === undefined) && typeof params.machine === 'string') {
@@ -234,7 +234,7 @@ export class Router {
     method: string,
     params: unknown,
     route: { keys: readonly string[]; result?: (r: unknown, q: Qualifier) => unknown; orMachine?: boolean },
-    ctx?: RpcContext,
+    ctx?: CallContext,
   ) {
     if (!isObj(params)) return this.opts.local(method, params, ctx)
     let target: RoutedMachine | null | undefined
@@ -264,7 +264,7 @@ export class Router {
     method: string,
     params: unknown,
     route: { result?: (r: unknown, q: Qualifier) => unknown; sharesAccount?: boolean },
-    ctx?: RpcContext,
+    ctx?: CallContext,
   ): Promise<unknown> {
     if (!isObj(params) || params.machine === undefined || params.machine === null) return this.opts.local(method, params, ctx)
     const m = this.machineById(params.machine)
@@ -285,7 +285,7 @@ export class Router {
    * accounts are not known to be the same, or the hub's own reading failed, and the remote is then asked as usual.
    * The prompt cache figures stay the remote's: they count its requests, not the hub's.
    */
-  private async sameAccountAnswer(m: RoutedMachine, method: string, params: Obj, ctx?: RpcContext): Promise<Obj | undefined> {
+  private async sameAccountAnswer(m: RoutedMachine, method: string, params: Obj, ctx?: CallContext): Promise<Obj | undefined> {
     const tool = params.tool
     if (typeof tool !== 'string' || params.limits === false) return undefined
     try {
@@ -312,7 +312,7 @@ export class Router {
    * mirror for it, marked `unreachable` and with `live` as last known, so the UI neither drops
    * them nor tries to wake them (§5, "Recovery").
    */
-  private async merge(method: RpcMethodName, params: unknown, ctx?: RpcContext): Promise<unknown> {
+  private async merge(method: RpcMethodName, params: unknown, ctx?: CallContext): Promise<unknown> {
     const machines = [...this.opts.machines()]
     switch (method) {
       case 'sessions.list':
@@ -328,7 +328,7 @@ export class Router {
     }
   }
 
-  private async mergeLists(machines: RoutedMachine[], kind: 'sessions' | 'projects', params: unknown, ctx?: RpcContext): Promise<unknown> {
+  private async mergeLists(machines: RoutedMachine[], kind: 'sessions' | 'projects', params: unknown, ctx?: CallContext): Promise<unknown> {
     const method = kind === 'sessions' ? 'sessions.list' : 'projects.list'
     const [local, ...remote] = await Promise.all([
       this.opts.local(method, params) as Promise<unknown[]>,
@@ -339,7 +339,7 @@ export class Router {
   }
 
   /** One machine's list in the hub's terms: asked when it can be, else its mirror, marked `unreachable` */
-  private async listOf(m: RoutedMachine, kind: 'sessions' | 'projects', ctx?: RpcContext): Promise<unknown[]> {
+  private async listOf(m: RoutedMachine, kind: 'sessions' | 'projects', ctx?: CallContext): Promise<unknown[]> {
     if (m.reachable) {
       try {
         const list = (await callOn(m, kind === 'sessions' ? 'sessions.list' : 'projects.list', {}, ctx)) as unknown[]
@@ -393,7 +393,7 @@ export class Router {
    * out of it: a stale window cannot move what it never saw. The kept order forgets a project the hub no longer lists,
    * unless it is a linked machine's, which may only be out of reach.
    */
-  private async reorderProjects(machines: RoutedMachine[], params: unknown, ctx?: RpcContext): Promise<unknown> {
+  private async reorderProjects(machines: RoutedMachine[], params: unknown, ctx?: CallContext): Promise<unknown> {
     // Checked before anything is kept or sent, as the hub's own handler would check it
     const { orderedIds } = RpcMethods['projects.reorder'].params.parse(params)
     const kept = this.opts.order?.read() ?? []
@@ -426,7 +426,7 @@ export class Router {
     return machines.length > 0 ? this.inPersonsOrder(all) : all
   }
 
-  private async deleteRule(machines: RoutedMachine[], params: unknown, ctx?: RpcContext): Promise<unknown> {
+  private async deleteRule(machines: RoutedMachine[], params: unknown, ctx?: CallContext): Promise<unknown> {
     const id = isObj(params) ? params.id : undefined
     const folded = typeof id === 'number' ? decodeNumber(id) : null
     if (!folded) return this.opts.local('approvals.deleteRule', params)
@@ -436,7 +436,7 @@ export class Router {
   }
 
   /** The other merges: every reachable machine, each answer in the hub's terms, combined by kind */
-  private async mergeSimple(method: RpcMethodName, machines: RoutedMachine[], params: unknown, ctx?: RpcContext): Promise<unknown> {
+  private async mergeSimple(method: RpcMethodName, machines: RoutedMachine[], params: unknown, ctx?: CallContext): Promise<unknown> {
     const local = await this.opts.local(method, params)
     const missed: RoutedMachine[] = machines.filter((m) => !m.reachable)
     const answers = await Promise.all(

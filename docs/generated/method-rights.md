@@ -88,6 +88,7 @@ With the limited credential: runs.
 - `git.status`
 - `grid.get`
 - `host.activity`
+- `host.devTabCode`
 - `host.handover`
 - `host.stop`
 - `machines.activity`
@@ -222,6 +223,8 @@ With the limited credential: refused, never a card: the person's own answers and
 - `apps.viewFrame`
 - `apps.viewMessage`
 - `grid.set`
+- `host.devTabs`
+- `host.revokeDevTab`
 - `host.systemEnding`
 - `mail.close`
 - `mail.held`
