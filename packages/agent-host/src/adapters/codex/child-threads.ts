@@ -14,8 +14,9 @@ const UNLINKED_CAP = 2_000
  */
 export class CodexChildThreads {
   /**
-   * Child threads (#222): a child's thread id, to the `spawnAgent` item that launched it. Its steps are kept under
-   * that card. Learned from the item's `receiverThreadIds` on `item/completed` (the `item/started` has an empty list).
+   * Child threads (#222): a child's thread id, to the launch item (`launchOf`) that started it. Its steps are kept under that
+   * card. A `spawnAgent` names it in `receiverThreadIds` on `item/completed` (the `item/started` has an empty list); a v2 `started`
+   * activity names it on `item/started` already.
    */
   private childCalls = new Map<string, string>()
   /**
@@ -73,7 +74,7 @@ export class CodexChildThreads {
   /** The parent's turn ended: what no launch call named by then is let go of (see `unlinked`) */
   noteTurnEnd(n: { method: string; params?: unknown }): void {
     if (n.method === 'turn/completed' && this.unlinked.size > 0) {
-      console.error(`[codex] ${this.host.sessionId.slice(0, 8)} let go of ${this.unlinkedCount} items from ${this.unlinked.size} threads no spawnAgent call named`)
+      console.error(`[codex] ${this.host.sessionId.slice(0, 8)} let go of ${this.unlinkedCount} items from ${this.unlinked.size} threads no launch call named`)
       this.unlinked.clear()
       this.unlinkedCount = 0
     }

@@ -3,6 +3,9 @@ import { fileChangeTool, type FileChange } from '../file-changes.js'
 import type { ToolSummary } from '@cc/protocol'
 import { centraluMark, centraluRunCommand, firstLine, isCentraluTool } from '../tool-titles.js'
 
+/** What a child agent is called when its item names no path */
+export const CHILD_AGENT = 'Child agent'
+
 /**
  * Codex's tool items (generated/v2/ThreadItem.ts), read: what a call was asked to do, how it is titled, what it
  * answered and whether it went through. Pure, like normalize.ts, which turns them into events.
@@ -151,7 +154,9 @@ export function itemSummary(item: Record<string, unknown>): ToolSummary {
    */
   if (type === 'subAgentActivity') {
     const path = str(item.agentPath)
-    return str(item.kind) === 'started' ? { tool: 'spawnAgent', title: path || 'Child agent', paths: [] } : { tool: 'sendMessage', title: path ? `Message to ${path}` : 'Message to a child agent', paths: [] }
+    // Any other kind (a word a later Codex adds) is no message: it stays the generic row below
+    if (str(item.kind) === 'started') return { tool: 'spawnAgent', title: path || CHILD_AGENT, paths: [] }
+    if (str(item.kind) === 'interacted') return { tool: 'sendMessage', title: path ? `Message to ${path}` : `Message to a ${CHILD_AGENT.toLowerCase()}`, paths: [] }
   }
   return { tool: type || 'tool', title: str(item.title) || type, paths: [] }
 }
