@@ -14,9 +14,7 @@ const UNLINKED_CAP = 2_000
  */
 export class CodexChildThreads {
   /**
-   * Child threads (#222): a child's thread id, to the launch item (`launchOf`) that started it. Its steps are kept under that
-   * card. A `spawnAgent` names it in `receiverThreadIds` on `item/completed` (the `item/started` has an empty list); a v2 `started`
-   * activity names it on `item/started` already.
+   * Child threads (#222): a child's thread id, to the launch item (`launchOf`) that started it. Its steps are kept under that card.
    */
   private childCalls = new Map<string, string>()
   /**
@@ -53,9 +51,8 @@ export class CodexChildThreads {
   }
 
   /**
-   * A launch call named the threads it started (#222: a completed `spawnAgent`; #2553: a v2 `subAgentActivity` that `started`; see
-   * `launchOf`) — from the parent, or from a child that started its own. Those threads' steps go under this card from now on,
-   * starting with whatever arrived before it.
+   * A launch call named the threads it started (`launchOf`), from the parent or from a child that started its own: their steps go
+   * under its card from now on, starting with whatever arrived before it.
    */
   noteSpawn(n: { method: string; params?: unknown }): void {
     const launch = launchOf(n)

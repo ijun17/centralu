@@ -3,7 +3,6 @@ import { fileChangeTool, type FileChange } from '../file-changes.js'
 import type { ToolSummary } from '@cc/protocol'
 import { centraluMark, centraluRunCommand, firstLine, isCentraluTool } from '../tool-titles.js'
 
-/** What a child agent is called when its item names no path */
 export const CHILD_AGENT = 'Child agent'
 
 /**
@@ -147,21 +146,16 @@ export function itemSummary(item: Record<string, unknown>): ToolSummary {
     const tool = str(item.tool) || type
     return { tool, title: firstLine(str(item.prompt)) || tool, paths: [] }
   }
-  /*
-   * A child agent under multi-agent v2 (codex-cli 0.172.0, recorded, #2553): the item says what happened to a child by its `kind`.
-   * `started` is the launch, read as the `spawnAgent` card that launched a subagent (`launchesSubagent`) titled by the child's
-   * `agentPath`; `interacted` is a message or follow-up task sent to it. The end of a child's turn has no row (`childEnded`).
-   */
+  // Multi-agent v2 (#2553, recorded): `started` launches a child (a `spawnAgent` card), `interacted` sends it a message or follow-up task
   if (type === 'subAgentActivity') {
     const path = str(item.agentPath)
-    // Any other kind (a word a later Codex adds) is no message: it stays the generic row below
     if (str(item.kind) === 'started') return { tool: 'spawnAgent', title: path || CHILD_AGENT, paths: [] }
     if (str(item.kind) === 'interacted') return { tool: 'sendMessage', title: path ? `Message to ${path}` : `Message to a ${CHILD_AGENT.toLowerCase()}`, paths: [] }
   }
   return { tool: type || 'tool', title: str(item.title) || type, paths: [] }
 }
 
-/** A v2 `subAgentActivity` that says a child's turn ended or was interrupted: the child's own `turn/completed` says it too, so it is no row (#2553) */
+/** A v2 activity that says a child's turn ended: its own `turn/completed` says it too, so no row (#2553) */
 export function childEnded(item: Record<string, unknown>): boolean {
   return str(item.type) === 'subAgentActivity' && (str(item.kind) === 'completed' || str(item.kind) === 'interrupted')
 }
