@@ -11,6 +11,25 @@ import { devTabKey } from './dev-tab-key.js'
  * presented at every reconnect; one the host no longer takes (expired, taken back in Settings, or a restarted host) is
  * dropped, and this banner offers the trust again (docs/security-boundaries/dev-browser-tabs.md).
  */
+type TabRpc = Pick<RpcClient, 'call' | 'connectionState' | 'rights' | 'trustedDev'>
+
+/**
+ * Whether this connection is a limited one the host does not trust: then the key this tab kept restores nothing (expired,
+ * taken back, or a restarted host) and is forgotten
+ */
+export function untrustedLimited(rpc: TabRpc): boolean {
+  return rpc.connectionState === 'connected' && rpc.rights === 'limited' && !rpc.trustedDev
+}
+
+/** Asks the host for a code, shows it, asks the person's window with it, and keeps the key an Allow answers with */
+export async function askToTrust(rpc: TabRpc, showCode: (code: string) => void, current: () => boolean = () => true): Promise<void> {
+  const { code } = await rpc.call('host.devTabCode', {})
+  if (!current()) return
+  showCode(code)
+  const { key } = await rpc.call('host.trustDevTab', { code })
+  if (current() && key) devTabKey.keep(key)
+}
+
 export function DevTrustBanner({ rpc }: { rpc: RpcClient }) {
   const [limited, setLimited] = useState(false)
   const [trusted, setTrusted] = useState(false)
@@ -25,11 +44,10 @@ export function DevTrustBanner({ rpc }: { rpc: RpcClient }) {
       reqGenRef.current += 1
       setPendingCode(null)
       setError(null)
-      const connected = rpc.connectionState === 'connected'
-      const isLimited = connected && rpc.rights === 'limited'
+      const isLimited = rpc.connectionState === 'connected' && rpc.rights === 'limited'
       setLimited(isLimited)
       setTrusted(isLimited && rpc.trustedDev)
-      if (isLimited && !rpc.trustedDev) devTabKey.forget()
+      if (untrustedLimited(rpc)) devTabKey.forget()
     }
     settle()
     const off = rpc.onConnectionChange(settle)
@@ -45,13 +63,10 @@ export function DevTrustBanner({ rpc }: { rpc: RpcClient }) {
     if (pendingCode) return
     const gen = ++reqGenRef.current
     setError(null)
+    const current = () => reqGenRef.current === gen
     try {
-      const { code } = await rpc.call('host.devTabCode', {})
-      if (reqGenRef.current !== gen) return
-      setPendingCode(code)
-      const { key } = await rpc.call('host.trustDevTab', { code })
-      if (reqGenRef.current !== gen) return
-      if (key) devTabKey.keep(key)
+      await askToTrust(rpc, setPendingCode, current)
+      if (!current()) return
       setTrusted(true)
     } catch (err) {
       if (reqGenRef.current !== gen) return

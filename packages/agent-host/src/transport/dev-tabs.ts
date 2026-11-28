@@ -20,7 +20,8 @@ export const DEV_TAB_TRUST_MS = 24 * 60 * 60_000
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 
-type Grant = DevTab & { hash: string; holder: number | null }
+/** `holders`: the sockets that presented its key, every tab the key was copied into (a duplicated tab copies sessionStorage) */
+type Grant = DevTab & { hash: string; holders: Set<number> }
 
 const hashOf = (key: string): string => createHash('sha256').update(key).digest('hex')
 
@@ -30,7 +31,11 @@ export class DevTabs {
   /** The pairing code each socket was given, until its card is raised */
   private readonly codes = new Map<number, string>()
 
-  constructor(private readonly now: () => number = Date.now) {}
+  constructor(
+    private readonly now: () => number = Date.now,
+    /** host.log: each grant and revoke by its id and origin, never its key */
+    private readonly log: (line: string) => void = (line) => console.error(line),
+  ) {}
 
   /** A code the host chose, shown in the tab and on the card: a program cannot pick the code the person compares */
   issueCode(socket: number): string {
@@ -47,41 +52,52 @@ export class DevTabs {
     return given !== undefined && given === code
   }
 
-  /** The person allowed it: a new key, held by this socket, in place of one the socket held, whose key restores nothing more */
+  /**
+   * The person allowed it: a new key, held by this socket, in place of one the socket held. That one's key restores nothing
+   * more unless another tab still holds it, which keeps its trust
+   */
   grant(origin: string, socket: number): { key: string; expiresAt: number } {
     this.sweep()
+    this.release(socket, true)
     const key = randomBytes(32).toString('base64url')
     const grantedAt = this.now()
     const expiresAt = grantedAt + DEV_TAB_TRUST_MS
-    for (const [hash, g] of this.grants) if (g.holder === socket) this.grants.delete(hash)
-    this.grants.set(hashOf(key), { id: randomBytes(4).toString('hex'), origin, grantedAt, expiresAt, hash: hashOf(key), holder: socket })
+    const id = randomBytes(4).toString('hex')
+    this.grants.set(hashOf(key), { id, origin, grantedAt, expiresAt, hash: hashOf(key), holders: new Set([socket]) })
+    this.log(`[dev-tabs] trusted the dev browser tab at ${origin} (grant ${id}) until ${new Date(expiresAt).toISOString()}`)
     return { key, expiresAt }
   }
 
   /**
-   * A reconnecting tab's hello: the trust moves to this socket for a key issued to this origin, unexpired and not taken
-   * back. One socket holds a key at a time, the latest hello: a copy of the key replayed elsewhere takes it from the tab
-   * it was given to, whose sends then show as a script's
+   * A tab's hello with its key: this socket holds the grant issued to this origin, unexpired and not taken back. Every
+   * socket that presents the key holds it, so a duplicated tab (or `window.open`, which copies sessionStorage) sends as
+   * the person too, as its hello said (#2569); taking the grant back or its expiry ends it for all of them
    */
   restore(key: string, origin: string | null, socket: number): boolean {
     this.sweep()
     const g = this.grants.get(hashOf(key))
     if (!g || g.origin !== origin) return false
     this.release(socket)
-    g.holder = socket
+    g.holders.add(socket)
     return true
   }
 
   /** Whether a call on this socket is the person's: it holds a grant that has not expired */
   trusts(socket: number): boolean {
-    for (const g of this.grants.values()) if (g.holder === socket) return g.expiresAt > this.now()
+    for (const g of this.grants.values()) if (g.holders.has(socket)) return g.expiresAt > this.now()
     return false
   }
 
-  /** The socket is gone: its grant waits for the tab's next hello, its unused code goes */
-  release(socket: number): void {
+  /**
+   * The socket is gone: its grant waits for a tab's next hello, its unused code goes. `dropHeld`: a grant only this
+   * socket held goes too (a new Allow replaces it)
+   */
+  release(socket: number, dropHeld = false): void {
     this.codes.delete(socket)
-    for (const g of this.grants.values()) if (g.holder === socket) g.holder = null
+    for (const [hash, g] of this.grants) {
+      if (!g.holders.delete(socket)) continue
+      if (dropHeld && g.holders.size === 0) this.grants.delete(hash)
+    }
   }
 
   list(): DevTab[] {
@@ -89,9 +105,13 @@ export class DevTabs {
     return [...this.grants.values()].map(({ id, origin, grantedAt, expiresAt }) => ({ id, origin, grantedAt, expiresAt })).sort((a, b) => a.grantedAt - b.grantedAt)
   }
 
-  /** Taken back from Settings: the holding socket's next call is a script's again */
+  /** Taken back from Settings: the next call of every socket holding it is a script's again */
   revoke(id: string): void {
-    for (const [hash, g] of this.grants) if (g.id === id) this.grants.delete(hash)
+    for (const [hash, g] of this.grants) {
+      if (g.id !== id) continue
+      this.grants.delete(hash)
+      this.log(`[dev-tabs] took back the trust of the dev browser tab at ${g.origin} (grant ${id}), held by ${g.holders.size} socket(s)`)
+    }
   }
 
   private sweep(): void {

@@ -119,10 +119,10 @@ export class HostRequests {
       'It keeps the rights of a program on this computer: approvals, deletions, mail and settings stay with this window. ' +
       'Allow only if you clicked "Trust this tab" and the tab shows the same code. Settings → Permissions takes it back.'
     const answer = await this.card('host.trustDevTab', question, from, signal)
+    // A tab gone while the card stood never gets here: its card is withdrawn with the call (`card`)
     if (answer.decision !== 'allow') throw unanswered('host.trustDevTab', answer.outcome)
-    // A tab gone while the card stood never gets the key: a grant nobody holds would only wait out its 24 hours in Settings
-    if (signal.aborted) throw unanswered('host.trustDevTab', 'withdrawn')
-    return { ok: true, ...devTabs.grant(from.origin, from.socket) }
+    const { key, expiresAt } = devTabs.grant(from.origin, from.socket)
+    return { ok: true, key, expiresAt }
   }
 
   /**

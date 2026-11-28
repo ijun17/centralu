@@ -1562,7 +1562,7 @@ describe('a dev browser tab the person trusted (dev-tabs.ts)', () => {
     return { port, devTabs, sendsAsPerson, trust, advance: (ms: number) => (now += ms) }
   }
 
-  it('keeps its trust across reconnects with its key, as attribution only, on one socket at a time', async () => {
+  it('keeps its trust across reconnects with its key, as attribution only', async () => {
     const h = await host()
     const a = await tab(h.port)
     const b = await tab(h.port)
@@ -1582,18 +1582,13 @@ describe('a dev browser tab the person trusted (dev-tabs.ts)', () => {
     expect(keyless.frames[0]).not.toHaveProperty('trustedDev')
     expect(await h.sendsAsPerson(keyless, '1')).toBe(false)
 
-    // The key replayed on another socket takes the trust from the tab it was given to
-    const replay = await tab(h.port, { key })
-    expect(await h.sendsAsPerson(replay, '1')).toBe(true)
-    expect(await h.sendsAsPerson(reloaded, '2')).toBe(false)
-
     // Not from another origin, a session credential or a full one
     for (const other of [{ origin: 'http://localhost:5173' }, { token: sessionToken(TOKEN, 'sess-1') }, { token: TOKEN }]) {
       const c = await tab(h.port, { ...other, key })
       expect(c.frames[0]).not.toHaveProperty('trustedDev')
       c.ws.close()
     }
-    for (const c of [b, reloaded, keyless, replay]) c.ws.close()
+    for (const c of [b, reloaded, keyless]) c.ws.close()
   })
 
   it('ends at its revoke and at its expiry, for the socket holding it and for the key', async () => {
@@ -1611,6 +1606,38 @@ describe('a dev browser tab the person trusted (dev-tabs.ts)', () => {
     expect(await h.sendsAsPerson(b, '2')).toBe(false)
     expect((await tab(h.port, { key: second })).frames[0]).not.toHaveProperty('trustedDev')
     expect(h.devTabs.list()).toEqual([])
+  })
+
+  it('a duplicated tab, which copies the key, sends as the person too, and the revoke ends both (#2569)', async () => {
+    const h = await host()
+    const a = await tab(h.port)
+    const key = await h.trust(a, '1')
+    const copy = await tab(h.port, { key })
+    expect(copy.frames[0]).toMatchObject({ kind: 'hello_ok', trustedDev: true })
+    expect(await h.sendsAsPerson(copy, '1')).toBe(true)
+    expect(await h.sendsAsPerson(a, '2')).toBe(true)
+    // One grant in Settings, and one closed copy leaves the other trusted
+    expect(h.devTabs.list()).toHaveLength(1)
+    copy.ws.close()
+    await new Promise((r) => setTimeout(r, 50))
+    expect(await h.sendsAsPerson(a, '3')).toBe(true)
+    const again = await tab(h.port, { key })
+    h.devTabs.revoke(h.devTabs.list()[0]!.id)
+    expect(await h.sendsAsPerson(a, '4')).toBe(false)
+    expect(await h.sendsAsPerson(again, '1')).toBe(false)
+    for (const c of [a, again]) c.ws.close()
+  })
+
+  it('a re-Allow from a tab whose key a duplicate still holds keeps the duplicate trusted', async () => {
+    const h = await host()
+    const a = await tab(h.port)
+    const first = await h.trust(a, '1')
+    const copy = await tab(h.port, { key: first })
+    await h.trust(a, '2')
+    expect(await h.sendsAsPerson(copy, '1')).toBe(true)
+    expect(await h.sendsAsPerson(a, '3')).toBe(true)
+    expect(h.devTabs.list()).toHaveLength(2)
+    for (const c of [a, copy]) c.ws.close()
   })
 
   it('a second Allow on one tab replaces its grant: the earlier key restores nothing and Settings lists one', async () => {

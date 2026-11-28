@@ -28,15 +28,19 @@ Settings). This file is that path: what it gives, what holds it, and what it lea
   its reloads and is dropped when it closes; it presents the key in each hello (`hello.devTabKey`). The host restores
   the trust only for a key it issued to that origin, unexpired and not taken back, on a hello with the plain limited
   credential.
-- **One socket at a time.** The latest hello presenting a key holds it; the socket that held it before is a script's
-  again.
+- **Every tab with the key.** Each socket that presents the key holds the grant: a duplicated tab, or one `window.open`
+  made, copies sessionStorage and sends as the person too, as its `hello_ok.trustedDev` says (#2569 review). Taking the grant back or its expiry ends it for all of them; the 24 hours are
+  the grant's, not each tab's. A second Allow from a tab replaces the grant that tab held, unless another tab still
+  holds it.
 - **Revocable.** Settings → Permissions lists the trusted tabs (`host.devTabs`, window only) and takes one back
-  (`host.revokeDevTab`); the holding socket's next call is a script's, and the key restores nothing.
+  (`host.revokeDevTab`); the next call of every socket holding it is a script's, and the key restores nothing. host.log
+  says each grant and revoke by the grant's id and origin, never the key (`[dev-tabs]`).
 - **Nothing at rest.** The keys live in the host's memory: a restart of the host (an update, a swap, a crash) ends every
   trust, and the tab drops its key at the next hello that does not restore it and offers the trust again. A stored key
   would be a credential on disk that outlives the tab it was given to.
 - **No card in the tab.** A socket holding the limited credential is sent no card's events (`HostServer.sees`): it
-  cannot answer one, and would read what other programs asked.
+  cannot answer one, so the events would only redraw cards it has no use for. This does not keep their text from it:
+  `requests.list` is everyday, so any limited caller reads every pending card (#2581).
 
 ## What it leaves open
 
@@ -45,8 +49,9 @@ Settings). This file is that path: what it gives, what holds it, and what it lea
   person's comparison of the card's code with the tab's stops it. An Allow given without comparing gives that program
   the person's attribution for at most 24 hours.
 - **A key read from the tab.** Anything that reads the tab's sessionStorage (a script on the dev page, the browser
-  profile on disk while the tab is open, a duplicated tab, which copies it) holds the trust until it expires or is
-  taken back; using it takes it from the tab, whose sends then show as a script's.
+  profile on disk while the tab is open) holds the trust beside the tab until it expires or is taken back.
+- **A reopened tab.** A browser that reopens a closed tab ("Reopen closed tab", or a restored session) may bring back its
+  sessionStorage, and with it the key: the trust then outlives the close, still bounded by the grant's 24 hours.
 - **Closing the tab ends the key, not the grant.** The host cannot see a tab close from a reload, so the grant stays
   listed in Settings, unusable, until its 24 hours pass or it is taken back.
 - **A revoked or expired tab is not told.** It keeps working as a script's; its banner offers the trust again only at
