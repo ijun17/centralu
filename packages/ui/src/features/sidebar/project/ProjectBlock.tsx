@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { isAway } from '@cc/core'
 import { groupProjectAppSessions } from '../tree.js'
 import { useStore } from '../../../store/store.js'
@@ -10,7 +10,6 @@ import { useIsProjectOpen, useSessionsOf } from '../../../store/selectors.js'
 import { useProjectApps } from '../../../store/app-catalog.js'
 import { PROJECT_MIME, moveTo } from '../reorder.js'
 import { useDropLine, dropLine } from '../dragDrop.js'
-import { HoverExpander } from '../fold.js'
 import { Fold } from '../../../components/Fold.jsx'
 import { TrustAsk } from './TrustAsk.jsx'
 import { AppRows } from '../apps/AppRows.jsx'
@@ -45,39 +44,10 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
   // The instructions for agents started here (#1161 item 2)
   const [instructing, setInstructing] = useState(false)
   // Fold state (#205), kept per project across restarts
-  const savedFolded = useStore((s) => s.foldedProjects.includes(projectId))
+  const folded = useStore((s) => s.foldedProjects.includes(projectId))
   // Until the saved folds are read the list is drawn open; folding then is not the person's, so it does not slide
   const workspaceReady = useStore((s) => s.workspaceReady)
-  const toggleFold = (id: string) => useStore.getState().toggleProjectFold(id)
-  // Hover expansion (#1578, HoverExpander); a click pins it, the saved fold taking over. It counts only while saved folded
-  const [hoverOpen, setHoverOpen] = useState(false)
-  const hoverActive = savedFolded && hoverOpen
-  const folded = savedFolded && !hoverOpen
-  const sectionRef = useRef<HTMLElement>(null)
-  const [headerMenuOpen, setHeaderMenuOpen] = useState(false)
-  const [dragging, setDragging] = useState(false)
-  const expander = useMemo(
-    () => new HoverExpander({ onChange: setHoverOpen, pointerInside: () => !!sectionRef.current?.matches(':hover') }),
-    [],
-  )
-  // An open menu, a name being edited or a drag keeps the project as it is until it ends
-  const holding = headerMenuOpen || sessionMenu !== null || renaming !== null || dragging
-  useEffect(() => expander.hold(holding), [expander, holding])
-  useEffect(() => {
-    if (!savedFolded) expander.reset()
-  }, [expander, savedFolded])
-  useEffect(() => () => expander.reset(), [expander])
-  /** A hover-expanded project stays open; otherwise the fold toggles as the arrow does */
-  const toggleFoldFromClick = () => {
-    if (hoverActive) expander.reset()
-    toggleFold(projectId)
-  }
-  const pinHoverExpanded = () => {
-    // Pressing the name of a folded project is a decision not to wait for the rest: no expansion follows it
-    if (!hoverActive) return expander.leaveRow()
-    expander.reset()
-    toggleFold(projectId)
-  }
+  const toggleFold = () => useStore.getState().toggleProjectFold(projectId)
   // An away machine (#82): its rows, as the hub last heard them, stay dimmed
   const away = useStore((s) => isAway(s.projects[projectId], s.machines))
 
@@ -96,32 +66,20 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
     */
     <section
       className={`relative rounded-lg py-2 ring-1 ring-inset transition-colors ${
-        folded ? 'hover:bg-surface-hover/30' : ''
-      } ${open ? 'bg-surface-hover/30 ring-line' : 'bg-surface-raised ring-surface-selected'} ${away ? 'opacity-60' : ''} ${dropLine(drop.edge)}`}
+        open ? 'bg-surface-hover/30 ring-line' : 'bg-surface-raised ring-surface-selected'
+      } ${away ? 'opacity-60' : ''} ${dropLine(drop.edge)}`}
       data-testid={`project-${project.name}`}
       data-machine={project.machine ?? undefined}
       data-away={away || undefined}
       data-folded={folded || undefined}
       data-selected={open || undefined}
-      data-hover-expanded={(savedFolded && hoverOpen) || undefined}
-      ref={sectionRef}
-      onPointerLeave={(e) => {
-        if (e.pointerType === 'mouse') expander.leaveBlock()
-      }}
-      onDragStart={() => setDragging(true)}
-      onDragEnd={() => setDragging(false)}
       {...drop.handlers}
     >
       <ProjectHeader
         project={project}
         projectId={projectId}
         folded={folded}
-        savedFolded={savedFolded}
-        onToggleFold={toggleFoldFromClick}
-        onPin={pinHoverExpanded}
-        onRowEnter={() => expander.enterRow(savedFolded)}
-        onRowLeave={() => expander.leaveRow()}
-        onMenuChange={setHeaderMenuOpen}
+        onToggleFold={toggleFold}
         sessions={sessions}
         rootApp={rootApp}
         appCount={apps.length}

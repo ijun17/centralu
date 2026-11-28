@@ -40,18 +40,18 @@ describe("the Assistant's children in the sidebar", () => {
   })
 })
 
-// #1591: the children fold under the button; a mouse rest opens them, and an open child keeps them shown
+// The children fold under the button while elsewhere; entering Assistant or opening one of its children expands them
 describe("when the Assistant's children's list is drawn", () => {
   const kids = { current: [{ id: 'a' }, { id: 'b' }], earlier: [{ id: 'old' }] }
-  it('is folded at rest, with children and nothing open', () => {
-    expect(assistantListShown(false, null, kids)).toBe(false)
-    expect(assistantListShown(false, 'someone-else', kids)).toBe(false)
+  it('is folded when neither the Assistant page nor any child is open', () => {
+    expect(assistantListShown('grid', null, kids)).toBe(false)
+    expect(assistantListShown('focus', 'someone-else', kids)).toBe(false)
   })
-  it('is open while the mouse rests on the button', () => {
-    expect(assistantListShown(true, null, kids)).toBe(true)
+  it('is open while the Assistant page is open', () => {
+    expect(assistantListShown('assistant', null, kids)).toBe(true)
   })
   it('stays shown while one of the children, an earlier one too, is the open session', () => {
-    expect(assistantListShown(false, 'b', kids)).toBe(true)
-    expect(assistantListShown(false, 'old', kids)).toBe(true)
+    expect(assistantListShown('focus', 'b', kids)).toBe(true)
+    expect(assistantListShown('focus', 'old', kids)).toBe(true)
   })
 })

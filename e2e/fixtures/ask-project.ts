@@ -245,8 +245,7 @@ export function askProjectTests(): void {
         const child = { ...o, id: 'orc-child-1', kind: 'worker', name: 'Look up the release notes', askedBy: o.id }
         ;(window as any).__mock.emit({ type: 'session_created', sessionId: child.id, session: child })
       }, orc)
-      // The children fold under the button and open on a mouse rest (#1591)
-      await page.getByTestId('assistant-button').hover()
+      // The Assistant page is already open, so its new child row is shown under the button
       const row = page.getByTestId('assistant-children').getByTestId('assistant-child-row-orc-child-1')
       await expect(row).toContainText('Look up the release notes')
       await row.click()
@@ -267,7 +266,7 @@ export function askProjectTests(): void {
         const child = { ...o, id: 'orc-child-2', kind: 'worker', name: 'An older lookup', askedBy: 'orc-gone' }
         ;(window as any).__mock.emit({ type: 'session_created', sessionId: child.id, session: child })
       }, orc)
-      await page.getByTestId('assistant-button').hover()
+      await page.getByTestId('assistant-button').click()
       await expect(page.getByTestId('assistant-children-earlier')).toHaveText('Started by an earlier assistant')
       await expect(page.getByTestId('assistant-child-row-orc-child-2')).toContainText('An older lookup')
     })

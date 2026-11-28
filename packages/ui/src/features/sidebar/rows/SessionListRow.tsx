@@ -101,8 +101,7 @@ function SessionListRowView({
             />
           )}
           <button
-            // Opening a row of a hover-expanded project leaves the saved fold as it is (#1578): it folds when the pointer leaves
-            onClick={(e) => focusSession(s.id, e.currentTarget.closest('[data-hover-expanded]') ? { reveal: false } : undefined)}
+            onClick={() => focusSession(s.id)}
             onKeyDown={foldKeys(children.length > 0, childrenFolded, (next) => setGroupsFolded([groupKey], next))}
             // Double-click renames, as in file explorers; the menu's Rename is the way for whoever does not know that
             onDoubleClick={() => setRenaming(s.id)}

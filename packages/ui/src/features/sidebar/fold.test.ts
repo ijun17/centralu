@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionState } from '@cc/protocol'
-import { foldSummary, groupAttention, HoverExpander, HOVER_EXPAND_MS } from './fold.js'
+import { foldSummary, groupAttention } from './fold.js'
 
 // Unread by default: an idle (`waiting_input`) session is not counted either way
 const of = (...states: SessionState[]) => states.map((state) => ({ state, pendingQuestions: [], lastSeq: 2, lastReadSeq: 1 }))
@@ -84,99 +84,5 @@ describe('groupAttention (#666)', () => {
 
   it('is the quieter unread when that is all there is', () => {
     expect(groupAttention([row(), row({ lastSeq: 4 })])).toBe('unread')
-  })
-})
-
-describe('HoverExpander (#1578)', () => {
-  function setup(inside = true) {
-    const timers: { fn: () => void; ms: number; live: boolean }[] = []
-    const changes: boolean[] = []
-    const state = { inside }
-    const h = new HoverExpander({
-      onChange: (o) => changes.push(o),
-      pointerInside: () => state.inside,
-      startTimer: (fn, ms) => {
-        const t = { fn, ms, live: true }
-        timers.push(t)
-        return () => void (t.live = false)
-      },
-    })
-    const fire = () => timers.filter((t) => t.live).forEach((t) => ((t.live = false), t.fn()))
-    return { h, changes, timers, fire, state }
-  }
-
-  it('expands once the pointer has rested HOVER_EXPAND_MS (100 ms) on a folded name row', () => {
-    const { h, changes, timers, fire } = setup()
-    h.enterRow(true)
-    expect(timers).toHaveLength(1)
-    expect(timers[0]?.ms).toBe(HOVER_EXPAND_MS)
-    // The owner's value (#1605): changing it is a decision, not a refactor
-    expect(HOVER_EXPAND_MS).toBe(100)
-    expect(changes).toEqual([])
-    fire()
-    expect(changes).toEqual([true])
-  })
-
-  it('does nothing when the pointer leaves the name before the rest is over', () => {
-    const { h, changes, fire } = setup()
-    h.enterRow(true)
-    h.leaveRow()
-    fire()
-    expect(changes).toEqual([])
-  })
-
-  it('starts no timer on a project that is not folded', () => {
-    const { h, timers } = setup()
-    h.enterRow(false)
-    expect(timers).toHaveLength(0)
-  })
-
-  it('folds when the pointer leaves the block, and not when it only leaves the name', () => {
-    const { h, changes, fire } = setup()
-    h.enterRow(true)
-    fire()
-    h.leaveRow()
-    expect(changes).toEqual([true])
-    h.leaveBlock()
-    expect(changes).toEqual([true, false])
-  })
-
-  it('keeps one timer: entering again restarts the rest, and a block leave clears a pending one', () => {
-    const { h, changes, timers, fire } = setup()
-    h.enterRow(true)
-    h.enterRow(true)
-    expect(timers.filter((t) => t.live)).toHaveLength(1)
-    h.leaveBlock()
-    fire()
-    expect(changes).toEqual([])
-  })
-
-  it('holds the project while a menu or a drag is open, and settles by where the pointer is', () => {
-    const { h, changes, fire, state } = setup()
-    h.enterRow(true)
-    fire()
-    h.hold(true)
-    h.leaveBlock()
-    expect(changes).toEqual([true])
-    state.inside = false
-    h.hold(false)
-    expect(changes).toEqual([true, false])
-  })
-
-  it('stays open after a hold ends with the pointer still inside', () => {
-    const { h, changes, fire } = setup(true)
-    h.enterRow(true)
-    fire()
-    h.hold(true)
-    h.hold(false)
-    expect(changes).toEqual([true])
-  })
-
-  it('reset (a click made it stay) drops the transient state', () => {
-    const { h, changes, fire } = setup()
-    h.enterRow(true)
-    fire()
-    h.reset()
-    expect(changes).toEqual([true, false])
   })
 })
