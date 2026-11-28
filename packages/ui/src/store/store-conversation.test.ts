@@ -649,7 +649,7 @@ describe('one send is one row when the host labels it as a script’s (#2469)', 
     mock.sessions.set(id, sessionInfo(id))
     await useStore.getState().attach(mock)
     mock.agents.send = async (sessionId, text) => {
-      useStore.getState().dispatchEvent({ type: 'user_message', sessionId, seq: 7, text, fromScript: asScript } as NormalizedEvent)
+      useStore.getState().dispatchEvent({ type: 'user_message', sessionId, seq: 7, text, fromScript: asScript })
     }
 
     await useStore.getState().send(id, 'look at this')
@@ -669,8 +669,8 @@ describe('one send is one row when the host labels it as a script’s (#2469)', 
     await useStore.getState().send(id, 'go')
     await useStore.getState().send(id, 'go')
     expect(users(id).map((u) => (u as { pending?: boolean }).pending)).toEqual([true, true])
-    useStore.getState().dispatchEvent({ type: 'user_message', sessionId: id, seq: 7, text: 'go', fromScript: asScript } as NormalizedEvent)
-    useStore.getState().dispatchEvent({ type: 'user_message', sessionId: id, seq: 8, text: 'go', fromScript: asScript } as NormalizedEvent)
+    useStore.getState().dispatchEvent({ type: 'user_message', sessionId: id, seq: 7, text: 'go', fromScript: asScript })
+    useStore.getState().dispatchEvent({ type: 'user_message', sessionId: id, seq: 8, text: 'go', fromScript: asScript })
 
     expect(users(id).map((u) => ({ seq: u.storedSeq, script: (u as { fromScript?: unknown }).fromScript }))).toEqual([
       { seq: 7, script: asScript },
