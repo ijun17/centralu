@@ -540,6 +540,7 @@ const agentVersions = new AgentVersionService({
   notes: mgr.sessionSettings,
   // Not listening yet: the first window asks
   publish: (status) => events.push({ type: 'agent_versions', status }),
+  versionChanged: (tool) => mgr.toolQueries.forgetModels(tool),
   readAutoApply: autoApplyAgentVersions.read,
   writeAutoApply: autoApplyAgentVersions.write,
 })

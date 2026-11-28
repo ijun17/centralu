@@ -42,6 +42,52 @@ describe("a tool's models", () => {
     expect(reads).toBe(2)
   })
 
+  // #2544: Codex 0.172 offered a model the five-minute list of 0.160 hid
+  it('forgetting a tool reads its list again at once, and a read of the old CLI still running is not kept', async () => {
+    await queries.listModels('claude')
+    answer = async () => [m('b')]
+    queries.forgetModels('claude')
+    expect((await queries.listModels('claude')).models).toEqual([m('b')])
+    expect(reads).toBe(2)
+
+    let release!: (v: ModelOption[]) => void
+    answer = () => new Promise<ModelOption[]>((r) => (release = r))
+    queries.forgetModels('claude')
+    const old = queries.listModels('claude')
+    queries.forgetModels('claude')
+    release([m('old')])
+    await old
+    answer = async () => [m('new')]
+    expect((await queries.listModels('claude')).models).toEqual([m('new')])
+  })
+
+  it('an ask after the change does not join a read of the old CLI still running', async () => {
+    let release!: (v: ModelOption[]) => void
+    answer = () => new Promise<ModelOption[]>((r) => (release = r))
+    const before = queries.listModels('claude')
+    queries.forgetModels('claude')
+    const readOld = release
+    answer = async () => [m('new')]
+    expect((await queries.listModels('claude')).models).toEqual([m('new')])
+    expect(reads).toBe(2)
+    readOld([m('old')])
+    expect((await before).models).toEqual([m('old')])
+    // What the old read ended with is not kept: the next ask still has the new list
+    expect((await queries.listModels('claude')).models).toEqual([m('new')])
+    expect(reads).toBe(2)
+  })
+
+  it('forgetting a tool also ends the wait after a failed read', async () => {
+    answer = async () => {
+      throw new Error('the tool did not answer')
+    }
+    expect(await queries.modelsWithin('claude', 100)).toBeNull()
+    answer = async () => [m('a')]
+    expect(await queries.modelsWithin('claude', 100)).toBeNull()
+    queries.forgetModels('claude')
+    expect((await queries.modelsWithin('claude', 100))?.models).toEqual([m('a')])
+  })
+
   it('a failed read keeps the last list, and is not tried again within a minute by a caller that cannot wait', async () => {
     await queries.listModels('claude')
     vi.advanceTimersByTime(5 * 60_000)

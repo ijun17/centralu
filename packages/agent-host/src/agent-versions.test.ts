@@ -229,6 +229,28 @@ describe('the agent version service (#297)', () => {
     expect(sessions.restarted).toEqual([])
   })
 
+  // #2544: a CLI update must not leave the old CLI's model list cached
+  it('says which tool changed when a reading differs from the one before, not for the first reading nor the same one', async () => {
+    const changed: string[] = []
+    const svc = new AgentVersionService({
+      tools: () => [{ tool: 'claude', installedVersion: async () => installed }],
+      sessions,
+      processes: sessions,
+      notes: sessions,
+      publish: () => {},
+      versionChanged: (tool) => changed.push(tool),
+      now: () => now,
+    })
+    await svc.check(true)
+    await svc.check(true)
+    expect(changed).toEqual([])
+    installed = '2.1.300'
+    await svc.check(true)
+    expect(changed).toEqual(['claude'])
+    await svc.check(true)
+    expect(changed).toEqual(['claude'])
+  })
+
   it('a focus soon after a reading answers with it; a process reporting a newer CLI than the reading reads again', async () => {
     installed = '2.1.282'
     sessions.sessions.set('a', session('a'))

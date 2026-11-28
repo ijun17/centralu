@@ -39,6 +39,8 @@ export type AgentVersionDeps = {
   processes: VersionProcesses
   notes: VersionNotes
   publish: (status: AgentVersions) => void
+  /** A tool's installed version differs from the one read before (#2544): what was learned from the old CLI (its model list) is dropped */
+  versionChanged?: (tool: ToolName) => void
   readAutoApply?: () => boolean
   writeAutoApply?: (enabled: boolean) => void
   now?: () => number
@@ -123,6 +125,7 @@ export class AgentVersionService {
 
   constructor(deps: AgentVersionDeps) {
     this.deps = {
+      versionChanged: () => {},
       readAutoApply: () => true,
       writeAutoApply: () => {},
       now: Date.now,
@@ -176,7 +179,9 @@ export class AgentVersionService {
     const tools = this.deps.tools().filter((t) => t.installedVersion)
     const read = await Promise.all(tools.map(async (t) => [t.tool, await t.installedVersion!().catch(() => null)] as const))
     const installed: Record<string, string | null> = Object.fromEntries(read)
+    const before = this.status.installed
     this.status = { ...this.status, installed, checkedAt: this.deps.now() }
+    for (const [tool, version] of read) if (tool in before && before[tool] !== version) this.deps.versionChanged?.(tool)
     this.deps.publish(this.current())
     if (this.status.autoApply) for (const s of this.deps.sessions.listSessions()) this.lookSoon(s.id)
     return this.current()
