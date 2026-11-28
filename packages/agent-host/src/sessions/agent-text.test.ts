@@ -34,6 +34,7 @@ const TOLD_LESS: Partial<Record<ToolName, { role?: string; tools?: string }>> = 
  * What a transport hands the agent: `text`, its parts joined for comparing (Claude's two, an ACP tool's `_meta` or its
  * bridge's); `instructions`, the part the cost measure counts
  */
+/** `text`: the role and tools as one text, the form the tools are compared in (a server's instructions get the heading here only); `instructions`: a server's own, as sent */
 type Told = { text: string | undefined; instructions: string | undefined }
 
 /** The instructions Claude's in-process server is made with, read from the SDK's own server */

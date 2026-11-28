@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { isInTurn, transition, type AdapterCapabilities, type NormalizedEvent, type SessionState } from '@cc/protocol'
-import type { AgentProcess, CreateSessionOpts, ProcessSource } from '../contract.js'
+import type { AgentProcess, CentraluTools, CreateSessionOpts, ProcessSource } from '../contract.js'
 import type { SessionApps } from '../contract/session-apps.js'
 import { failureSentence, isNetworkFailure } from '../../sessions/error-kind.js'
 import { AcpAdapter } from './adapter.js'
@@ -86,6 +86,21 @@ describe('the ACP session against a scripted agent', () => {
     // In the tool line's words, as every tool says it
     await expect(w.start()).rejects.toMatchObject({ code: 'not_logged_in', message: 'Fake is not signed in. Run log in in a terminal.' })
     expect(w.peers[0]!.methods()).toEqual(['initialize', 'session/new'])
+  })
+
+  it('hands a reopened conversation the bridge with the tool instructions, as a new one, where the tool shows a server’s', async () => {
+    const bridge = { centraluTools: {} as CentraluTools, centraluBridge: { url: 'ws://127.0.0.1:0', token: 'tok' } }
+    const serverChannel = { ...profile, capabilities: { ...profile.capabilities, instructionChannel: 'server' as const } }
+    const told = async (resumeExternalId?: string) => {
+      const w = world(base, { ...bridge, ...(resumeExternalId ? { resumeExternalId } : {}) }, serverChannel)
+      const s = await w.start()
+      const opened = w.peers[0]!.received.find((m) => m.method === (resumeExternalId ? 'session/load' : 'session/new')) as { params: { mcpServers: { env: { name: string; value: string }[] }[] } }
+      await s.dispose()
+      return opened.params.mcpServers[0]!.env.find((e) => e.name === 'CC_BRIDGE_INSTRUCTIONS')?.value
+    }
+    const fresh = await told()
+    expect(fresh).toBeTruthy()
+    expect(await told(SID)).toBe(fresh)
   })
 
   it('reports a conversation it cannot load, and does not start a new one in its place', async () => {

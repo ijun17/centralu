@@ -38,7 +38,8 @@ The doors differ because the tools do. codex-cli 0.160.0 shows a server's instru
 with `scripts/probe-codex-mcp-instructions.mts`), so its bridge sends none and Codex gets them in its one text.
 Codex reads that text at `thread/start` only and ignores it on `thread/resume`, so a Codex thread keeps what it was
 started with: one that changes profile while its thread lives on has its new tools without their instructions until
-it starts a new thread.
+it starts a new thread. OpenCode's bridge holds the instructions it was started with in the same way: an app attached
+or a profile changed while its process lives on reaches the model at the process's next start.
 
 Which ACP tools show a server's `initialize` instructions was measured with `scripts/probe-acp-mcp-instructions.mts`
 (2026-11-29, three runs each, a marked phrase asked for before and after calling the server's tool): OpenCode 1.19.4
