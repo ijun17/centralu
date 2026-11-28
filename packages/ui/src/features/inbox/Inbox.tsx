@@ -272,7 +272,7 @@ export function Inbox() {
                 ]}
               />
             </div>
-            <span className="ml-auto flex items-center gap-1 text-2xs text-ink-faint">
+            <span className="ml-auto flex flex-wrap items-center justify-end gap-1 text-2xs text-ink-faint">
               <Kbd>↑</Kbd>
               <Kbd>↓</Kbd> Move
               <Kbd>↵</Kbd> Open
@@ -437,15 +437,16 @@ function SessionRow({ it, project, active, settled, onOpen }: { it: InboxItem; p
     >
       <div className="flex items-center">
         <button
-          className="flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-3 pr-3 text-left @max-md:flex-wrap @max-md:gap-y-0.5"
+          className="flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-3 pr-3 text-left @max-[34rem]:flex-wrap @max-[34rem]:gap-y-0.5"
           onClick={onOpen}
           data-testid={`inbox-item-${it.id}`}
         >
           <StateDot state={it.state} />
-          <span className={`truncate text-md ${it.unread ? 'text-ink' : 'text-ink-muted'}`}>
+          {/* Narrow, the name takes what the line leaves and the project at most two fifths: cut, so neither wraps to a line of its own */}
+          <span className={`truncate text-md @max-[34rem]:grow @max-[34rem]:basis-0 ${it.unread ? 'text-ink' : 'text-ink-muted'}`}>
             {it.name}
           </span>
-          <span className="truncate text-xs text-ink-faint">
+          <span className="truncate text-xs text-ink-faint @max-[34rem]:max-w-2/5">
             {project}
           </span>
           {/* Which machine it waits on (#82): an approval answered here acts there. A proposal is this host's */}
@@ -453,12 +454,12 @@ function SessionRow({ it, project, active, settled, onOpen }: { it: InboxItem; p
             <SessionMachineTag sessionId={it.id} testId={`inbox-machine-${it.id}`} />
           )}
           {/*
-            Narrow (#2455), the state and time take a line of their own under the name, in from the dot: on the name's line
-            they cannot shrink, so they would run out of the button and be drawn under Continue
+            Narrower than the panel's full width (#2455), the state and time take a line of their own under the name, in from
+            the dot: on the name's line they cannot shrink, so they would run out of the button and be drawn under Continue
           */}
-          <span className="ml-auto flex shrink-0 items-center gap-2.5 @max-md:ml-0 @max-md:min-w-0 @max-md:shrink @max-md:basis-full @max-md:pl-5">
+          <span className="ml-auto flex shrink-0 items-center gap-2.5 @max-[34rem]:ml-0 @max-[34rem]:min-w-0 @max-[34rem]:shrink @max-[34rem]:basis-full @max-[34rem]:pl-5">
             <span
-              className="max-w-64 truncate text-xs text-ink-faint @max-md:max-w-none @max-md:whitespace-normal"
+              className="max-w-64 truncate text-xs text-ink-faint @max-[34rem]:max-w-none @max-[34rem]:whitespace-normal"
               title={it.arrival ? arrivalAsks(it.arrival.asks) : undefined}
               data-testid={it.arrival ? `inbox-arrival-asks-${it.id}` : undefined}
             >
@@ -513,7 +514,7 @@ function WaitingTime({ since }: { since: number | null }) {
   const now = useLabelNow(since === null ? null : next)
   const elapsed = since === null ? 0 : Math.max(0, now - since)
   return (
-    <span className={`readout w-16 shrink-0 text-right text-xs @max-md:w-auto ${waitingTone(elapsed)}`}>
+    <span className={`readout w-16 shrink-0 text-right text-xs @max-[34rem]:w-auto ${waitingTone(elapsed)}`}>
       {formatWaiting(elapsed)}
     </span>
   )

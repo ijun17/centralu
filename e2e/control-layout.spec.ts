@@ -23,17 +23,18 @@ test('The layout does not break even in a narrow window (L4-4)', async ({ page }
 
 /**
  * The side panels give way before the session does (#1561): at 480 px the sidebar and the evidence panel used to keep
- * their stored widths and left the session 0 px. Below 480 px the sidebar gives up its own minimum too, or the two
- * minimums push the pane past the window's right edge (#2362). 900 and 1280 px keep the layout they always had.
+ * their stored widths and left the session 0 px. Below 480 px the session gives up its own minimum, never the sidebar
+ * its 180 px, under which names read as a letter (#2455); two fixed minimums would push the pane past the window's
+ * right edge (#2362). 900 and 1280 px keep the layout they always had.
  */
 for (const [width, session] of [
-  [360, 300],
+  [360, 180],
   [480, 300],
   [900, 320],
   [1280, 700],
 ] as const) {
   const narrow = width <= 480
-  test(`At ${width} px wide the session pane is ${narrow ? 'still usable' : 'laid out as before'} (#1561, #2362)`, async ({ page }) => {
+  test(`At ${width} px wide the session pane is ${narrow ? 'still usable' : 'laid out as before'} (#1561, #2362, #2455)`, async ({ page }) => {
     await page.setViewportSize({ width, height: 700 })
     await setup(page, { projects: ['/tmp/alpha'] })
     await newSession(page, 'alpha', 'task')
@@ -44,7 +45,9 @@ for (const [width, session] of [
     if (narrow) expect(pane.width).toBeGreaterThanOrEqual(session)
     else expect(Math.round(pane.width)).toBe(session)
     expect(pane.x + pane.width).toBeLessThanOrEqual(width)
-    expect((await page.getByTestId('sidebar').boundingBox())!.x).toBeGreaterThanOrEqual(0)
+    const sidebar = (await page.getByTestId('sidebar').boundingBox())!
+    expect(sidebar.x).toBeGreaterThanOrEqual(0)
+    expect(sidebar.width).toBeGreaterThanOrEqual(180)
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)
     expect(overflow).toBe(false)
   })

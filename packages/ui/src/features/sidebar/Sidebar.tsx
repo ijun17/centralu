@@ -1,7 +1,7 @@
 import { errorMessage } from '@cc/protocol/client'
 import { useRef, useState } from 'react'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
-import { useStore, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, sidebarFloor, useTextZoom } from '../../store/store.js'
+import { useStore, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useTextZoom } from '../../store/store.js'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 import { AppPlusIcon, FolderPlusIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
@@ -55,7 +55,7 @@ export function Sidebar() {
     // Only the project list scrolls (#988): the resize handle, an absolute child, would scroll away with the rows
     <aside
       className="relative flex h-full shrink flex-col overflow-hidden border-r border-line bg-surface-side"
-      style={{ width, minWidth: sidebarFloor(zoom), ...SIDEBAR_VARS }}
+      style={{ width, minWidth: SIDEBAR_MIN / zoom, ...SIDEBAR_VARS }}
       data-testid="sidebar"
     >
       <ResizeHandle

@@ -301,8 +301,7 @@ async function expectWaitWhole(page: Page) {
 
   /*
    * The words are not cut: nothing overflows their box, and every line of them is drawn inside the line above the
-   * composer. Not the window: at 360 px the sidebar and the pane's own minimum width put the pane's right edge past the
-   * window, which is the app's layout and not this line's (#2362)
+   * composer. Not the window: where the pane's edge falls is the app's layout, not this line's (#2362, #2455)
    */
   const words = await wait.evaluate((el) => {
     const note = el.closest('[data-testid="stop-note"]')!.getBoundingClientRect()
