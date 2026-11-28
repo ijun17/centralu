@@ -317,12 +317,16 @@
    "to": 78,
    "breaksOlderReaders": true,
    "minReader": 75
+  },
+  {
+   "to": 79,
+   "breaksOlderReaders": false
   }
  ],
- "version": 78,
- "ran": 77,
+ "version": 79,
+ "ran": 78,
  "store": {
-  "userVersion": 78,
+  "userVersion": 79,
   "master": [
    {
     "type": "index",

@@ -205,8 +205,8 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
     await router.handle('grid.set', { panels: [{ kind: 'session', sessionId: 'm1.s1' }] })
     await router.handle('prefs.get', {})
     await router.handle('machines.list', {})
-    await router.handle('orchestrator.tool', { sessionId: 'm1.s1', name: 'x', args: {} })
-    expect(local.map((c) => c.method)).toEqual(['grid.set', 'prefs.get', 'machines.list', 'orchestrator.tool'])
+    await router.handle('assistant.tool', { sessionId: 'm1.s1', name: 'x', args: {} })
+    expect(local.map((c) => c.method)).toEqual(['grid.set', 'prefs.get', 'machines.list', 'assistant.tool'])
     expect(m1.calls).toEqual([])
   })
 

@@ -871,12 +871,12 @@ describe("the Codex bridge's credential (#382)", () => {
     const { calls, onRpc } = recorder()
     const { port } = await start(onRpc)
     const c = await bridgeConn(port, bridgeToken(TOKEN, 's1'))
-    c.send({ kind: 'rpc', id: 'a', method: 'orchestrator.tool', params: { sessionId: 's1', name: 'list_sessions', args: {} } })
-    c.send({ kind: 'rpc', id: 'b', method: 'orchestrator.tools', params: { sessionId: 's1' } })
+    c.send({ kind: 'rpc', id: 'a', method: 'assistant.tool', params: { sessionId: 's1', name: 'list_sessions', args: {} } })
+    c.send({ kind: 'rpc', id: 'b', method: 'assistant.tools', params: { sessionId: 's1' } })
     expect(await resOf(c, 'a')).toMatchObject({ ok: true })
     expect(await resOf(c, 'b')).toMatchObject({ ok: true })
     expect(c.frames[0]).toMatchObject({ kind: 'hello_ok' })
-    expect(calls.map(([m]) => m)).toEqual(['orchestrator.tool', 'orchestrator.tools'])
+    expect(calls.map(([m]) => m)).toEqual(['assistant.tool', 'assistant.tools'])
     c.ws.close()
   })
 
@@ -889,7 +889,7 @@ describe("the Codex bridge's credential (#382)", () => {
       ['projects.setTrusted', { projectId: 'p1', trusted: true }],
       ['sessions.list', {}],
       ['terminals.open', { sessionId: 's1' }],
-      // The per-app door of before #2231: an app is reached through orchestrator.tool's `app` now
+      // The per-app door of before #2231: an app is reached through assistant.tool's `app` now
       ['apps.sessionCall', { sessionId: 's1', server: 'app-x', name: 't', args: {} }],
     ]
     attempts.forEach(([method, params], i) => c.send({ kind: 'rpc', id: `x${i}`, method, params }))
@@ -906,8 +906,8 @@ describe("the Codex bridge's credential (#382)", () => {
     const { calls, onRpc } = recorder()
     const { port } = await start(onRpc)
     const c = await bridgeConn(port, bridgeToken(TOKEN, 's1'))
-    c.send({ kind: 'rpc', id: 'o', method: 'orchestrator.tool', params: { sessionId: 's2', name: 'list_sessions', args: {} } })
-    c.send({ kind: 'rpc', id: 'n', method: 'orchestrator.tools', params: {} })
+    c.send({ kind: 'rpc', id: 'o', method: 'assistant.tool', params: { sessionId: 's2', name: 'list_sessions', args: {} } })
+    c.send({ kind: 'rpc', id: 'n', method: 'assistant.tools', params: {} })
     for (const id of ['o', 'n']) {
       const res = await resOf(c, id)
       expect(res.ok).toBe(false)
@@ -930,7 +930,7 @@ describe("the Codex bridge's credential (#382)", () => {
     srv.pushTerminal({ terminalId: 't1', data: 'secret output' })
     // The app is the control: once it has both, the bridge has had every chance to get them too
     await app.wait(() => app.frames.filter((f) => f.kind === 'event').length === 2 && app.frames.some((f) => f.kind === 'term'))
-    bridge.send({ kind: 'rpc', id: 'r', method: 'orchestrator.tools', params: { sessionId: 's1' } })
+    bridge.send({ kind: 'rpc', id: 'r', method: 'assistant.tools', params: { sessionId: 's1' } })
     await resOf(bridge, 'r')
     expect(bridge.frames.map((f) => f.kind)).toEqual(['hello_ok', 'res'])
     bridge.ws.close()

@@ -223,7 +223,7 @@ describe('delivery', () => {
     expect(box.markReleased(stopped, B, NOW + 2, 'error')).toBe(true)
     expect(box.recipient(stopped, B)?.givenAgainAt).toBeNull()
     const NEW = 'session:h1/orc2'
-    const role = givenAgain(ORC, { via: 'orchestrator' })
+    const role = givenAgain(ORC, { via: 'assistant' })
     expect(box.moveRole(NEW)).toEqual([role])
     expect(box.recipient(role, NEW)?.givenAgainAt).toBeNull()
   })
@@ -436,16 +436,16 @@ describe('handoff and trash', () => {
   it('moveRole delivers afresh even when read, its reminders counted again', () => {
     const { box, send, db } = world()
     const NEW = 'session:h1/orc2'
-    const asked = send({ sender: A, needsReply: true }, to(ORC, { via: 'orchestrator' }))
+    const asked = send({ sender: A, needsReply: true }, to(ORC, { via: 'assistant' }))
     box.markDelivered(ORC, [asked], NOW, 3)
     box.markRead(ORC, [asked], NOW)
     db.prepare(`UPDATE mail_recipients SET reminded = 2, reminded_at = ? WHERE message_id = ?`).run(NOW, asked)
     const direct = send({ sender: A, needsReply: true }, ORC)
-    const done = send({ sender: A, needsReply: true }, to(ORC, { via: 'orchestrator' }))
+    const done = send({ sender: A, needsReply: true }, to(ORC, { via: 'assistant' }))
     box.markDelivered(ORC, [done], NOW, 3)
     box.settle(done, ORC, 'answered', NOW)
     expect(box.moveRole(NEW)).toEqual([asked])
-    expect(box.recipient(asked, NEW)).toMatchObject({ deliveredAt: null, readAt: null, attemptAt: null, turnSeq: null, attempts: 0, reminded: 0, remindedAt: null, via: 'orchestrator' })
+    expect(box.recipient(asked, NEW)).toMatchObject({ deliveredAt: null, readAt: null, attemptAt: null, turnSeq: null, attempts: 0, reminded: 0, remindedAt: null, via: 'assistant' })
     expect(box.recipient(direct, ORC)).toBeDefined()
     expect(box.recipient(done, ORC)).toBeDefined()
   })

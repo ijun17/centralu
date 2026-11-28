@@ -241,7 +241,7 @@ describe('parameters at the boundary', () => {
  */
 describe("the Assistant's old method names", () => {
   it('answer with the new name and an update, and any other missing method stays unknown', async () => {
-    const rpc = await createRpcHandler({} as SessionManager, new Map(), {})
+    const rpc = createRpcHandler({} as SessionManager, new Map(), {})
     await expect(rpc('orchestrator.get', {})).rejects.toThrow('orchestrator.get is now assistant.get: update Centralu on the computer that sent this')
     await expect(rpc('agents.deleteOrchestratorSkill', { name: 'x' })).rejects.toThrow('is now agents.deleteAssistantSkill: update Centralu')
     await expect(rpc('orchestrator.nothing', {})).rejects.toThrow('Unknown method: orchestrator.nothing')

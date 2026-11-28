@@ -15,22 +15,22 @@ function withRows(rows: Record<string, string>, changed: () => void = () => {}, 
 describe('assistant proposals read from a row another build wrote', () => {
   it('a row that is not a list reads as empty, and the next proposal still saves', () => {
     const { proposals, rows } = withRows({
-      orchestrator_mcp_proposals: '{"name":"x"}',
-      orchestrator_skill_proposals: '"text"',
-      orchestrator_skills: '{',
+      assistant_mcp_proposals: '{"name":"x"}',
+      assistant_skill_proposals: '"text"',
+      assistant_skills: '{',
     })
     expect(proposals.mcpProposals()).toEqual([])
     expect(proposals.skillProposals()).toEqual([])
     expect(proposals.assistantSkills()).toEqual([])
     expect(proposals.proposeSkill({ name: 'tidy', content: 'Keep it short.' }).ok).toBe(true)
-    expect(JSON.parse(rows.orchestrator_skill_proposals!)).toEqual([{ name: 'tidy', content: 'Keep it short.' }])
+    expect(JSON.parse(rows.assistant_skill_proposals!)).toEqual([{ name: 'tidy', content: 'Keep it short.' }])
   })
 
   it('an element without the fields this build needs is skipped; a newer element keeps its extra fields', () => {
     const newer = { name: 'tidy', content: 'Keep it short.', source: 'team' }
     const { proposals } = withRows({
-      orchestrator_skills: JSON.stringify([newer, { name: 'broken' }, null, 'text']),
-      orchestrator_mcp_proposals: JSON.stringify([{ name: 'db', command: 'node', args: ['s.js'] }, { name: 'bad', command: 'node', args: [1] }]),
+      assistant_skills: JSON.stringify([newer, { name: 'broken' }, null, 'text']),
+      assistant_mcp_proposals: JSON.stringify([{ name: 'db', command: 'node', args: ['s.js'] }, { name: 'bad', command: 'node', args: [1] }]),
     })
     expect(proposals.assistantSkills()).toEqual([newer])
     expect(proposals.mcpProposals().map((p) => p.name)).toEqual(['db'])
@@ -46,26 +46,26 @@ describe('a change written over a row another build wrote', () => {
   it('approving a skill keeps an approved skill this build cannot read', () => {
     const newer = { name: 'review', steps: ['read the diff', 'run the tests'] }
     const { proposals, rows } = withRows({
-      orchestrator_skills: JSON.stringify([{ name: 'tidy', content: 'Keep it short.' }, newer]),
-      orchestrator_skill_proposals: JSON.stringify([{ name: 'cite', content: 'Name the file.' }]),
+      assistant_skills: JSON.stringify([{ name: 'tidy', content: 'Keep it short.' }, newer]),
+      assistant_skill_proposals: JSON.stringify([{ name: 'cite', content: 'Name the file.' }]),
     })
     expect(proposals.assistantSkills().map((x) => x.name)).toEqual(['tidy'])
     expect(proposals.resolveSkillProposal('cite', true).ok).toBe(true)
-    expect(JSON.parse(rows.orchestrator_skills!)).toEqual([{ name: 'tidy', content: 'Keep it short.' }, { name: 'cite', content: 'Name the file.' }, newer])
+    expect(JSON.parse(rows.assistant_skills!)).toEqual([{ name: 'tidy', content: 'Keep it short.' }, { name: 'cite', content: 'Name the file.' }, newer])
   })
 
   it('a skills row that is not a list is said, and set aside when the next approval replaces it', () => {
     const said = vi.spyOn(console, 'error').mockImplementation(() => {})
     const cut = '[{"name":"tidy","content":"Keep it short."},{"name":"rev'
     const { proposals, rows } = withRows({
-      orchestrator_skills: cut,
-      orchestrator_skill_proposals: JSON.stringify([{ name: 'cite', content: 'Name the file.' }]),
+      assistant_skills: cut,
+      assistant_skill_proposals: JSON.stringify([{ name: 'cite', content: 'Name the file.' }]),
     })
     expect(proposals.assistantSkills()).toEqual([])
     expect(proposals.resolveSkillProposal('cite', true).ok).toBe(true)
-    expect(JSON.parse(rows.orchestrator_skills!)).toEqual([{ name: 'cite', content: 'Name the file.' }])
-    expect(rows['orchestrator_skills.unreadable']).toBe(cut)
-    expect(said.mock.calls.map((c) => String(c[0])).join(' | ')).toContain('app_settings.orchestrator_skills is not a JSON list')
+    expect(JSON.parse(rows.assistant_skills!)).toEqual([{ name: 'cite', content: 'Name the file.' }])
+    expect(rows['assistant_skills.unreadable']).toBe(cut)
+    expect(said.mock.calls.map((c) => String(c[0])).join(' | ')).toContain('app_settings.assistant_skills is not a JSON list')
     said.mockRestore()
   })
 })

@@ -114,7 +114,7 @@ const REFUSED: [string, unknown, string][] = [
   ['host.hubOffer', { hub: { id: 'h', name: 'h' }, on: true }, 'link'],
   // A project's app used from another machine (#1938): only a linked hub calls a machine's apps
   ['host.appCall', { call: 'c', session: 'h1', projectId: 'p1', appId: 'board', tool: 'peek', args: {}, waitMs: 1000 }, 'link'],
-  ['orchestrator.tool', { sessionId: 's1', name: 'empty_trash', args: {} }, 'bridge'],
+  ['assistant.tool', { sessionId: 's1', name: 'empty_trash', args: {} }, 'bridge'],
   ['no.such.method', {}, 'unknown'],
 ]
 

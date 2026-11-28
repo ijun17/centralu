@@ -3,7 +3,7 @@ import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 import { SessionManager } from './manager.js'
 
 /**
- * Two windows open the Assistant at once (#839, item 6). Each `orchestrator.get` read "none yet" and created one
+ * Two windows open the Assistant at once (#839, item 6). Each `assistant.get` read "none yet" and created one
  * while the other was still creating its own: two assistants, and the store's marker named only the second.
  */
 describe('the Assistant asked for twice at once (#839)', () => {
@@ -18,7 +18,7 @@ describe('the Assistant asked for twice at once (#839)', () => {
   it('is created once, and both callers get it', async () => {
     const [a, b] = await Promise.all([w.mgr.assistant(), w.mgr.assistant()])
     expect(a.id).toBe(b.id)
-    expect(w.mgr.listSessions().filter((s) => s.kind === 'orchestrator')).toHaveLength(1)
+    expect(w.mgr.listSessions().filter((s) => s.kind === 'assistant')).toHaveLength(1)
     expect(w.adapters.get('claude')!.handles.size).toBe(1)
     // Asked again afterwards, it is the same one
     expect((await w.mgr.assistant()).id).toBe(a.id)
@@ -40,7 +40,7 @@ describe('the role session an earlier build named (#2133)', () => {
 
   const restarted = async () => {
     const next = new SessionManager(w.store, w.adapters, () => {})
-    const name = next.listSessions().find((s) => s.kind === 'orchestrator')?.name
+    const name = next.listSessions().find((s) => s.kind === 'assistant')?.name
     await next.tenure.disposeAll()
     return name
   }
