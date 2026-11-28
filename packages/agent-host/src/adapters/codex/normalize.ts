@@ -3,7 +3,7 @@ import { type NormalizedEvent, type SessionGoal } from '@cc/protocol'
 import { mcpImageEvents } from '../images.js'
 import { planUpdate } from '../plan.js'
 import { toolResultEvent } from '../tool-result.js'
-import { codexItemOk, fileChangesOf, itemInput, itemSummary, resultSummary } from './items.js'
+import { childEnded, codexItemOk, fileChangesOf, itemInput, itemSummary, resultSummary } from './items.js'
 import { turnError } from './model-rejected.js'
 import { noticeWords } from './notices.js'
 import { paramsOf } from './params.js'
@@ -167,7 +167,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       if (type === 'enteredReviewMode') return [{ type: 'activity', sessionId, activity: 'reviewing' }]
       if (type === 'exitedReviewMode') return [{ type: 'activity', sessionId, activity: null }]
       // The start of viewing an image is not a tool line — the image itself is emitted at completion (#40)
-      if (type === 'imageView') return []
+      if (type === 'imageView' || childEnded(item)) return []
       const s = itemSummary(item)
       return [{ type: 'tool_call', sessionId, callId: str(item.id), summary: s, input: itemInput(item) }]
     }
@@ -179,7 +179,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
         // Empty, as its deltas carried the text; the session fills it in when none did (`StreamedMessages`, #2447)
         return str(item.text) ? [{ type: 'message_delta', sessionId, role: 'assistant', text: '', ...messageIdOf(item.id) }] : []
       }
-      if (type === 'userMessage' || type === 'reasoning') return []
+      if (type === 'userMessage' || type === 'reasoning' || childEnded(item)) return []
       /*
        * The compaction marker (FR-14, #303). The completed item is the only sign of a finished compaction that Codex
        * still sends: measured with gpt-5.6-luna on codex-cli 0.147.0, 0.153.4 and 0.160.0 (2026-10-04,

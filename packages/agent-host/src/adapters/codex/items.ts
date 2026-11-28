@@ -3,6 +3,8 @@ import { fileChangeTool, type FileChange } from '../file-changes.js'
 import type { ToolSummary } from '@cc/protocol'
 import { centraluMark, centraluRunCommand, firstLine, isCentraluTool } from '../tool-titles.js'
 
+export const CHILD_AGENT = 'Child agent'
+
 /**
  * Codex's tool items (generated/v2/ThreadItem.ts), read: what a call was asked to do, how it is titled, what it
  * answered and whether it went through. Pure, like normalize.ts, which turns them into events.
@@ -144,7 +146,18 @@ export function itemSummary(item: Record<string, unknown>): ToolSummary {
     const tool = str(item.tool) || type
     return { tool, title: firstLine(str(item.prompt)) || tool, paths: [] }
   }
+  // Multi-agent v2 (#2553, recorded): `started` launches a child (a `spawnAgent` card), `interacted` sends it a message or follow-up task
+  if (type === 'subAgentActivity') {
+    const path = str(item.agentPath)
+    if (str(item.kind) === 'started') return { tool: 'spawnAgent', title: path || CHILD_AGENT, paths: [] }
+    if (str(item.kind) === 'interacted') return { tool: 'sendMessage', title: path ? `Message to ${path}` : `Message to a ${CHILD_AGENT.toLowerCase()}`, paths: [] }
+  }
   return { tool: type || 'tool', title: str(item.title) || type, paths: [] }
+}
+
+/** A v2 activity that says a child's turn ended: its own `turn/completed` says it too, so no row (#2553) */
+export function childEnded(item: Record<string, unknown>): boolean {
+  return str(item.type) === 'subAgentActivity' && (str(item.kind) === 'completed' || str(item.kind) === 'interrupted')
 }
 
 /** The arguments, into one line on the card title: their **shape** (what was sent under what name), cut short: the full body is on the result card */

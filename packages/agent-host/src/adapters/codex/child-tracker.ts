@@ -3,7 +3,7 @@ import { type BackgroundTask, type NormalizedEvent, type SessionGoal } from '@cc
 import { BackgroundEvents, endedSummary } from '../background-events.js'
 import { subagentSteps } from '../subagent-steps.js'
 import { firstLine } from '../tool-titles.js'
-import { codexItemOk } from './items.js'
+import { CHILD_AGENT, codexItemOk } from './items.js'
 import { goalFromCodex, messageIdOf, normalizeNotification, type Notification } from './normalize.js'
 
 /**
@@ -36,12 +36,30 @@ export function childSteps(sessionId: string, parentCallId: string, n: Notificat
   return subagentSteps(sessionId, parentCallId, normalizeNotification(sessionId, n))
 }
 
-/** The child threads a completed `spawnAgent` call started (`receiverThreadIds`), none for any other item (#222, #843) */
-export function launchedThreads(n: Notification): string[] {
-  if (n.method !== 'item/completed') return []
+/**
+ * The launch call an item names, with the child threads it started and how the card reads (#222, #2553):
+ *   - v1: a completed `spawnAgent` collab call names them in `receiverThreadIds`; the card reads as the prompt's first line.
+ *   - v2 (codex-cli 0.172.0, recordings/codex-0.172.0/subagents-v2.jsonl): a `subAgentActivity` of kind `started`, which names the one
+ *     child as `agentThreadId` as soon as it starts, before the child's first notification; the card reads as the child's `agentPath`.
+ */
+export function launchOf(n: Notification): { callId: string; description: string; threads: string[] } | null {
+  if (n.method !== 'item/started' && n.method !== 'item/completed') return null
   const item = asObj(asObj(n.params).item)
-  if (str(item.type) !== 'collabAgentToolCall' || str(item.tool) !== 'spawnAgent' || !codexItemOk(item)) return []
-  return (Array.isArray(item.receiverThreadIds) ? item.receiverThreadIds : []).filter((t): t is string => typeof t === 'string' && t !== '')
+  const callId = str(item.id)
+  if (!callId) return null
+  if (str(item.type) === 'subAgentActivity') {
+    const thread = str(item.agentThreadId)
+    return str(item.kind) === 'started' && thread ? { callId, description: str(item.agentPath) || CHILD_AGENT, threads: [thread] } : null
+  }
+  if (n.method !== 'item/completed' || str(item.type) !== 'collabAgentToolCall' || str(item.tool) !== 'spawnAgent') return null
+  const threads = (Array.isArray(item.receiverThreadIds) ? item.receiverThreadIds : []).filter((t): t is string => typeof t === 'string' && t !== '')
+  return { callId, description: firstLine(str(item.prompt).trim()) || CHILD_AGENT, threads }
+}
+
+/** The child threads a completed launch call started, none for any other item (#222, #843); a call that failed started none that count */
+export function launchedThreads(n: Notification): string[] {
+  if (n.method !== 'item/completed' || !codexItemOk(asObj(asObj(n.params).item))) return []
+  return launchOf(n)?.threads ?? []
 }
 
 /** The background list's entry for the thread's active goal: one per thread */
@@ -107,10 +125,10 @@ export class CodexChildTracker {
     return out
   }
 
-  /** A `spawnAgent` call named this thread. */
-  link(thread: string, callId: string, prompt: string): NormalizedEvent[] {
+  /** A launch call named this thread (`launchOf`). */
+  link(thread: string, callId: string, description: string): NormalizedEvent[] {
     if (this.linked.has(thread)) return []
-    this.linked.set(thread, { callId, description: firstLine(prompt.trim()) || 'Child agent' })
+    this.linked.set(thread, { callId, description })
     return this.changed()
   }
 
