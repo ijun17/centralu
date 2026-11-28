@@ -4,7 +4,10 @@ import { createWebPlatform, type RpcClient } from '@cc/platform/web'
 import { createMockPlatform } from '@cc/platform/mock'
 import type { Platform } from '@cc/platform/ports'
 import { startPlatform } from './bootstrap.js'
+import { installArrowTrace } from './arrowTrace.js'
 import '../../../packages/ui/src/styles/index.css'
+
+installArrowTrace()
 
 /**
  * The only place that knows an implementation (docs/platform-abstraction.md §4). `?mock=1`: the empty in-memory mock
