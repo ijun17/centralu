@@ -89,9 +89,7 @@ describe('what restarts an ACP tool’s process when a session’s settings chan
     expect(of({ projectTrusted: true })).not.toBe(of({ projectTrusted: false }))
     expect(of({ projectTrusted: false })).toBe(of({}))
     expect(of({ projectTrusted: true, noSettingFiles: true })).toBe(of({}))
-  })
-
-  it('a tool whose launch derives nothing from them has no fingerprint, so nothing restarts it', () => {
+    // A tool whose launch derives nothing from them has none, so nothing restarts it
     expect(new OpenCode(cursorProfile()).launchSettingsFingerprint).toBeUndefined()
   })
 })
