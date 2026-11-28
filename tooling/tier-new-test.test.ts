@@ -25,6 +25,8 @@ describe('a new test file of plain tests (#2563)', () => {
     ['a test that names test rather than it', 'a.test.ts', "import { test, expect } from 'vitest'\ntest('one', () => {\n  expect(1).toBe(1)\n})\n"],
     ['another code language', 'a.test.mjs', "import { it } from 'vitest'\nit('x', () => {})\n"],
     ['async tests and a value made inside them', 'a.test.ts', "import { it, expect } from 'vitest'\nit('one', async () => {\n  const v = await Promise.resolve(1)\n  expect(v).toBe(1)\n})\n"],
+    // Only bare at the top level: a name bound to `it` inside a suite changes only this file's own tests
+    ['a name bound to it inside a suite', 'a.test.ts', "import { describe, it } from 'vitest'\ndescribe('s', () => {\n  const t = it\n  t('one', () => {})\n})\n"],
   ])('counts %s', (_, path, text) => {
     expect(judge(path, text)).toBe(true)
   })
@@ -53,6 +55,12 @@ describe('a new test file of plain tests (#2563)', () => {
     ['a file written through a namespace', "import { it } from 'vitest'\nimport * as fs from 'node:fs'\nit('one', () => {\n  fs.writeFileSync('fixture.json', '{}')\n})\n"],
     ['a process started', "import { it } from 'vitest'\nimport { execFileSync } from 'node:child_process'\nit('one', () => {\n  execFileSync('git', ['push'])\n})\n"],
     ['an import run for its effects', "import './setup.js'\nimport { it } from 'vitest'\nit('one', () => {})\n"],
+    // The deep review's escapes, each run for real in a file the name list rated light
+    ['a require made from node:module', "import { it } from 'vitest'\nimport { createRequire } from 'node:module'\nit('one', () => {\n  createRequire(import.meta.url)('fs')['write' + 'FileSync']('/tmp/x', '')\n})\n"],
+    ['the global object reached through a constructor', "import { it } from 'vitest'\nit('one', () => {\n  ;(() => {}).constructor('return this')()['pro' + 'cess']\n})\n"],
+    ['import.meta', "import { it } from 'vitest'\nit('one', () => {\n  void import.meta.url\n})\n"],
+    ['a built-in for the environment', "import { it } from 'vitest'\nimport { env } from 'node:process'\nit('one', () => {\n  env.X = '1'\n})\n"],
+    ['a package', "import { it } from 'vitest'\nimport { z } from 'zod'\nit('one', () => {\n  z.string()\n})\n"],
     ['a module imported at run time', withTest("  void import('./x.js')")],
     ['a top-level statement that is not a test', "import { it } from 'vitest'\nconst n = 1\nit('one', () => {})\n"],
     ['a file that does not parse', "import { it } from 'vitest'\nit('one', () => {\n"],

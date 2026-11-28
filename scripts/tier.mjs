@@ -352,30 +352,26 @@ export const NEW_TEST_TIER = 'light'
 
 /** A test file by its name, x.test.<code extension>; its helpers (x.test-helpers.*) never count */
 const TEST_FILE = /\.test\.[cm]?[jt]sx?$/
-/** The calls that declare tests: called bare, so none is skipped, focused, expected to fail, run at once or from a table */
+/** The calls that declare tests, called bare at the top level: there none is skipped, focused, failing, concurrent or a table */
 const TEST_CALLS = new Set(['it', 'test', 'describe'])
 /** What vitest gives a plain test: anything else it exports (vi, the hooks) changes how tests run */
 const PLAIN_VITEST = new Set(['it', 'test', 'describe', 'expect'])
-/** Modules that reach the disk or other processes: a test that writes a fixture another one reads is not a plain one */
-const SIDE_MODULES = /^(?:node:)?(?:fs|fs\/promises|child_process|worker_threads|cluster)$/
-/**
- * Names that reach past the test's own values: the process, the global object, mocks and hooks, code made at run time,
- * and writing files, in case one is reached another way
- */
-const REACHING = new Set(
-  ['vi', 'vitest', 'process', 'globalThis', 'global', 'window', 'self', 'require', 'eval', 'Function', 'beforeEach', 'beforeAll', 'afterEach', 'afterAll', 'onTestFinished', 'onTestFailed']
-    .concat(['writeFile', 'appendFile', 'mkdir', 'rm', 'rmdir', 'unlink', 'rename', 'cp', 'copyFile', 'symlink', 'link', 'truncate', 'chmod', 'utimes'].flatMap((f) => [f, `${f}Sync`]))
-    .concat(['createWriteStream', 'mkdtemp', 'mkdtempSync']),
-)
+/** A module the new file may import besides vitest: one of the repository's own, by a relative path */
+const RELATIVE = /^\.\.?\//
+/** Names that reach past the test's own values: the process, the global object, mocks and hooks, code made at run time */
+const REACHING = new Set(['vi', 'vitest', 'process', 'globalThis', 'global', 'window', 'self', 'require', 'eval', 'Function', 'constructor', 'beforeEach', 'beforeAll', 'afterEach', 'afterAll', 'onTestFinished', 'onTestFailed'])
 
 /**
  * Whether `text`, a test file `path` the change adds, holds only plain tests (`ts`: the typescript package), read by its
- * syntax. Each top-level statement is an import that binds names, from neither vitest beyond it, test, describe and expect
- * nor a module that reaches the disk or other processes, or a call of the bare name it, test or describe. Nowhere does the
+ * syntax. A speed check, not a trust boundary: the light review still reads the new file for what it reaches (the disk, the
+ * network, other processes) and for checks that check nothing, and a relative module it imports can do anything (reviewed
+ * at its own tier). Each top-level statement is an import that binds names, from vitest (it, test, describe and expect only)
+ * or by a relative path, never a built-in or a package, or a call of the bare name it, test or describe. Nowhere does the
  * file name what reaches past its own tests' values (`REACHING`), take a member of it, test or describe (`.skip`, `.only`,
- * `.fails`, `['skip']`), or import a module at run time. An edit to a test file there was, and a helpers file, never count:
- * a line slipped into a test, or a hook or mock added above it, weakens it without removing a line. Without `ts`, or a file
- * that does not parse cleanly: false.
+ * `.fails`, `['skip']`), read `import.meta` or import a module at run time. A name bound to `it` and called with `.skip`
+ * inside a suite still counts: it changes only the new file's own tests. An edit to a test file there was, and a helpers
+ * file, never count: a line slipped into a test, or a hook or mock added above it, weakens it without removing a line.
+ * Without `ts`, or a file that does not parse cleanly: false.
  */
 export function plainNewTest(path, text, ts) {
   if (!TEST_FILE.test(path) || !ts) return false
@@ -385,10 +381,9 @@ export function plainNewTest(path, text, ts) {
   const plainImport = (s) => {
     if (!ts.isImportDeclaration(s) || !s.importClause || !ts.isStringLiteral(s.moduleSpecifier)) return false
     const from = s.moduleSpecifier.text
-    if (SIDE_MODULES.test(from)) return false
+    if (RELATIVE.test(from)) return true
     const named = s.importClause.namedBindings
-    if (from !== 'vitest') return true
-    return !s.importClause.name && named !== undefined && ts.isNamedImports(named) && named.elements.every((e) => PLAIN_VITEST.has((e.propertyName ?? e.name).text))
+    return from === 'vitest' && !s.importClause.name && named !== undefined && ts.isNamedImports(named) && named.elements.every((e) => PLAIN_VITEST.has((e.propertyName ?? e.name).text))
   }
   if (!sf.statements.every((s) => testCall(s) || plainImport(s))) return false
   let plain = true
@@ -397,6 +392,7 @@ export function plainNewTest(path, text, ts) {
     if (ts.isIdentifier(node) && REACHING.has(node.text)) plain = false
     else if ((ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) && ts.isIdentifier(node.expression) && TEST_CALLS.has(node.expression.text)) plain = false
     else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) plain = false
+    else if (ts.isMetaProperty(node) && node.keywordToken === ts.SyntaxKind.ImportKeyword) plain = false
     else ts.forEachChild(node, visit)
   }
   visit(sf)
