@@ -687,14 +687,21 @@ async function pollItem(item, { now, ref, renew, save, landed = [], stillIntegra
     events.push({ kind: 'action', text: `${ref(repo, item.pr)} was opened as a draft by the session queuing it; the queue marked it ready for review, as that session would have.` })
   }
   let d = decideBefore({ item: view, permissions, pr, defaultBranch, ref })
-  if (d?.reason?.kind === 'dirty') {
+  // A head pushed since it was queued, without the pre-pr status read above (#1886). A speed check, not a trust boundary
+  // (AGENTS.md "pre-pr's status")
+  const askPrePr = () => (!item.auto && base.prePrHead !== pr.headRefOid ? prePrMissing({ n: ref(repo, item.pr), head: pr.headRefOid, accepted, base: pr.baseRefName }) : null)
+  // Asked before the queue merges the base into it or restacks it (#2434): pushed first, the author would have to pull the
+  // queue's commit before pre_pr, and the ask would name that commit
+  const ask = d?.reason?.kind === 'dirty' ? askPrePr() : null
+  if (ask) d = ask
+  else if (d?.reason?.kind === 'dirty') {
     if (!renew()) return { yielded: true }
     const c = await onConflict(view, pr, { now, ref, renew, defaultBranch, landed, opened })
     if (c.yielded) return { yielded: true }
     d = c.decision
     Object.assign(base, c.patch ?? {})
-    // The queue's own merge of the base, or restack, onto a head pre-pr passed on: the same change, so no pre-pr again
-    if (c.patch?.conflict?.outcome === 'pushed' && base.prePrHead === pr.headRefOid) base.prePrHead = c.patch.conflict.sha
+    // The queue's own merge of the base, or restack, onto the head pre-pr passed on: the same change, so no pre-pr again
+    if (c.patch?.conflict?.outcome === 'pushed') base.prePrHead = c.patch.conflict.sha
     events.push(...c.events)
   } else if (item.conflict && item.conflict.head !== pr.headRefOid && !d) {
     // Fixed: a new head that no longer conflicts, pushed by the queue or by a session (#1182)
@@ -705,9 +712,7 @@ async function pollItem(item, { now, ref, renew, save, landed = [], stillIntegra
     // Not behind everything queued while it was fixed (#1182): batches and the list take it first
     base.front = item.front ?? at
   }
-  // A head pushed since it was queued, without the pre-pr status read above (#1886). A speed check, not a trust boundary
-  // (AGENTS.md "pre-pr's status")
-  if (!d && !item.auto && base.prePrHead !== pr.headRefOid) d = prePrMissing({ n: ref(repo, item.pr), head: pr.headRefOid, accepted, base: pr.baseRefName })
+  d ??= askPrePr()
   // Handed over with integrate (#1259 step 3): judged on each new head; one that is not auto goes on to no CI or batch
   // A tier:<name> label above auto stops it on every poll, whatever the judge said of its head
   const labelled = !d && item.auto ? labelReason(ref(repo, item.pr), pr.labels) : null
