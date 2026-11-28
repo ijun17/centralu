@@ -635,6 +635,50 @@ describe('a conversation item\'s identity — only a changed row becomes a new o
 })
 
 // The composer clears on send (#38) and a failed send removes the bubble; the toast does not return the text.
+/*
+ * The host labels a send by the connection's credential: a window holding the limited one gets its own send back as a
+ * script's (#2469). One send is one row, labelled as the host stored it, whichever comes first: the echo or the answer.
+ */
+describe('one send is one row when the host labels it as a script’s (#2469)', () => {
+  const asScript = { credential: 'unnamed' }
+  const users = (id: string) => (useStore.getState().chat[id] ?? []).filter((i) => i.kind === 'user')
+
+  it('the echo before the answer takes the bubble’s place with the host’s label', async () => {
+    const id = 'ls-before'
+    const mock = new MockPlatform()
+    mock.sessions.set(id, sessionInfo(id))
+    await useStore.getState().attach(mock)
+    mock.agents.send = async (sessionId, text) => {
+      useStore.getState().dispatchEvent({ type: 'user_message', sessionId, seq: 7, text, fromScript: asScript } as NormalizedEvent)
+    }
+
+    await useStore.getState().send(id, 'look at this')
+
+    expect(users(id)).toHaveLength(1)
+    expect(users(id)[0]).toMatchObject({ text: 'look at this', storedSeq: 7, fromScript: asScript })
+    expect(users(id)[0]).not.toHaveProperty('pending', true)
+  })
+
+  it('the echo after the answer does the same, and the next send is a row of its own', async () => {
+    const id = 'ls-after'
+    const mock = new MockPlatform()
+    mock.sessions.set(id, sessionInfo(id))
+    await useStore.getState().attach(mock)
+    mock.agents.send = async () => {}
+
+    await useStore.getState().send(id, 'go')
+    await useStore.getState().send(id, 'go')
+    expect(users(id).map((u) => (u as { pending?: boolean }).pending)).toEqual([true, true])
+    useStore.getState().dispatchEvent({ type: 'user_message', sessionId: id, seq: 7, text: 'go', fromScript: asScript } as NormalizedEvent)
+    useStore.getState().dispatchEvent({ type: 'user_message', sessionId: id, seq: 8, text: 'go', fromScript: asScript } as NormalizedEvent)
+
+    expect(users(id).map((u) => ({ seq: u.storedSeq, script: (u as { fromScript?: unknown }).fromScript }))).toEqual([
+      { seq: 7, script: asScript },
+      { seq: 8, script: asScript },
+    ])
+  })
+})
+
 describe('restoring written text after a send failure', () => {
   it('a failure returns the sentence to the composer', async () => {
     const s = 'sf-s1'

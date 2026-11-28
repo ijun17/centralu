@@ -1,6 +1,6 @@
 import type { StoredMessage } from '@cc/protocol/client'
 import type { AppState, SubagentSteps } from './state.js'
-import { nextChatKey, type ChatItem } from './transcript.js'
+import { isPendingSend, nextChatKey, type ChatItem } from './transcript.js'
 
 // Which rows of a conversation the screen holds: history pages merged with the screen, the window cut back
 // off screen, and launch cards' subagent steps. Pure; the store's history actions call these.
@@ -44,7 +44,7 @@ function settle(live: ChatItem, row: ChatItem): ChatItem {
  * confirmation, an image (numbered only after its file is written), and a mock's error (the host's carry one, #161).
  */
 function sameLine(live: ChatItem, row: ChatItem): boolean {
-  if (live.kind === 'user' && row.kind === 'user') return !!live.pending && !row.from && !row.fromApp && !row.fromScript && live.text === row.text
+  if (live.kind === 'user' && row.kind === 'user') return isPendingSend(live, row.text)
   if (live.kind === 'image' && row.kind === 'image') return !!live.data && live.mime === row.mime && live.data === row.data
   if (live.kind === 'mark' && row.kind === 'mark') return live.text === row.text
   return false

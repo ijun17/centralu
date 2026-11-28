@@ -15,14 +15,17 @@ const row = (seq: number, kind: StoredMessage['kind'], payload: object, role: St
   ({ sessionId: 's', seq, role, kind, payload, ts: seq }) as StoredMessage
 
 describe('a script’s first message (§8.1)', () => {
-  it('is a message of its own kind live and stored, never absorbed into the person’s pending bubble', () => {
-    const pending: ChatItem[] = [{ kind: 'user', seq: 1, text: 'Triage the build', pending: true }]
-    const live = feed([{ type: 'user_message', seq: 9, text: 'Triage the build', fromScript: { credential: 'ci runner' } }], pending)
-    expect(live).toHaveLength(2)
-    expect(live[0]).toMatchObject({ pending: true })
-    expect(live[1]).toMatchObject({ kind: 'user', storedSeq: 9, fromScript: { credential: 'ci runner' } })
+  it('is a message of its own kind live and stored', () => {
+    const live = feed([{ type: 'user_message', seq: 9, text: 'Triage the build', fromScript: { credential: 'ci runner' } }])
+    expect(live[0]).toMatchObject({ kind: 'user', storedSeq: 9, fromScript: { credential: 'ci runner' } })
     const stored = messagesToChat([row(3, 'text', { text: 'Triage the build', fromScript: { credential: 'ci runner' } }, 'user')])
     expect(stored[0]).toMatchObject({ kind: 'user', fromScript: { credential: 'ci runner' } })
+  })
+
+  it('the host’s copy of a pending send, labelled as a script’s, takes the bubble with its label (#2469)', () => {
+    const pending: ChatItem[] = [{ kind: 'user', seq: 1, text: 'Triage the build', pending: true }]
+    const live = feed([{ type: 'user_message', seq: 9, text: 'Triage the build', fromScript: { credential: 'unnamed' } }], pending)
+    expect(live).toEqual([{ kind: 'user', seq: 1, text: 'Triage the build', pending: false, storedSeq: 9, fromScript: { credential: 'unnamed' } }])
   })
 })
 

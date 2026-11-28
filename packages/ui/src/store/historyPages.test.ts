@@ -107,18 +107,13 @@ describe('mergePage: the newest page against the rows already on screen', () => 
     expect(merged[2]).toMatchObject({ seq: sent.seq, storedSeq: 3, pending: false })
   })
 
-  it('a message with the same words from another session is not taken for the person\'s unconfirmed one', () => {
+  it('the page row of a pending send keeps the label the host stored, as a script’s (#2469)', () => {
     const rows = [said(1, 'go')]
-    rows[0]!.payload = { text: 'go', from: { sessionId: 'orch', name: 'Assistant' } }
-    const merged = mergePage([live({ kind: 'user', text: 'go', pending: true })], read(rows), rows)
-    expect(merged.map(text)).toEqual(['go', 'go'])
-  })
-
-  it('a script’s first message with the same words is not taken for the person’s unconfirmed one (§8.1)', () => {
-    const rows = [said(1, 'go')]
-    rows[0]!.payload = { text: 'go', fromScript: { credential: 'ci runner' } }
-    const merged = mergePage([live({ kind: 'user', text: 'go', pending: true })], read(rows), rows)
-    expect(merged.map(text)).toEqual(['go', 'go'])
+    rows[0]!.payload = { text: 'go', fromScript: { credential: 'unnamed' } }
+    const sent = live({ kind: 'user', text: 'go', pending: true })
+    const merged = mergePage([sent], read(rows), rows)
+    expect(merged).toHaveLength(1)
+    expect(merged[0]).toMatchObject({ seq: sent.seq, storedSeq: 1, pending: false, fromScript: { credential: 'unnamed' } })
   })
 
   it('two screen rows for one stored number become one row', () => {
