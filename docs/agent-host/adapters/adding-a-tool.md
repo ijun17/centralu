@@ -91,7 +91,7 @@
    one host, each reading only what the host says from the moment its run began and deleting its session when it is done. What the recording cannot say is in the entry: how an approval card is answered, what is on screen when
    Stop is pressed, and what the scenario draws of its own (the card log, the text of a folded line); a question card is
    answered with the option the recording holds. A test fails for a
-   recording that has no entry and no reason in `NOT_PLAYED`. A new recording of a tool already in `REPLAYED` is one entry
+   recording that has no entry and no reason in `NOT_PLAYED`. A new recording needs three places: the adapter's replay test (`<tool>/replay.test.ts`), its entry in `REPLAYS` or a reason in `NOT_PLAYED`, and the reader of its frames in `HELD`, which must leave out what the screen draws elsewhere (a child agent's frames on the same connection, drawn in its card); the e2e entry is the one a local `pnpm test` does not run. A new recording of a tool already in `REPLAYED` is one entry
    of `REPLAYS`; a new tool is one row of `REPLAYED` (its adapter, its `FrameCodec`, the options its session is given, its
    recordings folder) and one reader of its frames in `HELD`. A check that a tool's new version sends frames the recordings lack would read the same table: the
    version folder `newestVersion` picks against the installed tool's version, and the kinds of frame the host logs as
