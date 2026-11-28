@@ -31,10 +31,7 @@ export function bridgeSessionOf(hostToken: string, given: string): string | null
 }
 
 /** Every RPC the bridge sends (centralu-bridge.mjs) and nothing more: each names its `sessionId`, and the host judges what that session may do */
-const BRIDGE_METHODS: ReadonlySet<string> = new Set([
-  'assistant.tools',
-  'assistant.tool',
-])
+const BRIDGE_METHODS: ReadonlySet<string> = new Set(['assistant.tools', 'assistant.tool'])
 
 /**
  * Why a connection with the bridge credential of `boundSession` may not make this call, or null: the call must name that
