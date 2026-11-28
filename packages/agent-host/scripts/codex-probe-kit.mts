@@ -6,14 +6,14 @@
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { CLIENT_INFO } from '@cc/protocol'
 import { CodexClient, type ServerNotification, type ServerRequest } from '../src/adapters/codex/client.js'
 
 export function probeDir(prefix: string, git = false) {
   const cwd = mkdtempSync(join(tmpdir(), prefix))
   if (git) execFileSync('git', ['init', '-q'], { cwd })
-  const log = join(cwd, '..', `${cwd.split('/').pop()}.frames.jsonl`)
+  const log = join(dirname(cwd), `${basename(cwd)}.frames.jsonl`)
   const t0 = Date.now()
   const record = (dir: string, frame: unknown) => appendFileSync(log, JSON.stringify({ ms: Date.now() - t0, dir, frame }) + '\n')
   return { cwd, log, t0, record }
