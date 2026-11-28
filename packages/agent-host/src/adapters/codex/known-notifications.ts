@@ -42,4 +42,6 @@ export const CODEX_KNOWN_NOTIFICATIONS: ReadonlySet<string> = new Set([
   'thread/realtime/item/started', 'thread/realtime/item/transcript/delta', 'thread/realtime/item/completed',
   'thread/realtime/transcript/delta', 'thread/realtime/transcript/done', 'thread/realtime/outputAudio/delta',
   'thread/realtime/sdp', 'thread/realtime/error', 'thread/realtime/closed',
+  // codex-cli 0.172.0, sorted for #2513: Codex's own app features (predicted next prompts, read state, thread search, sections)
+  'thread/prediction/updated', 'thread/readState/changed', 'thread/search/partial', 'thread/section/changed',
 ])

@@ -157,7 +157,7 @@ the words, the title and a link to the session it names, on a stronger left edge
 subagent whose text, reasoning, tool calls and results reach the host on the parent's stream. Each becomes a
 `subagent_event` whose `step` is one of the parent's own shapes and whose `parentCallId` is the launching call: Claude's
 `Agent` tool_use id (the subagent's `parent_tool_use_id`), Codex's `spawnAgent` collab item (whose `receiverThreadIds`
-names the child thread). A subagent that launches its own tags that one's steps with its own launch call.
+names the child thread) or, under its multi-agent v2, a `subAgentActivity` item that started (whose `agentThreadId` does). A subagent that launches its own tags that one's steps with its own launch call.
 
 | Decision | Why |
 |---|---|

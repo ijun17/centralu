@@ -150,12 +150,20 @@
   "_variantFieldsComment": [
     "Fields the adapter reads from one variant of a union, found by its `type` tag (#2513). A turn's first `userMessage`",
     "item names the `clientId` the inputs were sent under (session.ts, #1604); without it a turn's inputs are never",
-    "matched to it. Read at the union's own level, so a plain union and an intersection with lifecycle times both work."
+    "matched to it. Read at the union's own level, so a plain union and an intersection with lifecycle times both work.",
+    "#2553: under multi-agent v2 a child is a `subAgentActivity` item (codex-cli 0.172.0, recorded) naming its thread and path; without",
+    "them no child is linked. A model's runtime is its own (`Model.multiAgentVersion`); the v2 tool names (collaboration.spawn_agent, send_message,",
+    "followup_task, list_agents, wait_agent) are in no protocol type: they show only as these items, and `list_agents` as none."
   ],
   "variantFields": {
     "ThreadItem": {
       "userMessage": [
         "clientId"
+      ],
+      "subAgentActivity": [
+        "kind",
+        "agentThreadId",
+        "agentPath"
       ]
     }
   },
@@ -176,6 +184,15 @@
     ],
     "ThreadStatus": [
       "active"
+    ],
+    "SubAgentActivityKind": [
+      "started",
+      "interacted",
+      "interrupted",
+      "completed"
+    ],
+    "CollabAgentTool": [
+      "spawnAgent"
     ]
   },
   "clientNotifications": [
@@ -224,6 +241,7 @@
     "fileChange",
     "mcpToolCall",
     "collabAgentToolCall",
+    "subAgentActivity",
     "webSearch"
   ],
   "serverRequests": [

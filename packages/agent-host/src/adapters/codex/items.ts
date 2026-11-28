@@ -144,7 +144,21 @@ export function itemSummary(item: Record<string, unknown>): ToolSummary {
     const tool = str(item.tool) || type
     return { tool, title: firstLine(str(item.prompt)) || tool, paths: [] }
   }
+  /*
+   * A child agent under multi-agent v2 (codex-cli 0.172.0, recorded, #2553): the item says what happened to a child by its `kind`.
+   * `started` is the launch, read as the `spawnAgent` card that launched a subagent (`launchesSubagent`) titled by the child's
+   * `agentPath`; `interacted` is a message or follow-up task sent to it. The end of a child's turn has no row (`childEnded`).
+   */
+  if (type === 'subAgentActivity') {
+    const path = str(item.agentPath)
+    return str(item.kind) === 'started' ? { tool: 'spawnAgent', title: path || 'Child agent', paths: [] } : { tool: 'sendMessage', title: path ? `Message to ${path}` : 'Message to a child agent', paths: [] }
+  }
   return { tool: type || 'tool', title: str(item.title) || type, paths: [] }
+}
+
+/** A v2 `subAgentActivity` that says a child's turn ended or was interrupted: the child's own `turn/completed` says it too, so it is no row (#2553) */
+export function childEnded(item: Record<string, unknown>): boolean {
+  return str(item.type) === 'subAgentActivity' && (str(item.kind) === 'completed' || str(item.kind) === 'interrupted')
 }
 
 /** The arguments, into one line on the card title: their **shape** (what was sent under what name), cut short: the full body is on the result card */

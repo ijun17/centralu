@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
 import { PermissionPreset } from '@cc/protocol'
 import type { AgentSpawnSpec } from '../contract.js'
-import { callOrder, codexCodec, loadRecording, of, recordedFolders, replaySpawner, temporaryFolder } from '../frames/replay.test-helpers.js'
+import { callOrder, codexCodec, loadRecording, newestVersion, of, recordedFolders, replaySpawner, temporaryFolder } from '../frames/replay.test-helpers.js'
 import { drive, scenariosFor } from '../frames/scenarios.test-helpers.js'
 import { CodexAdapter } from './index.js'
 import type { CodexClient } from './client.js'
@@ -58,6 +58,44 @@ const stops = (events: NormalizedEvent[]) => events.filter((e) => e.type === 'st
 
 describe(`what the adapter makes of the app-server’s real turns (${recordedVersion()})`, () => {
   const run = (name: string) => replay(recordedVersion(), name)
+
+  /*
+   * #2553, #2552: a child under multi-agent v2 (codex-cli 0.172.0, gpt-6-luna, recorded on macOS). The child arrives as `subAgentActivity` items of the
+   * parent (started, interacted, completed) with its thread id, never as a `spawnAgent` collab call; its own items and turns reach the parent's
+   * connection with its threadId. `list_agents` sends no item at all.
+   */
+  it('subagents-v2: the child launched by a started activity is linked, counted while it runs, and its steps and end close the launch card', async () => {
+    const { events } = await replay(newestVersion(CODEX_RECORDINGS, 'subagents-v2'), 'subagents-v2')
+    const calls = of(events, 'tool_call')
+    const launch = calls.find((c) => c.summary.tool === 'spawnAgent')!
+    expect(launch.summary.title).toBe('/root/agent')
+    expect(calls.filter((c) => c.summary.tool === 'spawnAgent')).toHaveLength(1)
+    // The child is a background agent under that card while its turn runs, twice: the follow-up task started another turn
+    const tasks = of(events, 'background_tasks')
+    const runs = tasks.filter((t) => t.live.length > 0 && !tasks[tasks.indexOf(t) - 1]?.live.length)
+    expect(runs).toHaveLength(2)
+    expect(tasks.find((t) => t.live.length > 0)!.live[0]).toMatchObject({ kind: 'agent', description: '/root/agent', parentCallId: launch.callId })
+    expect(tasks.at(-1)!.live).toEqual([])
+    // Its words are steps of the launch card, and the card closes only once its first turn has ended
+    const steps = of(events, 'subagent_event').map((e) => e.step)
+    expect(steps.flatMap((s) => (s.type === 'message_delta' ? [s.text] : []))).toEqual(['ready', 'done'])
+    const closed = events.findIndex((e) => e.type === 'tool_result' && e.callId === launch.callId)
+    expect(closed).toBeGreaterThan(events.findIndex((e) => e.type === 'subagent_event'))
+    expect(of(events, 'tool_result').filter((r) => r.callId === launch.callId)).toEqual([expect.objectContaining({ ok: true })])
+    expect(ended(events)).toBe(1)
+    expect(of(events, 'error')).toEqual([])
+  })
+
+  it('subagents-v2: a message to the child is a row, the end of its turn is none, and the child’s own wait is a step under the launch card', async () => {
+    const { events } = await replay(newestVersion(CODEX_RECORDINGS, 'subagents-v2'), 'subagents-v2')
+    const calls = of(events, 'tool_call')
+    expect(calls.filter((c) => c.summary.tool === 'sendMessage').map((c) => c.summary.title)).toEqual(['Message to /root/agent', 'Message to /root/agent'])
+    expect(calls.map((c) => c.summary.tool)).not.toContain('subAgentActivity')
+    // The parent's wait is its own row; the child waited too (its sender is the child), which is a step of the child
+    expect(calls.filter((c) => c.summary.tool === 'wait')).toHaveLength(1)
+    const stepTools = of(events, 'subagent_event').flatMap((e) => (e.step.type === 'tool_call' ? [e.step.summary.tool] : []))
+    expect(stepTools).toEqual(['wait'])
+  })
 
   it('basic: a plain turn streams its words and ends once; a file written under `auto` asks nothing and is marked touched', async () => {
     const { events } = await run('basic')
