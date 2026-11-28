@@ -117,7 +117,9 @@ function holds(items: ChatItem[], seq: number | undefined): boolean {
  * the same text, unlabelled or labelled as a script's. The host labels a send by the connection's credential, so a
  * window holding the limited one gets its own send back as a script's (#2469); that copy takes the bubble's place with
  * the host's label. A send never comes back as another session's or an app's (FR-11), so those stay rows of their own
- * and never take the bubble, its attachments or its undo on a failed send.
+ * and never take the bubble, its attachments or its undo on a failed send. A real script sending the same text while
+ * the send is pending cannot be told apart without a request id on the copy: it takes the bubble, and the send's own
+ * copy draws after it.
  */
 export function isPendingSend(item: ChatItem, msg: { text: string; from?: unknown; fromApp?: unknown }): boolean {
   return item.kind === 'user' && !!item.pending && !msg.from && !msg.fromApp && item.text === msg.text
