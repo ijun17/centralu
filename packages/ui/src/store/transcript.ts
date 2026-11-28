@@ -113,6 +113,19 @@ function holds(items: ChatItem[], seq: number | undefined): boolean {
 }
 
 /**
+ * Whether a stored message is the host's copy of the person's unconfirmed send (#75), live or from a history page (#79):
+ * the same text, unlabelled or labelled as a script's. The host labels a send by the connection's credential, so a
+ * window holding the limited one gets its own send back as a script's (#2469); that copy takes the bubble's place with
+ * the host's label. A send never comes back as another session's or an app's (FR-11), so those stay rows of their own
+ * and never take the bubble, its attachments or its undo on a failed send. A real script sending the same text while
+ * the send is pending cannot be told apart without a request id on the copy: it takes the bubble, and the send's own
+ * copy draws after it.
+ */
+export function isPendingSend(item: ChatItem, msg: { text: string; from?: unknown; fromApp?: unknown }): boolean {
+  return item.kind === 'user' && !!item.pending && !msg.from && !msg.fromApp && item.text === msg.text
+}
+
+/**
  * A different stored number is a different message (#77): every chunk carries its row's number, and two replies with no
  * human message between would otherwise run into one paragraph. An unnumbered side still appends.
  */
@@ -252,13 +265,16 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
       )
     case 'user_message': {
       /*
-       * Confirms the person's pending bubble by the text as sent (#75), or draws another sender's message, which has no
-       * other way on screen. One from another session, an app or a script never confirms a pending bubble (FR-11): its
-       * origin mark would be absorbed. A history page may have confirmed it already (#79).
+       * Confirms the person's pending bubble (`isPendingSend`), or draws another sender's message, which has no other way
+       * on screen. A history page may have confirmed it already (#79).
        */
       if (holds(items, e.seq)) return items
-      const idx =
-        e.from || e.fromApp || e.fromScript ? -1 : items.findIndex((i) => i.kind === 'user' && i.pending && i.text === e.text)
+      const origin = {
+        ...(e.from ? { from: e.from } : {}),
+        ...(e.fromApp ? { fromApp: e.fromApp } : {}),
+        ...(e.fromScript ? { fromScript: e.fromScript } : {}),
+      }
+      const idx = items.findIndex((i) => isPendingSend(i, e))
       if (idx === -1)
         return [
           ...items,
@@ -267,15 +283,13 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
             seq: ++chatSeq,
             storedSeq: e.seq,
             text: e.text,
-            ...(e.from ? { from: e.from } : {}),
-            ...(e.fromApp ? { fromApp: e.fromApp } : {}),
-            ...(e.fromScript ? { fromScript: e.fromScript } : {}),
+            ...origin,
             // Host-inserted (apps-plan C-5): a path and a name only; image bytes come with a history re-read
             ...(e.attachments?.length ? { attachments: e.attachments } : {}),
           },
         ]
       return items.map((it, i) =>
-        i === idx ? { ...(it as Extract<ChatItem, { kind: 'user' }>), pending: false, storedSeq: e.seq } : it,
+        i === idx ? { ...(it as Extract<ChatItem, { kind: 'user' }>), ...origin, pending: false, storedSeq: e.seq } : it,
       )
     }
     case 'history_synced':

@@ -15,14 +15,28 @@ const row = (seq: number, kind: StoredMessage['kind'], payload: object, role: St
   ({ sessionId: 's', seq, role, kind, payload, ts: seq }) as StoredMessage
 
 describe('a script’s first message (§8.1)', () => {
-  it('is a message of its own kind live and stored, never absorbed into the person’s pending bubble', () => {
+  it('is a message of its own kind live and stored, and the host’s copy of a pending send takes the bubble with that label (#2469)', () => {
     const pending: ChatItem[] = [{ kind: 'user', seq: 1, text: 'Triage the build', pending: true }]
     const live = feed([{ type: 'user_message', seq: 9, text: 'Triage the build', fromScript: { credential: 'ci runner' } }], pending)
-    expect(live).toHaveLength(2)
-    expect(live[0]).toMatchObject({ pending: true })
-    expect(live[1]).toMatchObject({ kind: 'user', storedSeq: 9, fromScript: { credential: 'ci runner' } })
+    expect(live).toEqual([{ kind: 'user', seq: 1, text: 'Triage the build', pending: false, storedSeq: 9, fromScript: { credential: 'ci runner' } }])
     const stored = messagesToChat([row(3, 'text', { text: 'Triage the build', fromScript: { credential: 'ci runner' } }, 'user')])
     expect(stored[0]).toMatchObject({ kind: 'user', fromScript: { credential: 'ci runner' } })
+  })
+})
+
+describe('another sender’s message with the words of a pending send (FR-11)', () => {
+  it('from another session or an app is a row of its own: the bubble, its attachments and its undo stay the person’s', () => {
+    const shot = { kind: 'image', path: '/a/shot.png', name: 'shot.png', mime: 'image/png', bytes: 3 }
+    const pending: ChatItem[] = [{ kind: 'user', seq: 1, text: 'go', pending: true, attachments: [shot] as never }]
+    const live = feed(
+      [
+        { type: 'user_message', seq: 5, text: 'go', from: { sessionId: 'orch', name: 'Assistant' } },
+        { type: 'user_message', seq: 6, text: 'go', fromApp: { appId: 'a', projectId: null, name: 'Board' } },
+      ],
+      pending,
+    )
+    expect(live).toHaveLength(3)
+    expect(live[0]).toMatchObject({ seq: 1, pending: true, attachments: [shot] })
   })
 })
 
