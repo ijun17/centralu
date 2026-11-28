@@ -2,7 +2,7 @@ import { relative, resolve, sep } from 'node:path'
 import type { Attachment, Interruption, NormalizedEvent, SessionInfo, ToolName, TurnOrigin } from '@cc/protocol'
 import { CONTINUE_WORDS, applyBackgroundTasks, applySessionState, nextContext, nextStateFor } from '@cc/protocol'
 import type { ToolQueriesHost } from './tool-queries.js'
-import type { SessionHandle } from '../adapters/contract.js'
+import { withAttachmentPaths, type SessionHandle } from '../adapters/contract.js'
 import { centraluInputId } from '../adapters/input-receipts.js'
 import { gitHeadSha } from '../dev-services/git.js'
 import { looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.js'
@@ -640,16 +640,18 @@ export class SessionEvents {
       : relayed && from && relayedText !== undefined ? relayedText
       : from && (relayed || (this.host.tools.directs(sessionId) && !this.host.tools.directs(from.sessionId) && !isHubSender(from.sessionId)))
         ? untrustedSourceSessionNotification(from.sessionId)
-        : attachments?.length
-          ? `${text}\n\n${attachments.map((a) => `@${a.path}`).join('\n')}`
-          : text
-    const { input, notice } = this.withRootAppsNotice(sessionId, adapterText)
+        : null
+    // Only the sender's own words carry its files: a framed or swapped text never names them, as it never names the words
+    const files = adapterText === null && attachments?.length ? attachments : undefined
+    const toAgent = files ? { attachments: files } : {}
+    const { input, notice } = this.withRootAppsNotice(sessionId, adapterText ?? text)
     // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
     this.host.cardRests.turnAsked(sessionId)
-    if (sendInput) sendInput(h, input, inputId)
+    // A caller's own send takes text alone, so its files go named in it
+    if (sendInput) sendInput(h, withAttachmentPaths(input, files), inputId)
     // Not with a line of Centralu's in front of it: that message is not only the person's words
-    else if (fromPerson === true && !notice) h.send(input, { origin: { kind: 'human' }, id: inputId })
-    else h.send(input, { id: inputId })
+    else if (fromPerson === true && !notice) h.send(input, { origin: { kind: 'human' }, id: inputId, ...toAgent })
+    else h.send(input, { id: inputId, ...toAgent })
     // It takes messages again: what could not be told it before goes in now (#1186)
     this.host.reports.deliverHeld(sessionId)
   }

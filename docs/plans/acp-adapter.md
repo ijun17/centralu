@@ -18,7 +18,7 @@ this one is the newer: the later sections are the design as proposed, kept for i
 | Question (§14) | Answer | What PR 1 does |
 |---|---|---|
 | Role text | Left out | An ACP tool declares `roleText: false`: it cannot be the orchestrator, a coordinator or an app's agent yet. Later: measure whether a leading prompt block marked as Centralu's carries it |
-| Untrusted projects | Not offered (fail safe) | `keepsRepoFilesOut: false`: refused in an untrusted project; revisited when what each tool reads is known |
+| Untrusted projects | Not offered (fail safe) until what each tool reads is known | OpenCode is kept from the project's files and runs there (§0.7). Cursor and Antigravity have no way to be kept out (`keepsRepoFilesOut: false`): refused in an untrusted project |
 | OpenCode's `/compact` | Accepted for PR 3 only | Not in PR 1: only inside the compact turn Centralu started, ended `end_turn`, next reading smaller; `trigger: manual`, no summary |
 | `safe` on Cursor | Not offered | Not mapped to Cursor's `ask` mode, which is a different promise. Since the review of #1562, Normal and Edits are not offered either (§0.6): `presets: ['auto']`, and whether Cursor stays offered under Auto only is the owner's to decide |
 | Idle sleep | Measure first | `sleep: false`; memory measured below, decided with the numbers |
@@ -185,7 +185,7 @@ change to.
 | Presets | All four, the same promise as for Claude and Codex, through an inline `OPENCODE_CONFIG_CONTENT` that OpenCode merges after the person's global and project files (`config.ts`). It is built from what the person's OpenCode would read (`config-files.ts`: the global files, `OPENCODE_CONFIG`, the project's `opencode.json(c)` up to its repository's root, the `.opencode` folders, `OPENCODE_CONFIG_DIR`, the managed folder, and the agents their markdown files define), with the person's own inline value kept under it. The asks below are made under the agent Centralu runs (`build` under Safe, the person's `default_agent` or `build` otherwise); under every other agent, which only runs as a subagent, each of them is a deny (Subagents, below). **Safe** asks before every edit (`edit` covers `write` and `patch`), command (`bash`), and web fetch or search (`webfetch`, `websearch`, as Claude's default asks), whatever the rules of any agent say: OpenCode's own, each the person names in a config file or `mode`, and each their markdown files define; handing work (`task`) to an agent it cannot see (one a plugin adds) asks too. A deny of the person's stays a deny (in `permission` or legacy `tools`), a deny of every `task` included. **Normal** asks before edits and commands where the person's rules say nothing about them; each rule of theirs wins over that base for the calls it names: one for every call of the tool (`bash: allow`, `*`, a one-word `permission`, legacy `tools`) leaves no base, one for some (`bash: {"git *": "allow"}`) decides those and the rest ask; the rules of an agent defined in a markdown file come after the base anyway, unless it is the person's `default_agent`, whose asks Centralu sets under its own name and so after its markdown rules. **Edits** starts as Normal and the adapter allows the edits inside the folder itself, so commands ask. **Auto** adds nothing; the adapter answers whatever is asked. Not held under any preset: MCP tools (the person's servers' and Centralu's own), `todowrite`, `skill`, reads. What can still loosen Safe: a managed config (`%ProgramData%\opencode`, `/Library/Application Support/opencode`, `/etc/opencode`) or an OpenCode account organisation's config, both merged after Centralu's; an agent a plugin adds runs its own rules once its `task` card is allowed. OpenCode's `plan` and `explore` agents, which deny edits by themselves, ask instead under Normal when Centralu runs them (Centralu's rule comes after theirs) |
 | Subagents | OpenCode drops an ask made in a subagent's session (one `task` started): its ACP side answers only for the session it opened (`session.tryGet` finds no other), so no `session/request_permission` is sent, nothing answers, and the turn waits until it is stopped (#1565 Mac re-check, case E). So under Safe and Normal (and Edits), under every agent but the one Centralu runs, whatever would ask is denied: the preset's tools, OpenCode's own asks (a `.env` read, a loop) and each tool the person's rules for that agent ask before (`task` and `OPENCODE_PERMISSION` included); their allows and denies stay. The subagent is told and its run ends; `task` hands its last text back to the agent Centralu runs, which can ask, and work is never handed to that agent as a subagent. Still waiting under every preset: an ask for a folder outside the project from inside a subagent (OpenCode's own `external_directory` rule, whose allowed folders are its own), an ask written for every tool at once (`"*": "ask"`) or in a markdown agent's frontmatter, and, under Auto, any subagent's ask |
 | A deny | A call denied by a rule ends the turn (OpenCode stops its loop on a deny unless `experimental.continue_loop_on_deny`), so a call later in the same turn, a write after a denied command, is never tried |
-| Trust and role | Trusted projects only (it reads `AGENTS.md` and the project's `opencode.json`, which can add plugins and servers); a project's plugin (`.opencode/plugin/*.js`) runs its code when the session starts, under every preset, Safe included. No role text, so not the orchestrator, a coordinator or an app's agent |
+| Trust and role | In a trusted project it reads `AGENTS.md` and the project's `opencode.json`, which can add plugins and servers, and a project's plugin (`.opencode/plugin/*.js`) runs its code when the session starts, under every preset, Safe included. In an untrusted one it is kept from all of them (`keepsRepoFilesOut: true`, [project-trust.md](../security-boundaries/project-trust.md)). No role text, so not the orchestrator, a coordinator or an app's agent |
 | Centralu's own tools | Not asked about under any preset (only `edit` and `bash` ask, measured in the `basic` and `approval` recordings), so no `centraluToolOf` is needed |
 | Compaction | Its `/compact` sends no protocol frame. Marked only at the end of the compact turn Centralu itself started (`SessionEvents.sendCompact`, `compact: true`), ended `end_turn` with a context reading smaller than the one before it: `trigger: manual`, no summary. A `/compact` the person types is never taken for one (`AcpSessionDeps.infersCompaction`) |
 | Input during a turn | Folded into the running turn by OpenCode; Centralu queues it for the turn's end instead (`midTurnInput: false`), the fold off |
@@ -215,7 +215,7 @@ three subagent cases (§0.8). It stops only the hosts it started and their `open
 | Within one object a key keeps its first place, and the last matching rule decides, so `{bash: allow, "*": allow}` under an agent beat Safe's `bash` (found while fixing the above) | Safe's rules sit under keys of their own (`bash*`), read after the person's, then the person's denies. Such a key also matches a tool whose name starts the same (an MCP tool `read_notes`), so it starts at its tool's first ask and holds that tool at most more strictly |
 | `webfetch` ran unasked under Safe | Safe asks before `webfetch` and `websearch` |
 | Normal and Edits asked nothing (OpenCode's default allows everything) | Normal asks before edits and commands under the person's own rules; Edits as Normal with the folder's edits allowed |
-| A project plugin runs code at the session's start | Inherent to trusted projects only; said above |
+| A project plugin runs code at the session's start | Only in a trusted project; said above |
 | The first turn after a restart reported no cost | The last total is kept beside the session |
 | `smoke:opencode` stopped every new `opencode acp`, and failed once with no card in 240 s | It stops only its hosts' descendants; the miss was the free models' usage limit (OpenCode logged `Free usage limit reached` and retried silently), so the smoke now names OpenCode's logged error |
 | A stray `</think>` on a new session's first turn | Dropped by the core, as above (open question 3) |
@@ -642,6 +642,20 @@ ACP has no standard sub-agent update. Cursor's `subagent_spawned` / `subagent_st
 calls. A tool that cannot report background work is never idle while it holds a process (`sessionIdle`), which keeps
 sleep and swaps safe meanwhile.
 
+### 5.8 Attachments (#2479)
+
+A message's attachments go with its input through the core's queue, and the wire builds the `session/prompt` from them
+(`acp/prompt-content.ts`, owner's coordinator: native ACP image blocks). The prompt is the text block, then one
+`{type: 'image', data, mimeType}` block per attachment that is an image (kind `image` or an `image/*` mime), when the
+agent's `initialize` advertised `promptCapabilities.image` (Cursor, OpenCode and Antigravity all do, recorded), the file
+reads (a relative path from the session's folder), it is within the ceiling an image coming out has (`IMAGE_MAX_BYTES`)
+and its bytes are a whole picture of a known format, which also gives the `mimeType`. Every other attachment, a plain file
+included, is named in the text as an `@<path>` line, the same words Claude and Codex are given (`withAttachmentPaths`),
+so nothing an agent cannot take fails the turn. The files are read before the prompt is written, in the turn's own
+start, so the queue's order stands; a Stop pressed during that read ends the turn and the prompt is never sent. Each tool
+has a recording (`attachment` scenario) in which the agent names the colour of the attached picture: Cursor 2026.10.22,
+OpenCode 1.19.4 (on a free model that takes images; its default free one answers that it cannot see them) and `agy acp` 1.5.2.
+
 ## 6. Centralu's tools through mcpServers
 
 `session/new` and `session/load` take the session's MCP servers, so Centralu's tools reach an ACP agent the way they
@@ -675,7 +689,7 @@ Values for the ACP adapter, decided per profile and, where marked, from the `ini
 | `contextUsage` | `none` | no `usage_update` (bundle); `exact` for a tool that sends it |
 | `resume` | true | `loadSession` or `sessionCapabilities.resume` |
 | `autoTitle` | true | `session_info_update` |
-| `attachments` | `['image']` | `promptCapabilities.image` |
+| `attachments` | `['image', 'file']` | images as content blocks when `promptCapabilities.image`, else by path (§5.8) |
 | `verbosities` | `[]` | |
 | `exclusiveWriter` | false | ACP promises no lock |
 | `backgroundTasks`, `builtInSubagents` | false | until PR 2 |

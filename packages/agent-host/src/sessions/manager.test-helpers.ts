@@ -4,8 +4,8 @@
  * (A test-only file. Product code never imports it.)
  */
 import { afterEach } from 'vitest'
-import type { AdapterCapabilities, ApprovalDecision, NormalizedEvent, ToolName } from '@cc/protocol'
-import type { AgentAdapter, CreateSessionOpts, EventSink, InputOrigin, CentraluTools, SessionHandle } from '../adapters/contract.js'
+import type { AdapterCapabilities, ApprovalDecision, Attachment, NormalizedEvent, ToolName } from '@cc/protocol'
+import { withAttachmentPaths, type AgentAdapter, type CreateSessionOpts, type EventSink, type InputOrigin, type CentraluTools, type SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import { SessionManager } from './manager.js'
@@ -27,8 +27,9 @@ export class FakeHandle implements SessionHandle {
   /** How many inputs the tool holds that no turn has started for (`SessionHandle.queuedInputs`); absent: this tool cannot say, as an ACP agent cannot */
   queuedInputs?: () => number
   constructor(readonly sessionId: string, private emit: EventSink) {}
-  send(text: string, opts?: { origin?: InputOrigin; compact?: boolean }) {
-    this.sent.push(text)
+  /** `sent` holds what the CLI reads: the attachments named by path, as Claude and Codex are given them */
+  send(text: string, opts?: { origin?: InputOrigin; compact?: boolean; attachments?: readonly Attachment[] }) {
+    this.sent.push(withAttachmentPaths(text, opts?.attachments))
     this.origins.push(opts?.origin)
     this.compacts.push(!!opts?.compact)
     this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })

@@ -1135,6 +1135,15 @@ describe('coordinator sessions an older build left — an Assistant-type with cl
     expect(handle.sent.at(-1)).toBe(`${directive}\n\n@docs/coordinator.md\n@docs/member notes.md`)
   })
 
+  it('a message whose words reach the agent framed (a script’s) hands it none of its attachments', async () => {
+    const p = await addProject()
+    const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
+    await mgr.inputs.send(a.id, 'Run the export', [{ kind: 'file', path: 'docs/plan.md', name: 'plan.md' }], undefined, false, { credential: 'ci runner' })
+    const sent = adapter.handleOf(a.id)!.sent.at(-1)!
+    expect(sent).toContain('Run the export')
+    expect(sent).not.toContain('@docs/plan.md')
+  })
+
   it("a coordinator session's reportBack does not carry the worker's body into the adapter turn either", async () => {
     const p = await addProject()
     const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo

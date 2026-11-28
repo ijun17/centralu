@@ -1,5 +1,5 @@
-import type { AdapterCapabilities, ApprovalDecision, QuestionAnswer, ToolName } from '@cc/protocol'
-import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
+import type { AdapterCapabilities, ApprovalDecision, Attachment, QuestionAnswer, ToolName } from '@cc/protocol'
+import { withAttachmentPaths, type AgentAdapter, type CreateSessionOpts, type EventSink, type SessionHandle } from '../adapters/contract.js'
 
 /**
  * An agent with no model behind it, for linked-host tests and probes (the e2e linked-hosts specs, links/*.test.ts). It answers from a script:
@@ -65,7 +65,8 @@ class ScriptedHandle implements SessionHandle {
     begin?.()
   }
 
-  send(text: string, opts?: { id?: string }): void {
+  send(words: string, opts?: { id?: string; attachments?: readonly Attachment[] }): void {
+    const text = withAttachmentPaths(words, opts?.attachments)
     if (this.queueBehind && (this.open || this.opening)) {
       this.held.push({ text, ...(opts?.id ? { id: opts.id } : {}) })
       if (!this.open && !this.announced) {

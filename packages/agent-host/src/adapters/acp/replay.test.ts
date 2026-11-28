@@ -1,4 +1,4 @@
-import { readdirSync } from 'node:fs'
+import { readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -10,7 +10,7 @@ import { AcpNormalizer } from './normalize.js'
 import { detailOf } from './session.js'
 import { readUpdate, RequestPermission } from './wire.js'
 import type { AcpProfile } from './profile.js'
-import { callOrder, loadRecording, of, replaySpawner } from '../frames/replay.test-helpers.js'
+import { callOrder, loadRecording, of, replaySpawner, temporaryFolder } from '../frames/replay.test-helpers.js'
 import { drive, scenariosFor } from '../frames/scenarios.test-helpers.js'
 
 /**
@@ -34,7 +34,8 @@ const profile = (dir: string, version: string): AcpProfile => {
   return { ...PROFILES[tool]!(), launch: async () => ({ command: 'agent', args: ['acp'] }), installedVersion: async () => version }
 }
 
-async function replay(dir: string, name: string): Promise<{ events: NormalizedEvent[]; problems: string[]; left: number; sent: Record<string, unknown>[] }> {
+/** `cwd`: a real folder the scenario's files are written to, for a check of what the adapter read from them; `/work` (none) otherwise */
+async function replay(dir: string, name: string, cwd?: string): Promise<{ events: NormalizedEvent[]; problems: string[]; left: number; sent: Record<string, unknown>[] }> {
   const recording = loadRecording(join(RECORDINGS, dir, `${name}.jsonl`))
   const tool = dir.replace(/-[^-]*$/, '')
   const named = scenariosFor(tool).find((s) => s.name === name)!
@@ -57,7 +58,10 @@ async function replay(dir: string, name: string): Promise<{ events: NormalizedEv
     return peer
   }
   const adapter = new ReplayAdapter(profile(dir, String(recording.header.version)), spawn, 60_000)
-  const events = await drive(adapter, scenario, '/work', `replay-${name}`, 0, () => peers.at(-1)?.kill('SIGKILL'), { tool, session: { centraluBridge: { url: 'ws://127.0.0.1:0', token: 'replay' } }, replay: state })
+  const seed = (files: Record<string, string | Buffer>) => {
+    for (const [file, content] of Object.entries(files)) if (cwd) writeFileSync(join(cwd, file), content)
+  }
+  const events = await drive(adapter, scenario, cwd ?? '/work', `replay-${name}`, 0, () => peers.at(-1)?.kill('SIGKILL'), { tool, session: { centraluBridge: { url: 'ws://127.0.0.1:0', token: 'replay' } }, replay: state, seed })
   return { events, problems: state.problems, left: state.left(), sent }
 }
 
@@ -221,9 +225,10 @@ for (const dir of readdirSync(RECORDINGS)) {
         expect(reads).toHaveLength(1)
         expect(of(events, 'tool_result').find((r) => r.callId === reads[0]!.callId)).toMatchObject({ ok: false, summary: expect.stringContaining('missing-file.txt') })
         expect(of(events, 'tool_output_delta').some((d) => d.text.includes('boom'))).toBe(true)
-        // As the tool reports it: `completed`, with the exit code only in its raw output (`metadata.exit: 3`). A command that failed reads ok (#2045)
+        // OpenCode ends both commands `completed`; only `metadata.exit` tells them apart (3, then 0 for one that prints EXIT=3), #2045
         const commands = of(events, 'tool_call').filter((c) => c.summary.tool === 'Bash')
-        expect(of(events, 'tool_result').find((r) => r.callId === commands[0]!.callId)?.ok).toBe(true)
+        const okOf = (i: number) => of(events, 'tool_result').find((r) => r.callId === commands[i]!.callId)?.ok
+        expect([okOf(0), okOf(1)]).toEqual([false, true])
         expect(of(events, 'turn_complete')).toHaveLength(1)
         expect(of(events, 'error')).toEqual([])
       })
@@ -263,7 +268,7 @@ for (const dir of readdirSync(RECORDINGS)) {
         expect(recording.frames.filter((f) => f.dir === 'out' && f.msg?.method === 'session/cancel')).toHaveLength(2)
         const { events } = await replay(dir, 'interrupt-tool')
         const call = of(events, 'tool_call')[0]!
-        expect(of(events, 'tool_result').filter((r) => r.callId === call.callId)).toHaveLength(1)
+        expect(of(events, 'tool_result').filter((r) => r.callId === call.callId)).toMatchObject([{ ok: false }])
         expect(of(events, 'state_change').filter((e) => e.state === 'waiting_input').map((e) => e.reason)).toEqual(['interrupted'])
         expect(of(events, 'turn_complete')).toHaveLength(1)
         expect(of(events, 'error')).toEqual([])
@@ -285,6 +290,20 @@ for (const dir of readdirSync(RECORDINGS)) {
         expect(results.map((r) => r.ok)).toEqual(calls.map(() => true))
         expect(results[0]!.output).toContain(name === 'centralu-mail' ? 'Docs worker' : 'naming question')
         expect(of(events, 'turn_complete')).toHaveLength(1)
+      })
+    }
+
+    if (names.includes('attachment')) {
+      it('attachment: the attached picture goes in the prompt as an image block after the text, read from the session’s folder, and the turn ends', async () => {
+        const folder = temporaryFolder('acp-attachment-')
+        try {
+          const { events, sent } = await replay(dir, 'attachment', folder.path)
+          const prompt = sent.find((f) => f.method === 'session/prompt') as { params: { prompt: { type: string; text?: string; mimeType?: string; data?: string }[] } }
+          expect(prompt.params.prompt).toEqual([{ type: 'text', text: 'What colour is the attached image? One word.' }, { type: 'image', mimeType: 'image/png', data: expect.stringMatching(/^iVBOR/) }])
+          expect(of(events, 'turn_complete')).toHaveLength(1)
+        } finally {
+          folder.remove()
+        }
       })
     }
 

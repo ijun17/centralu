@@ -15,6 +15,7 @@ import { CardIds, PendingCards } from '../session-kit.js'
 import { UnmappedTypes } from '../unmapped.js'
 import { AcpConnection, AUTH_REQUIRED, METHOD_NOT_FOUND, NOT_FOUND_CODES, NO_TIMEOUT_MS, RpcError, type RpcId } from './connection.js'
 import { KNOWN_UPDATES } from './known-updates.js'
+import { promptContent, type PromptBlock } from './prompt-content.js'
 import type { AcpToolShape, SignInWanted } from './profile.js'
 import { addTokens, NO_TOKENS } from '../token-usage.js'
 import { AcpNormalizer, pathsOf, requestInput, tokenUsage } from './normalize.js'
@@ -207,6 +208,8 @@ class AcpWire implements ToolWire {
   /** While `session/load` is answered, every update is the replay of the conversation, not this turn (§4.3) */
   private replaying = false
   private canClose = false
+  /** The agent takes image content in a prompt (`initialize`'s `promptCapabilities.image`); without it every attachment goes by path */
+  private imagesInPrompt = false
   /** Commands running now, by call id, and the clock that notes the tree while any runs */
   private readonly commandsRunning = new Set<string>()
   private treeClock: ReturnType<typeof setInterval> | null = null
@@ -380,6 +383,7 @@ class AcpWire implements ToolWire {
       const version = init.agentInfo?.version ?? (await this.deps.version())
       if (version) this.emit({ type: 'agent_version', sessionId: this.sessionId, version })
       this.canClose = init.agentCapabilities?.sessionCapabilities?.close !== undefined
+      this.imagesInPrompt = init.agentCapabilities?.promptCapabilities?.image === true
       const meta = this.deps.shape?.sessionMeta?.(this.opts)
       const base = { cwd: this.opts.cwd, mcpServers: this.mcpServers(), ...(meta ? { _meta: meta } : {}) }
       if (resume) {
@@ -518,11 +522,16 @@ class AcpWire implements ToolWire {
   }
 
   private async prompt(turn: Turn): Promise<void> {
+    const { text, attachments } = turn.input
+    let prompt: PromptBlock[] = [{ type: 'text', text }]
+    if (attachments) {
+      prompt = await promptContent(text, attachments, { cwd: this.opts.cwd, images: this.imagesInPrompt })
+      // A Stop pressed while the files were read found no prompt to cancel: the turn ends here, and the prompt is never sent
+      if (turn.core.stopAsked) return turn.core.end({ how: 'interrupted' })
+    }
     let result: PromptResult
     try {
-      result = PromptResult.parse(
-        await this.conn.request('session/prompt', { sessionId: this.conversation, prompt: [{ type: 'text', text: turn.input.text }] }, NO_TIMEOUT_MS),
-      )
+      result = PromptResult.parse(await this.conn.request('session/prompt', { sessionId: this.conversation, prompt }, NO_TIMEOUT_MS))
     } catch (err) {
       if (turn.refusal) {
         turn.core.end(this.refusedEnding(turn.refusal))

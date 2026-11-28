@@ -65,7 +65,7 @@ describe("Cursor's presets", () => {
 describe('what the ACP tools keep alike', () => {
   it('is ACP_CAPABILITIES for all three, each overriding only what it measured different', () => {
     expect(cursorProfile().capabilities).toStrictEqual({ ...ACP_CAPABILITIES, contextUsage: 'none', presets: ['auto'] })
-    expect(openCodeProfile().capabilities).toStrictEqual(ACP_CAPABILITIES)
+    expect(openCodeProfile().capabilities).toStrictEqual({ ...ACP_CAPABILITIES, keepsRepoFilesOut: true })
     expect(antigravityProfile().capabilities).toStrictEqual({
       ...ACP_CAPABILITIES,
       autoTitle: false,
@@ -73,8 +73,25 @@ describe('what the ACP tools keep alike', () => {
       subagentTool: 'invoke_subagent',
       roleText: true,
     })
-    expect(ACP_CAPABILITIES).toMatchObject({ approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, midTurnInput: false, processModel: 'per-session', roleText: false })
+    expect(ACP_CAPABILITIES).toMatchObject({ approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: ['image', 'file'], midTurnInput: false, processModel: 'per-session', roleText: false })
     expect(ACP_CAPABILITIES.instructionChannel).toBeUndefined()
+  })
+})
+
+describe('what restarts an ACP tool’s process when a session’s settings change', () => {
+  class OpenCode extends AcpAdapter {
+    readonly tool = 'opencode'
+  }
+  const settings = { cwd: '/work', permissionPreset: 'normal' as const }
+
+  it('OpenCode: whether the project’s files reach it, as trust and reading no settings files decide', () => {
+    const of = (more: { projectTrusted?: boolean; noSettingFiles?: boolean }) => new OpenCode(openCodeProfile()).launchSettingsFingerprint?.({ ...settings, ...more })
+    expect(of({ projectTrusted: true })).toBe(of({ projectTrusted: true, noSettingFiles: false }))
+    expect(of({ projectTrusted: true })).not.toBe(of({ projectTrusted: false }))
+    expect(of({ projectTrusted: false })).toBe(of({}))
+    expect(of({ projectTrusted: true, noSettingFiles: true })).toBe(of({}))
+    // A tool whose launch derives nothing from them has none, so nothing restarts it
+    expect(new OpenCode(cursorProfile()).launchSettingsFingerprint).toBeUndefined()
   })
 })
 

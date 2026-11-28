@@ -1,8 +1,8 @@
-import { hostAccessEnv } from '../contract.js'
+import { hostAccessEnv, withAttachmentPaths } from '../contract.js'
 import type { InputObserver, InputOrigin } from '../contract.js'
 import { launchPreset } from '../edit-grant.js'
 import { followsPersonsPolicy } from './launch-config.js'
-import { endsStreamRow, streamRowKind, type ApprovalDecision, type ApprovalScope, type PermissionPreset } from '@cc/protocol'
+import { endsStreamRow, streamRowKind, type ApprovalDecision, type ApprovalScope, type Attachment, type PermissionPreset } from '@cc/protocol'
 import { toolCommand } from '../../tool-launch.js'
 import type { CreateSessionOpts, EventSink, SessionHandle } from '../contract.js'
 import { CodexClient } from './client.js'
@@ -448,8 +448,8 @@ export class CodexSession implements SessionHandle {
     return this.startInputs
   }
 
-  send(text: string, opts?: { id?: string }): void {
-    this.ledger.send(text, opts?.id)
+  send(text: string, opts?: { id?: string; attachments?: readonly Attachment[] }): void {
+    this.ledger.send(withAttachmentPaths(text, opts?.attachments), opts?.id)
   }
 
   /** Inputs waiting to start a turn: behind a compact or review turn, or written and not answered (`MidTurnLedger.waiting`) */

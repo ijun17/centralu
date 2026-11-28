@@ -1,4 +1,4 @@
-import type { NormalizedEvent } from '@cc/protocol'
+import type { Attachment, NormalizedEvent } from '@cc/protocol'
 import { withStderrTail } from '../../stream-text.js'
 import { INTERRUPTED_BY_TOOL, type AgentProcess, type EventSink, type InputObserver, type InputOrigin } from '../contract.js'
 import { InputReceipts } from '../input-receipts.js'
@@ -113,21 +113,21 @@ export class CoreSession<W extends ToolWire = ToolWire> {
     proc.on('error', (err: Error) => gone(null, err))
   }
 
-  send(text: string, opts?: { origin?: InputOrigin; id?: string; compact?: boolean }): void {
-    void this.enqueue(text, opts?.id ?? null, opts?.compact === true, undefined, opts?.origin)
+  send(text: string, opts?: { origin?: InputOrigin; id?: string; compact?: boolean; attachments?: readonly Attachment[] }): void {
+    void this.enqueue(text, opts?.id ?? null, opts?.compact === true, undefined, opts?.origin, opts?.attachments)
   }
 
   sendTracked(text: string, observer?: InputObserver, opts?: { origin?: InputOrigin; id?: string }): Promise<void> {
     return this.enqueue(text, opts?.id ?? null, false, observer, opts?.origin)
   }
 
-  private enqueue(text: string, named: string | null, compact: boolean, observer?: InputObserver, origin?: InputOrigin): Promise<void> {
+  private enqueue(text: string, named: string | null, compact: boolean, observer?: InputObserver, origin?: InputOrigin, attachments?: readonly Attachment[]): Promise<void> {
     const receipt = this.receipts.create(observer)
     if (this.phase === 'closed') {
       this.receipts.fail([receipt.id], new Error(`${this.wire.label} session is closed`))
       return receipt.done
     }
-    this.queue.push({ input: { id: receipt.id, text, compact }, named })
+    this.queue.push({ input: { id: receipt.id, text, compact, ...(attachments?.length ? { attachments } : {}) }, named })
     if (this.turn && this.wire.turns.interruptForInput && origin?.kind === 'human') {
       this.interruptForInput()
     } else {

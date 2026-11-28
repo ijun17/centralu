@@ -418,7 +418,7 @@ shell call. **(live)** That a Stop under Centralu ends a `sleep` the agent start
 
 `approvals`, `contextUsage: exact`, `resume`, every preset. Not offered yet: role text (`roleText: false`; the agent
 offers `_meta.antigravity.systemPrompt.append`, untried), untrusted projects (`keepsRepoFilesOut: false`: it reads the
-project's own instruction files, as the other ACP tools), images in the prompt, the model and effort menus (the agent
+project's own instruction files, as the other ACP tools), the model and effort menus (the agent
 offers `configOptions` `model` and `thinking_level`; `set_config_option` unmeasured), sleep, apps (`appAttachment`
 answers `failed`, as for every ACP tool).
 

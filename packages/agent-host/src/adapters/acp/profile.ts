@@ -1,5 +1,5 @@
 import type { AdapterCapabilities, ModelOption, ToolDescriptor } from '@cc/protocol'
-import type { AgentSpawnSpec, CreateSessionOpts, DetectResult, LimitsAnswer, LocalUsage } from '../contract.js'
+import type { AgentSpawnSpec, CreateSessionOpts, DetectResult, LaunchSettings, LimitsAnswer, LocalUsage } from '../contract.js'
 import type { AdapterSurface } from '../contract/surface.js'
 import type { ConfigOption, RequestPermission, ToolCallFields } from './wire.js'
 
@@ -9,7 +9,7 @@ export const ACP_CAPABILITIES: AdapterCapabilities = {
   contextUsage: 'exact',
   resume: true,
   autoTitle: true,
-  attachments: [],
+  attachments: ['image', 'file'],
   verbosities: [],
   exclusiveWriter: false,
   backgroundTasks: false,
@@ -57,6 +57,8 @@ export type AcpProfile = {
   listModels?(): Promise<ModelOption[]>
   /** The parts of a tool's ACP that differ from the common shape the core reads (`AcpToolShape`) */
   readonly shape?: AcpToolShape
+  /** What the launch derives from a session's settings (`AgentAdapter.launchSettingsFingerprint`), so a change restarts its process; absent: nothing */
+  launchSettingsFingerprint?(settings: LaunchSettings): string
 }
 
 /**

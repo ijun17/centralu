@@ -1,8 +1,10 @@
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
-import { isInTurn, transition, type AdapterCapabilities, type NormalizedEvent, type SessionState } from '@cc/protocol'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { isInTurn, transition, type AdapterCapabilities, type Attachment, type NormalizedEvent, type SessionState } from '@cc/protocol'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
+import { IMAGE_MAX_BYTES } from '../images.js'
 import type { AgentProcess, CreateSessionOpts, ProcessSource } from '../contract.js'
 import type { SessionApps } from '../contract/session-apps.js'
 import { failureSentence, isNetworkFailure } from '../../sessions/error-kind.js'
@@ -760,6 +762,111 @@ describe('interruptForInput in ACP session', () => {
     await new Promise((r) => setImmediate(r))
     peer.release('session/prompt', { result: { stopReason: 'end_turn' } })
 
+    await s.dispose()
+  })
+})
+
+/**
+ * A message's attachments in the prompt (docs/plans/acp-adapter.md §5.8): read from a real folder, one row per condition. An
+ * image the agent cannot be handed is named by path, as every tool is told it, and the turn runs either way
+ */
+describe('attachments in the ACP prompt', () => {
+  /** A 2x2 red PNG, the scenarios' picture */
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGP4z8AARAwQCgAf7gP9i18U1AAAAABJRU5ErkJggg==', 'base64')
+  const imageBlock = { type: 'image', mimeType: 'image/png', data: PNG.toString('base64') }
+  const picture = (path: string): Attachment => ({ kind: 'image', path, name: 'picture.png', mime: 'image/png' })
+  /** An agent that answers every prompt at once; `images`: what its `initialize` says of `promptCapabilities.image` */
+  const agent = (images: boolean): PeerScript => (method, params, peer) =>
+    method === 'initialize' ? { result: { ...INIT_RESULT, agentCapabilities: { ...INIT_RESULT.agentCapabilities, promptCapabilities: { image: images } } } }
+    : method === 'session/prompt' ? { result: { stopReason: 'end_turn' } }
+    : base(method, params, peer)
+  const withImages = agent(true)
+
+  const folders: string[] = []
+  afterEach(async () => {
+    await Promise.all(folders.splice(0).map(removeTree))
+  })
+  const folder = (files: Record<string, string | Buffer> = {}) => {
+    const dir = tempRoot('cc-acp-attach-')
+    folders.push(dir)
+    for (const [name, content] of Object.entries(files)) writeFileSync(join(dir, name), content)
+    return dir
+  }
+
+  /** The prompt the agent is sent for one message, and that the turn it starts ends */
+  async function prompted(cwd: string, attachments: Attachment[] | undefined, script: PeerScript = withImages) {
+    const w = world(script, { cwd })
+    const s = await w.start()
+    s.send('What colour?', attachments ? { attachments } : undefined)
+    const sent = (await w.peers[0]!.next(isPrompt)) as { params: { prompt: unknown[] } }
+    await w.event((e) => e.type === 'turn_complete')
+    await s.dispose()
+    return sent.params.prompt
+  }
+
+  it('an image within the size, to an agent that takes images: an image block after the text, read relative to the session’s folder', async () => {
+    expect(await prompted(folder({ 'picture.png': PNG }), [picture('picture.png')])).toEqual([{ type: 'text', text: 'What colour?' }, imageBlock])
+  })
+
+  it('an image by its absolute path (a pasted one, saved outside the project): read where it is', async () => {
+    const saved = join(folder({ 'pasted.png': PNG }), 'pasted.png')
+    expect(await prompted(folder(), [picture(saved)])).toEqual([{ type: 'text', text: 'What colour?' }, imageBlock])
+  })
+
+  it('an image to an agent that does not say it takes images: named by path', async () => {
+    expect(await prompted(folder({ 'picture.png': PNG }), [picture('picture.png')], agent(false))).toEqual([{ type: 'text', text: 'What colour?\n\n@picture.png' }])
+  })
+
+  it('an image larger than an image event may be: named by path, though it is a whole picture', async () => {
+    const big = Buffer.concat([PNG, Buffer.alloc(IMAGE_MAX_BYTES + 1 - PNG.length)])
+    expect(await prompted(folder({ 'big.png': big }), [picture('big.png')])).toEqual([{ type: 'text', text: 'What colour?\n\n@big.png' }])
+  })
+
+  it('an image of exactly the largest size: an image block', async () => {
+    const edge = Buffer.concat([PNG, Buffer.alloc(IMAGE_MAX_BYTES - PNG.length)])
+    expect(await prompted(folder({ 'edge.png': edge }), [picture('edge.png')])).toEqual([{ type: 'text', text: 'What colour?' }, { type: 'image', mimeType: 'image/png', data: edge.toString('base64') }])
+  })
+
+  it('a file that is gone: named by path, and the turn runs', async () => {
+    expect(await prompted(folder(), [picture('gone.png')])).toEqual([{ type: 'text', text: 'What colour?\n\n@gone.png' }])
+  })
+
+  it('an attachment said to be an image whose bytes are no picture: named by path', async () => {
+    expect(await prompted(folder({ 'fake.png': 'not a picture' }), [picture('fake.png')])).toEqual([{ type: 'text', text: 'What colour?\n\n@fake.png' }])
+  })
+
+  it('a plain file is named by path, a file with an image mime is a picture, and the paths keep their order', async () => {
+    const cwd = folder({ 'picture.png': PNG, 'notes.md': '# notes\n', 'shot': PNG })
+    const files: Attachment[] = [{ kind: 'file', path: 'notes.md', name: 'notes.md' }, picture('picture.png'), { kind: 'file', path: 'shot', name: 'shot', mime: 'image/png' }, { kind: 'file', path: 'gone.md', name: 'gone.md' }]
+    expect(await prompted(cwd, files)).toEqual([{ type: 'text', text: 'What colour?\n\n@notes.md\n@gone.md' }, imageBlock, imageBlock])
+  })
+
+  it('a picture sent as a file with no mime: named by path, its bytes not looked at', async () => {
+    expect(await prompted(folder({ 'shot.png': PNG }), [{ kind: 'file', path: 'shot.png', name: 'shot.png' }])).toEqual([{ type: 'text', text: 'What colour?\n\n@shot.png' }])
+  })
+
+
+  it('keeps the queue’s order: a message sent behind one whose picture is being read is the next prompt, not the first', async () => {
+    const w = world(withImages, { cwd: folder({ 'picture.png': PNG }) })
+    const s = await w.start()
+    s.send('first', { attachments: [picture('picture.png')] })
+    s.send('second')
+    await w.event((e) => e.type === 'turn_complete' && w.events.filter((x) => x.type === 'turn_complete').length === 2)
+    const prompts = w.peers[0]!.received.filter(isPrompt) as { params: { prompt: { type: string; text?: string }[] } }[]
+    expect(prompts.map((p) => p.params.prompt.map((b) => b.text ?? b.type))).toEqual([['first', 'image'], ['second']])
+    await s.dispose()
+  })
+
+  it('a Stop pressed while the picture is read ends the turn as stopped, and the prompt is never sent', async () => {
+    const w = world(withImages, { cwd: folder({ 'picture.png': PNG }) })
+    const s = await w.start()
+    s.send('first', { attachments: [picture('picture.png')] })
+    s.interrupt()
+    await w.event((e) => e.type === 'state_change' && e.state === 'waiting_input')
+    expect(w.peers[0]!.methods().filter((m) => m === 'session/prompt')).toEqual([])
+    s.send('second')
+    await w.peers[0]!.next((m) => isPrompt(m) && JSON.stringify(m).includes('second'))
+    expect(w.peers[0]!.methods().filter((m) => m === 'session/prompt')).toHaveLength(1)
     await s.dispose()
   })
 })

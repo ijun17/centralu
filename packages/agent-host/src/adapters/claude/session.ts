@@ -2,8 +2,8 @@ import { query, type SettingSource } from '@anthropic-ai/claude-agent-sdk'
 import { randomUUID } from 'node:crypto'
 import { centraluInputId, type InputReceipt } from '../input-receipts.js'
 import { isUuid } from '../../uuid.js'
-import type { InputObserver } from '../contract.js'
-import type { ApprovalDecision, ApprovalScope, PermissionPreset, QuestionAnswer } from '@cc/protocol'
+import { withAttachmentPaths, type InputObserver } from '../contract.js'
+import type { ApprovalDecision, ApprovalScope, Attachment, PermissionPreset, QuestionAnswer } from '@cc/protocol'
 import { ClaudeLinks } from './exe-link.js'
 import { StartGate } from './start-gate.js'
 import type { UsageQuery } from './usage.js'
@@ -537,8 +537,8 @@ export class ClaudeSession implements SessionHandle {
   }
 
   /** Every input goes out under an id with Centralu's mark, so its line in the transcript reads back as Centralu's (`centraluInputId`) */
-  send(text: string, opts?: { origin?: InputOrigin; id?: string; quiet?: boolean }): void {
-    this.sendInput(text, opts?.id !== undefined && isUuid(opts.id) ? opts.id : centraluInputId(), undefined, opts?.origin, opts?.quiet)
+  send(text: string, opts?: { origin?: InputOrigin; id?: string; quiet?: boolean; attachments?: readonly Attachment[] }): void {
+    this.sendInput(withAttachmentPaths(text, opts?.attachments), opts?.id !== undefined && isUuid(opts.id) ? opts.id : centraluInputId(), undefined, opts?.origin, opts?.quiet)
   }
 
   /**

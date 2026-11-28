@@ -38,8 +38,8 @@ export function temporaryAgy(parent: string, scenario: string, signedOut: boolea
   let version: Promise<string> | undefined
   const recorded: AgyProfile = {
     ...profile,
-    async launch() {
-      const started = await profile.launch()
+    async launch(opts) {
+      const started = await profile.launch(opts)
       if (!started) throw new Error('the profile does not launch')
       // Through the proxy that sets the model (`frames-record-agy-model.mjs`)
       return { ...started, command: process.execPath, args: [MODEL_PROXY, AGY_MODEL, 'agy', 'acp', '--gemini-dir', profile.home.geminiHome, '--disable-telemetry'], env: { ...started.env, HOME: home, USERPROFILE: home } }

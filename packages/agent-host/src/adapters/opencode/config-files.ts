@@ -3,7 +3,8 @@ import { homedir } from 'node:os'
 import { dirname, extname, join, relative } from 'node:path'
 import { isObj, type Obj } from '../../json-value.js'
 import { systemSettingsFolder } from '../../os.js'
-import type { OpenCodeConfigs } from './config.js'
+import { readsRepoFiles, type CreateSessionOpts } from '../contract.js'
+import { presetEnv, type OpenCodeConfigs } from './config.js'
 
 /**
  * The person's OpenCode configuration a session in `cwd` would read (1.19.4, `Config.loadInstanceState` and
@@ -28,6 +29,25 @@ export function readOpenCodeConfigs(cwd: string, env: Readonly<Record<string, st
     layers: files.map(readConfig).filter((c): c is Obj => c !== null),
     agentFiles: [...new Set([global, ...dotFolders].flatMap(agentNames))],
   }
+}
+
+/**
+ * What keeps every file of the project's own out of OpenCode 1.19.4 (measured with its free model): `AGENTS.md`,
+ * `CLAUDE.md` and those above it up to the repository's root, `opencode.json` and the instructions it names, `.opencode`
+ * agents, plugins and tools (whose code runs at start), and `.opencode`, `.claude` and `.agents` skills. The skills flag also
+ * leaves out the person's own `~/.claude` and `~/.agents` skills: OpenCode has no flag for the project's alone
+ */
+const REPO_FILES_OFF = { OPENCODE_DISABLE_PROJECT_CONFIG: '1', OPENCODE_DISABLE_EXTERNAL_SKILLS: '1' }
+
+/** The environment a session's OpenCode starts with on top of the host's: the project's files kept out unless it is trusted, then the preset */
+export function openCodeLaunchEnv(
+  opts: Pick<CreateSessionOpts, 'cwd' | 'permissionPreset' | 'projectTrusted' | 'noSettingFiles'>,
+  env: Readonly<Record<string, string | undefined>>,
+  home = homedir(),
+): Record<string, string> {
+  const repoFiles = readsRepoFiles(opts) ? {} : REPO_FILES_OFF
+  const seen = { ...env, ...repoFiles }
+  return { ...repoFiles, ...presetEnv(opts.permissionPreset, seen, readOpenCodeConfigs(opts.cwd, seen, home)) }
 }
 
 const CONFIG_NAMES = ['opencode.json', 'opencode.jsonc']

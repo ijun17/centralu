@@ -12,8 +12,10 @@ interface AgentAdapter {
 
 interface SessionHandle {
   readonly externalId: string
-  send(input: UserInput, opts?: { origin?: InputOrigin }): void  // origin: only { kind: 'human' }, for the person's own typing
-  sendTracked?(text: string, observer?: InputObserver): Promise<void> // host-only completion receipt (#592)
+  send(input: UserInput, opts?: { origin?: InputOrigin; attachments?: Attachment[] }): void  // origin: only { kind: 'human' }, for the person's own typing
+  // attachments: the message's files, given apart from its text; Claude and Codex name each as an `@<path>` line
+  // (withAttachmentPaths), an ACP agent takes an image as a content block (../../plans/acp-adapter.md §5.8)
+  sendTracked?(text: string, observer?: InputObserver, opts?: { attachments?: Attachment[] }): Promise<void> // host-only completion receipt (#592)
   respondApproval(requestId: string, decision: Decision, scope?: Scope): void
   interrupt(): void
   stopBackgroundTask?(taskId: string): Promise<void>  // #290: stop one background task alone
