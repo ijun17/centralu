@@ -2,8 +2,7 @@ import type { AdapterCapabilities, ToolDescriptor } from '@cc/protocol'
 import { AcpAdapter } from '../acp/adapter.js'
 import { ACP_CAPABILITIES, type AcpProfile } from '../acp/profile.js'
 import type { DetectResult } from '../contract.js'
-import { readOpenCodeConfigs } from './config-files.js'
-import { presetEnv } from './config.js'
+import { openCodeLaunchEnv } from './config-files.js'
 import { findOpenCode } from './install.js'
 import { openCodeRefusal } from './refusal.js'
 import { OPENCODE_SURFACE } from './surface.js'
@@ -15,13 +14,14 @@ import { execText } from '../../os/exec.js'
 /**
  * What OpenCode through ACP can keep (docs/plans/acp-adapter.md §7), measured on 1.19.4. Its `usage_update` is the
  * context in tokens and the model's window, so the share is exact. Every preset, through its inline config
- * (`config.ts`), which reads the person's own (`config-files.ts`). Nothing keeps it from reading `AGENTS.md` and the project's `opencode.json` (which can add plugins and
- * servers), so trusted projects only; ACP has no field for Centralu's role text, so it cannot be the Assistant, a
+ * (`config.ts`), which reads the person's own (`config-files.ts`). In an untrusted project it is kept from the project's
+ * own files (`openCodeLaunchEnv`); ACP has no field for Centralu's role text, so it cannot be the Assistant, a
  * coordinator or an app's agent yet. A second prompt during a turn is folded into it (measured), so input waits for
  * the turn's end instead (`midTurnInput: false`, the core's queue).
  */
 const CAPABILITIES: AdapterCapabilities = {
   ...ACP_CAPABILITIES,
+  keepsRepoFilesOut: true,
 }
 
 const DESCRIPTOR: ToolDescriptor = {
@@ -59,7 +59,7 @@ export function openCodeProfile(): AcpProfile {
     localUsage,
     async launch(opts) {
       const l = findOpenCode()
-      return l ? { command: l.command, args: [...l.args, 'acp', '--print-logs', '--log-level', 'ERROR'], env: presetEnv(opts.permissionPreset, process.env, readOpenCodeConfigs(opts.cwd, process.env)) } : null
+      return l ? { command: l.command, args: [...l.args, 'acp', '--print-logs', '--log-level', 'ERROR'], env: openCodeLaunchEnv(opts, process.env) } : null
     },
     installedVersion: version,
     async detect(): Promise<DetectResult> {

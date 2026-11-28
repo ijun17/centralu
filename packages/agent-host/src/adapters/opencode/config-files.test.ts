@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
-import { readOpenCodeConfigs } from './config-files.js'
+import { openCodeLaunchEnv, readOpenCodeConfigs } from './config-files.js'
 
 const roots: string[] = []
 afterEach(async () => {
@@ -53,5 +53,31 @@ describe("the person's OpenCode configuration a session reads", () => {
     const root = tree({ 'repo/.git/HEAD': '', 'repo/opencode.json': JSON.stringify({ agent: { lint: {} } }), 'repo/.opencode/agent/helper.md': '' })
     const env = { XDG_CONFIG_HOME: join(root, 'none'), OPENCODE_TEST_MANAGED_CONFIG_DIR: join(root, 'none'), OPENCODE_DISABLE_PROJECT_CONFIG: '1' }
     expect(readOpenCodeConfigs(join(root, 'repo'), env, join(root, 'home'))).toEqual({ layers: [], agentFiles: [] })
+  })
+})
+
+describe('the environment a session’s OpenCode starts with', () => {
+  const OFF = { OPENCODE_DISABLE_PROJECT_CONFIG: '1', OPENCODE_DISABLE_EXTERNAL_SKILLS: '1' }
+  // The project's own rule allows every command, which would shape Normal's inline config if it were read
+  const launch = (trust: { projectTrusted?: boolean; noSettingFiles?: boolean }, project = true) => {
+    const root = tree({ 'repo/.git/HEAD': '', ...(project ? { 'repo/opencode.json': JSON.stringify({ permission: { bash: 'allow' } }) } : {}) })
+    const env = { XDG_CONFIG_HOME: join(root, 'none'), OPENCODE_TEST_MANAGED_CONFIG_DIR: join(root, 'none') }
+    return openCodeLaunchEnv({ cwd: join(root, 'repo'), permissionPreset: 'normal', ...trust }, env, join(root, 'home'))
+  }
+
+  it.each([
+    ['untrusted', {}],
+    ['untrusted, said so', { projectTrusted: false }],
+    ['trusted but reading no settings files', { projectTrusted: true, noSettingFiles: true }],
+  ])('%s: keeps the project’s files out, and its rules do not shape the preset', (_, trust) => {
+    const env = launch(trust)
+    expect(env).toMatchObject(OFF)
+    expect(env.OPENCODE_CONFIG_CONTENT).toBe(launch(trust, false).OPENCODE_CONFIG_CONTENT)
+  })
+
+  it('trusted: reads the project as OpenCode does, its rules shaping the preset', () => {
+    const env = launch({ projectTrusted: true })
+    expect(Object.keys(env).filter((k) => k in OFF)).toEqual([])
+    expect(env.OPENCODE_CONFIG_CONTENT).not.toBe(launch({ projectTrusted: true }, false).OPENCODE_CONFIG_CONTENT)
   })
 })

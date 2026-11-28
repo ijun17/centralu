@@ -6,8 +6,12 @@ the repository's `.claude/` settings, local settings, hooks, commands and `CLAUD
 not apply. Codex threads are started with the project's paths marked `untrusted` for that
 thread only, and `project_doc_max_bytes = 0`. That keeps the repository's `.codex/config.toml`,
 hooks, exec rules and `AGENTS.md` out, and it stops Codex from persisting the folder as
-trusted in `~/.codex/config.toml` on first use. The user's own settings in `~/.claude` and
-`~/.codex` still decide under the `normal` preset. What a session reads follows from what the
+trusted in `~/.codex/config.toml` on first use. OpenCode starts with `OPENCODE_DISABLE_PROJECT_CONFIG`
+and `OPENCODE_DISABLE_EXTERNAL_SKILLS`, which keep out the project's `AGENTS.md` and `CLAUDE.md` (and those above it
+up to the repository's root), `opencode.json`, `.opencode` agents, plugins and tools, and its skills; Centralu's
+own rules for the preset are read without the project's (`openCodeLaunchEnv`). Cursor and Antigravity cannot be
+kept from a project's files, so they run in trusted projects only (`keepsRepoFilesOut: false`). The user's own settings in `~/.claude`,
+`~/.codex` and OpenCode's global config still decide under the `normal` preset. What a session reads follows from what the
 session is, not from whether it carries Centralu's own tools (#152). Only the Assistant and
 coordinators read no settings files, trusted or not: they belong to no project and work in a folder
 other sessions can write to (in Claude, `settingSources: []`, which leaves out `~/.claude` too, except
@@ -63,6 +67,9 @@ Limits:
   folders. They are instructions only; whatever they lead the model to do still passes approval.
 - The Codex behaviour is verified from Codex source and the installed binary's strings, not
   by a logged-in run.
+- OpenCode's was measured on 1.19.4 with its free model: a project holding each kind of file named above, with and
+  without the two flags. The skills flag also leaves out the person's own `~/.claude` and `~/.agents` skills in an
+  untrusted project, since OpenCode has no flag for the project's alone.
 
 ## Git before trust (#407)
 
