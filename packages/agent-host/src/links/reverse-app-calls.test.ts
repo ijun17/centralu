@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { LinkedAppCallParams } from '@cc/protocol'
 import * as kit from '../apps/external/test-helpers.js'
 import { sessionAddress } from '../mail/address.js'
 import { runCleanups } from './links-world.test-helpers.js'
@@ -7,7 +8,7 @@ import { appsPeers, linkedNotices } from './apps-across.js'
 import type { AppsPeer } from './linked-apps.js'
 import { recordStartingHub } from '../sessions/hub-preset.js'
 import type { RemoteAgent } from '../sessions/remote-agents.js'
-import { eventually } from '../../../../tooling/test-timing.js'
+import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 
 /**
  * A started agent uses its parent project's apps on the hub that started it (#1938, docs/plans/remote-hub.md §13.5): it is
@@ -46,6 +47,41 @@ async function world(o: { hubApps?: boolean; mail?: true } = {}) {
 }
 
 type World = Awaited<ReturnType<typeof world>>
+
+/**
+ * The machine's link to the hub as its sessions' app calls use it, recording each `hub.appCall` sent. From the `holdFrom`th
+ * call of `hold` on, the hub is asked to wait for the run's end (`held` resolves as that call is sent, `ended` once it
+ * settles), so only the link's loss ends the wait and the test drops it at a known point rather than racing the hub's answer
+ */
+function watchHubCalls(machine: World['machine'], holdFrom: number) {
+  const real = appsPeers({ hubs: machine.hubs, settings: machine.store.settings })
+  const sent: LinkedAppCallParams[] = []
+  let reached = () => {}
+  const held = new Promise<void>((resolve) => (reached = resolve))
+  let settled = () => {}
+  const ended = new Promise<void>((resolve) => (settled = resolve))
+  const watched = (link: AppsPeer): AppsPeer => ({
+    ...link,
+    call: (method, params, timeoutMs) => {
+      if (method !== 'appCall') return link.call(method, params, timeoutMs)
+      const p = LinkedAppCallParams.parse(params)
+      sent.push(p)
+      if (p.tool !== 'hold' || sent.filter((s) => s.tool === 'hold').length < holdFrom) return link.call(method, params, timeoutMs)
+      reached()
+      const answer = link.call(method, { ...p, waitMs: 600_000 }, timeoutMs)
+      void answer.catch(() => {}).then(settled)
+      return answer
+    },
+  })
+  machine.apps!.linked.usePeers({
+    machines: real.machines,
+    startedBy: (id) => {
+      const s = real.startedBy(id)
+      return s?.link ? { ...s, link: watched(s.link) } : s
+    },
+  })
+  return { sent, held, ended }
+}
 
 const boardRuns = (host: { apps: { rt: { runs(q: { projectId: string; appId: string }): { tool: string; status: string; callerSessionId: string | null }[] } } | null }, projectId: string) =>
   host.apps!.rt.runs({ projectId, appId: 'board' })
@@ -221,5 +257,50 @@ describe("a started agent uses its parent project's apps on the hub (#1938, §13
     expect(text(await live.call('app-board', 'peek', {}))).toBe('peeked')
     expect(boardRuns(machine, 'p-remote')).toMatchObject([{ tool: 'peek', callerSessionId: 'w1' }])
     expect(hub.apps).toBeNull()
+  })
+
+  it.each([
+    { when: 'after its first answer, its run id known', holdFrom: 2, told: false },
+    { when: 'before its first answer, its run id not known', holdFrom: 1, told: false },
+    { when: 'after the agent was told it is still running', holdFrom: 2, told: true },
+  ])("a link lost mid-call ($when) is answered as maybe done, nothing is resent, and a known run id's run_status gives the hub's result", async ({ holdFrom, told }) => {
+    const { machine, hub, attach } = await world()
+    const live = attach('w1')
+    const { sent, held, ended } = watchHubCalls(machine, holdFrom)
+    // `told`: past its wait the agent hears it is still running, with its run id, and the call goes on here (`detached`).
+    // The wait outlasts the first 1 s chunk that brings the run id, with room for a slow machine
+    const calling = live.call('app-board', 'hold', {}, told ? { waitMs: 3_000 * SLOW } : {})
+    // A write: the agent's own card on the machine asks first
+    const card = await eventually(() => machine.mgr.listSessions().find((s) => s.id === 'w1')?.pendingApproval)
+    machine.mgr.inputs.respondApproval('w1', card!.requestId, 'allow')
+    await held
+    await eventually(() => boardRuns(hub, 'p-hub').some((r) => r.tool === 'hold' && r.status === 'running'))
+    const runId = hub.apps!.rt.runs({ projectId: 'p-hub', appId: 'board' })[0]!.id
+    const early = told ? await calling : null
+    if (early) expect(early.structuredContent).toMatchObject({ runId, status: 'running' })
+    let lost!: Awaited<typeof calling>
+    await machine.bounce(undefined, async () => {
+      await ended
+      lost = await calling
+    })
+    if (!told) {
+      expect(lost.isError).toBe(true)
+      expect(text(lost).match(/may or may not/g)).toEqual(['may or may not'])
+      expect(text(lost)).toContain('The link to Hub mac was lost during the call, so App board on Hub mac may or may not have done this.')
+      const status = `app(action="call", app="board", tool="run_status", args={"run_id": "${runId}"})`
+      if (holdFrom === 2) expect(text(lost)).toContain(`Do not call it again: once the link is back, ${status} gives its result.`)
+      else expect(text(lost)).toContain('Its run id there is not known: check what it did before calling it again.')
+    }
+
+    await eventually(() => machine.hubs.appsPeer(hub.id)?.reachable === true)
+    hub.apps!.open('board')
+    await eventually(() => boardRuns(hub, 'p-hub')[0]?.status === 'ok')
+    // The hub's `released`, not the lost-link error the early-returned call left recorded here
+    if (holdFrom === 2) expect(text(await live.call('app-board', 'run_status', { run_id: runId }))).toContain('released')
+    // Sent once, as one call under one id (asked again per wait, never as a second run), and never after the loss
+    const holds = sent.filter((p) => p.tool === 'hold')
+    expect(holds).toHaveLength(holdFrom)
+    expect(new Set(holds.map((p) => p.call)).size).toBe(1)
+    expect(boardRuns(hub, 'p-hub').filter((r) => r.tool === 'hold')).toHaveLength(1)
   })
 })
