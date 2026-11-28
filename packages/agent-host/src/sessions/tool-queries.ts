@@ -247,6 +247,9 @@ export class ToolQueries {
    */
   private readonly modelCache = new Map<ToolName, { models: ModelOption[]; at: number }>()
 
+  /** Counts the times a tool's CLI changed (`forgetModels`): a read that began under an older count is of the old CLI and is not kept */
+  private readonly modelEpoch = new Map<ToolName, number>()
+
   /** One read of a tool's list at a time: a second asker waits on it instead of starting another tool process */
   private readonly modelFetches = new Map<ToolName, Promise<ModelOption[]>>()
 
@@ -262,14 +265,18 @@ export class ToolQueries {
   private fetchModels(tool: ToolName, adapter: AgentAdapter): Promise<ModelOption[]> {
     const running = this.modelFetches.get(tool)
     if (running) return running
+    const epoch = this.modelEpoch.get(tool) ?? 0
+    const current = () => (this.modelEpoch.get(tool) ?? 0) === epoch
     const p = withTimeout(adapter.listModels!(), MODEL_LIST_READ_MS, `${tool}'s model list`).then(
       (models) => {
-        this.modelCache.set(tool, { models, at: Date.now() })
-        this.modelFailures.delete(tool)
+        if (current()) {
+          this.modelCache.set(tool, { models, at: Date.now() })
+          this.modelFailures.delete(tool)
+        }
         return models
       },
       (err: unknown) => {
-        this.modelFailures.set(tool, Date.now())
+        if (current()) this.modelFailures.set(tool, Date.now())
         throw err
       },
     )
@@ -279,6 +286,17 @@ export class ToolQueries {
     }
     p.then(clear, clear)
     return p
+  }
+
+  /**
+   * The tool's CLI changed (`AgentVersionService`, #2544): the list it gave, and the failure that held the next read off, were the old
+   * CLI's. The next ask reads the new one, and a read still running for the old one is not kept.
+   */
+  forgetModels(tool: ToolName): void {
+    this.modelCache.delete(tool)
+    this.modelFailures.delete(tool)
+    this.modelFetches.delete(tool)
+    this.modelEpoch.set(tool, (this.modelEpoch.get(tool) ?? 0) + 1)
   }
 
   async listModels(tool: ToolName): Promise<{ supported: boolean; reason?: string; models: ModelOption[] }> {
