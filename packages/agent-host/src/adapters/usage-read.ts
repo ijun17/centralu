@@ -56,8 +56,19 @@ export function softRead<T>(o: SoftReadOptions<T>): (ask?: SoftAsk<T>) => Promis
   let value: { at: number; v: T; tookMs: number } | null = null
   let failedAt: number | null = null
   let inflight: Promise<T> | null = null
+  /**
+   * The answer this process read, unless it is dated in the future (the clock moved back since it was read): that one is no
+   * answer, held, fresh or standing in for a failed read, since it would show that time
+   */
+  const kept = (t: number) => {
+    if (value && isFromTheFuture(value.at, t)) value = null
+    return value
+  }
   /** The last answer when it may stand in for a read that did not come (a logged-out one may not, also after a failure), else the fallback */
-  const standIn = (): T => (value && (o.staleOk?.(value.v) ?? true) ? value.v : o.fallback())
+  const standIn = (): T => {
+    const last = kept(now())
+    return last && (o.staleOk?.(last.v) ?? true) ? last.v : o.fallback()
+  }
 
   const start = (): Promise<T> => {
     const began = now()
@@ -82,9 +93,10 @@ export function softRead<T>(o: SoftReadOptions<T>): (ask?: SoftAsk<T>) => Promis
 
   return async (ask = {}) => {
     const t = now()
+    kept(t)
     // Nothing read in this process yet: the answer a former one kept stands in, as a stale one does; not one dated in the future (#1702)
     if (!value && ask.seed && !isFromTheFuture(ask.seed.at, t)) value = { at: ask.seed.at, v: ask.seed.value, tookMs: 0 }
-    if (value && !isFromTheFuture(value.at, t) && t - value.at < freshFor(value)) return { value: value.v, provisional: false }
+    if (value && t - value.at < freshFor(value)) return { value: value.v, provisional: false }
     if (failedAt !== null && !isFromTheFuture(failedAt, t) && t - failedAt < o.failMs) return { value: standIn(), provisional: false }
     const run = start()
     // The last answer, when it may stand in while the read goes on: returned at once, as provisional, unless the asker settles

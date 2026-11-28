@@ -118,7 +118,7 @@ The common shape is "Could not <verb> <what>: <reason>", with a way to try again
 ### 1.8 Tool, machine and product names
 
 - Tools are named as their makers name them, from the adapter's label: "Claude Code", "Codex"
-  ("Install or sign in to Claude Code or Codex", `usage/UsageDonuts.tsx`). Never "Claude" alone for the
+  ("Install or sign in to Claude Code, Codex or another coding agent", `usage/UsageDonuts.tsx`). Never "Claude" alone for the
   tool.
 - A linked machine is named by the name the person gave it: "Runs on <name>" (`machines/MachineTag.tsx`).
 - The product is "Centralu", used where the person needs to know who did something: "Stopped: Centralu

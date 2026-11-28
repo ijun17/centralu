@@ -38,9 +38,12 @@ them it starts up fine and then has nothing to open a session with.
 |---|---|
 | **Node 22.14 or newer** | the host sidecar runs on it, and the bundled database crashes on an older 22.x. If it's missing, the app says so on startup |
 | **`claude` CLI**, logged in | for Claude Code sessions — `npm i -g @anthropic-ai/claude-code` |
-| **`codex` CLI**, logged in | for Codex sessions — `npm i -g @openai/codex`. Skip it if you don't use Codex |
+| **`codex` CLI**, logged in | for Codex sessions — `npm i -g @openai/codex` |
+| **Cursor CLI** (`agent`), logged in | for Cursor sessions — `curl https://cursor.com/install -fsS \| bash` (Windows: `irm 'https://cursor.com/install?win32=true' \| iex`) |
+| **`opencode` CLI** | for OpenCode sessions — `npm i -g opencode-ai` |
+| **Antigravity** | nothing to install by hand: Centralu installs it and signs you in with Google from Antigravity's line |
 
-Either one on its own is enough. The first-run screen tells you which it found and
+Any one of them is enough. The first-run screen tells you which it found and
 prints the command for whatever's missing.
 
 ## Install
