@@ -1,6 +1,6 @@
 import { TrustProjectButton } from './TrustCard.jsx'
 import { useEffect, useState } from 'react'
-import { errorMessage, newAppIdProblem } from '@cc/protocol/client'
+import { BUILDER_DEMANDS, errorMessage, newAppIdProblem } from '@cc/protocol/client'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { Modal } from '../../components/Modal.jsx'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
@@ -32,12 +32,10 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
   const createApp = useStore((s) => s.createApp)
   const allTools = useTools()
   // The default guesses the host's (the project's default, else the Assistant's tool); the selected tool is what is sent
-  // An app's builder is given its role as text, which a tool that takes none cannot run (`roleText`)
   const { tool, setTool, toolMeta, tools, info, usable, refusal, blocked, detectError, redetect } = useToolChoice(
     (projectId ? project?.defaultTool : assistantTool) ?? allTools[0]?.name ?? '',
     undefined,
-    // A builder starts under `auto` (`AppSessions.createAppBuilder`), the default every new session gets
-    { permissionPreset: 'auto', projectTrusted: true, roleText: true },
+    BUILDER_DEMANDS,
   )
   const [name, setName] = useState('')
   /** The value the person entered if they touched the id, otherwise null — the derived id keeps following as the name is edited */

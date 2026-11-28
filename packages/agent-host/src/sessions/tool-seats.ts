@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { CENTRALU_MCP_NAME, type ToolProfile } from '../apps/contract.js'
+import type { ToolProfile } from '../apps/contract.js'
 import type { GuideSeats, GuideTool } from './app-guide.js'
 import { trustedJsonText } from './tool-answers.js'
 import {
@@ -259,8 +259,8 @@ export function toolDefsFor(
 }
 
 /**
- * The server instructions for a profile, or undefined for none. In one place so the size test
- * measures the exact text the adapter sends. `subagentTool`: what the session's CLI calls its own subagent
+ * The tool instructions for a profile, or undefined for none; every tool gets them through `agentTextOf`
+ * (agent-text.ts), so the size test measures the exact text sent. `subagentTool`: what the session's CLI calls its own subagent
  * tool (`AdapterCapabilities.subagentTool`), which the reader's first line names (#1587).
  */
 export function instructionsFor(profile: ToolProfile, tier: RareTier = rareTier, appsAttached = false, subagentTool?: string): string | undefined {
@@ -276,31 +276,6 @@ export function instructionsFor(profile: ToolProfile, tier: RareTier = rareTier,
   }
 }
 
-/**
- * The same instructions as a Codex thread's developer instructions carry them (#525).
- *
- * Claude Code shows a server's `instructions` to the model; codex-cli 0.160.0 does not. Measured
- * (`scripts/probe-codex-mcp-instructions.mts`, 2026-10-12): a stdio server whose `initialize` answered with
- * `instructions` started, its tool was listed and reached, yet the model could not name a phrase from them, and the
- * thread's rollout had no trace of them, in four runs; the phrase in `developerInstructions` was named every time,
- * and the rollout holds it as a developer message. So the bridge sends none, and the adapter appends this to the
- * thread's developer instructions. The header says whose they are: Codex shows these tools to the model as
- * `mcp__centralu__<tool>`, and the text names them bare, as Claude Code's section heading (the server's name) does.
- */
-export function codexToolInstructionsFor(profile: ToolProfile, tier: RareTier = rareTier, appsAttached = false, subagentTool?: string): string | undefined {
-  const text = instructionsFor(profile, tier, appsAttached, subagentTool)
-  return text ? `# How to use the ${CENTRALU_MCP_NAME} tools (mcp__${CENTRALU_MCP_NAME}__*)\n\n${text}` : undefined
-}
-
-/** The adapter decides the channel; this module only owns the shared wording. */
-export function toolInstructionsFor(
-  profile: ToolProfile,
-  channel: 'server' | 'developer',
-  tier: RareTier = rareTier,
-  subagentTool?: string,
-): string | undefined {
-  return channel === 'developer' ? codexToolInstructionsFor(profile, tier, false, subagentTool) : instructionsFor(profile, tier, false, subagentTool)
-}
 
 /**
  * The tools this profile can call **right now** — the same decision as the exposure logic

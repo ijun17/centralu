@@ -1,4 +1,4 @@
-import type { NormalizedEvent, SessionInfo } from '@cc/protocol/client'
+import { roleTextDemanded, type NormalizedEvent, type SessionInfo } from '@cc/protocol/client'
 import { initialSession, type SessionSummary } from '@cc/core'
 import type { AppState } from './state.js'
 
@@ -40,6 +40,7 @@ export function sessionFromInfo(f: SessionInfo, cur?: SessionSummary): SessionSu
     ...(cur ?? initialSession({ id: f.id, projectId: f.projectId, name: f.name, tool: f.tool })),
     projectId: f.projectId,
     kind: f.kind,
+    roleText: roleTextDemanded(f),
     appId: f.appId,
     askedBy: f.askedBy ?? null,
     forkedFrom: f.forkedFrom ?? null,

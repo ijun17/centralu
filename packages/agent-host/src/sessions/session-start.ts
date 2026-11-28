@@ -23,7 +23,7 @@ import { commandsSentence } from './tool-seats.js'
 import type { HandoffNotes } from './handoff-notes.js'
 import type { HostCardsHost } from './host-cards.js'
 import type { LaunchRecords, LaunchRecordsHost } from './launch-records.js'
-import { assistantRole } from './assistant-home.js'
+import { sessionRole } from './agent-text.js'
 import type { ProjectRegistry } from './project-registry.js'
 import type { RestartHost } from './restart-policy.js'
 import type { SessionAppWiring } from './session-app-wiring.js'
@@ -639,15 +639,11 @@ export class SessionStarts {
        * with it. A session that came in through resume already has the tool holding its context,
        * so the same text is never inserted twice.
        */
-      systemPromptAppend:
-        isAssistantKind(m.kind)
-          ? // Skills (#71) always ride along; the memory handoff only for a genuinely new process
-            // (unchanged rule)
-            assistantRole() + this.host.skillsPrompt() + past
-          : // A builder session's (M4 C-2) role is entirely the roleAppend fixed at creation
-            // Reapplying the fixed role text — for a coordinator session an older build left (#372), and
-            // for a builder session (C-2) even if the app is broken
-            (m.roleAppend ?? undefined),
+      systemPromptAppend: sessionRole(m, {
+        skills: () => this.host.skillsPrompt(),
+        past,
+        builder: () => this.host.appSessions.builderRoleOf(m, o.cwd),
+      }),
       // The path back to the host — used by the Centralu tools' bridge and an external app's bridge
       // (M4 A-5)
       centraluBridge: profile || o.apps ? bridgeOf(this.host.endpoint?.(m.id)) : undefined,

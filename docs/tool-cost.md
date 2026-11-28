@@ -202,8 +202,10 @@ Over the scripted session Claude's request grew from 16,467 to 19,094 tokens, Co
 ## 5. What guards the numbers without a model
 
 - `sessions/centralu-tools.test.ts`, *the resident cost of each profile*: each profile's resident
-  definitions plus instructions stay within `RESIDENT_BUDGET_CHARS` on both CLIs (the reader's is the sum
+  definitions plus instructions stay within `RESIDENT_BUDGET_CHARS` on Claude and Codex (the reader's is the sum
   of its four sets' ceilings). It reuses the reader set's own budget tests rather than repeating them.
+- `sessions/agent-text.test.ts`: on every tool, with the capabilities its adapter declares, the instructions the
+  measure counts are the ones that tool's transport sends, and each profile stays within `RESIDENT_BUDGET_CHARS`.
 - `adapters/claude/tool-prefix.test.ts`: the resident tool prefix of a Claude session, read the way the
   CLI reads it (`tools/list` on every server, the tools marked `anthropic/alwaysLoad`), is byte-identical
   before and after an app is attached and detached, even an app that declares `anthropic/alwaysLoad`
@@ -1142,8 +1144,9 @@ profiles' ceilings count the instructions too. Raising one is a decision about t
 ### What each profile carries in every request (`RESIDENT_BUDGET_CHARS`)
 
 The characters of its resident definitions plus the server instructions the model is sent (`residentCost` in `tool-cost.ts`), in the
-default rare-commands tier (#513). Codex carries the same plus the 52-character header its developer instructions put over
-them (#525, `codexToolInstructionsFor`). Each ceiling below, since #2231, has `APP_BUDGET_CHARS` added, and the Assistant's has
+default rare-commands tier (#513). Codex and Antigravity carry the same plus the 46-character heading their one text puts over
+them (`TOOLS_HEADING` in `sessions/agent-text.ts`; it was a 52-character Codex header until the one text replaced it); Cursor and
+OpenCode are told no instructions (agent-host/tool-profiles.md "What every tool is told"). Each ceiling below, since #2231, has `APP_BUDGET_CHARS` added, and the Assistant's has
 `COMPACT_BUDGET_CHARS` too. The reader's is the sum of its sets' ceilings (#561 added the agent set). The worktree manager's seat went with the role (#561 part 3).
 
 | Profile | Now (without the added ceilings) | How it moved |

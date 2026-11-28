@@ -3,7 +3,9 @@ import { hostAccessEnv, toolProfileOf } from '../contract.js'
 import type { randomUUID } from 'node:crypto'
 import type { AgentProcess, CreateSessionOpts, InputOrigin } from '../contract.js'
 import type { LocalSpawnSpec } from '../local-process.js'
+import { agentTextOf } from '../../sessions/agent-text.js'
 import { seatHas } from '../../sessions/tool-seats.js'
+import { CLAUDE_SUBAGENT_TOOL } from './centralu-mcp.js'
 import { withoutCrossSessionMessaging } from './cross-session.js'
 import { probeIds } from './live-queries.js'
 import type { ModelQuery } from './models.js'
@@ -114,6 +116,7 @@ export function flagSettings(opts: Pick<CreateSessionOpts, 'autoCompactTokens'>,
 
 /** The options a session's `query()` starts with */
 export function claudeQueryOptions({ sessionId, opts, executablePath, servers, permissionOptions, codeIntelligence, spawn, canUseTool }: ClaudeQueryInputs) {
+  const { role } = agentTextOf(opts, CLAUDE_SUBAGENT_TOOL)
   return withoutCrossSessionMessaging({
     // The host's address and this session's credential, for a script the agent writes (#1405)
     env: hostAccessEnv(opts.hostAccess),
@@ -159,14 +162,8 @@ export function claudeQueryOptions({ sessionId, opts, executablePath, servers, p
     ...settingSourcesFor(opts),
     // A folder to read outside the working folder (#142 — an inherited handoff note). Without it, this asks (measured in CreateSessionOpts.readableDirs).
     ...(opts.readableDirs?.length ? { additionalDirectories: opts.readableDirs } : {}),
-    ...(opts.centraluTools
-      ? {
-          // The role is guaranteed here, not by AGENTS.md, which the person can and should edit
-          ...(opts.systemPromptAppend
-            ? { systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: opts.systemPromptAppend } }
-            : {}),
-        }
-      : {}),
+    // The role is guaranteed here, not by AGENTS.md, which the person can and should edit; the tools' part is the server's
+    ...(role ? { systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: role } } : {}),
     ...permissionOptions,
     ...flagSettings(opts, codeIntelligence),
     // A usage probe starts no server of the person's: those in ~/.claude.json would run for a read that needs none (#726)

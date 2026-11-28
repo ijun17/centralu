@@ -15,15 +15,38 @@ bundle leaves out is refused even through the Codex bridge.
 | `assistant` | the one Assistant | every session | all but the builder's | role and usage |
 | `scoped` | a coordinator (#80): made only by the control app's tasks, which were removed in #372 with the RPC that created one; the ones in a store still wake with this profile | its members | list, read, send | its boundary |
 | `builder` | an app's building session (M4 C-3) | its own app | `check` | build-and-check |
-| `reader` | every other session in a project (#320), a former worktree manager included | from a trusted project, reads every session here and on linked machines but an Assistant's (#984, #1941); from an untrusted one, its own project only; acts on the agents it started (auto: any session in its own project) | `read_session` (no id: lists), `recall`, `app_guide`; `ask_project` (#371, [delegation/ask-project.md](delegation/ask-project.md)); `start_agent`, `agent_session` (#561, [delegation/start-agent.md](delegation/start-agent.md)); and `find_apps`, `attach_app`, `detach_app` (#371 part A, apps/other-projects-apps.md) | Centralu's tools first unless the person says otherwise (#564) |
+| `reader` | every other session in a project (#320), a former worktree manager included | from a trusted project, reads every session here and on linked machines but an Assistant's (#984, #1941); from an untrusted one, its own project only; acts on the agents it started (auto: any session in its own project) | `read_session` (no id: lists), `recall`, `app_guide`, `update_centralu`; `ask_project` (#371, [delegation/ask-project.md](delegation/ask-project.md)); `start_agent`, `agent_session` (#561, [delegation/start-agent.md](delegation/start-agent.md)); and `find_apps`, `attach_app`, `detach_app` (#371 part A, apps/other-projects-apps.md); `app` (#2231), `mail`, `compact_self` | Centralu's tools first unless the person says otherwise (#564) |
 
-The instructions reach the model on both CLIs, by different doors. Claude gets them as the in-process
-server's `instructions`. codex-cli 0.160.0 shows a server's instructions to no model (#525, measured with
-`scripts/probe-codex-mcp-instructions.mts`), so the Codex bridge sends none and the same text rides in the
-thread's developer instructions, after the seat's role, under a one-line header. Codex reads those at
-`thread/start` only and ignores them on `thread/resume`, so a Codex thread keeps the instructions it was started
-with: one that changes profile while its thread lives on has its new tools without their instructions until it starts a
-new thread.
+## What every tool is told
+
+A session's agent is told two things: its role (the Assistant's, a builder's, an old coordinator's; an ordinary
+session has none) and these instructions. Both are written once, in `sessions/agent-text.ts` (`agentTextOf`), for
+every tool; an adapter decides only how each part travels, never what it says. The one word that differs by tool
+is the name of the tool's own subagent tool, which the `start_agent` line names (`AdapterCapabilities.subagentTool`).
+
+| Tool | Role | Instructions |
+|---|---|---|
+| Claude | `systemPrompt.append` | the in-process server's `instructions`, which Claude Code heads itself |
+| Codex | one text in the thread's developer instructions: the role, then the instructions under one heading (`joinedAgentText`) | (same text) |
+| Antigravity | the same one text, in `_meta.antigravity.systemPrompt.append` | (same text) |
+| Cursor, OpenCode | none | none |
+
+The doors differ because the tools do. codex-cli 0.160.0 shows a server's instructions to no model (#525, measured
+with `scripts/probe-codex-mcp-instructions.mts`), so the bridge sends none and every tool but Claude gets them in
+its one text. Codex reads that text at `thread/start` only and ignores it on `thread/resume`, so a Codex thread
+keeps what it was started with: one that changes profile while its thread lives on has its new tools without their
+instructions until it starts a new thread.
+
+**Cursor and OpenCode are told nothing**, neither a role nor these instructions: their ACP servers take no system
+prompt, and whether they show a server's `initialize` instructions to the model is not measured yet (#2479). So
+they declare no `instructionChannel` and `roleText: false`, the cost measure counts no instructions for them, and a
+session that needs role text (the Assistant, a coordinator, an app's builder) is refused on them (`launchRefusal`).
+An ordinary session on them runs without the "Centralu's tools first" rule.
+
+`sessions/agent-text.test.ts` reads every seat's text from each adapter's own transport and fails on any difference
+from `agentTextOf` that its short list of tools told nothing does not name.
+
+## The profiles in detail
 
 **There is no worktree manager** (#561 part 3, owner 2026-10-12). A session starts worktree
 agents itself (`start_agent` with `worktree`, [delegation/child-workspace.md](delegation/child-workspace.md)), works with them (`agent_session`) and removes an idle child

@@ -2,7 +2,6 @@ import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import type { CentraluTools } from '../contract.js'
 import {
   CENTRALU_MCP_NAME,
-  instructionsFor,
   runCentraluTool,
   toolDefsFor,
 } from '../../sessions/centralu-tools.js'
@@ -44,24 +43,23 @@ export function centraluMcp(
   tools: CentraluTools,
   profile: ToolProfile,
   sessionId?: string,
-  /** An app is attached as the session starts (#957): the instructions then name an app's help */
-  appsAttached = false,
+  /** The session's tool instructions (`agentTextOf`) */
+  instructions?: string,
 ) {
   const defs = toolDefsFor(profile)
-  // A set with a deferred tool is loaded tool by tool: only the reader's has one
+  // A set with a deferred tool (every set has `app`) is loaded tool by tool
   const someDeferred = defs.some((t) => 'deferred' in t && t.deferred === true)
   return createSdkMcpServer({
     name: CENTRALU_MCP_NAME,
     version: '1',
     /*
-     * **Do not defer.** The SDK defers MCP tools behind ToolSearch by default; measured, the Assistant then called only
-     * `list_sessions`, never saw `send_to_session`, and ended the turn silently without handing out the work.
-     * The reader set (#320) is loaded tool by tool: all but app_guide (deferring them left recall unused, measured);
-     * app_guide waits behind tool search, as it rides in every ordinary session and is rarely needed.
+     * **Do not defer what is not marked deferred.** The SDK defers MCP tools behind ToolSearch by default; measured, the
+     * Assistant then called only `list_sessions`, never saw `send_to_session`, and ended the turn silently without handing
+     * out the work. In the reader set (#320) deferring the others left recall unused (measured); app_guide waits behind
+     * tool search, as it rides in every ordinary session and is rarely needed.
      */
     alwaysLoad: !someDeferred,
-    // None for the reader set (#320): server instructions are where a role would creep in
-    instructions: instructionsFor(profile, undefined, appsAttached, CLAUDE_SUBAGENT_TOOL),
+    instructions,
     // Only expose what the profile allows (#69) — the execution side re-checks the same rule.
     tools: defs.map((t) =>
       tool(t.name, t.description, t.schema.shape, async (args: Record<string, unknown>, extra: unknown) =>

@@ -250,6 +250,8 @@ export class AppSessions {
       tool: tool ?? fallback,
       // The default a new session gets (owner decision 2026-11-05): a builder exists only in a trusted project or the user folder
       permissionPreset: 'auto',
+      // Read at launch only when the app cannot be (`builderRoleOf`), and by builds that read no other; it also marks the
+      // row as one that demands role text (`roleTextDemanded`)
       roleAppend: builderRole(app, cwd),
       appId: ref.appId,
       builderOf: ref,
@@ -276,6 +278,13 @@ export class AppSessions {
     if (!m.appId) return null
     const ref: AppRef = { projectId: m.projectId, appId: m.appId }
     return this.builderMap()[builderKey(ref)] === m.id ? ref : null
+  }
+
+  /** A builder's role for its app as the app is now, at `cwd` (`sessionRole`); null for any other session, or an app not listed */
+  builderRoleOf(m: Pick<SessionInfo, 'id' | 'appId' | 'projectId'>, cwd: string): string | null {
+    const ref = this.builderRefOf(m)
+    const app = ref ? this.host.appsHub?.rt?.list().find((a) => sameApp(a, ref)) : undefined
+    return app ? builderRole(app, cwd) : null
   }
 
   /**

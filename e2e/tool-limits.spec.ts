@@ -47,6 +47,19 @@ test('a tool that takes no role text cannot be picked for the Assistant, and say
   await expect(page.getByTestId('assistant-tool-claude')).toBeEnabled()
 })
 
+test("an app builder's empty session leaves out a tool that takes no role text, as the host would refuse it", async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'], trusted: true })
+  await limitCodex(page)
+  const builderId = await page.evaluate(async () => {
+    const pid = (Object.values((window as any).__store.getState().projects) as { id: string; path: string }[]).find((x) => x.path === '/tmp/alpha')!.id
+    const made = await (window as any).__mock.apps.create({ projectId: pid, id: 'notes', name: 'Notes', tool: 'claude' })
+    return made.builder.id as string
+  })
+  await page.getByTestId(`app-session-row-${builderId}`).click()
+  await expect(page.getByTestId('session-start-tool-claude')).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('session-start-tool-codex')).toHaveCount(0)
+})
+
 test("the empty session's tool switch offers only the tools that keep the session's own preset", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'], trusted: true })
   await limitCodex(page)

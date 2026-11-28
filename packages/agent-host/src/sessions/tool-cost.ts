@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto'
 import type { AdapterCapabilities } from '@cc/protocol'
 import { z } from 'zod'
 import type { ToolProfile } from '../apps/contract.js'
-import { CENTRALU_MCP_NAME, toolInstructionsFor, toolDefsFor } from './centralu-tools.js'
+import { servedInstructions } from './agent-text.js'
+import { CENTRALU_MCP_NAME, toolDefsFor } from './centralu-tools.js'
 
 /**
  * What a session's Centralu tools cost before a word is said (#513): the definitions as each CLI
@@ -49,20 +50,10 @@ export function servedDefinitions(profile: ToolProfile, capabilities: ToolServin
   })
 }
 
-/**
- * The server instructions that reach the model. Claude Code puts an MCP server's instructions in a
- * `<system-reminder>` of the first user message (measured, CLI 2.1.289: "# MCP Server Instructions"),
- * so they ride in every request like the definitions. Codex shows a server's instructions to no model
- * (#525), so a Codex thread gets the same text in its developer instructions, under a header
- * (`codexToolInstructionsFor`), next to its role where it has one; they ride in every request too.
- */
-export function servedInstructions(profile: ToolProfile, capabilities: ToolServingCapabilities): string {
-  return toolInstructionsFor(profile, capabilities.instructionChannel ?? 'server', undefined, capabilities.subagentTool) ?? ''
-}
-
 export type ResidentCost = {
   profile: ToolProfile
-  instructionChannel: NonNullable<ToolServingCapabilities['instructionChannel']>
+  /** `none`: the tool is given no instructions (`servedInstructions`) */
+  instructionChannel: NonNullable<ToolServingCapabilities['instructionChannel']> | 'none'
   tools: number
   residentTools: number
   /** Characters of the resident definitions */
@@ -80,7 +71,7 @@ export function residentCost(profile: ToolProfile, capabilities: ToolServingCapa
   const instructions = servedInstructions(profile, capabilities)
   return {
     profile,
-    instructionChannel: capabilities.instructionChannel ?? 'server',
+    instructionChannel: capabilities.instructionChannel ?? 'none',
     tools: defs.length,
     residentTools: resident.length,
     residentChars: resident.reduce((n, d) => n + d.chars, 0),

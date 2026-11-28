@@ -44,14 +44,11 @@ Rules to follow (the app folder's AGENTS.md has the detailed rules — read it o
   (centralu.host), declare it under "uses" in the manifest (agent, apps, host). Centralu refuses a
   request that was not declared.
 - Do not touch files outside the app unless the person separately asks you to.
-- After making a change, call the centralu server's **check**. It actually starts the app and reads
-  its tool list and screen, then reports any problem. Do not leave testing to the person. This
-  session also has your app's own tools attached (app-${app.appId}) — call them to confirm the
-  behavior.
+- check actually starts the app and reads its tool list and screen, then reports any problem. The
+  app tool calls your app's own tools (as "${app.appId}") to confirm the behavior.
 - The app restarts once when your turn ends (if the app folder changed, and after any call in
   progress finishes). To confirm something right away within the turn, call check — it restarts
-  the app from the files as they are now. The attached tool list changes for Claude from the next
-  turn on, and for Codex from the next thread on.
+  the app from the files as they are now.
 
 Answer in the language the person writes in.`
 }

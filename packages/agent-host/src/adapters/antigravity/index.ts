@@ -1,10 +1,9 @@
 import { notSignedIn, type AdapterCapabilities, type ToolDescriptor, type UsageSnapshot } from '@cc/protocol'
-import { CENTRALU_MCP_NAME } from '../../apps/contract.js'
 import { dataRoot } from '../../data-dir.js'
 import type { Platform } from '../../os.js'
 import { rpcError } from '../../rpc-error.js'
-import { instructionsFor } from '../../sessions/centralu-tools.js'
-import { toolProfileOf, type AgentProcess, type AgentSpawnSpec, type CreateSessionOpts, type DetectResult } from '../contract.js'
+import { agentTextOf, joinedAgentText } from '../../sessions/agent-text.js'
+import type { AgentProcess, AgentSpawnSpec, DetectResult } from '../contract.js'
 import { AcpAdapter } from '../acp/adapter.js'
 import { ACP_CAPABILITIES, type AcpProfile } from '../acp/profile.js'
 import { toolNotInstalled } from '../core/tool-process.js'
@@ -21,22 +20,6 @@ import { listAgyModels, saveAgyModels, toModelOptions } from './models.js'
 /** What Antigravity calls its own subagent tool: named in Centralu's tool instructions before `start_agent` */
 const AGY_SUBAGENT_TOOL = 'invoke_subagent'
 
-/**
- * System prompt appended via `_meta.antigravity.systemPrompt.append` on `session/new`, `session/load`, and
- * `session/resume`: the session's role text (`opts.systemPromptAppend`), followed by Centralu's MCP tool instructions
- * when the Centralu bridge is attached (since `centralu-bridge.mjs` omits MCP `initialize.instructions`).
- * Heading names the MCP server rather than `mcp__centralu__*` because Antigravity calls tools via `call_mcp_tool`.
- */
-export function agySystemPrompt(opts: CreateSessionOpts): string | undefined {
-  const apps = (opts.apps?.current().length ?? 0) > 0
-  const rawTools =
-    opts.centraluTools && opts.centraluBridge
-      ? instructionsFor(toolProfileOf(opts), undefined, apps, AGY_SUBAGENT_TOOL)
-      : undefined
-  const tools = rawTools ? `# How to use the ${CENTRALU_MCP_NAME} MCP server tools\n\n${rawTools}` : undefined
-  const text = [opts.systemPromptAppend, tools].filter(Boolean).join('\n\n')
-  return text || undefined
-}
 
 /**
  * What Google's Antigravity agent through ACP can keep (docs/plans/antigravity-adapter.md §6), measured on 1.4.3:
@@ -54,7 +37,6 @@ const CAPABILITIES: AdapterCapabilities = {
   // - Files of its own in the project: on Linux (measured, 1.4.3 and 1.5.0) and macOS (seen), it writes its `run_workflow`
   //   skill as `skills/system/run-workflow/SKILL.md` into the session's project at `session/new`; Windows 1.4.3 writes none
   //   (#2320, docs/plans/antigravity-acp.md §1 has the cause)
-  // - System prompt & role text: passed through `_meta.antigravity.systemPrompt.append` on session/new, session/load, and session/resume
   // - Not offered yet: untrusted projects (it reads the project's own instruction files, as the other ACP tools), images in the prompt
   ...ACP_CAPABILITIES,
   autoTitle: false,
@@ -175,8 +157,9 @@ export function antigravityProfile(deps: AgyProfileDeps = {}): AgyProfile {
         const models = toModelOptions(options)
         if (models.length > 0) void saveAgyModels(setup.home, models).catch(() => {})
       },
+      // Sent on session/new, load and resume; the bridge sends no `initialize` instructions (centralu-bridge.mjs)
       sessionMeta: (opts) => {
-        const append = agySystemPrompt(opts)
+        const append = joinedAgentText(agentTextOf(opts, AGY_SUBAGENT_TOOL, !!(opts.centraluTools && opts.centraluBridge)))
         return append ? { antigravity: { systemPrompt: { append } } } : undefined
       },
     },

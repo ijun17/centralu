@@ -87,6 +87,11 @@ export type SessionSummary = {
   unreachable?: boolean
   /** Decided by the host (#698); the state alone cannot tell a stopped turn from a finished one */
   interruption?: Interruption | null
+  /**
+   * Its launch demands role text (`roleTextDemanded`, read from the host's row). Held rather than a selector
+   * (docs/state-management.md §3) because its input, `SessionInfo.roleAppend`, is not kept in the store
+   */
+  roleText: boolean
 }
 
 export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | 'name' | 'tool'> & Partial<SessionSummary>): SessionSummary {
@@ -95,7 +100,7 @@ export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | '
     live: true, preview: '', pendingApproval: null, pendingQuestions: [], usage: null, context: null,
     limit: null, lastError: null, touchedPaths: [], model: null, effort: null, verbosity: null, serviceTier: null,
     permissionPreset: 'normal', worktree: null, parentSessionId: null, merged: false, pr: null, goal: null, backgroundTasks: [], agentVersion: null, thinkingTokens: null, plan: null, kind: 'worker' as const,
-    appId: null,
+    appId: null, roleText: false,
     ...init,
   }
 }

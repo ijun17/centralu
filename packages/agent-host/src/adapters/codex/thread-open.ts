@@ -1,7 +1,7 @@
 import { CLIENT_INFO, parseCliVersion } from '@cc/protocol'
-import { codexToolInstructionsFor } from '../../sessions/centralu-tools.js'
+import { agentTextOf, joinedAgentText } from '../../sessions/agent-text.js'
 import { rpcError } from '../../rpc-error.js'
-import { toolProfileOf, type CreateSessionOpts, type EventSink } from '../contract.js'
+import type { CreateSessionOpts, EventSink } from '../contract.js'
 import type { CodexClient } from './client.js'
 import { permissionOptionsFor, repoFilesConfig } from './launch-config.js'
 import { runningTurnOf } from './turn-reads.js'
@@ -147,12 +147,8 @@ export function startThreadParams(opts: CreateSessionOpts, servers: Record<strin
     ...permissionOptionsFor(opts.permissionPreset),
     model: opts.model,
     /*
-     * The following two are attached only for the Assistant.
-     *
-     * The role is given directly through developerInstructions — the same slot as Claude's
-     * systemPrompt append. The reason we avoid a file (AGENTS.md) is the same: if a
-     * lower-privilege session could edit that file, it would become able to instruct every
-     * session. The instructions of the Centralu tools ride there too (#525, developerInstructions()).
+     * The role is given directly through developerInstructions, never a file (AGENTS.md): a
+     * lower-privilege session that could edit that file could instruct every session.
      *
      * Tools are attached through the stdio bridge. What we confirmed by measurement:
      *   per-thread config.mcp_servers  works (our command actually runs)
@@ -192,20 +188,16 @@ export function networkAccessOf(res: Record<string, unknown>): boolean | undefin
 export const CODEX_SUBAGENT_TOOL = 'spawn_agent'
 
 /**
- * The thread's developer instructions: the session's role, then the instructions of the Centralu tools it gets
- * (#525), which Claude receives from the in-process server and Codex would never show from the bridge's
- * `initialize` (measured: sessions/centralu-tools.ts, codexToolInstructionsFor). Sent at thread/start only.
- * `thread/resume` takes the same field and ignores it: resumed with other developer instructions, the model still
- * named the phrase from the first ones and the rollout gained no developer message (codex-cli 0.160.0,
- * `scripts/probe-codex-mcp-instructions.mts`, 2026-10-12). So a thread keeps what it was started with; a session
- * that changes profile while its thread lives on (a session the person turns the reader set off for, or back on)
- * keeps its tools' new rules from the tool descriptions alone until it starts a new thread.
+ * The thread's developer instructions: the session's agent text (`joinedAgentText`), all of it, as codex-cli
+ * 0.160.0 shows a server's `initialize` instructions to no model: in four runs the model could not name a phrase from
+ * them and the rollout had no trace, while the phrase in `developerInstructions` was named every time (#525,
+ * `scripts/probe-codex-mcp-instructions.mts`, 2026-10-12). Sent at thread/start only: `thread/resume` takes the same
+ * field and ignores it (resumed with other instructions, the model still named the first ones, same probe). So a
+ * thread keeps what it was started with, and a session that changes profile while its thread lives on keeps its
+ * tools' new rules from the tool descriptions alone until it starts a new thread.
  */
 function developerInstructions(opts: CreateSessionOpts): { developerInstructions?: string } {
-  // An app attached as the thread starts adds the line on repository work (#957, #992)
-  const apps = (opts.apps?.current().length ?? 0) > 0
-  const tools = opts.centraluTools && opts.centraluBridge ? codexToolInstructionsFor(toolProfileOf(opts), undefined, apps, CODEX_SUBAGENT_TOOL) : undefined
-  const text = [opts.systemPromptAppend, tools].filter(Boolean).join('\n\n')
+  const text = joinedAgentText(agentTextOf(opts, CODEX_SUBAGENT_TOOL, !!(opts.centraluTools && opts.centraluBridge)))
   return text ? { developerInstructions: text } : {}
 }
 
