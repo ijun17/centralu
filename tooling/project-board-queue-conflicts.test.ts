@@ -322,25 +322,62 @@ describe('the merge queue resolves a conflict with main itself, or hands it to t
     expect(queueTmps()).toEqual([])
   })
 
-  // #1886: the queue's push is exempt only onto a head pre-pr passed on; onto one pushed since, it is that head's change still
-  it('asks for the pre-pr status of the head it pushed onto a head that had none, and lands nothing meanwhile', async () => {
+  // #1886, #2434: the queue's push is exempt only onto a head pre-pr passed on; a head pushed since is asked for it first, on
+  // the author's own commit, and nothing is merged into it until it is there
+  it('asks for pre-pr on a head pushed since it was queued before merging main into it, pushes nothing meanwhile, and merges once it is there', async () => {
     const repo = conflictRepo({ 77: ['pnpm-lock.yaml'] })
     const at = new Date().toISOString()
     // Queued at A; the author pushed the conflicting head since, with no pre-pr status
     seedQueue([{ repo: R, pr: 77, lowers: [], owner: 'tester', author: 'writer', state: 'waiting', head: A, prePrHead: A, title: 'feat(apps): change 77', queuedAt: at, updatedAt: at, reruns: {} }])
     conflictRuntime(repo, [77])
     patchGh((s) => (s.noPrePr = '*'))
-    await until(() => conflictSteps().some((e) => e.step === 'push'), 'the merge to be pushed')
-    const tip = tipOf(repo, 77)
-    patchGh((s) => {
-      Object.assign(s.prs['77'], { headRefOid: tip, mergeStateStatus: 'CLEAN', mergeable: 'MERGEABLE' })
-      s.checks[tip] = green('2026-10-17T09:00:00Z')
-      s.runs[tip] = [ghRun('success', 1, tip)]
-    })
-    const q = await until((x) => stateOf(x) === 'attention', 'attention for the pushed head')
+    const q = await until((x) => stateOf(x) === 'attention', 'the ask for pre-pr')
     expect(q.queue[0].reason.kind).toBe('pre-pr')
-    expect(q.queue[0].reason.text).toContain(`since ${A.slice(0, 7)} to ${tip.slice(0, 7)}`)
+    expect(q.queue[0].reason.text).toContain(`since ${A.slice(0, 7)} to ${repo.heads[77]!.slice(0, 7)}`)
+    expect(q.queue[0].reason.text).toContain(`Run pre_pr with pr #77: it runs pnpm pre-pr on ${repo.heads[77]!.slice(0, 7)}`)
+    expect(conflictSteps()).toEqual([])
+    expect(tipOf(repo, 77)).toBe(repo.heads[77])
+    // pre_pr posted the status on the author's head: the queue merges main into it and pushes
+    patchGh((s) => (s.noPrePr = []))
+    await until(() => conflictSteps().some((e) => e.step === 'push'), 'the merge to be pushed')
+    expect(g(repo.origin, 'rev-list', '--parents', '-n', '1', tipOf(repo, 77)).split(' ').slice(1)).toEqual([repo.heads[77], repo.main])
     expect(writes().filter((w) => w[0] === 'merge')).toEqual([])
+  })
+
+  it('asks for pre-pr on a head pushed since it was queued before handing it its conflict in code, and pushes nothing', async () => {
+    const repo = conflictRepo({ 77: ['src/app.ts'] })
+    const at = new Date().toISOString()
+    seedQueue([{ repo: R, pr: 77, lowers: [], owner: 'tester', author: 'writer', state: 'waiting', head: A, prePrHead: A, title: 'feat(apps): change 77', queuedAt: at, updatedAt: at, reruns: {} }])
+    conflictRuntime(repo, [77])
+    patchGh((s) => (s.noPrePr = '*'))
+    const asked = await until((x) => stateOf(x) === 'attention', 'the ask for pre-pr')
+    expect(asked.queue[0].reason.kind).toBe('pre-pr')
+    expect(conflictSteps()).toEqual([])
+    // With the status there, the conflict in code is handed to the author: nothing merged, nothing pushed
+    patchGh((s) => (s.noPrePr = []))
+    const q = await until((x) => x.queue[0]?.reason?.kind === 'conflict', 'the hand-off')
+    expect(q.queue[0].reason).toMatchObject({ files: ['src/app.ts'], relay: { to: 'writer', branch: 'feat/b77' } })
+    expect(conflictSteps().map((e) => e.step)).toEqual(['merge', 'handoff'])
+    expect(tipOf(repo, 77)).toBe(repo.heads[77])
+  })
+
+  it('asks for pre-pr on a stacked head pushed since it was queued before restacking it onto the squash of the one under it', async () => {
+    const repo = squashedStack()
+    const at = new Date().toISOString()
+    seedQueue([{ repo: R, pr: 77, lowers: [], owner: 'tester', author: 'writer', state: 'waiting', head: A, prePrHead: A, title: 'feat(apps): change 77', queuedAt: at, updatedAt: at, reruns: {} }])
+    conflictRuntime(repo, [77])
+    patchGh((s) => (s.noPrePr = [repo.heads[77]!]))
+    await landLower(repo)
+    const asked = await until((x) => stateOf(x, 77) === 'attention', 'the ask for pre-pr')
+    expect(asked.queue.find((i: { pr: number }) => i.pr === 77).reason.kind).toBe('pre-pr')
+    expect(conflictSteps()).toEqual([])
+    expect(tipOf(repo, 77)).toBe(repo.heads[77])
+    patchGh((s) => (s.noPrePr = []))
+    await until(() => conflictSteps().some((e) => e.step === 'push'), 'the restack to be pushed')
+    expect(conflictSteps().map((e) => [e.step, e.dropped ?? null])).toEqual([
+      ['rebase', 76],
+      ['push', null],
+    ])
   })
 
   it('lands its push onto a head pushed since it was queued that has the pre-pr status, without asking for it again', async () => {
