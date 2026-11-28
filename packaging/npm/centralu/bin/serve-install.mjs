@@ -119,7 +119,7 @@ export function parsePointer(text) {
  * there from a git commit (`pnpm remote-dev`, #1036), null for a release (or anything unreadable). The hub shows it
  * on the machine's row, so a build no release produced is never mistaken for one.
  */
-export function installSource(versionDir) {
+function installSource(versionDir) {
   try {
     const s = JSON.parse(readFileSync(join(versionDir, 'install.json'), 'utf8')).source
     if (s?.kind === 'dev' && typeof s.commit === 'string' && /^[0-9a-f]{7,64}$/.test(s.commit)) return { kind: 'dev', commit: s.commit, dirty: s.dirty === true }

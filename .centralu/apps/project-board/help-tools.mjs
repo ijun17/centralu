@@ -4,7 +4,7 @@
 import { z } from './runtime/centralu-app-runtime.mjs'
 import { answer } from './reply.mjs'
 
-export const GUIDE = [
+const GUIDE = [
   'Project board: which tool for which repository task, instead of gh or git by hand.',
   '- Merge PRs (one, several or a stack), unattended → queue_merge, then merge_queue to follow and unqueue to take one out (not gh pr merge, nor a loop of gh pr merge / gh run rerun). Run the watch command queue_merge answers in the background to hear when an item needs you or lands. Without maintain or admin, mark a PR ready for the maintainer → mark_ready (not gh pr ready).',
   '- Land an auto-tier change (docs, fixture data, UI assets: pnpm tier) → push its branch, made from main, and hand it over with integrate (no open_pr, no queue_merge, no stack): it judges the tier itself, refuses anything else, and opens and lands the pull request as the record.',

@@ -8,7 +8,7 @@ import { sleep } from './util.mjs'
 // batch's, and the batch waited 15 minutes for a run that could not come.
 
 /** How many times, and how long apart, a branch is read before a run is started on it; `PROJECT_BOARD_QUEUE_SEEN_MS` is for tests only */
-export const SEEN_TRIES = 6
+const SEEN_TRIES = 6
 const SEEN_WAIT_MS = Number(process.env.PROJECT_BOARD_QUEUE_SEEN_MS) || 1_000
 
 /** A workflow's file name, from its path in the configuration (`.github/workflows/build.yml`) or as it is */

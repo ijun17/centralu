@@ -19,8 +19,8 @@ import { GitHubError } from './github.mjs'
 import { short } from './util.mjs'
 
 /** main's judge and rules (#1259 step 2) */
-export const TIER_SCRIPT = 'scripts/tier.mjs'
-export const TIER_RULES = '.centralu/tiers.json'
+const TIER_SCRIPT = 'scripts/tier.mjs'
+const TIER_RULES = '.centralu/tiers.json'
 /** How long main's judge may take over one change */
 const JUDGE_MS = 60_000
 
@@ -175,7 +175,7 @@ export function recordVerified(j, { branch, defaultBranch, owner, verified }) {
  * Why the queue does not land an integrated item at `head` (#1259 step 3): `j` is judgeBranch's answer for it, not
  * auto. As attention (kind `tier`) for the session that handed it over, with the files and what to do.
  */
-export function tierReason(n, j, { branch, head }) {
+function tierReason(n, j, { branch, head }) {
   const files = becauseLines(j, 6)
   const why = j.unjudged ? `it could not be judged (${j.unjudged}), so it counts as deep` : `its tier is now ${j.tier}${files.length ? `, from ${files.join(', ')}` : ''}`
   return {

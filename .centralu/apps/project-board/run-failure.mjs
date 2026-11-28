@@ -105,7 +105,7 @@ export const LOST_RUNNER_NOTE = /lost communication with the server|runner has r
  * diff), and followed by the `##[error]The operation was canceled.` that the cancelled step ends with (`shutdownAt`).
  * A test that only prints the text, then really fails, keeps its failure.
  */
-export const RUNNER_SHUTDOWN = /^##\[error\]The runner has received a shutdown signal/
+const RUNNER_SHUTDOWN = /^##\[error\]The runner has received a shutdown signal/
 /** The line a cancelled step ends with: the runner's word, after the shutdown line, that it was this which ended the job */
 const STEP_CANCELED = /^##\[error\]The operation was canceled\.?\s*$/
 

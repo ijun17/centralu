@@ -272,7 +272,7 @@ export async function runDetach({
 export const DETACH_WORK_CAP_MS = 90_000
 
 /** Why the host was not started in the Windows sign-in, from `startInSignIn`'s answer, for serve.log and stderr */
-export function signInMissed(s) {
+function signInMissed(s) {
   if (s.reason === 'nosession') {
     const n = s.desktops
     const unread = s.unreadable ? `, ${s.unreadable} of them with an owner WMI would not tell` : ''

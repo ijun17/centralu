@@ -86,7 +86,7 @@ function split(raw) {
 const LOCAL_BUILD = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*\.local\.[1-9]\d*$/
 
 /** A maintainer's local build: `<base>.local.N`, strict SemVer, with a prerelease base and a positive N (`scripts/local-manifest.mjs`). */
-export function isLocalBuildVersion(v) {
+function isLocalBuildVersion(v) {
   return typeof v === 'string' && v.length <= 64 && LOCAL_BUILD.test(v)
 }
 

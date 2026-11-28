@@ -39,10 +39,10 @@ import { onFlakyList } from './run-failure.mjs'
 import { ACTIVE, BATCH_ACTIVE, findItem, pushEvent, queueOrder, screenLanded, shardsComplete, unexpandedSkip } from './queue.mjs'
 import { short } from './util.mjs'
 
-export const BRANCH_PREFIX = 'queue/batch-'
+const BRANCH_PREFIX = 'queue/batch-'
 export const STATUS_CONTEXT = 'merge-queue'
 export { BATCH_ACTIVE }
-export const MAX_BATCHES_KEPT = 20
+const MAX_BATCHES_KEPT = 20
 /** A run GitHub has not started: cancelling it throws away no work. */
 export const NOT_STARTED = new Set(['queued', 'waiting', 'requested', 'pending'])
 const OK_CONCLUSIONS = new Set(['success', 'neutral', 'skipped'])
@@ -96,11 +96,11 @@ export function heavyRan(jobs, screen) {
   })
 }
 /** The tiers by the names the queue's texts use */
-export const TIER_NAME = { quick: 'fast tier', full: 'full tier' }
+const TIER_NAME = { quick: 'fast tier', full: 'full tier' }
 /** The tier a batch ran, as a phrase for the queue's texts ("the fast tier"); empty when it is not known (no tiers of CI, an older batch) */
 export const tierPhrase = (b) => (TIER_NAME[b?.tier] ? `the ${TIER_NAME[b.tier]}` : '')
 /** Green, but the pull request has not been CLEAN (or UNSTABLE from runs the batch cancelled) for this long. */
-export const LANDING_WAIT_MS = 30 * 60_000
+const LANDING_WAIT_MS = 30 * 60_000
 
 export const activeBatch = (q) => (q.batches ?? []).find((b) => BATCH_ACTIVE.has(b.state)) ?? null
 const refList = (b, prs, ref) => prs.map((p) => ref(b.repo, p)).join(', ')
@@ -145,7 +145,7 @@ export function batchCandidates(q, { max, tiers = false }) {
 }
 
 /** How long a batch waits for an item queued just now to be read once, before it forms without it. */
-export const GATHER_MS = 60_000
+const GATHER_MS = 60_000
 
 /**
  * Whether a batch that could form now should wait a moment (the owner, 2026-10-19: batch every ready

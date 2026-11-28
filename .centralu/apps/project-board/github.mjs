@@ -61,7 +61,7 @@ export function classify(text) {
  * Runs `gh` with arguments (never a shell), and returns its stdout. `input` goes to its stdin (with
  * `--input -`), so a long text never rides on the command line.
  */
-export async function runGh(args, { timeoutMs = GH_TIMEOUT_MS, cwd, input } = {}) {
+async function runGh(args, { timeoutMs = GH_TIMEOUT_MS, cwd, input } = {}) {
   try {
     // No prompts, no colour, no update notice: gh runs with nobody at a terminal.
     const env = { ...process.env, GH_PROMPT_DISABLED: '1', NO_COLOR: '1', GH_NO_UPDATE_NOTIFIER: '1', GH_PAGER: '' }
@@ -344,7 +344,7 @@ export function checkRepo(repo) {
 }
 
 /** GET one REST path as JSON. `missing` (HTTP codes) answers null for those instead of throwing. */
-export async function restJson(path, { missing = [] } = {}) {
+async function restJson(path, { missing = [] } = {}) {
   let out
   try {
     out = await runGh(['api', path])

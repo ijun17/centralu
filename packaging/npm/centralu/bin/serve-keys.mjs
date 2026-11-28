@@ -8,8 +8,8 @@ import { createHmac, createPrivateKey, createPublicKey, verify } from 'node:cryp
 
 /** Bytes of a nonce, a public key and a signature (`@cc/protocol` `link-wire.ts`) */
 export const LINK_NONCE_BYTES = 24
-export const LINK_PUBLIC_KEY_BYTES = 32
-export const LINK_SIGNATURE_BYTES = 64
+const LINK_PUBLIC_KEY_BYTES = 32
+const LINK_SIGNATURE_BYTES = 64
 
 const CONTEXT_LABEL = 'centralu link v1'
 const HOST_ROLE_LABEL = 'centralu link host v1'
@@ -19,7 +19,7 @@ const PKCS8_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex')
 const P = 2n ** 255n - 19n
 
 /** The bytes of `text` when it is exactly the base64url (no padding) of `bytes` bytes: encoding them again gives the same string */
-export function decodeBase64url(text, bytes) {
+function decodeBase64url(text, bytes) {
   if (typeof text !== 'string') return null
   const raw = Buffer.from(text, 'base64url')
   if (raw.length !== bytes || raw.toString('base64url') !== text) return null
@@ -76,7 +76,7 @@ export function hostLinkPublicKey(key) {
 }
 
 /** `u32be(len) ‖ bytes` for each part; a string as ASCII, and one with another character throws */
-export function encodeFields(parts) {
+function encodeFields(parts) {
   const out = []
   for (const part of parts) {
     if (typeof part === 'string' && Array.from(part).some((c) => c.codePointAt(0) > 0x7f)) throw new Error('A field string is ASCII')
@@ -89,7 +89,7 @@ export function encodeFields(parts) {
 }
 
 /** `127.0.0.1:<port>` for a port 1 to 65535, null otherwise (the host's `linkAddress`) */
-export function linkAddress(port) {
+function linkAddress(port) {
   return Number.isInteger(port) && port >= 1 && port <= 65535 ? `127.0.0.1:${port}` : null
 }
 

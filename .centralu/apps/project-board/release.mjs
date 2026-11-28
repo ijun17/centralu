@@ -44,7 +44,7 @@ export class ReleaseRefusal extends Error {
 }
 
 // Releases are maintainer-only, like merging (#386, merge policy); checked before anything else
-export const NOT_MAINTAINER =
+const NOT_MAINTAINER =
   "The GitHub account gh is logged in as has no maintain or admin permission on this repository, and releasing is the maintainer's act (#386). Nothing was changed."
 
 const list = (xs) => listSome(xs, 6)
