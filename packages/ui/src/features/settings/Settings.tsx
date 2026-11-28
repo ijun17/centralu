@@ -39,6 +39,7 @@ import {
 import { SettingsCard, SettingsEmpty, SettingsGroup, SettingsPage, SettingsRow } from './SettingsLayout.jsx'
 import { ArchiveSection } from './ArchiveSection.jsx'
 import { ProjectConsentsSection } from './ProjectConsentsSection.jsx'
+import { DevTabsSection } from './DevTabsSection.jsx'
 import { SettingToggle } from './SettingToggle.jsx'
 import { GrantList } from './GrantList.jsx'
 import { ThemeSection } from './ThemeSection.jsx'
@@ -297,6 +298,7 @@ export function Settings() {
                   />
                 </SettingsGroup>
                 <ProjectConsentsSection />
+                <DevTabsSection />
               </SettingsPage>
             )}
 

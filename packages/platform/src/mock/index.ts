@@ -1,5 +1,5 @@
 import { defaultCapabilities } from '../capabilities.js'
-import { changedFileCount, type NormalizedEvent } from '@cc/protocol/client'
+import { changedFileCount, type DevTab, type NormalizedEvent } from '@cc/protocol/client'
 import type { AgentPort, DiagnosticsPort, Platform } from '../ports/index.js'
 import { AgentVersionsMock } from './agent-versions.js'
 import { AppBuilderMock } from './app-builder.js'
@@ -496,6 +496,8 @@ export class MockPlatform implements Platform {
   raiseHostRequest(...args: Parameters<HostRequestsMock['raiseHostRequest']>): string { return this.hostRequestsMock.raiseHostRequest(...args) }
   withdrawHostRequest(requestId: string): void { this.hostRequestsMock.withdrawHostRequest(requestId) }
   get hostRequestAnswers(): HostRequestsMock['hostRequestAnswers'] { return this.hostRequestsMock.hostRequestAnswers }
+  /** A dev browser tab the person trusted, for Settings → Permissions to list */
+  seedDevTab(tab: DevTab): void { this.hostRequestsMock.devTabs.push(tab) }
   replaceApprovalUnseen(...args: Parameters<ApprovalsMock['replaceApprovalUnseen']>): ReturnType<ApprovalsMock['replaceApprovalUnseen']> { return this.approvalsMock.replaceApprovalUnseen(...args) }
   saveProposal(...args: Parameters<ProposalsMock['saveProposal']>): ReturnType<ProposalsMock['saveProposal']> { return this.proposalsMock.saveProposal(...args) }
   setInstalledVersions(...args: Parameters<AgentVersionsMock['setInstalledVersions']>): ReturnType<AgentVersionsMock['setInstalledVersions']> { return this.agentVersionsMock.setInstalledVersions(...args) }

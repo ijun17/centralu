@@ -771,3 +771,26 @@ describe('RpcClient — connection rights from hello_ok', () => {
     expect(rpc.rights).toBeNull()
   })
 })
+
+describe('RpcClient — a dev browser tab’s key (#2469)', () => {
+  it('sends the key read at each hello, and says whether the host restored the trust on this socket', async () => {
+    let key: string | null = null
+    const rpc = makeClient({ devTabKey: () => key })
+    rpc.connect()
+    FakeWebSocket.last.ready({ rights: 'limited' })
+    expect(JSON.parse(FakeWebSocket.last.sent[0]!)).not.toHaveProperty('devTabKey')
+    expect(rpc.trustedDev).toBe(false)
+
+    key = 'k'.repeat(43)
+    FakeWebSocket.last.drop()
+    expect(rpc.trustedDev).toBe(false)
+    await vi.advanceTimersByTimeAsync(1000)
+    FakeWebSocket.last.ready({ rights: 'limited', trustedDev: true })
+    expect(JSON.parse(FakeWebSocket.last.sent[0]!)).toMatchObject({ kind: 'hello', devTabKey: key })
+    expect(rpc.trustedDev).toBe(true)
+
+    FakeWebSocket.last.drop()
+    expect(rpc.trustedDev).toBe(false)
+    rpc.close()
+  })
+})
