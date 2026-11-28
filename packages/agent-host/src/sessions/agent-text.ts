@@ -9,8 +9,8 @@ export type AgentText = { role?: string; tools?: string }
 
 /**
  * A session's role at every start. The Assistant's carries the approved skills (#71) and, in a new process, the past
- * conversation. A builder's is written for its app as it is now; the row's copy serves when the app cannot be read, and
- * for a coordinator an older build made (#372).
+ * conversation. A builder's is written for its app as it is now; the row's copy (written at creation) serves when the
+ * app is not listed or its manifest cannot be read, and for a coordinator an older build made (#372).
  */
 export function sessionRole(
   m: Pick<SessionInfo, 'kind' | 'roleAppend'>,

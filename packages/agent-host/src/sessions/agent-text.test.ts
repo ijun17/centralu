@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AdapterCapabilities, ToolName } from '@cc/protocol'
 import type { ToolProfile } from '../apps/contract.js'
-import type { CentraluTools, CreateSessionOpts } from '../adapters/contract.js'
+import type { CentraluTools, CreateSessionOpts, SessionApps } from '../adapters/contract.js'
 import { cursorProfile } from '../adapters/cursor-agent/index.js'
 import { openCodeProfile } from '../adapters/opencode/index.js'
 import { antigravityProfile } from '../adapters/antigravity/index.js'
@@ -13,7 +13,7 @@ import { startThreadParams } from '../adapters/codex/thread-open.js'
 import type { AcpProfile } from '../adapters/acp/profile.js'
 import { createAdapters } from '../adapters/registry.js'
 import { agentTextOf, joinedAgentText, servedInstructions, TOOLS_HEADING } from './agent-text.js'
-import { RESIDENT_BUDGET_CHARS } from './centralu-tools.js'
+import { REPO_WORK_FIRST, RESIDENT_BUDGET_CHARS } from './centralu-tools.js'
 import { residentCost, TOOL_PROFILES } from './tool-cost.js'
 
 /**
@@ -67,14 +67,24 @@ const TOOLS: { name: ToolName; capabilities: AdapterCapabilities; told: (opts: C
   ...[cursorProfile(), openCodeProfile(), antigravityProfile()].map((p) => ({ name: p.descriptor.name, capabilities: p.capabilities, told: acpTold(p) })),
 ]
 
-const SEATS: { seat: string; profile: ToolProfile; role?: string }[] = [
+const SEATS: { seat: string; profile: ToolProfile; role?: string; apps?: boolean }[] = [
   { seat: 'the Assistant', profile: 'assistant', role: 'The Assistant role.' },
   { seat: "an app's builder", profile: 'builder', role: 'The builder role.' },
   { seat: 'a coordinator', profile: 'scoped', role: 'The coordinator role.' },
   { seat: 'a session in a project', profile: 'reader' },
+  // An app attached at the start adds the line on repository work (#957), so a tool that dropped the apps would differ
+  { seat: 'a session in a project with an app', profile: 'reader', apps: true },
 ]
 
-const optsFor = (profile: ToolProfile, role: string | undefined): CreateSessionOpts => ({
+const withAnApp: SessionApps = {
+  current: () => [{ name: 'board', server: 'app-board', appId: 'board', tools: null }],
+  noteCall: () => {},
+  callEnded: () => {},
+  cancelAll: () => {},
+  close: () => {},
+}
+
+const optsFor = (profile: ToolProfile, role: string | undefined, apps = false): CreateSessionOpts => ({
   sessionId: 's1',
   cwd: '/work',
   permissionPreset: 'normal',
@@ -82,6 +92,7 @@ const optsFor = (profile: ToolProfile, role: string | undefined): CreateSessionO
   centraluBridge: { url: 'ws://127.0.0.1:0', token: 'tok' },
   toolProfile: profile,
   ...(role ? { systemPromptAppend: role } : {}),
+  ...(apps ? { apps: withAnApp } : {}),
 })
 
 describe('every tool is told the same text for a seat', () => {
@@ -89,11 +100,12 @@ describe('every tool is told the same text for a seat', () => {
     expect(TOOLS.map((t) => t.name).sort()).toEqual([...createAdapters().keys()].sort())
   })
 
-  describe.each(SEATS)('$seat', ({ profile, role }) => {
+  describe.each(SEATS)('$seat', ({ profile, role, apps }) => {
     it.each(TOOLS)('$name', ({ name, capabilities, told }) => {
-      const opts = optsFor(profile, role)
+      const opts = optsFor(profile, role, apps)
       const want = TOLD_NOTHING[name] ? undefined : joinedAgentText(agentTextOf(opts, capabilities.subagentTool))
       expect(told(opts)).toBe(want)
+      if (want) expect(want.includes(REPO_WORK_FIRST)).toBe(!!apps)
     })
   })
 

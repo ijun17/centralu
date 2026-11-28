@@ -20,7 +20,9 @@ bundle leaves out is refused even through the Codex bridge.
 ## What every tool is told
 
 A session's agent is told two things: its role (the Assistant's, a builder's, an old coordinator's; an ordinary
-session has none) and these instructions. Both are written once, in `sessions/agent-text.ts` (`agentTextOf`), for
+session has none) and these instructions. A builder's role is written for its app at every start; when the app is not
+listed or its manifest cannot be read, the copy written at the builder's creation stands in, so a builder whose app was
+renamed and then lost goes back to the first name. Both are written once, in `sessions/agent-text.ts` (`agentTextOf`), for
 every tool; an adapter decides only how each part travels, never what it says. The one word that differs by tool
 is the name of the tool's own subagent tool, which the `start_agent` line names (`AdapterCapabilities.subagentTool`).
 
