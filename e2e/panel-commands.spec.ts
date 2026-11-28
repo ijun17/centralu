@@ -208,7 +208,7 @@ test('the run dialog: a registered command survives closing and reopening the di
   await expect(page.getByTestId('run-command-0')).toContainText('pnpm lint')
 })
 
-test('the run dialog: deleting targets something different from running — a running command that gets deleted cannot be undone', async ({ page }) => {
+test('the run dialog: removing a command that is not running takes only its row', async ({ page }) => {
   await setup(page)
   await newSession(page, 'alpha', 'claude', 'task')
 
@@ -226,6 +226,47 @@ test('the run dialog: deleting targets something different from running — a ru
   await expect(page.getByTestId('run-command-1')).toBeHidden()
   // And nothing was running
   expect(await commandRuns(page)).toEqual([])
+})
+
+/**
+ * A command removed while it runs is stopped first (#2472): its row holds its only Stop, so a run left behind by a
+ * removed row kept the header lit with nothing on screen to end it.
+ */
+async function removeWhileRunning(page: Page): Promise<void> {
+  await setup(page)
+  await newSession(page, 'alpha', 'claude', 'task')
+  await page.getByTestId('run-open').click()
+  for (const cmd of ['pnpm dev', 'pnpm lint']) {
+    await page.getByTestId('run-add-input').fill(cmd)
+    await page.getByTestId('run-add').click()
+  }
+  await expect(page.getByTestId('run-delete-0')).toHaveAttribute('aria-label', 'Remove pnpm dev')
+  await page.getByTestId('run-exec-0').click()
+  await expect(page.getByTestId('run-running-0')).toBeVisible()
+  // While it runs, the control says what it will do
+  await expect(page.getByTestId('run-delete-0')).toHaveAttribute('aria-label', 'Stop and remove pnpm dev')
+}
+
+test('the run dialog: removing a running command stops it, and the header light goes out (#2472)', async ({ page }) => {
+  await removeWhileRunning(page)
+  await page.getByTestId('run-delete-0').click()
+
+  await expect(page.getByTestId('run-command-0')).toContainText('pnpm lint')
+  await expect(page.getByTestId('run-command-1')).toBeHidden()
+  await expect.poll(() => commandRuns(page)).toEqual([expect.objectContaining({ running: false })])
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('run-open')).not.toHaveAttribute('aria-label', /running/)
+})
+
+test('the run dialog: a running command that will not stop stays on the list, saying why (#2472)', async ({ page }) => {
+  await removeWhileRunning(page)
+  await page.evaluate(() => ((window as never as { __mock: any }).__mock.stopDoesNotEnd = true))
+  await page.getByTestId('run-delete-0').click()
+
+  await expect(page.getByTestId('toast')).toContainText('pnpm dev did not stop, so it stays on the list')
+  await expect(page.getByTestId('run-command-0')).toContainText('pnpm dev')
+  await expect(page.getByTestId('run-running-0')).toBeVisible()
+  await expect(page.getByTestId('run-delete-0')).toHaveAttribute('aria-label', 'Stop and remove pnpm dev')
 })
 
 /**

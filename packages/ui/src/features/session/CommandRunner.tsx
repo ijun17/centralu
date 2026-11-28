@@ -516,9 +516,10 @@ function CommandRow({
             <PencilIcon size={12} />
           </IconButton>
         )}
-        {/* At the far end, away from Run, since a removal cannot be undone. A running command keeps running */}
+        {/* At the far end, away from Run, since a removal cannot be undone. A running one is stopped first (#2472):
+            its row holds its only Stop, so the host ends it before the list loses it, and keeps it listed if it will not end */}
         <IconButton
-          label={`Remove ${c.command}`}
+          label={`${running ? 'Stop and remove' : 'Remove'} ${c.command}`}
           onClick={onRemove}
           testId={`run-delete-${i}`}
           align="right"
