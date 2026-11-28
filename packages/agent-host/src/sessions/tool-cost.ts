@@ -44,7 +44,7 @@ export function servedDefinitions(profile: ToolProfile, capabilities: ToolServin
   return toolDefsFor(profile).map((t) => {
     const name = `mcp__${CENTRALU_MCP_NAME}__${t.name}`
     const inputSchema = z.toJSONSchema(t.schema)
-    // The same rule as centraluMcp: a set with no deferred tool is alwaysLoad, any other is loaded tool by tool
+    // The same rule as centraluMcp: every tool not marked deferred is loaded
     const deferred = capabilities.toolDeferral === true && 'deferred' in t && t.deferred === true
     return { name, description: t.description, inputSchema, resident: !deferred, chars: definitionChars(name, t.description, inputSchema) }
   })

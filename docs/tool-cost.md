@@ -251,8 +251,8 @@ asks the model for a phrase from each. In four runs (in two of them the model fi
 `exec` listing and called it) the model named the developer phrase and never the server's, and the thread's
 rollout held the developer text as a developer message and the server's nowhere. So the bridge still sends none,
 and the adapter appends `instructionsFor(profile)`, the text Claude's in-process server sends, to the thread's
-developer instructions, after the seat's role, under the header `# How to use the centralu tools
-(mcp__centralu__*)` (`codexToolInstructionsFor`).
+developer instructions, after the seat's role, under a header (then `# How to use the centralu tools
+(mcp__centralu__*)`; now the one heading every single-text tool gets, agent-host/tool-profiles.md "What every tool is told").
 
 The same probe resumed the thread with other developer instructions, then the same again, then none, a turn after
 each: the model kept naming the first phrase and the rollout gained no developer message. Codex reads developer

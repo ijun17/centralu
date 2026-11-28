@@ -188,13 +188,9 @@ export function networkAccessOf(res: Record<string, unknown>): boolean | undefin
 export const CODEX_SUBAGENT_TOOL = 'spawn_agent'
 
 /**
- * The thread's developer instructions: the session's agent text (`joinedAgentText`), all of it, as codex-cli
- * 0.160.0 shows a server's `initialize` instructions to no model: in four runs the model could not name a phrase from
- * them and the rollout had no trace, while the phrase in `developerInstructions` was named every time (#525,
- * `scripts/probe-codex-mcp-instructions.mts`, 2026-10-12). Sent at thread/start only: `thread/resume` takes the same
- * field and ignores it (resumed with other instructions, the model still named the first ones, same probe). So a
- * thread keeps what it was started with, and a session that changes profile while its thread lives on keeps its
- * tools' new rules from the tool descriptions alone until it starts a new thread.
+ * The thread's developer instructions: the session's whole agent text (`joinedAgentText`), as Codex shows a server's
+ * `initialize` instructions to no model. Sent at thread/start only: `thread/resume` ignores the field. Both measured:
+ * docs/agent-host/tool-profiles.md "What every tool is told".
  */
 function developerInstructions(opts: CreateSessionOpts): { developerInstructions?: string } {
   const text = joinedAgentText(agentTextOf(opts, CODEX_SUBAGENT_TOOL, !!(opts.centraluTools && opts.centraluBridge)))

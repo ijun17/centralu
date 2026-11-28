@@ -139,6 +139,7 @@ export const AdapterCapabilities = z.object({
   gatesSteps: z.boolean().optional(),
   /** Can defer single Centralu tool definitions until the model asks; the host counts a kept process's prefix by it */
   toolDeferral: z.boolean().optional(),
+  /** How Centralu's tool instructions reach the agent (docs/agent-host/tool-profiles.md "What every tool is told"). Absent: they do not */
   instructionChannel: z.enum(['server', 'developer']).optional(),
   processModel: z.enum(['per-session', 'shared-server']).optional(),
   builtInSubagents: z.boolean().optional(),

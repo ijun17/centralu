@@ -47,18 +47,9 @@ export function centraluMcp(
   instructions?: string,
 ) {
   const defs = toolDefsFor(profile)
-  // A set with a deferred tool (every set has `app`) is loaded tool by tool
-  const someDeferred = defs.some((t) => 'deferred' in t && t.deferred === true)
   return createSdkMcpServer({
     name: CENTRALU_MCP_NAME,
     version: '1',
-    /*
-     * **Do not defer what is not marked deferred.** The SDK defers MCP tools behind ToolSearch by default; measured, the
-     * Assistant then called only `list_sessions`, never saw `send_to_session`, and ended the turn silently without handing
-     * out the work. In the reader set (#320) deferring the others left recall unused (measured); app_guide waits behind
-     * tool search, as it rides in every ordinary session and is rarely needed.
-     */
-    alwaysLoad: !someDeferred,
     instructions,
     // Only expose what the profile allows (#69) — the execution side re-checks the same rule.
     tools: defs.map((t) =>
@@ -80,7 +71,13 @@ export function centraluMcp(
             if (e instanceof DrainCut) return drainToolResult(e)
             throw e
           }),
-        someDeferred && !('deferred' in t && t.deferred) ? { alwaysLoad: true } : undefined,
+        /*
+         * **Load what is not marked deferred.** The SDK defers MCP tools behind ToolSearch by default; measured, the
+         * Assistant then called only `list_sessions`, never saw `send_to_session`, and ended the turn silently without
+         * handing out the work. In the reader set (#320) deferring the others left recall unused (measured); app_guide
+         * waits behind tool search, as it rides in every ordinary session and is rarely needed.
+         */
+        'deferred' in t && t.deferred ? undefined : { alwaysLoad: true },
       ),
     ),
   })

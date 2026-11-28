@@ -20,7 +20,6 @@ import { listAgyModels, saveAgyModels, toModelOptions } from './models.js'
 /** What Antigravity calls its own subagent tool: named in Centralu's tool instructions before `start_agent` */
 const AGY_SUBAGENT_TOOL = 'invoke_subagent'
 
-
 /**
  * What Google's Antigravity agent through ACP can keep (docs/plans/antigravity-adapter.md §6), measured on 1.4.3:
  * - **Presets: all four.** The agent stays in its `default` mode, where it asks for every command, edit, web fetch, MCP

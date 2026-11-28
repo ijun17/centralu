@@ -2,7 +2,7 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { roleTextDemanded, type AdapterCapabilities } from '@cc/protocol'
+import type { AdapterCapabilities } from '@cc/protocol'
 import { managerWorld } from './manager.test-helpers.js'
 
 /**
@@ -76,21 +76,12 @@ describe('launching a tool that declares limits', () => {
     expect(world.store.settings.appSetting('orchestrator_tool')).toBe('claude')
   })
 
-  it('demands role text of the Assistant and of a row with role text pinned, and of nothing else', () => {
-    expect(roleTextDemanded({ kind: 'orchestrator', roleAppend: null })).toBe(true)
-    expect(roleTextDemanded({ kind: 'assistant', roleAppend: null })).toBe(true)
-    expect(roleTextDemanded({ kind: 'worker', roleAppend: 'A builder role.' })).toBe(true)
-    expect(roleTextDemanded({ kind: 'coordinator', roleAppend: 'A coordinator role.' })).toBe(true)
-    expect(roleTextDemanded({ kind: 'worker', roleAppend: null })).toBe(false)
-    expect(roleTextDemanded({ kind: 'worker', roleAppend: '' })).toBe(false)
-  })
-
   it('refuses switching a session with role text pinned to a tool that takes none, and leaves it on its tool', async () => {
     const world = limitedWorld()
     const p = (await world.rpc('projects.add', { path: dir })) as { id: string }
     await world.rpc('projects.setTrusted', { projectId: p.id, trusted: true })
     const s = (await world.rpc('agents.createSession', { projectId: p.id, cwd: dir, tool: 'claude' })) as { id: string }
-    world.mgr.meta.get(s.id)!.roleAppend = 'A pinned role.'
+    world.mgr.sessionInfo(s.id)!.roleAppend = 'A pinned role.'
     await expect(world.rpc('agents.switchTool', { sessionId: s.id, tool: 'codex' })).rejects.toThrow(/Limited.*an app's builder/)
     expect(world.codexAdapter.lastOpts).toBeNull()
   })

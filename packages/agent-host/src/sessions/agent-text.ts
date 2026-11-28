@@ -36,8 +36,8 @@ export function agentTextOf(opts: CreateSessionOpts, subagentTool: string | unde
 }
 
 /**
- * Over the tool instructions where they share one text with the role: the model sees the tools as
- * `mcp__centralu__<tool>` (or through a call tool of its own), and the instructions name them bare.
+ * Over the tool instructions where they share one text with the role. The instructions name the tools bare; the model
+ * sees them as `mcp__centralu__<tool>` (Codex) or through a call tool of its own (Antigravity), so it names the server.
  */
 export const TOOLS_HEADING = `# How to use the ${CENTRALU_MCP_NAME} MCP server's tools`
 

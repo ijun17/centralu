@@ -7,8 +7,8 @@ import { frameField, type ExternalAppInfo } from '@cc/protocol'
  * app's building session has its cwd at the project root, so it does not go looking for the app folder's own guidance, and once
  * a project's trust is revoked its setting files are not read at all (decision 3, the manager's settingFilesFor). A user-folder
  * app's session has the app folder as its cwd and trusts it, so it does read that guidance (Claude reads CLAUDE.md, Codex
- * AGENTS.md). The core of the rule is carried here and the file is pointed to for the details. It is baked into `roleAppend`
- * when the session is created and loaded again on every resume.
+ * AGENTS.md). The core of the rule is carried here and the file is pointed to for the details. Written for the app as it is
+ * at every start (`AppSessions.builderRoleOf`); the copy on the row (`roleAppend`) serves when the app cannot be read.
  */
 export function builderRole(app: ExternalAppInfo, cwd: string): string {
   // The manifest's name is the app author's text: one line and quoted, so it cannot add a rule of its own (#838)

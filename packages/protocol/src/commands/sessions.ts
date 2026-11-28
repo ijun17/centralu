@@ -154,11 +154,6 @@ export const SessionInfo = z.object({
 })
 export type SessionInfo = z.infer<typeof SessionInfo>
 
-/** Whether a session's launch demands role text (`LaunchDemands.roleText`): the Assistant, or a row with role text pinned (a builder, a coordinator) */
-export function roleTextDemanded(m: Pick<SessionInfo, 'kind' | 'roleAppend'>): boolean {
-  return isAssistantKind(m.kind) || !!m.roleAppend
-}
-
 /** The fields the state rule writes (`applySessionState`), also read from a hub's copy of a linked machine's sessions */
 export const LiveStateFields = SessionInfo.pick({ state: true, waitingSince: true, pendingApproval: true, pendingQuestions: true, activity: true, limit: true })
 export type LiveStateFields = z.infer<typeof LiveStateFields>

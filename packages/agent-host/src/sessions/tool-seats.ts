@@ -276,7 +276,6 @@ export function instructionsFor(profile: ToolProfile, tier: RareTier = rareTier,
   }
 }
 
-
 /**
  * The tools this profile can call **right now** — the same decision as the exposure logic
  * (centraluToolSchemas). The guide uses this when it states what each seat can do (M4 P-4):
