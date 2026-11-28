@@ -1,7 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import type { AdapterCapabilities, ToolName } from '@cc/protocol'
 import type { ToolProfile } from '../apps/contract.js'
 import type { CentraluTools, CreateSessionOpts } from '../adapters/contract.js'
@@ -28,9 +25,6 @@ const TOLD_NOTHING: Partial<Record<ToolName, string>> = {
   'cursor-agent': 'its ACP server takes no system prompt; whether it shows MCP instructions is unmeasured (#2479)',
   opencode: 'its ACP server takes no system prompt; whether it shows MCP instructions is unmeasured (#2479)',
 }
-
-const dataDir = mkdtempSync(join(tmpdir(), 'cc-agent-text-'))
-afterAll(() => rmSync(dataDir, { recursive: true, force: true }))
 
 const acpTold = (profile: AcpProfile) => (opts: CreateSessionOpts) => {
   const meta = profile.shape?.sessionMeta?.(opts) as { antigravity?: { systemPrompt?: { append?: string } } } | undefined
@@ -70,7 +64,7 @@ const TOOLS: { name: ToolName; capabilities: AdapterCapabilities; told: (opts: C
     capabilities: new CodexAdapter().capabilities,
     told: (opts) => startThreadParams(opts, {}, {}).developerInstructions as string | undefined,
   },
-  ...[cursorProfile(), openCodeProfile(), antigravityProfile({ dataDir })].map((p) => ({ name: p.descriptor.name, capabilities: p.capabilities, told: acpTold(p) })),
+  ...[cursorProfile(), openCodeProfile(), antigravityProfile()].map((p) => ({ name: p.descriptor.name, capabilities: p.capabilities, told: acpTold(p) })),
 ]
 
 const SEATS: { seat: string; profile: ToolProfile; role?: string }[] = [

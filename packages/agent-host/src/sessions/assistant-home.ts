@@ -8,9 +8,7 @@ import { commandsFor } from './centralu-tools.js'
  * A preamble at the head of the Assistant's role: the product rule (product-spec.md §1.2, #564), unless the person
  * says otherwise, use what Centralu offers before doing a thing another way. Measured in #512's round 2 (33 to 55
  * tokens a request, no regression). Ordinary sessions get the same rule as their tools' instructions
- * (READER_INSTRUCTIONS), not here: their prompt carries no role.
- *
- * It names centralu_commands only where the seat has it.
+ * (READER_INSTRUCTIONS), not here: their prompt carries no role. It names centralu_commands only where the seat has it.
  */
 export function assistantPreamble(): string {
   return commandsFor('assistant').length

@@ -15,8 +15,6 @@ export const ACP_CAPABILITIES: AdapterCapabilities = {
   backgroundTasks: false,
   midTurnInput: false,
   toolDeferral: false,
-  // No `instructionChannel`: their ACP servers take no system prompt, and whether they show a server's `initialize`
-  // instructions is unmeasured (#2479), so the bridge sends none and they are told nothing (agent-text.ts)
   processModel: 'per-session',
   builtInSubagents: false,
   peerMessaging: false,
